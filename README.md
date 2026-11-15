@@ -7,8 +7,9 @@ each client's native config files, never touches entries it did not create,
 and keeps secret values out of the store.
 
 Status: early development. The design is in [SPEC.md](SPEC.md); milestones M0
-(workspace bootstrap), M1 (store schemas and validation) and M2 (git-backed
-store, `loadout server add|ls|show|rm`, `loadout history`) are in place.
+(workspace bootstrap), M1 (store schemas and validation), M2 (git-backed
+store, `loadout server add|ls|show|rm`, `loadout history`) and M3
+(format-preserving JSON, JSONC and TOML editors) are in place.
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
