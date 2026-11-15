@@ -20,6 +20,9 @@ clap = { version = "4", features = ["derive"] }
 dirs = "6"
 getrandom = "0.4"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+insta = { version = "1", default-features = false }
+jsonc-parser = { version = "0.34", features = ["cst"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
