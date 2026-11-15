@@ -1,0 +1,17 @@
+[package]
+name = "agent-loadout-core"
+description = "Core library of Loadout: MCP servers, skills and secret references for AI coding clients"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]
+agent-loadout-testkit.workspace = true
+
+[lints]
+workspace = true

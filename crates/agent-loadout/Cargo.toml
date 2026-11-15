@@ -1,0 +1,24 @@
+[package]
+name = "agent-loadout"
+description = "Loadout CLI: manage MCP servers, skills and secret references for AI coding clients"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "loadout"
+path = "src/main.rs"
+
+[dependencies]
+agent-loadout-core.workspace = true
+clap.workspace = true
+dirs.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+agent-loadout-testkit.workspace = true
+
+[lints]
+workspace = true

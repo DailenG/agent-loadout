@@ -1,0 +1,16 @@
+[package]
+name = "agent-loadout-testkit"
+description = "Hermetic test helpers for Loadout (temp homes, rooted file system)"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agent-loadout-core.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
