@@ -1,0 +1,6 @@
+schema = 1
+id = "env-not-string"
+transport = "stdio"
+command = "npx"
+[env]
+PORT = 8080

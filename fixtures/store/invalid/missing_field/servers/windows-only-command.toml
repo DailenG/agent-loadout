@@ -1,0 +1,6 @@
+schema = 1
+id = "windows-only-command"
+transport = "stdio"
+
+[os.windows]
+command = "tool.exe"

@@ -1,0 +1,30 @@
+schema = 1
+id = "sample-app-7k2f"              # generated on init: slug + 4 random chars; survives moves
+name = "Sample App"
+
+[defaults]
+clients = "all-detected"            # clients that receive project-scope files; or an explicit list
+
+[servers.github]                    # override a system server in this folder
+from = "github"                     # inherit store/servers/github.toml
+[servers.github.env]
+GITHUB_TOOLSETS = "repos,issues,pull_requests,actions"
+
+[servers.postgres]                  # project-only server, inline definition
+transport = "stdio"
+command = "uvx"
+args = ["postgres-mcp", "--access-mode=restricted"]
+clients = ["claude-code", "cursor", "codex"]
+[servers.postgres.env]
+DATABASE_URI = "${env:DATABASE_URL}"
+
+[servers.playwright]
+from = "playwright"                 # a store server used as a template, not enabled system-wide
+unset = ["env.DEBUG", "headers.X-Debug"]
+
+[servers.slack]
+enabled = false                     # suppress a system server in this folder
+
+[skills]
+enable = ["repo-conventions", "tauri-release"]
+share = false                       # false: link + .git/info/exclude; true: copy files for teammates

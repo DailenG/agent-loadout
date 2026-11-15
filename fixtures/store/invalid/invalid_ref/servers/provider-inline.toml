@@ -1,0 +1,6 @@
+schema = 1
+id = "provider-inline"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+[headers]
+Authorization = "Bearer ${op://Example Vault/Fake Item/credential}"

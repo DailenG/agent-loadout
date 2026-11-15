@@ -1,0 +1,10 @@
+schema = 1
+theme = "system"
+apply_mode = "instant"        # instant (default) | review
+new_server_enable = "all-detected"
+new_skill_enable = "none"
+agents_cli_compat = true
+
+[list_view]
+mcp = { sort = "name", density = "compact" }
+skills.group_by = "source"

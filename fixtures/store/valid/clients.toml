@@ -1,0 +1,11 @@
+schema = 1
+[claude-code]
+project_shared_target = ".mcp.json"          # where project.toml layer goes
+project_local_target = "local-scope"         # ~/.claude.json projects[<P>].mcpServers
+[omp]
+profiles = ["default"]                       # omp named profiles to target
+[vscode-legacy]                              # read/import only
+import_variants = ["Code", "VSCodium"]       # Code | Code - Insiders | VSCodium
+import_profiles = "default"                  # default | all | ["<profile-id>", ...]
+[windsurf]
+enabled = false                              # Tier D; opt a client out of everything

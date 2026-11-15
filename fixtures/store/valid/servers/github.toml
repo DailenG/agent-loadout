@@ -1,0 +1,39 @@
+schema = 1
+id = "github"
+display_name = "GitHub"
+description = "Issues, pull requests and code search"
+tags = ["dev"]
+
+transport = "stdio"                 # stdio | http | sse
+command = 'npx'
+args = ["-y", "@modelcontextprotocol/server-github"]
+# cwd = "${project}"                # template vars: ${home}, ${project}, ${loadout_home}
+x_future_field = { added_in = "1.4", flags = [1, 2] }   # unknown key, kept
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${secret:GITHUB_PAT}"   # reference, never a value
+GITHUB_TOOLSETS = "repos,issues"                         # literal non-secret values are fine
+
+[enable]                            # system scope (user-wide) enablement
+clients = ["claude-code", "cursor", "codex", "omp", "pi", "copilot"]
+# clients = "all-detected"          # every detected client whose capabilities fit
+
+[delivery]                          # how refs reach the server (section 11.4)
+mode = "auto"                       # auto | env | launch | command | inline
+
+[tools]                             # written only via native fields
+deny = ["delete_repository"]
+
+[os.windows]                        # per-OS deep-merged overrides
+# command = "C:\\tools\\gh-mcp.exe"
+
+[client.codex]                      # native passthrough fields, checked against the allowlist
+startup_timeout_sec = 60
+[client.gemini]
+trust = false
+native_name = "github-mcp"
+
+[meta]
+homepage = "https://example.com/github-mcp-server"
+origin = "imported:cursor"          # manual | imported:<client> | migrated:skilldock | catalog:<source>
+reviewed_at = 2026-01-01T00:00:00Z  # unknown key with a datetime value, kept

@@ -1,0 +1,4 @@
+schema = 1
+id = "bad-transport"
+transport = "ws"
+url = "wss://ws.example.com/mcp"

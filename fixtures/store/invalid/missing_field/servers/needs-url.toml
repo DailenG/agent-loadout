@@ -1,0 +1,5 @@
+schema = 1
+id = "needs-url"
+transport = "http"
+[headers]
+X-Client = "loadout"

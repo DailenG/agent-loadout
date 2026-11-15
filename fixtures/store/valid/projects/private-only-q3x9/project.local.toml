@@ -1,0 +1,11 @@
+# A private project (the default for new manifests): no project.toml, so the
+# local file carries the id.
+schema = 1
+id = "private-only-q3x9"
+name = "Private Only"
+
+[servers.notes]
+transport = "stdio"
+command = "uvx"
+args = ["notes-mcp", "--root", "${project}"]
+clients = ["claude-code"]

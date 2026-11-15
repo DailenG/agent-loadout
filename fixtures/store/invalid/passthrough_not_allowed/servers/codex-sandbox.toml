@@ -1,0 +1,8 @@
+schema = 1
+id = "codex-sandbox"
+transport = "stdio"
+command = "npx"
+
+[client.codex]
+startup_timeout_sec = 60
+sandbox = "workspace-write"

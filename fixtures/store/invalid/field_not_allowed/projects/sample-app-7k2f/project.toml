@@ -1,0 +1,7 @@
+schema = 1
+id = "sample-app-7k2f"
+
+[servers.docs]
+transport = "http"
+url = "https://docs.example.com/mcp"
+args = ["--verbose"]

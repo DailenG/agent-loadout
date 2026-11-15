@@ -1,0 +1,7 @@
+schema = 1
+id = "claude-code-type"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+
+[client.claude-code]
+type = "ws"

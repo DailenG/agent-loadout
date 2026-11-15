@@ -1,0 +1,6 @@
+schema = 1
+id = "stdio-with-headers"
+transport = "stdio"
+command = "npx"
+[headers]
+Authorization = "Bearer ${secret:TOKEN}"

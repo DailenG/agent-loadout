@@ -1,0 +1,6 @@
+schema = 1
+id = "bad-enable"
+transport = "stdio"
+command = "npx"
+[enable]
+clients = "everything"

@@ -1,0 +1,13 @@
+schema = 1
+id = "repo-conventions"
+name = "repo-conventions"              # from SKILL.md frontmatter
+tags = ["team"]                         # a list now
+[source]
+kind = "git"                           # git | local | agents-cli | catalog | authored
+url = "https://git.example.com/acme/skills"
+path = "skills/repo-conventions"
+ref = "main"
+commit = "3f2a9c1"
+[enable]
+clients = ["claude-code", "codex", "omp", "pi"]
+method = "link"                        # link | copy

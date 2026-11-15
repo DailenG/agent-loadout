@@ -1,0 +1,6 @@
+schema = 1
+id = "bad-native-name"
+transport = "stdio"
+command = "npx"
+[client.gemini]
+native_name = 3

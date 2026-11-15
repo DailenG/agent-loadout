@@ -1,0 +1,5 @@
+schema = 1
+id = "stdio-with-url"
+transport = "stdio"
+command = "npx"
+url = "https://mcp.example.com/mcp"

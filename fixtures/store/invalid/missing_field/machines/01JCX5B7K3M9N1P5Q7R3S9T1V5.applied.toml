@@ -1,0 +1,17 @@
+schema = 1
+machine_id = "01JCX5B7K3M9N1P5Q7R3S9T1V5"
+apply_id = "01JCX4A0M2N8P6Q4R2S0T8X6V4"
+time = 2026-01-01T00:00:00Z
+store_revision = "4be1c2d"
+trigger = "review"
+outcome = "ok"
+
+[[targets]]
+client = "cursor"
+scope = "project"
+file = "<P>/.cursor/mcp.json"
+create = 1
+update = 0
+remove = 0
+disable = 0
+outcome = "ok"

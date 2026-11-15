@@ -1,0 +1,7 @@
+schema = 1
+id = "sse-with-windows-command"
+transport = "sse"
+url = "https://mcp.example.com/sse"
+
+[os.windows]
+command = "proxy.exe"

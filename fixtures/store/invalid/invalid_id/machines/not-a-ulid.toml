@@ -1,0 +1,4 @@
+schema = 1
+machine_id = "not-a-ulid"
+label = "desktop"
+os = "windows"

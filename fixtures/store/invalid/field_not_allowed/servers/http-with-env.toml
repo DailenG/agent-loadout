@@ -1,0 +1,6 @@
+schema = 1
+id = "http-with-env"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+[env]
+API_TOKEN = "${secret:API_TOKEN}"

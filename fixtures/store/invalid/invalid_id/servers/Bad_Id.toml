@@ -1,0 +1,4 @@
+schema = 1
+id = "Bad_Id"
+transport = "stdio"
+command = "npx"

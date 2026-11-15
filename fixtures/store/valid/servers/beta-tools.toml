@@ -1,0 +1,12 @@
+schema = 1
+id = "beta-tools"
+description = "Enabled for a client this build does not know yet"
+transport = "sse"
+url = "https://beta.example.com/sse"
+
+[enable]
+# "future-client" comes from a newer Loadout; it must survive a rewrite.
+clients = ["claude-code", "future-client"]
+
+[client.future-client]
+some_native_field = "kept as written"

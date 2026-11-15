@@ -1,0 +1,8 @@
+schema = 1
+id = "linear"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+[headers]
+Authorization = "Bearer ${secret:LINEAR_TOKEN}"
+[enable]
+clients = "all-detected"

@@ -1,0 +1,7 @@
+schema = 1
+id = "bad-alias"
+transport = "stdio"
+command = "npx"
+
+[os.linux]
+env = { TOKEN = "${secret:has-dash}" }

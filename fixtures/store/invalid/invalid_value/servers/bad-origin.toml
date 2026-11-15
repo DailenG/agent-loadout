@@ -1,0 +1,6 @@
+schema = 1
+id = "bad-origin"
+transport = "stdio"
+command = "npx"
+[meta]
+origin = "downloaded"

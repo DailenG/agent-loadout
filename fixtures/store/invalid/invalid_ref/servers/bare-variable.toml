@@ -1,0 +1,6 @@
+schema = 1
+id = "bare-variable"
+transport = "stdio"
+command = "npx"
+[env]
+GITHUB_TOKEN = "${GITHUB_TOKEN}"

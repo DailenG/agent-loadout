@@ -1,0 +1,17 @@
+schema = 1
+machine_id = "01JCX3R8Q6T5W1V9Y2Z7A4B6C8"
+apply_id = "01JCX4A0M2N8P6Q4R2S0T8X6V4"
+time = 2026-01-01T00:00:00Z
+store_revision = "4be1c2d"
+trigger = "instant"
+outcome = "ok"
+
+[[targets]]
+client = "claude-code"
+scope = "user"
+file = "/home/someone/.claude.json"
+create = 1
+update = 0
+remove = 0
+disable = 0
+outcome = "ok"

@@ -1,0 +1,7 @@
+schema = 1
+machine_id = "01JCX5B7K3M9N1P5Q7R3S9T1V5"
+label = "laptop"
+os = "linux"
+
+[secrets.GITHUB_PAT]
+ref = "vault://secret/github"

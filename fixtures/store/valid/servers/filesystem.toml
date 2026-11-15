@@ -1,0 +1,24 @@
+# Paths differ per OS; the base definition has no command of its own.
+schema = 1
+id = "filesystem"
+transport = "stdio"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "${home}/Code", "$${not-a-var}"]
+cwd = "${loadout_home}"
+env = { LOG_LEVEL = "info", HOME_HINT = "${env:HOME}" }
+
+[os.windows]
+command = "npx.cmd"
+
+[os.linux]
+command = "npx"
+
+[os.macos]
+command = "npx"
+env.LOG_LEVEL = "debug"
+
+[client.pi]
+timeout = 30
+exposure = "lazy"
+
+[meta]
+origin = "manual"
