@@ -1,0 +1,49 @@
+# Loadout
+
+Loadout (`agent-loadout`) manages MCP servers, skills and secret references for
+AI coding clients (Claude Code, Codex, omp, Pi, Claude Desktop, VS Code with
+GitHub Copilot, Cursor and more) from one versioned, offline store. It writes
+each client's native config files, never touches entries it did not create,
+and keeps secret values out of the store.
+
+Status: early development. The design is in [SPEC.md](SPEC.md); milestone M0
+(workspace bootstrap) is in place. Nothing is released yet.
+
+## Build
+
+Requires a stable Rust toolchain (see `rust-toolchain.toml`).
+
+```sh
+cargo build --workspace
+cargo test --workspace
+cargo run -p agent-loadout -- --version
+cargo run -p agent-loadout -- doctor --paths
+```
+
+Once published, install the CLI with `cargo install agent-loadout`; the binary
+is `loadout`. (The crates.io crate named `loadout` is an unrelated project.)
+
+## Data directory
+
+| OS | Default `LOADOUT_HOME` |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Loadout` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/loadout` |
+| macOS | `~/Library/Application Support/Loadout` |
+
+Override it with `--home <PATH>` or the `LOADOUT_HOME` environment variable.
+Keep it out of file-sync folders (OneDrive, Dropbox, Google Drive, Syncthing,
+Resilio Sync); `loadout doctor` reports `sync_root_detected` when it is inside one.
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| `crates/agent-loadout-core` | Core library; no process-global state, takes an injected `Env` and `Fs` |
+| `crates/agent-loadout` | CLI, binary `loadout` |
+| `crates/agent-loadout-testkit` | Hermetic test helpers (`TempHome`, `RootedFs`), unpublished |
+
+## License
+
+MIT, see [LICENSE](LICENSE). Portions are derived from SkillDock; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
