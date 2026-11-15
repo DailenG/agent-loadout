@@ -1,0 +1,38 @@
+{
+  "numStartups": 12,
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\work"],
+      "env": {}
+    },
+    "remote-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_TOKEN}"
+      }
+    }
+  },
+  "projects": {
+    "C:/work/sample-app": {
+      "allowedTools": [],
+      "mcpServers": {},
+      "disabledMcpServers": ["remote-docs"],
+      "hasTrustDialogAccepted": true
+    },
+    "C:/work/other-app": {
+      "allowedTools": ["Bash(npm test)"],
+      "mcpServers": {
+        "local-db": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["db-mcp", "--readonly"]
+        }
+      }
+    }
+  },
+  "tipsDisabled": false
+}

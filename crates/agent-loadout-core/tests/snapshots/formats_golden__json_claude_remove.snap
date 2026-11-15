@@ -1,0 +1,35 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "edit(Format::Json, &lf, |doc|\n{ assert!(doc.remove(&[\"mcpServers\"], \"remote-docs\").unwrap()); })"
+---
+{
+  "numStartups": 12,
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\work"],
+      "env": {}
+    }
+  },
+  "projects": {
+    "C:/work/sample-app": {
+      "allowedTools": [],
+      "mcpServers": {},
+      "disabledMcpServers": ["remote-docs"],
+      "hasTrustDialogAccepted": true
+    },
+    "C:/work/other-app": {
+      "allowedTools": ["Bash(npm test)"],
+      "mcpServers": {
+        "local-db": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["db-mcp", "--readonly"]
+        }
+      }
+    }
+  },
+  "tipsDisabled": false
+}

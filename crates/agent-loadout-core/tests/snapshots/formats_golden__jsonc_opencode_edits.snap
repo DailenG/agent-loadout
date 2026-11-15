@@ -1,0 +1,30 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "edit(Format::Jsonc, &lf, |doc|\n{\n    let mut files = doc.get(&[\"mcp\"], \"files\").unwrap().unwrap(); let\n    NativeValue::Object(members) = &mut files else\n    { panic!(\"files is an object\"); };\n    members.insert(\"enabled\", false.into());\n    assert!(doc.upsert(&[\"mcp\"], \"files\", &files).unwrap()); let value =\n    json(r#\"{\"type\": \"local\", \"command\": [\"new-mcp\", \"--stdio\"], \"environment\": {\"LEVEL\": \"debug\"}, \"enabled\": true}\"#);\n    assert!(doc.upsert(&[\"mcp\"], \"new-server\", &value).unwrap());\n    assert!(doc.remove(&[\"mcp\"], \"search\").unwrap());\n})"
+---
+{
+  // OpenCode settings (synthetic fixture)
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "system",
+  /* MCP servers */
+  "mcp": {
+    // Local tools
+    "files": {
+      "type": "local",
+      "command": ["npx", "-y", "files-mcp"], // pinned by the lockfile
+      "environment": {
+        "ROOT": "~/work",
+      },
+      "enabled": false,
+    },
+
+    "new-server": {
+      "type": "local",
+      "command": ["new-mcp", "--stdio"],
+      "environment": {
+        "LEVEL": "debug",
+      },
+      "enabled": true,
+    },
+  },
+}

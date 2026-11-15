@@ -1,0 +1,24 @@
+{
+  // OpenCode settings (synthetic fixture)
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "system",
+  /* MCP servers */
+  "mcp": {
+    // Local tools
+    "files": {
+      "type": "local",
+      "command": ["npx", "-y", "files-mcp"], // pinned by the lockfile
+      "environment": {
+        "ROOT": "~/work",
+      },
+      "enabled": true,
+    },
+
+    // Remote
+    "search": {
+      "type": "remote",
+      "url": "https://search.example.com/mcp",
+      "enabled": false,
+    },
+  },
+}

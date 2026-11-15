@@ -1,0 +1,30 @@
+# Codex configuration (synthetic fixture)
+model = "example-model"
+approval_policy = "on-request"
+
+[profiles.fast]
+model = "example-model-mini"
+
+# MCP servers
+
+[mcp_servers.docs]
+command = "npx"   # launcher
+args = ["-y", "docs-mcp"]
+# Wait a little longer on first start.
+startup_timeout_sec = 20
+
+[mcp_servers.docs.env]
+DOCS_ROOT = "~/docs"
+
+[mcp_servers.tracker]
+url = "https://tracker.example.com/mcp"
+bearer_token_env_var = "TRACKER_TOKEN"
+enabled = true
+
+# Written by an older version; read-only for Loadout.
+[mcp.servers.legacy-tool]
+command = "legacy-tool"
+args = ["--stdio"]
+
+[sandbox_workspace_write]
+network_access = false

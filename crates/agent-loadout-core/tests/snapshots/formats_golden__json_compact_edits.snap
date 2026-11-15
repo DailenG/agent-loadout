@@ -1,0 +1,5 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "edit(Format::Json, &lf, |doc|\n{\n    let value =\n    json(r#\"{\"command\": \"second-mcp\", \"env\": {\"A\": \"1\", \"B\": \"2\"}}\"#);\n    assert!(doc.upsert(&[\"mcpServers\"], \"second\", &value).unwrap()); let value\n    = json(r#\"{\"command\": \"tool-mcp\", \"args\": [\"--stdio\"]}\"#);\n    assert!(doc.upsert(&[\"mcpServers\"], \"tool\", &value).unwrap());\n    assert!(doc.set_list_member(&[\"disabledServers\"], \"tool\", true).unwrap());\n})"
+---
+{"mcpServers":{"tool":{"command":"tool-mcp","args":["--stdio"]},"second":{"command":"second-mcp","env":{"A":"1","B":"2"}}},"other":true,"disabledServers":["tool"]}

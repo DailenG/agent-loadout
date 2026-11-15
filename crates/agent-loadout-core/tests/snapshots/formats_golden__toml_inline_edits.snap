@@ -1,0 +1,7 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "edit(Format::Toml, &lf, |doc|\n{\n    let value = json(r#\"{\"command\": \"new-mcp\", \"env\": {\"LEVEL\": \"debug\"}}\"#);\n    assert!(doc.upsert(&[\"mcp_servers\"], \"new-server\", &value).unwrap()); let\n    value = json(r#\"{\"url\": \"https://search.example.com/v2/mcp\"}\"#);\n    assert!(doc.upsert(&[\"mcp_servers\"], \"search\", &value).unwrap());\n    assert!(doc.remove(&[\"mcp_servers\"], \"files\").unwrap());\n})"
+---
+[mcp_servers]
+search = { url = "https://search.example.com/v2/mcp" } # remote
+new-server = { command = "new-mcp", env = { LEVEL = "debug" } }

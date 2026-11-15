@@ -1,0 +1,20 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: remove
+---
+# Codex configuration (synthetic fixture)
+model = "example-model"
+approval_policy = "on-request"
+
+[profiles.fast]
+model = "example-model-mini"
+
+# MCP servers
+
+# Written by an older version; read-only for Loadout.
+[mcp.servers.legacy-tool]
+command = "legacy-tool"
+args = ["--stdio"]
+
+[sandbox_workspace_write]
+network_access = false

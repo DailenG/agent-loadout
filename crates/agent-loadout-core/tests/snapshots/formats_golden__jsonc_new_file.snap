@@ -1,0 +1,12 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "String::from_utf8(doc.to_bytes()).unwrap()"
+---
+{
+  "mcpServers": {
+    "new-server": {
+      "command": "new-mcp",
+      "args": ["--stdio"]
+    }
+  }
+}

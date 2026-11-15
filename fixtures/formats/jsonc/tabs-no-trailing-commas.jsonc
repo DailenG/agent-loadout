@@ -1,0 +1,10 @@
+{
+	// Editor-style file: tabs, comments, no trailing commas
+	"servers": {
+		"lint": {
+			"command": "lint-mcp", /* inline note */
+			"args": []
+		}
+	},
+	"inputs": []
+}

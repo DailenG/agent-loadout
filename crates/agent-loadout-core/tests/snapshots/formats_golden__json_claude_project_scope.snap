@@ -1,0 +1,47 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "edit(Format::Json, &lf, |doc|\n{\n    let local = [\"projects\", SAMPLE_APP, \"mcpServers\"]; let disabled =\n    [\"projects\", SAMPLE_APP, \"disabledMcpServers\"]; let value =\n    json(r#\"{\"type\": \"http\", \"url\": \"http://localhost:8080/mcp\"}\"#);\n    assert!(doc.upsert(&local, \"local-api\", &value).unwrap());\n    assert!(doc.set_list_member(&disabled, \"filesystem\", true).unwrap());\n    assert!(doc.set_list_member(&disabled, \"remote-docs\", false).unwrap());\n    assert!(!doc.set_list_member(&disabled, \"remote-docs\", false).unwrap());\n})"
+---
+{
+  "numStartups": 12,
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\work"],
+      "env": {}
+    },
+    "remote-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_TOKEN}"
+      }
+    }
+  },
+  "projects": {
+    "C:/work/sample-app": {
+      "allowedTools": [],
+      "mcpServers": {
+        "local-api": {
+          "type": "http",
+          "url": "http://localhost:8080/mcp"
+        }
+      },
+      "disabledMcpServers": ["filesystem"],
+      "hasTrustDialogAccepted": true
+    },
+    "C:/work/other-app": {
+      "allowedTools": ["Bash(npm test)"],
+      "mcpServers": {
+        "local-db": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["db-mcp", "--readonly"]
+        }
+      }
+    }
+  },
+  "tipsDisabled": false
+}

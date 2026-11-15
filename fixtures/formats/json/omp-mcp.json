@@ -1,0 +1,11 @@
+{
+    "$schema": "https://example.invalid/omp/mcp.schema.json",
+    "mcpServers": {
+        "issues": {
+            "type": "http",
+            "url": "https://issues.example.com/mcp/",
+            "timeout": 30000
+        }
+    },
+    "disabledServers": ["issues"]
+}

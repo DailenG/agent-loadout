@@ -1,0 +1,42 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "edit(Format::Json, &lf, |doc|\n{\n    let value =\n    json(r#\"{\"type\": \"stdio\", \"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"D:\\\\data\"], \"cwd\": \"C:\\\\work\"}\"#);\n    assert!(doc.upsert(&[\"mcpServers\"], \"filesystem\", &value).unwrap());\n})"
+---
+{
+  "numStartups": 12,
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:\\data"],
+      "cwd": "C:\\work"
+    },
+    "remote-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_TOKEN}"
+      }
+    }
+  },
+  "projects": {
+    "C:/work/sample-app": {
+      "allowedTools": [],
+      "mcpServers": {},
+      "disabledMcpServers": ["remote-docs"],
+      "hasTrustDialogAccepted": true
+    },
+    "C:/work/other-app": {
+      "allowedTools": ["Bash(npm test)"],
+      "mcpServers": {
+        "local-db": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["db-mcp", "--readonly"]
+        }
+      }
+    }
+  },
+  "tipsDisabled": false
+}

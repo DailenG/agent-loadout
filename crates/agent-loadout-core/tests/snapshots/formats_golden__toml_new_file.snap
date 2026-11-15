@@ -1,0 +1,8 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: "String::from_utf8(doc.to_bytes()).unwrap()"
+---
+[mcp_servers.new-server]
+command = "new-mcp"
+args = ["--stdio"]
+env = { LEVEL = "debug" }

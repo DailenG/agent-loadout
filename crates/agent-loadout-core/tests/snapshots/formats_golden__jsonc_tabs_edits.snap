@@ -1,0 +1,18 @@
+---
+source: crates/agent-loadout-core/tests/formats_golden.rs
+expression: out
+---
+{
+	// Editor-style file: tabs, comments, no trailing commas
+	"servers": {
+		"lint": {
+			"command": "lint-mcp", /* inline note */
+			"args": ["--fix"]
+		},
+		"fmt": {
+			"command": "fmt-mcp",
+			"args": ["--check"]
+		}
+	},
+	"inputs": []
+}

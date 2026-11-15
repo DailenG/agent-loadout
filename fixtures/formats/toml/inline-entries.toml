@@ -1,0 +1,4 @@
+[mcp_servers]
+# local helpers
+files = { command = "files-mcp", args = ["--root", "."] }
+search = { url = "https://search.example.com/mcp" } # remote
