@@ -38,6 +38,14 @@ pub enum ErrorCode {
     UnknownClient,
     /// An OS name is not `windows`, `linux` or `macos`. Warning: kept as written.
     UnknownOs,
+    /// Another process holds `state/loadout.lock` and the wait timed out.
+    Locked,
+    /// The store repository could not be read or written.
+    GitError,
+    /// An entity with this id already exists.
+    AlreadyExists,
+    /// No entity with this id exists.
+    NotFound,
 }
 
 impl ErrorCode {
@@ -57,6 +65,10 @@ impl ErrorCode {
             ErrorCode::InvalidRef => "invalid_ref",
             ErrorCode::UnknownClient => "unknown_client",
             ErrorCode::UnknownOs => "unknown_os",
+            ErrorCode::Locked => "locked",
+            ErrorCode::GitError => "git_error",
+            ErrorCode::AlreadyExists => "already_exists",
+            ErrorCode::NotFound => "not_found",
         }
     }
 }

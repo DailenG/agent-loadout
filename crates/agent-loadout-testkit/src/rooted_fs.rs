@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -61,5 +62,17 @@ impl Fs for RootedFs {
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         RealFs.create_dir_all(self.check(path))
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        RealFs.remove_file(self.check(path))
+    }
+
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
+        RealFs.read_dir(self.check(path))
+    }
+
+    fn open_lock_file(&self, path: &Path) -> io::Result<File> {
+        RealFs.open_lock_file(self.check(path))
     }
 }

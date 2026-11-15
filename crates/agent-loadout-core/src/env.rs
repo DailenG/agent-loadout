@@ -1,5 +1,5 @@
-//! Process environment facade: OS, known folders, environment variables and
-//! clock. The core reads these only through [`Env`]; the CLI and the app build
+//! Process environment facade: OS, known folders, environment variables, host
+//! name and clock. The core reads these only through [`Env`]; the CLI and the app build
 //! one from the process, tests build one from a temp root.
 
 use std::collections::BTreeMap;
@@ -71,6 +71,7 @@ pub struct Env {
     local_app_data: Option<PathBuf>,
     roaming_app_data: Option<PathBuf>,
     vars: BTreeMap<String, OsString>,
+    hostname: Option<String>,
     clock: Arc<dyn Clock>,
 }
 
@@ -85,6 +86,7 @@ impl Env {
                 local_app_data: None,
                 roaming_app_data: None,
                 vars: BTreeMap::new(),
+                hostname: None,
                 clock: Arc::new(SystemClock),
             },
         }
@@ -120,6 +122,13 @@ impl Env {
     pub fn now(&self) -> SystemTime {
         self.clock.now()
     }
+
+    /// The computer's host name, if known. The default machine label.
+    pub fn hostname(&self) -> Option<&str> {
+        self.hostname
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+    }
 }
 
 /// Builder for [`Env`]. The clock defaults to [`SystemClock`].
@@ -142,6 +151,11 @@ impl EnvBuilder {
         self.env
             .vars
             .insert(var_key(self.env.os, name), value.into());
+        self
+    }
+
+    pub fn hostname(mut self, name: impl Into<String>) -> Self {
+        self.env.hostname = Some(name.into());
         self
     }
 

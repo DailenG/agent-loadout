@@ -55,6 +55,15 @@ fn access_outside_root_panics_without_touching_disk() {
     assert_panics("create_dir_all", || {
         let _ = fs.create_dir_all(&outside.join("nested"));
     });
+    assert_panics("remove_file", || {
+        let _ = fs.remove_file(&outside.join("config.json"));
+    });
+    assert_panics("read_dir", || {
+        let _ = fs.read_dir(&outside);
+    });
+    assert_panics("open_lock_file", || {
+        let _ = fs.open_lock_file(&outside);
+    });
     assert_panics("write through ..", || {
         let _ = fs.write(&escape, b"x");
     });

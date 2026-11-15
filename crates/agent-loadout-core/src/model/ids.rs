@@ -2,6 +2,8 @@
 //! bad id survives a rewrite and is reported by validation with
 //! [`ErrorCode::InvalidId`] instead of failing to load.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::error::{CoreError, ErrorCode};
 
 /// Longest server, skill, project id or secret alias, in bytes.
@@ -30,6 +32,8 @@ pub enum IdKind {
     Machine,
     /// Apply id: a ULID, as for machines.
     Apply,
+    /// Store id (`loadout.toml`): a ULID, as for machines.
+    Store,
 }
 
 impl IdKind {
@@ -43,6 +47,7 @@ impl IdKind {
             IdKind::EnvVar => "environment variable name",
             IdKind::Machine => "machine id",
             IdKind::Apply => "apply id",
+            IdKind::Store => "store id",
         }
     }
 
@@ -55,7 +60,9 @@ impl IdKind {
                 "1 to 64 characters from A-Z, a-z, 0-9, '_', not starting with a digit"
             }
             IdKind::EnvVar => "characters from A-Z, a-z, 0-9, '_', not starting with a digit",
-            IdKind::Machine | IdKind::Apply => "a ULID: 26 upper-case Crockford base32 characters",
+            IdKind::Machine | IdKind::Apply | IdKind::Store => {
+                "a ULID: 26 upper-case Crockford base32 characters"
+            }
         }
     }
 }
@@ -66,7 +73,7 @@ pub fn is_valid(kind: IdKind, value: &str) -> bool {
         IdKind::Server | IdKind::Skill | IdKind::Project => is_slug(value),
         IdKind::SecretAlias => value.len() <= MAX_ID_LEN && is_env_name(value),
         IdKind::EnvVar => is_env_name(value),
-        IdKind::Machine | IdKind::Apply => is_ulid(value),
+        IdKind::Machine | IdKind::Apply | IdKind::Store => is_ulid(value),
     }
 }
 
@@ -114,11 +121,39 @@ fn is_env_name(value: &str) -> bool {
             .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// Crockford base32 alphabet used by ULIDs.
+const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 fn is_ulid(value: &str) -> bool {
-    const CROCKFORD: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let bytes = value.as_bytes();
     // The first character carries 3 bits of a 128-bit value, so it is 0-7.
     bytes.len() == 26 && bytes[0] <= b'7' && bytes.iter().all(|b| CROCKFORD.contains(b))
+}
+
+/// A new ULID for `time` (from [`crate::Env::now`]): 48 bits of Unix
+/// milliseconds, then 80 bits from the operating system's random source.
+pub fn new_ulid(time: SystemTime) -> Result<String, CoreError> {
+    let mut random = [0u8; 10];
+    getrandom::fill(&mut random).map_err(|err| {
+        CoreError::new(
+            ErrorCode::IoError,
+            format!("cannot read random bytes for a new id: {err}"),
+        )
+    })?;
+    Ok(encode_ulid(time, random))
+}
+
+fn encode_ulid(time: SystemTime, random: [u8; 10]) -> String {
+    let millis = time
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis())
+        & ((1 << 48) - 1);
+    let value = random
+        .iter()
+        .fold(millis, |value, &byte| (value << 8) | u128::from(byte));
+    (0..26)
+        .map(|index| char::from(CROCKFORD[((value >> (125 - 5 * index)) & 31) as usize]))
+        .collect()
 }
 
 /// Abbreviated or full lower-case hex git object id (SHA-1 or SHA-256).
