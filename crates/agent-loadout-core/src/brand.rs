@@ -27,3 +27,10 @@ pub const PROJECT_DIR: &str = ".loadout";
 pub const TRAILER_PREFIX: &str = "Loadout-";
 /// OS keyring service name.
 pub const KEYRING_SERVICE: &str = "loadout";
+
+/// Store commit author and committer name prefix (`loadout <machine-label>`).
+pub const COMMIT_AUTHOR_NAME: &str = "loadout";
+/// Domain of store commit e-mail addresses (`<machine-id>@loadout.invalid`).
+pub const COMMIT_EMAIL_DOMAIN: &str = "loadout.invalid";
+/// `Loadout-Client` trailer name of the CLI (`loadout-cli/<version>`).
+pub const CLI_CLIENT_NAME: &str = "loadout-cli";

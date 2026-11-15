@@ -11,6 +11,7 @@ pub mod error;
 pub mod fs;
 pub mod model;
 pub mod paths;
+pub mod store;
 
 pub use env::{Clock, Env, EnvBuilder, FixedClock, KnownFolder, Os, SystemClock};
 pub use error::{CoreError, ErrorCode};
