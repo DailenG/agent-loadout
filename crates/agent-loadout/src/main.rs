@@ -1,16 +1,17 @@
 //! `loadout` CLI. Thin over `agent-loadout-core`; the only place that builds
 //! an [`Env`] from the running process.
 
+mod cmd;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use agent_loadout_core::paths::{self, LoadoutHome, SyncRoot, SyncRootKind};
+use agent_loadout_core::paths::{self, LoadoutHome, SyncRoot};
 use agent_loadout_core::{CoreError, Env, ErrorCode, KnownFolder, Os, RealFs, SystemClock, brand};
 use clap::{Args, Parser, Subcommand};
 use serde_json::{Value, json};
 
-/// Version of every `--json` document.
-const JSON_SCHEMA: u32 = 1;
+use cmd::{Context, JSON_SCHEMA, path_json, print_json, sync_root_warning};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -33,6 +34,10 @@ struct Cli {
 enum Command {
     /// Check the installation and report problems.
     Doctor(DoctorArgs),
+    /// Manage MCP servers in the store.
+    Server(cmd::server::ServerArgs),
+    /// List store commits.
+    History(cmd::history::HistoryArgs),
 }
 
 #[derive(Debug, Args)]
@@ -47,8 +52,8 @@ fn main() -> ExitCode {
     match run(&cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            report_error(&err, cli.json);
-            ExitCode::FAILURE
+            cmd::report_error(&err, cli.json);
+            ExitCode::from(cmd::exit_code(&err))
         }
     }
 }
@@ -56,8 +61,17 @@ fn main() -> ExitCode {
 fn run(cli: &Cli) -> Result<(), CoreError> {
     let env = process_env()?;
     let flag = cli.home.as_deref().map(absolute).transpose()?;
+    let context = || -> Result<Context, CoreError> {
+        Ok(Context {
+            home: paths::loadout_home(&env, &RealFs, flag.as_deref())?,
+            env: env.clone(),
+            json: cli.json,
+        })
+    };
     match &cli.command {
         Command::Doctor(args) => doctor(&env, flag.as_deref(), args, cli.json),
+        Command::Server(args) => cmd::server::run(&context()?, args),
+        Command::History(args) => cmd::history::run(&context()?, args),
     }
 }
 
@@ -105,7 +119,23 @@ fn process_env() -> Result<Env, CoreError> {
             builder = builder.var(name, value);
         }
     }
+    if let Some(name) = hostname(os) {
+        builder = builder.hostname(name);
+    }
     Ok(builder.build())
+}
+
+/// `COMPUTERNAME` on Windows; elsewhere `HOSTNAME`, then `/etc/hostname`.
+fn hostname(os: Os) -> Option<String> {
+    let var = |name: &str| std::env::var(name).ok();
+    let name = match os {
+        Os::Windows => var("COMPUTERNAME"),
+        Os::Linux | Os::MacOs => {
+            var("HOSTNAME").or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        }
+    }?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 fn absolute(path: &Path) -> Result<PathBuf, CoreError> {
@@ -140,13 +170,7 @@ fn doctor(env: &Env, flag: Option<&Path>, args: &DoctorArgs, json: bool) -> Resu
         println!("No problems found.");
     }
     for root in findings {
-        println!(
-            "warning[sync_root_detected]: {} is inside a {} folder ({}). Sync tools corrupt live git repos and lock files; move it with --home or {}.",
-            brand::HOME_ENV_VAR,
-            sync_kind_label(root.kind),
-            root.root.display(),
-            brand::HOME_ENV_VAR,
-        );
+        println!("warning[sync_root_detected]: {}", sync_root_warning(root));
     }
     Ok(())
 }
@@ -211,40 +235,4 @@ fn sync_root_finding_json(root: &SyncRoot) -> Value {
         "kind": root.kind.as_str(),
         "root": path_json(&root.root),
     })
-}
-
-fn sync_kind_label(kind: SyncRootKind) -> &'static str {
-    match kind {
-        SyncRootKind::Resilio => "Resilio Sync",
-        SyncRootKind::Syncthing => "Syncthing",
-        SyncRootKind::OneDrive => "OneDrive",
-        SyncRootKind::Dropbox => "Dropbox",
-        SyncRootKind::GoogleDrive => "Google Drive",
-    }
-}
-
-fn path_json(path: &Path) -> Value {
-    Value::String(path.as_os_str().to_string_lossy().into_owned())
-}
-
-fn print_json(doc: &Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(doc).expect("JSON values always serialize")
-    );
-}
-
-fn report_error(err: &CoreError, json: bool) {
-    if json {
-        print_json(&json!({
-            "schema": JSON_SCHEMA,
-            "error": {
-                "code": err.code().as_str(),
-                "message": err.message(),
-                "path": err.path().map_or(Value::Null, path_json),
-            },
-        }));
-    } else {
-        eprintln!("error[{}]: {err}", err.code());
-    }
 }
