@@ -1,10 +1,10 @@
-# SkillDock Next: Specification
+# Loadout: Specification
 
-Status: draft v1 for review (2026-11-14). Spec only; nothing here is implemented.
+Status: draft v2 for review (2026-11-14), formerly "SkillDock Next". Dailen's answers are folded in (§21 Decisions). Spec only; nothing here is implemented.
 
 Conventions:
 
-- `sdn` is a **placeholder** for the final product name (see Appendix C). Every identifier containing `sdn` (binary, data dir, manifest dir, env vars, crate names) is renamed by one search/replace in M0.
+- Product name: **Loadout** (identifiers and the name-collision check are in Appendix C). Every brand string (binary, data dir, manifest dir, env vars, app id, commit-trailer and keyring prefixes) comes from one module, `loadout-core::brand`.
 - MUST / SHOULD / MAY carry RFC 2119 meaning.
 - `[verify]` marks a client behavior that was not confirmed against primary docs on 2026-11-14. The adapter that depends on it MUST ship with a fixture test plus a manual check against the real client before it is marked stable.
 - `~` is the user profile directory. On Windows this is the Known Folder `FOLDERID_Profile` (`%USERPROFILE%`), **never** `$HOME`. `<P>` is a project root folder.
@@ -30,7 +30,7 @@ SkillDock is a Tauri 2 app (Rust backend about 75k lines, React frontend about 5
 | Secrets in backup | `env`/`headers` dropped wholesale, key names kept in `requiredSecrets`; the frontend never reads `requiredSecrets` | Restore on a new machine silently loses secrets |
 | Merge | Object-level 3-way for skills; MCP, preferences and plugin trees: **local wins silently** | Silent data loss |
 | Restore | Replaces `~/.skilldock/skills` wholesale and pushes a new commit; no pre-restore undo point | Destructive |
-| Status values | Localized Chinese strings persisted as state (`"已启用"`); frontend regex-parses Chinese errors (`缺少环境变量`) | Fragile, not i18n-safe |
+| Status values | Localized Chinese status labels persisted as state; frontend regex-parses Chinese backend error text | Fragile, not i18n-safe |
 | Tool registry | 5+ hand-maintained tables (`build_tool_configs`, `tool_skills_path_for_home`, `known_roots`, `mcp_config_path_for_tool`, `target_app_specs`) plus a 6-entry declarative `tool_adapters.rs` | Drift between tables |
 | Windows paths | `HOME` preferred over `USERPROFILE` (Git Bash `HOME` redirects everything) | Wrong files on Windows |
 | Linux | Not released (CI builds macOS and Windows only) | Requirement 8 is new work |
@@ -43,12 +43,12 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 
 ### Goals
 
-1. **SkillDock-identical GUI** (layout, flows, look) on Tauri 2, backed by a reusable Rust core crate shared with a CLI (`sdn apply|status|diff|backup|restore` and more).
+1. **SkillDock-identical GUI** (layout, flows, look) on Tauri 2, backed by a reusable Rust core crate shared with a CLI (`loadout apply|status|diff|backup|restore` and more).
 2. **MCP management at two scopes:** system (user-wide) and project (any folder with a manifest that layers over system). Writes every client's native project-level config. Shows the effective config per folder with per-entry provenance.
-3. **Versioned store:** every change is a commit in a local git repo under the app data dir (fully offline). History, semantic diff, restore any version, named tags. Remotes are optional push targets.
+3. **Versioned store:** every change and every apply is a commit in a local git repo under the app data dir (fully offline). History, semantic diff, restore any version, one-click rollback of any apply, named tags. Remotes (NAS, GitHub, Resilio) are optional push targets.
 4. **Vendor independence:** nothing breaks if any vendor, upstream repo or service disappears. No baked-in OAuth client ids. Remote auth uses the user's own git credentials or a user-supplied OAuth app id. Plain folders (NAS, Resilio) are first-class remotes.
-5. **Secrets by reference only:** `${env:NAME}`, `op://vault/item/field`, 1Password Developer Environments, OS keyring. No secret value ever enters the store, a snapshot or a remote. Restore on a new machine shows "missing secret" state.
-6. **First-class clients:** Claude Code, Claude Desktop, Cursor, VS Code, GitHub Copilot, Windsurf, Devin Desktop, Codex, Gemini CLI, Antigravity, OpenCode, Pi, oh-my-pi (omp), Grok Build; all other SkillDock clients ported at user scope. Format-preserving edits; never touch entries the app did not create; drift detection with adopt/import.
+5. **Secrets by reference only:** `${env:NAME}`, `op://vault/item/field`, 1Password Environments, OS keyring. 1Password values are fetched by the launcher (`loadout exec`) at server start and never written to disk. No secret value ever enters the store, a snapshot or a remote. Restore on a new machine shows "missing secret" state; a machine without the 1Password CLI degrades to env and keyring refs.
+6. **Clients by tier** (Decision 15). Tier A, daily, built and verified first: Claude Code, omp, Pi, Codex, Claude Desktop (Windows only). Tier B, daily: VS Code Stable with GitHub Copilot, Cursor. Tier C: Gemini CLI, Antigravity, OpenCode, Grok Build. Tier D, best effort: Windsurf and Devin Desktop (not installed), the legacy VS Code editor format (read/import only), and all other SkillDock clients at user scope. Format-preserving edits; never touch entries the app did not create; drift detection with adopt/import.
 7. **Skills:** keep SkillDock's store, link/copy distribution, `~/.agents/skills` scan; add project scope.
 8. **Platforms:** Windows 11 (primary) and Arch Linux on Hyprland/Wayland as first-class builds; macOS best effort.
 9. **Migration** from `~/.skilldock` and from existing client configs.
@@ -57,8 +57,8 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 
 - MCP proxies, gateways or container runtimes (ToolHive, 1MCP, Docker MCP gateway, MetaMCP), per LANDSCAPE.md.
 - Rewriting servers into wrapper commands for tool filtering (SkillDock's `mcp-filter`/`mcp-remote`). Tool filtering is written only through native client fields.
-- Plugin management, SkillHub publishing and the Publish route. Deferred (Open question Q3). The GUI keeps their nav slots hidden behind a feature flag.
-- Built-in marketplaces as required dependencies. Catalog sources are optional add-ons (M17).
+- Plugin management, marketplaces, SkillHub publishing and the Publish route: deferred post-v1 (Decision 3). The GUI keeps their nav slots hidden behind a feature flag.
+- Built-in catalogs as required dependencies. Catalog sources are optional post-v1 add-ons.
 - Managing client settings unrelated to MCP and skills (rules, hooks, permissions, models).
 - Team or multi-user servers. The store is personal; project manifests may be shared through the project's own repo.
 - Encrypting the store. It contains no secrets by construction (§11), so encryption is unnecessary.
@@ -69,8 +69,8 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 
 | Term | Meaning |
 |---|---|
-| Store | The versioned git repo `<SDN_HOME>/store` holding desired state (servers, skills, secret references, project mirrors, machine overlays). |
-| State | Machine-local, unversioned data `<SDN_HOME>/state` (ledger, remotes, trust, journals, local settings). |
+| Store | The versioned git repo `<LOADOUT_HOME>/store` holding desired state (servers, skills, secret references, project mirrors, machine overlays, apply records). |
+| State | Machine-local, unversioned data `<LOADOUT_HOME>/state` (ledger, remotes, trust, journals, local settings). |
 | Client | An MCP/skills consumer (Claude Code, Cursor, ...). Has an adapter. |
 | Target | One native config file + container + scope for one or more clients, e.g. `<P>/.mcp.json` `/mcpServers`. |
 | Native entry | One server entry inside a target (e.g. key `github` under `mcpServers`). |
@@ -90,34 +90,35 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 ### 4.1 Repository and crates
 
 ```
-sdn/                           (Cargo workspace + npm package)
+loadout/                       (Cargo workspace + npm package)
   crates/
-    sdn-core/                  lib: everything below, no Tauri dependency
+    loadout-core/              lib: everything below, no Tauri dependency
+      src/brand.rs             single source of brand strings (names, dirs, env var, app id, prefixes)
       src/env.rs               Env + Fs facade (paths, OS, vars); injected everywhere
-      src/model/               schemas: server, secrets, project, machine, settings, skill-meta
+      src/model/               schemas: server, secrets, project, machine, applied, settings, skill-meta
       src/store/               git2-backed store: transactions, commits, tags, log, diff, restore, merge
-      src/remote/              git (system git CLI), folder (repo-per-machine, mirror, archive)
-      src/formats/             format-preserving editors: json/jsonc, json5 (read), toml, yaml
+      src/remote/              git (system git CLI), folder (repo-per-machine, mirror, archive), UNC resolution
+      src/formats/             format-preserving editors: json/jsonc, toml, then yaml, json5 (read)
       src/adapters/            AdapterSpec table + mappers per client; detection
       src/layering/            manifests, merge, effective config, provenance
-      src/apply/               ledger, planner, executor, journal, backups, lock
+      src/apply/               ledger, planner, executor, journal, backups, lock, apply commits, rollback
       src/secrets/             ref grammar, catalog, providers, delivery rendering, leak scanner
       src/skills/              skill store, frontmatter, link/junction/copy, agents-cli scan
       src/migrate/             SkillDock importer, first-run client scan
       src/events.rs            typed change events (for GUI watchers and CLI output)
-    sdn-cli/                   bin `sdn` (clap); thin over sdn-core; also `sdn exec`, `sdn git-credential`
-    sdn-testkit/               dev-dependency: temp HOME builder, fixtures, fake providers, op stub
-  src-tauri/                   bin: Tauri app; commands are thin wrappers over sdn-core
+    loadout-cli/               bin `loadout` (clap); thin over loadout-core; also `loadout exec`, `loadout git-credential`
+    loadout-testkit/           dev-dependency: temp HOME builder, fixtures, fake providers, op/gh stubs
+  src-tauri/                   bin: Tauri app (identifier dev.dailen.loadout); commands are thin wrappers over loadout-core
   src/                         React frontend (ported from SkillDock)
   fixtures/                    client config fixtures + golden outputs (shared by Rust tests)
 ```
 
 Rules:
 
-- `sdn-core` MUST NOT read process-global state directly (`std::env`, `dirs::home_dir`, `SystemTime::now`). It receives an `Env` (paths, OS, env vars, clock) and an `Fs` trait object. Tests use `RootedFs`, which panics on any path outside the temp root. This is the guarantee that tests never touch real agent configs.
+- `loadout-core` MUST NOT read process-global state directly (`std::env`, `dirs::home_dir`, `SystemTime::now`). It receives an `Env` (paths, OS, env vars, clock) and an `Fs` trait object. Tests use `RootedFs`, which panics on any path outside the temp root. This is the guarantee that tests never touch real agent configs.
 - Errors are typed: `enum CoreError { code: ErrorCode, ... }` with stable `snake_case` codes (`parse_error`, `foreign_entry`, `missing_secret`, ...). The frontend and CLI localize from codes. No localized strings cross the IPC boundary as state.
 - All mutating core APIs go through `Store::transaction(op, |tx| ...)`, which validates, writes store files, runs the leak scanner and commits once (§9.2).
-- One cross-process lock `<SDN_HOME>/state/sdn.lock` (`fd-lock`) is held by any process mutating the store, ledger or client files. GUI and CLI can run concurrently; the second waits up to 10 s, then fails with `locked`.
+- One cross-process lock `<LOADOUT_HOME>/state/loadout.lock` (`fd-lock`) is held by any process mutating the store, ledger or client files. GUI and CLI can run concurrently; the second waits up to 10 s, then fails with `locked`.
 
 ### 4.2 Git implementation choice
 
@@ -131,7 +132,7 @@ Rules:
   - Typed IPC: generate TS bindings for commands and events from Rust with `tauri-specta`. Replace `invokeOrFallback` silent fixture fallback with an explicit mock transport used only in tests and Storybook-style dev mode.
   - Server state via TanStack Query (cache + invalidation on core change events) instead of the 90-member god Context and ad-hoc cooldowns (`ROUTE_LOCAL_ALIGN_COOLDOWN_MS`, `MCP_LOCAL_ALIGN_COOLDOWN_MS`, ...).
   - Route modules split per page; header toolbars rendered through React context slots instead of `document.getElementById` portals.
-  - Statuses are enums; i18n keys only in presentation.
+  - Statuses are enums. **English only** (Decision 13): display strings live in one presentation-layer catalog (`src/i18n/en.ts`) keyed by enum and error code; no zh-CN catalog, no language setting.
   - Keep CodeMirror 6 + `@codemirror/merge` for diffs and TOML editing; keep `react-markdown`.
 - Tauri: CSP enabled (SkillDock ships `"csp": null`); capabilities minimal (dialog, process, optional updater, window controls). Plugins: `dialog`, `process`, `updater` (optional, §16.4).
 
@@ -140,35 +141,35 @@ Rules:
 ```mermaid
 flowchart LR
   GUI[React UI] -- typed invoke/events --> APP[src-tauri]
-  CLI[sdn CLI] --> CORE
-  APP --> CORE[sdn-core]
+  CLI[loadout CLI] --> CORE
+  APP --> CORE[loadout-core]
   CORE --> STORE[(store git repo)]
   CORE --> STATE[(state: ledger, remotes, trust)]
   CORE --> FILES[client config files and skill dirs]
   CORE -- system git CLI --> REMOTE[(git remotes)]
   CORE -- git2 local transport --> FOLDER[(folder remotes)]
   CORE -- op / keyring --> SECRETS[(secret providers)]
-  CLIENT[client app e.g. Cursor] -- spawns --> EXEC[sdn exec] --> SECRETS
+  CLIENT[client app e.g. Claude Code] -- spawns --> EXEC[loadout exec] --> SECRETS
 ```
 
 The GUI watches target files, manifests and skill dirs with `notify` (debounced 500 ms, coalesced) and re-runs drift detection for affected targets only.
 
 ### 4.5 Data directory layout
 
-`SDN_HOME` default (overridable with env `SDN_HOME` or Settings; see Q2):
+`LOADOUT_HOME` default (overridable with env `LOADOUT_HOME` or Settings):
 
 | OS | Default |
 |---|---|
-| Windows | `%LOCALAPPDATA%\sdn` (not Roaming: a roaming profile must not sync a live git repo) |
-| Linux | `${XDG_DATA_HOME:-~/.local/share}/sdn` |
-| macOS | `~/Library/Application Support/sdn` |
+| Windows | `%LOCALAPPDATA%\Loadout` (Known Folder `FOLDERID_LocalAppData`; not Roaming: a roaming profile must not sync a live git repo) |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/loadout` |
+| macOS | `~/Library/Application Support/Loadout` |
 
-The app MUST warn when `SDN_HOME` resolves inside a file-sync root (Resilio `.sync` marker, OneDrive, Dropbox, Syncthing `.stfolder`, Google Drive): file sync tools corrupt live git repos. Sync folders are for **folder remotes** (§9.7), not for `SDN_HOME`.
+`LOADOUT_HOME` must never live inside a Resilio folder or any other file-sync root (OneDrive, Dropbox, Syncthing, Google Drive): sync tools corrupt live git repos. Detection walks the ancestors of the resolved path for a Resilio `.sync` dir (containing `ID` or `IgnoreList`) or a Syncthing `.stfolder`, and compares against the OneDrive, Dropbox and Google Drive roots from their known registry and config locations. On a hit the GUI shows a blocking warning that needs an explicit "use anyway" (recorded in `state/local-settings.toml`), the CLI repeats the warning on every mutating command, and `loadout doctor` reports `sync_root_detected`. The defaults never resolve into a sync root; the check guards overrides. Sync folders are for **folder remotes** (§9.6), not for `LOADOUT_HOME`.
 
 ```
-<SDN_HOME>/
+<LOADOUT_HOME>/
   store/                          git repo (branch main); desired state; NEVER contains secret values
-    sdn.toml                      store identity: schema, store_id (ULID), created_at
+    loadout.toml                  store identity: schema, store_id (ULID), created_at
     servers/<id>.toml             one MCP server per file (§5.2)
     secrets.toml                  secret reference catalog: aliases -> refs (§5.3)
     clients.toml                  per-client preferences (§5.4)
@@ -176,20 +177,21 @@ The app MUST warn when `SDN_HOME` resolves inside a file-sync root (Resilio `.sy
     skills/<id>/...               managed skill content (SKILL.md + files, no .git)
     skill-meta/<id>.toml          skill metadata: source, tags, enablement (§12)
     projects/<project-id>/
-      project.toml                mirror of <P>/.sdn/project.toml
-      project.local.toml          mirror of <P>/.sdn/project.local.toml (refs only)
+      project.toml                mirror of <P>/.loadout/project.toml (when shared)
+      project.local.toml          mirror of <P>/.loadout/project.local.toml (refs only)
     machines/<machine-id>.toml    per-machine overlay: label, OS, project paths, overrides (§5.6)
+    machines/<machine-id>.applied.toml   last apply record of that machine (§8.7)
   state/                          machine-local, unversioned
     machine.toml                  machine_id (ULID), label; created on first run
     ledger.json                   ownership ledger (§8.1)
     ledger.key                    32-byte HMAC key for ledger hashes (or stored in OS keyring)
     remotes.toml                  remotes for this machine (§9.6)
     trust.json                    trusted project manifests (path, id, content hash)
-    local-settings.toml           window geometry, default editor path, feature flags
+    local-settings.toml           window geometry, default editor path, feature flags, sync-root override
     merge/                        in-progress pull merge state (§9.9)
     journal/<apply-id>.json       apply journals for crash recovery (§8.4)
-    applies/<apply-id>.json       apply results (last 200)
-    sdn.lock                      cross-process lock
+    applies/<apply-id>.json       apply results with per-file detail (last 200)
+    loadout.lock                  cross-process lock
   backups/                        machine-local, NEVER pushed; user-only permissions
     files/<ts>-<apply-id>/<encoded-path>   pre-write copies of client files (may contain secrets)
     trash/<ts>/<encoded-path>     items removed by explicit user delete (skills, entries)
@@ -198,7 +200,7 @@ The app MUST warn when `SDN_HOME` resolves inside a file-sync root (Resilio `.sy
     tools/<server-id>.json        last MCP tool discovery result
   imports/
     skilldock-backup.git          bare copy of SkillDock's backup repo (migration, §15)
-  logs/sdn.log                    rotating, redacted
+  logs/loadout.log                rotating, redacted
 ```
 
 Encoding for backup paths: absolute path with drive colon and separators percent-encoded, so restores are unambiguous across OSes.
@@ -227,7 +229,7 @@ tags = ["dev"]
 transport = "stdio"                 # stdio | http | sse
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
-# cwd = "${project}"                # template vars: ${home}, ${project}, ${sdn_home}
+# cwd = "${project}"                # template vars: ${home}, ${project}, ${loadout_home}
 
 [env]
 GITHUB_PERSONAL_ACCESS_TOKEN = "${secret:GITHUB_PAT}"   # reference, never a value
@@ -279,15 +281,18 @@ Windows `npx`/`.cmd` shims: adapters with `windows_shell_shim` (clients that spa
 ```toml
 schema = 1
 
+[onepassword]
+environment = "blgexucrwfr2dtsxe2q4uu7dp4"   # the one Environment holding MCP secrets (an id, not a secret; example id from 1Password docs)
+
 [secrets.GITHUB_PAT]
 ref = "op://Developer/GitHub PAT/credential"
 description = "Fine-grained PAT, contents:read on selected repos"
 
 [secrets.LINEAR_TOKEN]
-ref = "op-env://blgexucrwfr2dtsxe2q4uu7dp4/LINEAR_TOKEN"   # 1Password Developer Environment
+ref = "op-env://blgexucrwfr2dtsxe2q4uu7dp4/LINEAR_TOKEN"   # 1Password Environment
 
 [secrets.OPENAI_API_KEY]
-ref = "keyring://sdn/OPENAI_API_KEY"
+ref = "keyring://loadout/OPENAI_API_KEY"
 
 [secrets.HASS_TOKEN]
 ref = "env:HASS_TOKEN"              # plain environment variable
@@ -303,16 +308,16 @@ schema = 1
 [claude-code]
 project_shared_target = ".mcp.json"          # where project.toml layer goes
 project_local_target = "local-scope"         # ~/.claude.json projects[<P>].mcpServers
-[vscode]
-variants = ["Code"]                          # Code | Code - Insiders | VSCodium
-profiles = "default"                         # default | all | ["<profile-id>", ...]
 [omp]
 profiles = ["default"]                       # omp named profiles to target
+[vscode-legacy]                              # read/import only (§7.3)
+import_variants = ["Code"]                   # Code | Code - Insiders | VSCodium
+import_profiles = "default"                  # default | all | ["<profile-id>", ...]
 [windsurf]
-enabled = false                              # opt a client out of everything
+enabled = false                              # Tier D; opt a client out of everything
 ```
 
-### 5.5 Project manifest (`<P>/.sdn/project.toml`)
+### 5.5 Project manifest (`<P>/.loadout/project.toml`, `<P>/.loadout/project.local.toml`)
 
 ```toml
 schema = 1
@@ -346,7 +351,7 @@ enable = ["repo-conventions", "tauri-release"]
 share = false                       # false: link + .git/info/exclude; true: copy files for teammates
 ```
 
-`<P>/.sdn/project.local.toml` has the same schema (no `id`, it inherits), is personal, and is listed in `<P>/.sdn/.gitignore` (created on init). On init the user chooses **Shared** (manifest committed with the project) or **Private** (`.sdn/` added to `<P>/.git/info/exclude`; nothing visible to teammates).
+`<P>/.loadout/project.local.toml` has the same schema and is personal. **New manifests default to private** (Decision 8): `loadout project init` and the GUI create only `.loadout/project.local.toml`, which then carries the `id`, and append `.loadout/` to `<P>/.git/info/exclude`, so nothing is visible to teammates. **Shared** (on request, `--shared`) creates `.loadout/project.toml` with the `id` plus `.loadout/.gitignore` listing `project.local.toml`; the shared file is committed with the project. When both exist, `id` comes from `project.toml` and the local file layers on top. "Share manifest" (`loadout project share`) moves selected entries from the local file into `project.toml` as one commit.
 
 ### 5.6 Machine overlay (`store/machines/<machine-id>.toml`)
 
@@ -354,26 +359,28 @@ Written only by the machine it describes (so merges never conflict on it).
 
 ```toml
 schema = 1
-machine_id = "01JCX3R8Q6T5W1V9Y2Z7A4B6C8"
-label = "dailen-desktop"
-os = "windows"
+machine_id = "01JCX5B7K3M9N1P5Q7R3S9T1V5"
+label = "arch-omarchy"
+os = "linux"
 
 [enable]
-exclude_clients = ["claude-desktop"]
+exclude_clients = ["cursor"]
 
-[secrets.GITHUB_PAT]                # per-machine ref override
-ref = "keyring://sdn/GITHUB_PAT"
+[secrets.GITHUB_PAT]                # per-machine ref override: no 1Password CLI here (§11.11)
+ref = "keyring://loadout/GITHUB_PAT"
 
 [servers.filesystem]                # per-machine field overrides for system servers
-args = ["-y", "@modelcontextprotocol/server-filesystem", "D:\\Code"]
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/<user>/Code"]
 
 [projects.skilldock-next-7k2f]      # where this project lives on this machine
-path = "C:\\Users\\<user>\\Code\\skilldock-next"
+path = "/home/<user>/Code/skilldock-next"
 ```
+
+`machines/<machine-id>.applied.toml` (§8.7) follows the same single-writer rule.
 
 ### 5.7 Portable settings (`store/settings.toml`)
 
-`theme`, `language`, `apply_mode` (`instant` | `review`), `new_server_enable` (`all-detected` | `none`, maps SkillDock `mcpInstallActivation`), `new_skill_enable`, `agents_cli_compat`, `list_view` preferences. Machine-specific values (editor path, window size) live in `state/local-settings.toml`.
+`theme`, `apply_mode` (`instant` (default) | `review`), `new_server_enable` (`all-detected` | `none`, maps SkillDock `mcpInstallActivation`), `new_skill_enable`, `agents_cli_compat`, `list_view` preferences. No language setting (English only). Machine-specific values (editor path, window size) live in `state/local-settings.toml`.
 
 ---
 
@@ -384,8 +391,8 @@ path = "C:\\Users\\<user>\\Code\\skilldock-next"
 For a folder `F` and a client `C`, lowest to highest:
 
 1. **System**: store servers with `C` in `enable.clients`, after OS overrides (`[os.<os>]`) and the machine overlay. Written to `C`'s user-scope target.
-2. **Project (shared)**: the nearest manifest at or above `F` (`<P>/.sdn/project.toml`). Written to `C`'s project target.
-3. **Project-local (private)**: `<P>/.sdn/project.local.toml`. Written to `C`'s private project target when the client has one; otherwise merged into the project target (with a warning if that file is shared, see 6.5).
+2. **Project (shared)**: `<P>/.loadout/project.toml` in the nearest manifest dir at or above `F`. Written to `C`'s project target.
+3. **Project-local (private)**: `<P>/.loadout/project.local.toml`, the only file of a private project (the default for new manifests). Written to `C`'s private project target when the client has one; otherwise merged into the project target, subject to the shared-file rules of 6.5.
 
 Nested manifests: v1 uses the **nearest** manifest only; outer manifests are not merged (documented limitation, revisit for monorepos). A manifest directly in `~` is ignored (it would be "every folder").
 
@@ -442,7 +449,7 @@ Adapters are **data first**: one declarative table (replacing SkillDock's five t
 pub struct AdapterSpec {
     pub id: &'static str,                  // "claude-code"
     pub display_name: &'static str,
-    pub tier: Tier,                        // FirstClass | Ported
+    pub tier: Tier,                        // A daily | B daily, second wave | C supported | D best effort / ported
     pub detect: &'static [Probe],          // config dir exists, executable on PATH, Windows App Paths/registry, MSIX package
     pub mcp: Option<McpSpec>,
     pub skills: Option<SkillsSpec>,
@@ -506,36 +513,36 @@ pub enum Location {
 
 Common rules: detect and keep BOM, line endings (CRLF on Windows files), final newline, indentation width. Editing a document with no logical change MUST return byte-identical text (property-tested). New keys are appended at the end of the container. A missing file is created with the minimal skeleton (omp also gets its `$schema` line, matching what omp itself writes).
 
-### 7.3 First-class clients: MCP
+### 7.3 Client paths and shapes (MCP)
 
-Paths: `~` per Conventions; `%APPDATA%` is Roaming; `$XDG_CONFIG_HOME` defaults to `~/.config`.
+Paths: `~` per Conventions; `%APPDATA%` is Roaming; `$XDG_CONFIG_HOME` defaults to `~/.config`. Rows are ordered by tier (Decision 15).
 
-| Client (id) | Format | User scope | Project (shared) | Project-local (private) | Container and entry shape |
-|---|---|---|---|---|---|
-| Claude Code (`claude-code`) | JSON | `~/.claude.json` (all OS; `$CLAUDE_CONFIG_DIR/.claude.json` when set [verify]) | `<P>/.mcp.json` | `~/.claude.json` at `projects["<P>"].mcpServers` (key format of `<P>` on Windows [verify]) | `mcpServers.<n>`: `{type, command, args, env}` or `{type: "http"/"sse"/"ws", url, headers, headersHelper}`; `type` required for remote entries |
-| Claude Desktop (`claude-desktop`) | JSON | Win `%APPDATA%\Claude\claude_desktop_config.json`, plus MSIX copy `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json` when present (write both, warn); Linux `$XDG_CONFIG_HOME/Claude/claude_desktop_config.json`; macOS `~/Library/Application Support/Claude/claude_desktop_config.json` | none | none | `mcpServers.<n>`: stdio only (remote servers are Connectors in the app UI) |
-| Cursor (`cursor`) | JSON | `~/.cursor/mcp.json` | `<P>/.cursor/mcp.json` | none | `mcpServers.<n>`: `{command, args, env, envFile}` or `{url, headers}` |
-| VS Code, editor-managed (`vscode`) | JSONC | Win `%APPDATA%\Code\User\mcp.json`; Linux `$XDG_CONFIG_HOME/Code/User/mcp.json`; macOS `~/Library/Application Support/Code/User/mcp.json`; variants `Code - Insiders`, `VSCodium`; profiles `User/profiles/<id>/mcp.json` | `<P>/.vscode/mcp.json` | none | `servers.<n>`: `{type, command, args, env, envFile, cwd}` or `{type, url, headers}`; existing `inputs[]` preserved, never generated. VS Code marks this "Local harness" format deprecated, removal February 2027. |
-| GitHub Copilot, CLI and VS Code Copilot harness (`copilot`) | JSON | `$COPILOT_HOME/mcp-config.json`, else `~/.copilot/mcp-config.json` | `<P>/.mcp.json` (shared file, 6.5) | none | `mcpServers.<n>`: `{type, command, args, env, cwd, tools}` or `{type, url, headers, tools, oauthClientId}` |
-| Windsurf, legacy Cascade (`windsurf`) | JSON | `~/.codeium/windsurf/mcp_config.json` | `<P>/.windsurf/mcp_config.json` [verify] | none | `mcpServers.<n>`: `{command, args, env}` or `{serverUrl, headers}` [verify `url` vs `serverUrl`] |
-| Devin Desktop, Windsurf successor (`devin`) | JSON | Linux/macOS `~/.config/devin/mcp_config.json`; Win `%APPDATA%\devin\mcp_config.json` | `<P>/.devin/mcp_config.json` | `<P>/.devin/mcp_config.local.json` | `mcpServers.<n>`: `{command, args, env}` or `{url, transport}` |
-| Codex (`codex`) | TOML | `$CODEX_HOME/config.toml`, else `~/.codex/config.toml` | `<P>/.codex/config.toml` (loaded only for trusted projects) | none | `[mcp_servers.<n>]`: `command, args, env, env_vars, cwd` or `url, bearer_token_env_var, http_headers, env_http_headers`; `enabled, startup_timeout_sec, tool_timeout_sec, enabled_tools, disabled_tools`. No SSE. Legacy `[mcp.servers]` read-only, never deleted (fixes SkillDock bug). |
-| Gemini CLI (`gemini`) | JSON | `~/.gemini/settings.json` | `<P>/.gemini/settings.json` (trusted folders) | none | `mcpServers.<n>`: `{command, args, env, cwd}` or `{url}` (SSE) or `{httpUrl}` (HTTP); `headers, timeout, trust, includeTools, excludeTools`; no `type` field |
-| Antigravity (`antigravity`) | JSON | `~/.gemini/config/mcp_config.json` | `<P>/.agents/mcp_config.json` | none | `mcpServers.<n>`: `{command, args, env}` or `{serverUrl, headers, timeoutSeconds}`; no SSE, no `httpUrl` |
-| OpenCode (`opencode`) | JSONC | `$XDG_CONFIG_HOME/opencode/opencode.json[c]` (also `~/.config` on Windows) | `<P>/opencode.json[c]` (reads `<P>/.opencode/` too) | none | `mcp.<n>`: `{type: "local", command: [cmd, ...args], environment, enabled}` or `{type: "remote", url, headers, enabled}` |
-| Pi (`pi`) | JSON | `~/.pi/agent/mcp.json` | `<P>/.pi/mcp.json` (project trust required) | none | `mcpServers.<n>`: `{command, args, env, cwd}` or `{url, headers, oauth}`; optional `type` (`stdio`, `http`, `streamable-http`); `enabled, exposure, toolExposure, description, timeout` (seconds). No SSE. If `pi-mcp-adapter` is installed, built-in MCP is replaced: adapter reports `client_mcp_replaced_by_extension`. |
-| oh-my-pi (`omp`) | JSON | `~/.omp/agent/mcp.json` (honors `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`; named profiles `~/.omp/profiles/<name>/agent/mcp.json` per `clients.toml`) | `<P>/.omp/mcp.json` | none | `mcpServers.<n>`: `{type, command, args, env, cwd}` or `{type, url, headers, auth, oauth}`; `enabled, timeout` (ms), `instructions`; top-level `disabledServers`/`enabledServers` preserved |
-| Grok Build (`grok`) | TOML | `~/.grok/config.toml` | `<P>/.grok/config.toml` (Grok walks cwd to git root) | none | `[mcp_servers.<n>]`: `command, args, env` or `url, headers`; `startup_timeout_sec, tool_timeout_sec` |
+| Tier | Client (id) | Format | User scope | Project (shared) | Project-local (private) | Container and entry shape |
+|---|---|---|---|---|---|---|
+| A | Claude Code (`claude-code`) | JSON | `~/.claude.json` (all OS; `$CLAUDE_CONFIG_DIR/.claude.json` when set [verify]) | `<P>/.mcp.json` | `~/.claude.json` at `projects["<P>"].mcpServers` (key format of `<P>` on Windows [verify]) | `mcpServers.<n>`: `{type, command, args, env}` or `{type: "http"/"sse"/"ws", url, headers, headersHelper}`; `type` required for remote entries |
+| A | oh-my-pi (`omp`) | JSON | `~/.omp/agent/mcp.json` (honors `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`; named profiles `~/.omp/profiles/<name>/agent/mcp.json` per `clients.toml`) | `<P>/.omp/mcp.json` | none | `mcpServers.<n>`: `{type, command, args, env, cwd}` or `{type, url, headers, auth, oauth}`; `enabled, timeout` (ms), `instructions`; top-level `disabledServers`/`enabledServers` preserved |
+| A | Pi (`pi`) | JSON | `~/.pi/agent/mcp.json` | `<P>/.pi/mcp.json` (project trust required) | none | `mcpServers.<n>`: `{command, args, env, cwd}` or `{url, headers, oauth}`; optional `type` (`stdio`, `http`, `streamable-http`); `enabled, exposure, toolExposure, description, timeout` (seconds). No SSE. If `pi-mcp-adapter` is installed, built-in MCP is replaced: adapter reports `client_mcp_replaced_by_extension`. |
+| A | Codex (`codex`) | TOML | `$CODEX_HOME/config.toml`, else `~/.codex/config.toml` | `<P>/.codex/config.toml` (loaded only for trusted projects) | none | `[mcp_servers.<n>]`: `command, args, env, env_vars, cwd` or `url, bearer_token_env_var, http_headers, env_http_headers`; `enabled, startup_timeout_sec, tool_timeout_sec, enabled_tools, disabled_tools`. No SSE. Legacy `[mcp.servers]` read-only, never deleted (fixes SkillDock bug). |
+| A | Claude Desktop (`claude-desktop`) | JSON | **Windows only** (Decision 12): `%APPDATA%\Claude\claude_desktop_config.json`, plus the MSIX copy `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json` when present (write both, warn). macOS `~/Library/Application Support/Claude/claude_desktop_config.json` best effort. No Linux target. | none | none | `mcpServers.<n>`: stdio only (remote servers are Connectors in the app UI) |
+| B | VS Code Stable with GitHub Copilot, and Copilot CLI (`copilot`) | JSON | `$COPILOT_HOME/mcp-config.json`, else `~/.copilot/mcp-config.json` | `<P>/.mcp.json` at the workspace root (shared file, 6.5) | none | `mcpServers.<n>`: `{type, command, args, env, cwd, tools}` or `{type, url, headers, tools, oauthClientId}`; `type` is `stdio`, `http` or `sse`. Never writes editor-only fields (`inputs`, `envFile`, `dev`, `sandbox`). This is VS Code's current Copilot-harness location (checked against the VS Code MCP configuration reference on 2026-11-14). |
+| B | Cursor (`cursor`) | JSON | `~/.cursor/mcp.json` | `<P>/.cursor/mcp.json` | none | `mcpServers.<n>`: `{command, args, env, envFile}` or `{url, headers}` |
+| C | Gemini CLI (`gemini`) | JSON | `~/.gemini/settings.json` | `<P>/.gemini/settings.json` (trusted folders) | none | `mcpServers.<n>`: `{command, args, env, cwd}` or `{url}` (SSE) or `{httpUrl}` (HTTP); `headers, timeout, trust, includeTools, excludeTools`; no `type` field |
+| C | Antigravity (`antigravity`) | JSON | `~/.gemini/config/mcp_config.json` | `<P>/.agents/mcp_config.json` | none | `mcpServers.<n>`: `{command, args, env}` or `{serverUrl, headers, timeoutSeconds}`; no SSE, no `httpUrl` |
+| C | OpenCode (`opencode`) | JSONC | `$XDG_CONFIG_HOME/opencode/opencode.json[c]` (also `~/.config` on Windows) | `<P>/opencode.json[c]` (reads `<P>/.opencode/` too) | none | `mcp.<n>`: `{type: "local", command: [cmd, ...args], environment, enabled}` or `{type: "remote", url, headers, enabled}` |
+| C | Grok Build (`grok`) | TOML | `~/.grok/config.toml` | `<P>/.grok/config.toml` (Grok walks cwd to git root) | none | `[mcp_servers.<n>]`: `command, args, env` or `url, headers`; `startup_timeout_sec, tool_timeout_sec` |
+| D | VS Code editor-managed format, legacy (`vscode-legacy`) | JSONC | **Read/import only**: Win `%APPDATA%\Code\User\mcp.json`; Linux `$XDG_CONFIG_HOME/Code/User/mcp.json`; macOS `~/Library/Application Support/Code/User/mcp.json`; variants `Code - Insiders`, `VSCodium`; profiles `User/profiles/<id>/mcp.json` | `<P>/.vscode/mcp.json` (read/import only) | none | `servers.<n>` plus `inputs[]`. VS Code deprecated this Local-harness format (removal February 2027). Never written. Import converts `${env:NAME}` to refs and flags `${input:...}` as `needs_manual_secret`. VS Code can forward these definitions into Copilot sessions, so the effective view lists them as `client-compat` sources for `copilot` and flags duplicates. |
+| D | Windsurf, legacy Cascade (`windsurf`) | JSON | `~/.codeium/windsurf/mcp_config.json` | `<P>/.windsurf/mcp_config.json` [verify] | none | `mcpServers.<n>`: `{command, args, env}` or `{serverUrl, headers}` [verify `url` vs `serverUrl`]. Not installed; best effort. |
+| D | Devin Desktop, Windsurf successor (`devin`) | JSON | Linux/macOS `~/.config/devin/mcp_config.json`; Win `%APPDATA%\devin\mcp_config.json` | `<P>/.devin/mcp_config.json` | `<P>/.devin/mcp_config.local.json` | `mcpServers.<n>`: `{command, args, env}` or `{url, transport}`. Not installed; best effort. |
 
-### 7.4 First-class clients: capabilities
+### 7.4 Client capabilities
 
 | Client | Transports | Env ref written | Command ref | Native disable | Project suppression of a user server | Project precedence | Trust gate | Notes |
 |---|---|---|---|---|---|---|---|---|
 | claude-code | stdio, http, sse, ws | `${VAR}`, `${VAR:-d}` in command, args, env, url, headers | `headersHelper` (http/ws) | none in entry | `projects["<P>"].disabledMcpServers` list membership | Replace (local > project > user; whole entry) | `.mcp.json` approval | `~/.claude.json` rewritten by Claude Code constantly: CAS write, retry |
-| claude-desktop | stdio | none (literal) | none | none (remove) | n/a | n/a | none | `restart_required`; `windows_shell_shim` |
+| claude-desktop | stdio | none (literal) | none | none (remove) | n/a | n/a | none | Windows only; `restart_required`; `windows_shell_shim` |
 | cursor | stdio, http, sse | `${env:NAME}`, `${userHome}`, `${workspaceFolder}` | none | none [verify] | unsupported [verify] | Replace [verify] | none | |
-| vscode | stdio, http, sse | `${env:NAME}` | none | none [verify] | unsupported | n/a (separate files) | workspace trust | deprecated format |
-| copilot | stdio, http, sse | `${NAME}`, `${NAME:-d}` | none | none [verify] | unsupported | [verify] | none | `tools` field for filtering |
+| vscode-legacy | n/a (read/import only) | reads `${env:NAME}` | none | n/a | n/a | n/a | workspace trust | deprecated format, never written |
+| copilot | stdio, http, sse | `${NAME}`, `${NAME:-default}` in `command`, `args`, `env` and header values | none | none [verify] | unsupported | [verify] | workspace trust in VS Code [verify] | `tools` field for filtering; VS Code's workspace-root form rejects `${...}` but the runtime reads it |
 | windsurf | stdio, http, sse | `${env:NAME}` | none | `disabled: true` [verify] | unsupported [verify] | [verify] | none | |
 | devin | stdio, http, sse | `${env:VAR}` [verify fields] | none | [verify] | [verify] | local > project > user [verify] | none | |
 | codex | stdio, http | `env_vars = ["NAME"]` (forward), `bearer_token_env_var`, `env_http_headers` | none | `enabled = false` | project `enabled = false` [verify merge] | DeepMerge [verify] | trusted projects only | no `${}` expansion |
@@ -546,9 +553,9 @@ Paths: `~` per Conventions; `%APPDATA%` is Roaming; `$XDG_CONFIG_HOME` defaults 
 | omp | stdio, http, sse | `${VAR}`, `${VAR:-d}`, bare env name | `!command` (env/headers) | `enabled: false` | project `enabled: false` | Replace (project first) | none | reads many other clients' files: compat duplicates |
 | grok | stdio, http | `${VAR}`, `${VAR:-d}` | none | [verify] | unsupported (same-name replaces) | Replace | folder trust | reads `~/.claude.json`, `.cursor/mcp.json`, `.mcp.json` (compat) |
 
-### 7.5 Ported clients (Tier 2, user scope in v1)
+### 7.5 Tier D ported clients (user scope in v1)
 
-Carried over from SkillDock's tables (`mcp_manager.rs:1336-1527`, `tool_adapters.rs`), with the OS fixes noted. Project scope for these is `[verify]` and out of v1 scope.
+Carried over from SkillDock's tables (`mcp_manager.rs:1336-1527`, `tool_adapters.rs`), with the OS fixes noted. Best effort; project scope for these is `[verify]` and out of v1 scope.
 
 | id | Format | User-scope MCP file | Container | Skills dir |
 |---|---|---|---|---|
@@ -585,7 +592,7 @@ Transport inference on read is unified across all mappers (SkillDock was inconsi
 | claude-code | `~/.claude/skills` | `<P>/.claude/skills` |
 | codex | `~/.codex/skills` (SkillDock) and `~/.agents/skills` [verify which Codex reads] | `<P>/.agents/skills` [verify] |
 | cursor | `~/.cursor/skills` | `<P>/.cursor/skills` [verify] |
-| copilot / vscode | `~/.copilot/skills` | `<P>/.github/skills` [verify] |
+| copilot (VS Code with Copilot) | `~/.copilot/skills` | `<P>/.github/skills` [verify] |
 | windsurf / devin | `~/.codeium/windsurf/skills` / [verify] | [verify] |
 | gemini | `~/.gemini/skills` | `<P>/.gemini/skills` [verify] |
 | antigravity | `~/.gemini/config/skills` | `<P>/.agents/skills` [verify] |
@@ -624,7 +631,7 @@ A client is "detected" when any probe passes: its config dir exists, its executa
   }, {
     "kind": "skill_link", "client": "claude-code", "scope": "user",
     "path": "~/.claude/skills/repo-conventions", "method": "junction",
-    "target": "<SDN_HOME>/store/skills/repo-conventions", "written_hash": "..."
+    "target": "<LOADOUT_HOME>/store/skills/repo-conventions", "written_hash": "..."
   }]}
 ```
 
@@ -670,7 +677,7 @@ plan(selection):                          # selection = scopes x clients x folde
   return Plan { per_file_ops, per_file_text_diff, warnings }
 ```
 
-`sdn diff` and the GUI "Pending changes" drawer render the plan as unified diffs of each file (before/after text), with secret values masked in inline mode.
+`loadout diff` and the GUI "Pending changes" drawer render the plan as unified diffs of each file (before/after text), with secret values masked in inline mode.
 
 ### 8.4 Execution
 
@@ -679,7 +686,7 @@ Per target file, in order, holding the global lock:
 1. Re-read the file; if its bytes differ from what was planned against, re-plan that file (up to 3 times, then `file_changed_during_apply`).
 2. Copy the original bytes to `backups/files/<ts>-<apply-id>/<encoded-path>` (user-only ACL on Windows, mode 0600 on Unix).
 3. Apply edits through the format editor. Re-parse the result and re-read our entries through the mapper; they MUST equal desired, and every non-owned entry MUST be byte-identical to before. Otherwise abort this file (`self_check_failed`).
-4. Atomic write: temp file in the same dir (`.<name>.sdn-<rand>.tmp`), write, `fsync`, copy permissions, compare-and-swap check (re-hash target), then `rename` (Unix) or `ReplaceFileW` (Windows, keeps ACLs and attributes), then `fsync` the directory (Unix). Locked by another process on Windows: retry with backoff for 2 s, then `file_locked`.
+4. Atomic write: temp file in the same dir (`.<name>.loadout-<rand>.tmp`), write, `fsync`, copy permissions, compare-and-swap check (re-hash target), then `rename` (Unix) or `ReplaceFileW` (Windows, keeps ACLs and attributes), then `fsync` the directory (Unix). Locked by another process on Windows: retry with backoff for 2 s, then `file_locked`.
 5. Update the ledger (atomic write) immediately after each file.
 6. Append the result to `state/journal/<apply-id>.json`. On next start, an unfinished journal is reported with per-file outcomes; no automatic replay.
 
@@ -692,14 +699,25 @@ Invariants (each has a test):
 
 ### 8.5 Drift detection triggers
 
-GUI: file watcher on every target file, manifest and skill target dir; window focus; manual Refresh. CLI: `sdn status`. Drift is never auto-reverted.
+GUI: file watcher on every target file, manifest and skill target dir; window focus; manual Refresh. CLI: `loadout status`. Drift is never auto-reverted.
 
 ### 8.6 Adopt and import
 
-- **Scan** (GUI "Scan Import", CLI `sdn import --scan`): reads every detected client's user target and every known project folder's targets; lists foreign entries grouped by name. Identical definitions (canonical equality after transport normalization) across clients collapse into one candidate with several sources. Differing definitions are shown side by side; the user picks one, or imports both as `name` and `name-<client>`. (SkillDock silently kept whichever app it scanned last.)
+- **Scan** (GUI "Scan Import", CLI `loadout import --scan`): reads every detected client's user target and every known project folder's targets; lists foreign entries grouped by name. Identical definitions (canonical equality after transport normalization) across clients collapse into one candidate with several sources. Differing definitions are shown side by side; the user picks one, or imports both as `name` and `name-<client>`. (SkillDock silently kept whichever app it scanned last.)
 - **Import** creates the store server (through secret extraction, §11.7), sets `enable.clients` to the clients where it was found, and records ledger entries with `origin = adopted` when the rendered entry equals the observed one; when rendering would reformat it, the plan shows that diff first.
 - **Import only** copies the definition into the store without taking ownership of the native entries.
 - **Adopt drift**: "Import their change" turns a drifted native entry into a store edit (commit `adopt: cursor/github drift`).
+
+### 8.7 Apply commits and one-click rollback
+
+Every apply run is one commit in the store (Decision 10):
+
+- The commit updates `machines/<machine-id>.applied.toml`: apply id, time, store revision applied, trigger (`instant` | `review` | `restore` | `rollback` | `pull`), and one record per target with `client`, `scope`, `project_id`, `file` (written with `~` and `<P>` placeholders), op counts (`create`, `update`, `remove`, `disable`) and `outcome`. No file content, no values, no hashes (hashes stay in the machine-local ledger); per-file detail stays in `state/applies/`.
+- Instant mode (default): the user's edit, validation, apply and commit run as one transaction under the global lock: stage store files, plan against the staged desired state, execute, then commit once with the edit's trailers plus `Loadout-Apply: <apply-id> <outcome>`. A `partial`, `blocked` or `failed` outcome still commits the desired state; the header pill shows what is left.
+- Review mode, restores and pulls: each apply run commits on its own (`apply: 2 files (claude-code, codex)`).
+- An apply with zero writes makes no commit.
+- **One-click rollback** ("Undo this apply" in History, `loadout rollback <apply-id|last>`): tag `auto/pre-rollback/<ts>`, then a new commit whose desired-state entities equal the parent of the apply commit (other machines' files untouched), applied immediately through the normal planner. Ownership rules still hold: entries that apply created are removed only if unchanged since (otherwise `drifted`, and the user is asked); foreign edits made after the apply are kept. Rolling back a rollback restores the original. Rolling back the latest apply never asks; rolling back an older one shows the plan first when later applies touched the same entries.
+- Exact-byte recovery of a client file, including foreign content, stays separate: `backups/files` (§9.5, `loadout restore --files`).
 
 ---
 
@@ -707,7 +725,7 @@ GUI: file watcher on every target file, manifest and skill target dir; window fo
 
 ### 9.1 Repo
 
-`<SDN_HOME>/store` is a normal git repo, branch `main`, readable by any git client. Initial commit: `init: store <store_id>`. Store id (`sdn.toml`) ties remotes and machines to one logical store.
+`<LOADOUT_HOME>/store` is a normal git repo, branch `main`, readable by any git client. Initial commit: `init: store <store_id>`. Store id (`loadout.toml`) ties remotes and machines to one logical store.
 
 ### 9.2 Commit per change
 
@@ -716,65 +734,71 @@ Every core mutation is one commit, created by `Store::transaction`:
 ```
 server: update github (env.GITHUB_TOOLSETS)
 
-Sdn-Op: server.update
-Sdn-Entity: server/github
-Sdn-Scope: system
-Sdn-Machine: 01JCX3R8Q6T5W1V9Y2Z7A4B6C8 (dailen-desktop)
-Sdn-Client: sdn-gui/0.1.0
+Loadout-Op: server.update
+Loadout-Entity: server/github
+Loadout-Scope: system
+Loadout-Machine: 01JCX3R8Q6T5W1V9Y2Z7A4B6C8 (dailen-desktop)
+Loadout-Client: loadout-gui/0.1.0
+Loadout-Apply: 01JCX4A0M2N8P6Q4R2S0T8U6V4 ok
 ```
 
-- Author and committer: `sdn <machine-label>` / `<machine-id>@sdn.invalid`, passed to git2 directly (no git config is read or written).
+- Author and committer: `loadout <machine-label>` / `<machine-id>@loadout.invalid`, passed to git2 directly (no git config is read or written).
 - A GUI bulk action ("Enable all", batch toggle, import of 12 servers) is one commit; SkillDock looped single toggles.
 - Before commit: schema validation and the leak scanner (§11.8). A failing scan aborts the transaction with `secret_detected` and the offending path/key.
-- Apply runs are not commits (they change client files, not desired state) but are recorded in `state/applies/` with the store commit they applied.
+- Apply runs are commits too (§8.7). In instant mode (the default) the user's edit and its apply are **one** commit carrying the `Loadout-Apply: <apply-id> <ok|partial|blocked|failed>` trailer; in review mode the edit commits first and each later apply run commits `apply: <n> files (<clients>)`. Either way the commit updates `machines/<machine-id>.applied.toml`.
 
 ### 9.3 History and diff
 
-- `history` lists commits with op, entity, scope, machine, time; filter by entity (`Sdn-Entity` trailer or path) or scope.
+- `history` lists commits with op, entity, scope, machine, time; filter by entity (`Loadout-Entity` trailer or path) or scope.
 - **Semantic diff** between any two revisions: per entity added / removed / changed fields (`env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`), refs shown as refs. Skill content changes show as file diffs. **Raw diff** is the unified git diff.
 - **Live diff**: desired (any revision) vs current client files, which is the apply plan.
 
 ### 9.4 Tags
 
 - User tags: annotated, name `^[A-Za-z0-9._-]{1,64}$` (e.g. `pre-reset`), message, machine. Never pruned.
-- Automatic tags under `auto/`: `auto/pre-restore/<ts>`, `auto/pre-pull/<ts>`, `auto/pre-migrate/<ts>`, `auto/post-migrate/<ts>`. Pruned after 90 days (configurable).
+- Automatic tags under `auto/`: `auto/pre-restore/<ts>`, `auto/pre-rollback/<ts>`, `auto/pre-pull/<ts>`, `auto/pre-migrate/<ts>`, `auto/post-migrate/<ts>`. Pruned after 90 days (configurable).
 - Tags are pushed to git remotes and included in folder remotes.
 
 ### 9.5 Restore and rollback
 
 - `restore <rev>`: creates tag `auto/pre-restore/<ts>`, then a **new commit** whose tree equals `<rev>`'s tree (or only the selected entities with `--path`). History is never rewritten; a restore is itself undoable.
 - `machines/<other-machine>.toml` files are never changed by a restore made on this machine (single-writer rule).
-- Project manifests: a restore that changes `projects/<id>/project.toml` writes it back to `<P>/.sdn/project.toml` only after confirmation, because that file may be shared with a team.
-- After restore, the GUI opens the apply plan. `apply_mode = instant` still asks here, because a restore can touch many files.
+- Project manifests: a restore that changes `projects/<id>/project.toml` writes it back to `<P>/.loadout/project.toml` only after confirmation, because that file may be shared with a team.
+- After restore, the GUI opens the apply plan. `apply_mode = instant` still asks here, because a restore can touch many files. Rolling back a single apply run (§8.7) does not ask: it is the one-click undo.
 - **Client-file rollback** (separate from store restore): any `backups/files/<apply>` snapshot can be restored for one file or a whole apply run. It goes through the same atomic write and updates the ledger. This covers mistakes in foreign content that the store never versioned.
 - Retention: `backups/files` keeps the last 50 apply runs or 30 days, whichever is larger.
 
 ### 9.6 Remotes (optional)
 
-Remotes are machine-local config (`state/remotes.toml`), because URLs, mount paths and auth differ per machine:
+Remotes are machine-local config (`state/remotes.toml`), because URLs, mount paths and auth differ per machine. The Add remote wizard offers them in this order, which is also the recommended setup:
+
+1. **NAS (foxnas)**: folder remote on the SMB share, `repo-per-machine`. Windows: a UNC path (`\\foxnas\<share>\loadout`) or a mapped drive letter; a drive letter is kept as typed but resolved to its UNC path with `WNetGetUniversalNameW` before each push, so pushes also work from processes that lack the mapping (elevated shells, scheduled tasks). Linux: the CIFS mount path (for example `/mnt/foxnas/<share>/loadout`, mounted by fstab or a systemd automount). Loadout never mounts shares and never stores SMB credentials. An unmounted or unreachable path reports `remote_unreachable`, is retried on the next push trigger, and never blocks local work.
+2. **GitHub private repository**: git remote using the user's existing `gh` login or git credentials (`auth = gh` or `system`). §9.7 can create the repo.
+3. **Resilio**: folder remote inside a Resilio Sync folder, `repo-per-machine` (one copy per machine, written only by that machine).
 
 ```toml
 [[remote]]
-name = "github"
-kind = "git"
-url = "git@github.com:DailenG/sdn-store.git"
-auth = "system"             # system | gh | token
+name = "foxnas"
+kind = "folder"
+path = "\\\\foxnas\\backup\\loadout"   # share name is per machine; Linux: "/mnt/foxnas/backup/loadout"
+mode = "repo-per-machine"   # repo-per-machine | mirror | archive
 push = "on-commit"          # manual | on-commit | interval:15m
 pull = "on-start"           # manual | on-start | interval:15m
 
 [[remote]]
-name = "resilio"
-kind = "folder"
-path = "D:\\Backups\\sdn"
-mode = "repo-per-machine"   # repo-per-machine | mirror | archive
+name = "github"
+kind = "git"
+url = "https://github.com/DailenG/loadout-store.git"
+auth = "gh"                 # system | gh | token
 push = "on-commit"
+pull = "on-start"
 
 [[remote]]
-name = "nas-export"
+name = "resilio"
 kind = "folder"
-path = "\\\\nas\\backup\\sdn"
-mode = "archive"
-keep = 30
+path = "D:\\Backups\\loadout"
+mode = "repo-per-machine"
+push = "on-commit"
 ```
 
 #### Git remotes
@@ -782,15 +806,15 @@ keep = 30
 - Executed with the system `git` CLI in `store/`: `git push <url> refs/heads/main:refs/heads/main 'refs/tags/*:refs/tags/*'` and `git fetch <url> +refs/heads/main:refs/remotes/<name>/main '+refs/tags/*:refs/tags/*'`. Progress parsed from stderr; idle timeout 120 s.
 - `auth = system`: no flags; whatever the user's git does (GCM, SSH agent, `gh auth setup-git`, any helper).
 - `auth = gh`: `git -c credential.helper= -c credential.helper='!gh auth git-credential'`.
-- `auth = token`: `git -c credential.helper= -c credential.helper='!"<abs path>/sdn" git-credential --remote <name>'`; `sdn git-credential` implements the git credential protocol and returns `username=x-access-token` plus a token read from the OS keyring. No askpass shell scripts (SkillDock's `git-askpass.sh` needed `sh` on Windows), no token in environment variables or argv.
+- `auth = token`: `git -c credential.helper= -c credential.helper='!"<abs path>/loadout" git-credential --remote <name>'`; `loadout git-credential` implements the git credential protocol and returns `username=x-access-token` plus a token read from the OS keyring. No askpass shell scripts (SkillDock's `git-askpass.sh` needed `sh` on Windows), no token in environment variables or argv.
 
 #### Folder remotes
 
-- **`repo-per-machine`** (default for synced folders such as Resilio, Syncthing, OneDrive, NAS shares): layout `<path>/<store_id>/<machine_id>.git`, a bare repo written **only** by its machine via git2 local transport. Other machines only read it. A single writer per file set is what makes file-sync tools safe: git objects are immutable files and refs change by atomic rename, so the sync tool never sees two writers on one file. Pull fetches every sibling `*.git` and merges (§9.9). A partially synced sibling (refs ahead of objects) fails fetch with missing objects and is reported as `remote_incomplete` (retry later), not as an error. No git CLI needed.
+- **`repo-per-machine`** (default for every folder remote: NAS shares and sync folders alike): layout `<path>/<store_id>/<machine_id>.git`, a bare repo written **only** by its machine via git2 local transport. Other machines only read it. A single writer per file set is what makes file-sync tools and SMB shares safe: git objects are immutable files and refs change by atomic rename, so neither a sync tool nor a network share ever sees two writers on one file. Pull fetches every sibling `*.git` and merges (§9.9). A partially synced sibling (refs ahead of objects) fails fetch with missing objects and is reported as `remote_incomplete` (retry later), not as an error. No git CLI needed.
 - **`mirror`**: export-only, human-browsable copy of the HEAD tree at `<path>/<store_id>/<machine_id>/latest/` plus `EXPORT.json` (`commit`, `time`, `machine`, `schema`). Overwritten each push via temp dir + rename.
-- **`archive`**: export-only `<path>/<store_id>/<machine_id>/sdn-<yyyymmdd-hhmmss>-<shortsha>.zip` containing the HEAD tree and `EXPORT.json`; keeps the newest `keep` archives.
-- `sdn restore --from <dir|zip|bare-repo>` bootstraps a new machine from any of the three.
-- A single shared bare repo in a synced folder is supported only as `kind = "git"` with a `file://` URL and shows a warning (two machines writing the same refs through a sync tool can corrupt it).
+- **`archive`**: export-only `<path>/<store_id>/<machine_id>/loadout-<yyyymmdd-hhmmss>-<shortsha>.zip` containing the HEAD tree and `EXPORT.json`; keeps the newest `keep` archives.
+- `loadout restore --from <dir|zip|bare-repo>` bootstraps a new machine from any of the three.
+- A single shared bare repo in a synced folder or share is supported only as `kind = "git"` with a `file://` URL and shows a warning (two machines writing the same refs through a sync tool or SMB can corrupt it).
 
 ### 9.7 GitHub conveniences (optional, never required)
 
@@ -807,7 +831,7 @@ keep = 30
 1. Tag `auto/pre-pull/<ts>`.
 2. Fetch each remote head (`repo-per-machine`: every sibling).
 3. Per incoming head: ancestor of HEAD: nothing; HEAD is its ancestor: fast-forward; otherwise **entity-level 3-way merge** against the merge base:
-   - Entities: `servers/<id>.toml`, `secrets.toml` per alias, `clients.toml` and `settings.toml` per key, `projects/<id>/*` per server/skill key, `skill-meta/<id>.toml` per field, `skills/<id>/**` per file (text 3-way via git2 `merge_file`; binary: conflict), `machines/<id>.toml` always taken from the newer side of that machine's own history (single writer, never a conflict).
+   - Entities: `servers/<id>.toml`, `secrets.toml` per alias, `clients.toml` and `settings.toml` per key, `projects/<id>/*` per server/skill key, `skill-meta/<id>.toml` per field, `skills/<id>/**` per file (text 3-way via git2 `merge_file`; binary: conflict), `machines/<id>.toml` and `machines/<id>.applied.toml` always taken from the newer side of that machine's own history (single writer, never a conflict).
    - TOML entities are parsed and merged per field: changed on one side: take it; both changed identically: take it; both changed differently, or delete versus modify: **conflict** for that field. Nothing is silently resolved in favor of local (SkillDock did that for MCP, preferences and plugins).
 4. No conflicts: merge commit `merge: <remote>[/<machine>]` with both parents.
 5. Conflicts: write `state/merge/MERGE_STATE.json` (base/ours/theirs per field, local only, not in the repo; SkillDock stored conflicts in the synced repo, which looped). HEAD stays unchanged. Local edits remain allowed; resolution re-runs the merge against the current HEAD. The GUI resolver offers per field: ours / theirs / edit; per entity: ours / theirs / keep both (rename theirs to `<id>-<machine-label>`).
@@ -850,7 +874,7 @@ Inside any string field of a server definition:
 |---|---|
 | `${env:NAME}` | environment variable `NAME` |
 | `${secret:ALIAS}` | alias from `secrets.toml` (with machine overlay) |
-| `${home}`, `${project}`, `${sdn_home}` | non-secret path variables, resolved at apply time (or rendered as the client's own variable, e.g. Cursor `${workspaceFolder}`, Claude Code `${CLAUDE_PROJECT_DIR:-.}`) |
+| `${home}`, `${project}`, `${loadout_home}` | non-secret path variables, resolved at apply time (or rendered as the client's own variable, e.g. Cursor `${workspaceFolder}`, Claude Code `${CLAUDE_PROJECT_DIR:-.}`) |
 | `$${` | literal `${` |
 
 `ref` values in `secrets.toml` (whole-value provider URIs):
@@ -859,67 +883,69 @@ Inside any string field of a server definition:
 |---|---|---|
 | `env:NAME` | process environment | read env |
 | `op://vault/item/field` (optionally `?attribute=otp`) | 1Password item | `op read --no-newline <ref>` |
-| `op-env://<environment-id>/<NAME>` | 1Password Developer Environment | `op run --environment <id> -- ...` at launch; for inline resolution, list secrets with the CLI's environment secret listing command (1Password CLI 2.42+, replaces `op environment read` which 1Password deprecates on 2026-11-17 and removes 2027-01-20) [verify exact flags] |
+| `op-env://<environment-id>/<NAME>` | 1Password Environment (one Environment holds the MCP secrets) | `op run --environment <id> --no-masking -- ...` at server start (CLI 2.41.0+). Loadout never calls `op environment read` (deprecated 2026-11-17, removed 2027-01-20). Name listing for bulk mapping uses `op environment secret list <id> --format json` (CLI 2.42.0+, §11.10) |
 | `keyring://<service>/<account>` | OS keyring (`keyring` crate): Windows Credential Manager, macOS Keychain, Linux Secret Service | keyring get |
 
 Provider URIs are not allowed inline in templates; they must go through an alias. This keeps the template parser trivial and avoids ambiguity with literal strings that contain `op://`.
 
 ### 11.3 Resolution statuses
 
-`resolved`, `missing` (env unset, keyring entry absent, 1Password item or variable not found), `locked` (1Password needs sign-in or approval), `provider_unavailable` (`op` not installed or too old; no Secret Service on Linux), `unverifiable` (env delivery: the variable is not in sdn's own environment but may exist in the client's, e.g. a 1Password-mounted `.env`), `error`.
+`resolved`, `missing` (env unset, keyring entry absent, 1Password item or variable not found), `locked` (1Password needs sign-in or approval), `provider_unavailable` (`op` not installed, shown as "1Password CLI not found"; no Secret Service on Linux), `provider_too_old` (`op` below the version a feature needs, §11.11), `unverifiable` (env delivery: the variable is not in Loadout's own environment but may exist in the client's, e.g. a 1Password-mounted `.env`), `error`.
 
 ### 11.4 Delivery modes
 
 | Mode | Who resolves, when | Where the value exists | Applies to |
 |---|---|---|---|
 | `env` (passthrough) | the client, at client start or server spawn | the client's process environment | clients and fields with `env_ref` support (7.4) |
-| `launch` | `sdn exec`, at MCP server process start | memory of the server process | stdio servers on every client |
+| `launch` | `loadout exec`, at MCP server process start | memory of the server process | stdio servers on every client; **default for 1Password and keyring refs** |
 | `command` | the client, at connect time, by running a command | memory | omp and Pi `!command` in env/headers; Claude Code `headersHelper` for http headers |
-| `inline` | sdn, at apply time | plaintext inside the client's config file | fallback; user-scope or private project files only |
+| `inline` | Loadout, at apply time | plaintext inside the client's config file | explicit per-server opt-in only; user-scope or private project files only |
 
 `auto` picks, per (server, client, field):
 
-1. `${env:X}` refs: `env` when the client expands that field; otherwise `inline` from sdn's environment, with warning `inline_env_fallback`.
+1. `${env:X}` refs: `env` when the client expands that field; otherwise `launch` for stdio (exec reads `X` from the environment it inherits from the client); otherwise `inline` from Loadout's environment, with warning `inline_env_fallback`.
 2. Provider refs (`op`, `op-env`, `keyring`):
-   - stdio: `launch` if the `sdn` CLI is on PATH (installer puts it there), else `inline`.
-   - http/sse headers: `command` where supported (`!op read <ref>` for omp/Pi; `headersHelper` printing the header JSON via `sdn secret-header` for Claude Code); else `env` if the user enabled "export provider secrets to my environment" (§11.6); else `inline`.
+   - stdio: `launch`. Values are fetched when the server starts and are never written to disk. If the launcher binary cannot be resolved the entry is `blocked: launcher_not_found`; if the provider is unavailable on this machine (no `op` on the Arch machine) it is `blocked: provider_unavailable` unless the machine overlay maps the alias to another provider (§5.6, §11.11). Neither case falls back to `inline` silently.
+   - http/sse headers: `command` where supported (`!"<abs path>/loadout" secret get --ref <ref>` for omp/Pi; `headersHelper` running `loadout secret-header` for Claude Code); Codex `bearer_token_env_var`/`env_http_headers` through `env`; else `env` if the user enabled "export provider secrets to my environment" (§11.6); else `blocked: no_secret_free_delivery`, with fixes "export to environment" or "allow inline for this server".
 3. `inline` is refused for targets classified as shared (project files tracked by git, or flagged shared). Those get `blocked: secret_in_shared_file` with fixes: switch to `env` or `launch`, or move the server to the project-local layer.
 
 Rendering examples for alias `GITHUB_PAT` (env name `GITHUB_PAT`) on `env.GITHUB_PERSONAL_ACCESS_TOKEN`:
 
 | Client | `env` mode | `launch` mode |
 |---|---|---|
-| Claude Code, Copilot, omp, Pi, Grok, Gemini | `"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"` | `"command": "sdn", "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Developer/GitHub PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"]` |
-| Cursor, VS Code, Windsurf | `"${env:GITHUB_PAT}"` | same as above |
-| OpenCode | `"{env:GITHUB_PAT}"` | `command: ["sdn", "exec", "--ref", "...", "--", "npx", ...]` |
-| Codex | `env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN"]`: Codex forwards a parent variable under its own name and cannot rename it, so `env` works only when the alias's `env_name` equals the server's env key; otherwise `auto` picks `launch` | `command = "sdn"`, `args = [...]` |
+| Claude Code, Copilot, omp, Pi, Grok, Gemini | `"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"` | `"command": "<abs path>/loadout", "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Developer/GitHub PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"]` |
+| Cursor, Windsurf, Devin | `"${env:GITHUB_PAT}"` | same as above |
+| OpenCode | `"{env:GITHUB_PAT}"` | `command: ["<abs path>/loadout", "exec", "--ref", "...", "--", "npx", ...]` |
+| Codex | `env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN"]`: Codex forwards a parent variable under its own name and cannot rename it, so `env` works only when the alias's `env_name` equals the server's env key; otherwise `auto` picks `launch` | `command = "<abs path>/loadout"`, `args = [...]` |
 | Claude Desktop | not supported: `launch` or `inline` | same as above |
 
-### 11.5 `sdn exec`
+### 11.5 `loadout exec` (the 1Password default)
 
-`sdn exec [--ref NAME=REF]... [--op-env <environment-id>] -- <cmd> [args...]`
+`loadout exec [--ref NAME=REF]... [--op-env <environment-id> --map KEY=NAME...] -- <cmd> [args...]`
 
 - Self-contained: the refs are in its argv (refs, never values), so it does not read the store at runtime and cannot diverge from what was applied.
-- Resolves all refs; if every ref comes from one 1Password Environment, it delegates to `op run --environment <id> -- <cmd>` (1Password injects and masks values itself).
-- Never writes to stdout (stdout is the MCP JSON-RPC channel). Errors go to stderr with a stable prefix `sdn-exec:`; exit code 78 for config errors, 77 for missing secrets.
-- Unix: `execvp` (no extra process). Windows: spawns the child with inherited handles, attaches it to a Job Object with kill-on-close so the client killing `sdn exec` kills the server tree, and forwards the exit code.
-- Interaction cost: the 1Password desktop integration may prompt for approval when a client starts servers. A 1Password service account token (stored in the keyring as `keyring://sdn/OP_SERVICE_ACCOUNT_TOKEN`, scoped to the needed vault or Environment) removes prompts. This tradeoff is Q6.
+- Resolution: `op://` refs with `op read --no-newline <ref>`; keyring refs through the `keyring` crate; `env:` refs from the inherited environment. Environment refs: exec runs `op run --environment <id> --no-masking -- "<abs path>/loadout" exec --stage2 --map KEY=NAME... -- <cmd> [args...]`; stage 2 copies each Environment variable `NAME` to the server key `KEY`, removes Environment variables the server did not ask for, then execs the server. `--no-masking` is required because stdout is the MCP JSON-RPC channel and must stay byte-exact.
+- Values exist only in memory (exec, `op`, the server process environment). They are never written to disk, logs or argv.
+- Never writes to stdout. Errors go to stderr with a stable prefix `loadout-exec:`; exit code 78 for config errors, 77 for missing secrets. With `op` absent: `loadout-exec: 1Password CLI not found (op); install it or map GITHUB_PAT to keyring/env for this machine`.
+- Unix: `execvp` (no extra process). Windows: spawns the child with inherited handles, attaches it to a Job Object with kill-on-close so the client killing `loadout exec` kills the server tree, and forwards the exit code.
+- Launcher path: user-scope and private targets reference the **absolute path** of the installed binary (resolved at apply; an install-path change re-plans those entries as updates), so another program named `loadout` on `PATH` cannot hijack server launch (Appendix C). Shared project files use bare `loadout` to stay portable.
+- Prompts and the service account option: with the 1Password desktop app integration, `op` may ask for approval when a client starts servers [verify how long one approval lasts per client process on Windows]. To avoid prompts, `loadout secrets service-account set` stores a 1Password service account token in the OS keyring (`keyring://loadout/OP_SERVICE_ACCOUNT_TOKEN`); exec passes it as `OP_SERVICE_ACCOUNT_TOKEN` to the `op` child only, never to the MCP server. Scope the account read-only to the MCP Environment and to the vaults that hold `op://` items; service accounts cannot read Personal/Private vaults [verify], so those items belong in a shared vault. Settings states the tradeoff: no prompts versus a long-lived token at rest in the keyring.
 
 ### 11.6 Environment export helper
 
-`sdn env --export [--shell pwsh|bash|zsh|fish] [--aliases A,B]` prints export statements for selected aliases (resolving them), for users who choose `env` delivery with GUI clients. On Windows, the GUI offers "set as user environment variables" (registry `HKCU\Environment`, plaintext at rest, explicit opt-in with a warning). For 1Password Environments, the recommended path is 1Password's own local `.env` mount or `op run` launchers, documented, not reimplemented.
+`loadout env --export [--shell pwsh|bash|zsh|fish] [--aliases A,B]` prints export statements for selected aliases (resolving them), for users who choose `env` delivery with GUI clients. On Windows, the GUI offers "set as user environment variables" (registry `HKCU\Environment`, plaintext at rest, explicit opt-in with a warning). For 1Password Environments, the recommended path is `loadout exec` (launch mode) or 1Password's own local `.env` mount, documented, not reimplemented.
 
 ### 11.7 Secret extraction on import, adopt and migration
 
 Every imported literal value in `env`, `headers`, `args` and URLs is classified:
 
 - Sensitive when the key matches `(?i)(token|secret|password|passwd|api[_-]?key|auth|credential|private[_-]?key|bearer)`, the value matches a known token format (`ghp_`, `github_pat_`, `gho_`, `sk-`, `sk-ant-`, `xox[abposr]-`, `AKIA[0-9A-Z]{16}`, `AIza`, `glpat-`, `-----BEGIN ... PRIVATE KEY-----`, JWT shape), a URL contains userinfo or a token-like query parameter, or entropy exceeds 3.5 bits/char over 20+ chars under a sensitive key. SkillDock's `SENSITIVE_ARGUMENT_NAMES` list is included.
-- The import wizard shows each sensitive value masked and requires a destination: **save to OS keyring** (default; creates `keyring://sdn/<ALIAS>`), **map to 1Password** (pick an existing `op://` item or Environment variable; nothing is uploaded to 1Password by this app), **environment variable** (alias with `env:`), or **mark as not secret** (records an allowlist hash in `store/.sdn-allow`, so the scanner stops flagging it).
+- The import wizard shows each sensitive value masked and requires a destination: **save to OS keyring** (default; creates `keyring://loadout/<ALIAS>`), **map to 1Password** (pick an existing `op://` item or Environment variable; nothing is uploaded to 1Password by this app), **environment variable** (alias with `env:`), or **mark as not secret** (records an allowlist hash in `store/.loadout-allow`, so the scanner stops flagging it).
 - Non-sensitive literals (`LOG_LEVEL=info`) stay literal (SkillDock dropped all env values on export).
 
 ### 11.8 Leak scanner
 
-Runs on every store transaction and before every push/export: the classifier above over all staged text, plus exact-match against values resolved during this process lifetime (kept only as keyed hashes in memory). Store files: a hit blocks the commit. Skill files: a hit blocks with an override that records the allowlist hash. `sdn doctor --scan-history` scans all reachable commits (for stores imported from elsewhere) and reports; it never rewrites history automatically.
+Runs on every store transaction and before every push/export: the classifier above over all staged text, plus exact-match against values resolved during this process lifetime (kept only as keyed hashes in memory). Store files: a hit blocks the commit. Skill files: a hit blocks with an override that records the allowlist hash. `loadout doctor --scan-history` scans all reachable commits (for stores imported from elsewhere) and reports; it never rewrites history automatically.
 
 ### 11.9 Missing-secret UX on a new machine
 
@@ -932,7 +958,15 @@ After `restore --from` or a first pull:
 
 ### 11.10 1Password Developer Environments bulk mapping
 
-"Map a 1Password Environment" (Settings > Secrets): enter an Environment id; sdn lists variable **names** via the CLI and creates aliases `op-env://<id>/<NAME>` in bulk for selected names. Values are not read during mapping.
+"Map a 1Password Environment" (Settings > Secrets, `loadout secrets map-op-env <ENV-ID>`): Dailen uses one Environment for all MCP secrets; its id is saved as `[onepassword] environment` in `secrets.toml` (an identifier, not a secret). Loadout runs `op environment secret list <id> --format json` (CLI 2.42.0+) and keeps only the names, creating aliases `op-env://<id>/<NAME>` in bulk for the selected names. Secrets marked "show value by default" come back with values even without `--reveal`, so the parser drops every value field immediately and never logs the raw output. Below 2.42.0 the user types the names instead.
+
+### 11.11 1Password CLI availability per machine
+
+- Detection: `op` on `PATH` (on Windows also `%LOCALAPPDATA%\Microsoft\WinGet\Links`), `op --version`; sign-in state only on an explicit "Check" (it may prompt).
+- Version gates: below 2.41.0, Environment refs are `provider_too_old`; below 2.42.0, Environment name listing is disabled. Item refs (`op read`) work on any 2.x.
+- Windows (WDC-DAILEN1126): CLI 2.42.0 installed through WinGet; every feature available.
+- Arch/Omarchy: CLI not installed. Settings > Secrets and `loadout secrets providers` show **"1Password CLI not found"**; `op`/`op-env` aliases are `provider_unavailable` and the servers using them are blocked **on this machine only**; env and keyring refs work normally. Each blocked alias offers "Use keyring on this machine" or "Use environment variable", which writes a machine-overlay ref (§5.6).
+- Install guidance (user guide and Settings link): `yay -S 1password-cli` (AUR; 2.41.1 on 2026-11-14, enough for `op read` and `op run --environment`, not yet for name listing) or 1Password's official Linux packages; then enable the desktop app's CLI integration (1Password > Settings > Developer) or set a service account token (§11.5).
 
 ---
 
@@ -965,7 +999,7 @@ method = "link"                        # link | copy
 ### 12.2 Distribution
 
 - `link`: Unix symlink; Windows directory **junction** by default (no Developer Mode or admin needed), symlink when available and chosen. Created with Win32 APIs (`junction` crate), not `cmd /c mklink /J`.
-- `copy`: materialized copy with a `.sdn-managed` marker file; tracked in the ledger by content hash so edits in place show as drift.
+- `copy`: materialized copy with a `.loadout-managed` marker file; tracked in the ledger by content hash so edits in place show as drift.
 - Conflict rules from SkillDock kept: an existing link pointing elsewhere is a collision (ask), a real dir or file with the same name is never overwritten (`foreign`, offer import).
 - Disable removes only ledger-owned links/copies whose hash is unchanged.
 
@@ -996,7 +1030,7 @@ Same grid, tokens, sidebar widths (174 px / 86 px collapsed), header with title,
 
 ```
 +----------------------+-------------------------------------------------------------+
-| [icon] sdn           |  MCP                                  [search][≡/▦][Refresh]|
+| [icon] Loadout       |  MCP                                  [search][≡/▦][Refresh]|
 | Scope: [System    v] |  Scan, edit, and sync MCP config      [Scan Import][Add]    |
 |   System (user-wide) |  for 14 tools          (3 pending)    [Review & Apply]      |
 |   skilldock-next     +-------------------------------------------------------------+
@@ -1014,7 +1048,7 @@ Same grid, tokens, sidebar widths (174 px / 86 px collapsed), header with title,
 +----------------------+-------------------------------------------------------------+
 ```
 
-- Plugins and Publish nav items exist behind a feature flag (hidden in v1, Q3).
+- Plugins and Publish nav items exist behind a feature flag (hidden in v1; deferred post-v1).
 - Window chrome: Windows custom controls (`decorations: false`, as SkillDock); Linux native decorations (Hyprland tiles windows; no custom bar); macOS Overlay title bar.
 - Header shows a **pending changes** pill when `apply_mode = review` or when an instant apply left blocked/failed items; clicking opens the Apply drawer.
 
@@ -1060,7 +1094,7 @@ Project scope: the list shows the **effective** servers for the folder; actions 
 +------------------------------------------------------------------------------------+
 ```
 
-Add folder: pick a folder; if `.sdn/project.toml` exists, bind it (and its id) to this machine; else offer init (Shared or Private). Untrusted or changed manifests require review of the diff before any apply ("project manifests can run commands through stdio servers").
+Add folder: pick a folder; if `.loadout/project.toml` or `.loadout/project.local.toml` exists, bind it (and its id) to this machine; else offer init with **Private** preselected (Shared on request). Untrusted or changed manifests require review of the diff before any apply ("project manifests can run commands through stdio servers").
 
 Effective config view (per folder): matrix, rows = server names, columns = clients:
 
@@ -1086,25 +1120,27 @@ Clicking a cell shows the provenance chain (winner file, shadowed entries, reade
 +-------------------------------------------------------------------------------------+
 | History                  [filter: all v] [entity...]   [Tag current...] [Remotes ▸] |
 +-------------------------------------------------------------------------------------+
+| ● apply: 2 files (claude-code, codex)          dailen-desktop · 2 min ago          |
 | ● server: update github (env.GITHUB_TOOLSETS)   dailen-desktop · 2 min ago          |
 | ● project skilldock-next: add postgres          dailen-desktop · 1 h ago  🏷 pre-reset|
-| ● merge: resilio/arch-laptop                    arch-laptop · yesterday              |
-|   [Show diff] [Restore this version] [Restore entity...] [Tag] [Download zip]       |
+| ● merge: foxnas/arch-laptop                     arch-laptop · yesterday              |
+|   [Show diff] [Undo this apply] [Restore this version] [Restore entity...] [Tag]    |
+|   [Download zip]                                                                    |
 +-------------------------------------------------------------------------------------+
-| Remotes: github ✓ in sync · resilio ↑2 · nas-export last archive 3 h ago            |
+| Remotes: foxnas ✓ in sync · github ✓ in sync · resilio ↑2                           |
 | Conflicts (1): secrets.toml GITHUB_PAT ref differs  [Resolve]                        |
 +-------------------------------------------------------------------------------------+
 ```
 
-Diff view: semantic by default, toggle raw. Restore opens a preview ("adds 1, changes 3, removes 0 entities") then the apply plan. A "Client file backups" tab lists apply runs with per-file restore.
+Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files touched and their outcomes; **Undo this apply** runs the one-click rollback. Restore of an arbitrary version opens a preview ("adds 1, changes 3, removes 0 entities") then the apply plan. A "Client file backups" tab lists apply runs with per-file restore.
 
 ### 13.6 Settings (SkillDock sections plus new ones)
 
-1. App Preferences (as SkillDock: storage folder with Open, language, default editor, Agent Skills CLI compatibility, appearance, header style, tag filter layout, card layout).
-2. Apply Behavior (new): Instant (SkillDock-like: each change applies immediately) or Review; disable behavior (remove vs native disable); pull apply (manual/auto).
+1. App Preferences (as SkillDock, minus language: storage folder with Open, default editor, Agent Skills CLI compatibility, appearance, header style, tag filter layout, card layout). The UI is English only.
+2. Apply Behavior (new): **Instant** (default, SkillDock-like: each change applies immediately and becomes one commit) or Review; disable behavior (remove vs native disable); pull apply (manual/auto).
 3. Install Behavior (as SkillDock): enable new skills / new MCPs by default.
-4. Versioning & Backup (replaces "Account & Backup"): remotes list with status; Add remote wizard (Git URL / Folder / GitHub helper); auth choice per git remote (System git credentials, gh, Token in keyring, Device flow with your own OAuth app id); push/pull buttons; auto tag retention.
-5. Secrets (new): providers status (1Password CLI version and sign-in state, OS keyring backend, Secret Service on Linux), alias list with status and fixes, "Map a 1Password Environment", "Check all".
+4. Versioning & Backup (replaces "Account & Backup"): remotes list with status; Add remote wizard offering, in order, **NAS folder**, **GitHub private repository**, **Resilio folder**, other Git URL; auth choice per git remote (System git credentials, gh, Token in keyring, Device flow with your own OAuth app id); push/pull buttons; auto tag retention.
+5. Secrets (new): providers status (1Password CLI version and sign-in state, or "1Password CLI not found" with install steps from §11.11; OS keyring backend; Secret Service on Linux), service account token set/clear, alias list with status and fixes, "Map a 1Password Environment", "Check all".
 6. Software Updates: enable/disable, endpoint, public key; hidden on Linux package builds.
 7. Cache; Tool Status (as SkillDock).
 
@@ -1112,39 +1148,42 @@ Diff view: semantic by default, toggle raw. Restore opens a preview ("adds 1, ch
 
 - **Tools**: SkillDock grid (logo, type badge, Manage); paths shown per scope (User / Project for the active folder) with open buttons; capability summary (transports, env refs, project support). Manage dialog tabs Skills | MCP (Plugins hidden), scope-aware.
 - **Skills**: SkillDock list/grid/grouped views, source tabs per tool with managed/unmanaged/mismatch, detail with "Enable in Tools" pills, file browser, diff view; scope-aware (project scope shows project-enabled skills).
-- **Install**: Skill: Git | Local (Catalog tab only when a catalog source is enabled, M17). MCP: Manual form | Paste config | Catalog (optional). Plugin tab hidden.
+- **Install**: Skill: Git | Local. MCP: Manual form | Paste config. Catalog tabs and the Plugin tab are hidden in v1 (catalogs and marketplaces are post-v1).
 
 ---
 
 ## 14. CLI
 
-`sdn [--home <SDN_HOME>] [--json] [--yes] [-v] <command>`
+`loadout [--home <LOADOUT_HOME>] [--json] [--yes] [-v] <command>`
 
 | Command | Purpose |
 |---|---|
-| `sdn status [PATH] [--client C] [--scope system\|project\|all] [--check]` | States per target/entry; `--check` exits 3 on pending/drift |
-| `sdn diff [PATH] [--client C] [--exit-code]` | Apply plan as file diffs (masked) |
-| `sdn diff --rev A..B [--raw]` | Semantic store diff between revisions |
-| `sdn apply [PATH] [--client C] [--scope ...] [--dry-run] [--on-conflict ask\|skip\|overwrite\|import]` | Reconcile; `PATH` selects the project; no PATH = system + all known projects |
-| `sdn effective [PATH] [--client C]` | Effective config with provenance |
-| `sdn backup [-m MSG] [--tag NAME] [--remote NAME\|--all] [--no-push]` | Ensure state is committed (no-op if clean), optional tag, push to remotes |
-| `sdn restore <REV\|TAG> [--path ENTITY]... [--apply]` | Restore store version as new commit (auto tag first) |
-| `sdn restore --from <DIR\|ZIP\|BARE-REPO>` | Bootstrap a new machine from a folder/zip/repo export |
-| `sdn restore --files <APPLY-ID> [--file PATH]` | Restore client files from pre-apply backups |
-| `sdn history [--entity server/github] [--limit N]`, `sdn show <REV>` | History and details |
-| `sdn tag <NAME> [REV] [-m MSG]`, `sdn tag --list`, `sdn tag --delete NAME` | Tags |
-| `sdn remote add git <NAME> <URL> [--auth system\|gh\|token]` / `add folder <NAME> <PATH> [--mode ...]` / `ls` / `rm` / `push [NAME]` / `pull [NAME]` | Remotes |
-| `sdn server ls\|show\|add\|edit\|rm <ID>`, `sdn server enable\|disable <ID> --client C... [--project PATH [--local]]` | Server CRUD and enablement |
-| `sdn project init [PATH] [--private]`, `add PATH`, `ls`, `rm ID`, `trust PATH` | Projects |
-| `sdn import [--scan] [--client C] [--scope ...]`, `sdn adopt [ENTRY...] [--all-identical]` | Import and adopt |
-| `sdn skills ls\|add <URL\|PATH>\|rm\|enable\|disable\|update\|scan` | Skills |
-| `sdn secrets ls\|check\|set <ALIAS> [--keyring]\|map-op-env <ENV-ID>` | Secrets |
-| `sdn env --export [--shell ...] [--aliases ...]` | Print exports (§11.6) |
-| `sdn exec [--ref NAME=REF]... [--op-env ID] -- <cmd> [args]` | Launch-time secret injection (§11.5) |
-| `sdn git-credential get\|store\|erase --remote NAME` | Git credential helper (internal) |
-| `sdn migrate skilldock [--from PATH] [--dry-run]` | Migration (§15) |
-| `sdn doctor [--scan-history]` | Store integrity, schema, providers, paths, sync-folder warning |
-| `sdn completions <shell>` | Shell completions |
+| `loadout status [PATH] [--client C] [--scope system\|project\|all] [--check]` | States per target/entry; `--check` exits 3 on pending/drift |
+| `loadout diff [PATH] [--client C] [--exit-code]` | Apply plan as file diffs (masked) |
+| `loadout diff --rev A..B [--raw]` | Semantic store diff between revisions |
+| `loadout apply [PATH] [--client C] [--scope ...] [--dry-run] [--on-conflict ask\|skip\|overwrite\|import]` | Reconcile; `PATH` selects the project; no PATH = system + all known projects; one commit per run (§8.7) |
+| `loadout rollback <APPLY-ID\|last>` | One-click rollback of an apply run (§8.7) |
+| `loadout effective [PATH] [--client C]` | Effective config with provenance |
+| `loadout backup [-m MSG] [--tag NAME] [--remote NAME\|--all] [--no-push]` | Ensure state is committed (no-op if clean), optional tag, push to remotes |
+| `loadout restore <REV\|TAG> [--path ENTITY]... [--apply]` | Restore store version as new commit (auto tag first) |
+| `loadout restore --from <DIR\|ZIP\|BARE-REPO>` | Bootstrap a new machine from a folder/zip/repo export |
+| `loadout restore --files <APPLY-ID> [--file PATH]` | Restore client files byte-for-byte from pre-apply backups |
+| `loadout history [--entity server/github] [--limit N]`, `loadout show <REV>` | History and details |
+| `loadout tag <NAME> [REV] [-m MSG]`, `loadout tag --list`, `loadout tag --delete NAME` | Tags |
+| `loadout remote add folder <NAME> <PATH> [--mode repo-per-machine\|mirror\|archive]` / `add git <NAME> <URL> [--auth system\|gh\|token]` / `ls` / `rm` / `push [NAME]` / `pull [NAME]` | Remotes |
+| `loadout server ls\|show\|add\|edit\|rm <ID>`, `loadout server enable\|disable <ID> --client C... [--project PATH [--shared]]` | Server CRUD and enablement (project writes default to the private layer) |
+| `loadout project init [PATH] [--shared]`, `share ID`, `add PATH`, `ls`, `rm ID`, `trust PATH` | Projects; init is private unless `--shared`; `share` moves private entries into `project.toml` |
+| `loadout import [--scan] [--client C] [--scope ...]`, `loadout adopt [ENTRY...] [--all-identical]` | Import and adopt |
+| `loadout skills ls\|add <URL\|PATH>\|rm\|enable\|disable\|update\|scan` | Skills |
+| `loadout secrets ls\|check\|providers\|set <ALIAS> [--keyring]\|map-op-env <ENV-ID>\|service-account set\|clear` | Secrets |
+| `loadout env --export [--shell ...] [--aliases ...]` | Print exports (§11.6) |
+| `loadout secret get --ref REF`, `loadout secret-header NAME=TEMPLATE...` | Internal, for client command hooks (omp/Pi `!command`, Claude Code `headersHelper`): print one resolved value or header JSON to stdout; never logged |
+| `loadout exec [--ref NAME=REF]... [--op-env ID] -- <cmd> [args]` | Launch-time secret injection (§11.5) |
+| `loadout git-credential get\|store\|erase --remote NAME` | Git credential helper (internal) |
+| `loadout migrate skilldock [--from PATH] [--dry-run]` | Migration (§15) |
+| `loadout doctor [--paths] [--scan-history]` | Store integrity, schema, providers, paths, sync-folder warning, `PATH` collision check |
+| `loadout --identify` | Prints `dev.dailen.loadout <version>` (used by `doctor` and adapters to detect a foreign `loadout` binary) |
+| `loadout completions <shell>` | Shell completions |
 
 Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout. `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
 
@@ -1152,7 +1191,7 @@ Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`
 
 ## 15. Migration
 
-### 15.1 From SkillDock (`sdn migrate skilldock`, also a first-run wizard)
+### 15.1 From SkillDock (`loadout migrate skilldock`, also a first-run wizard)
 
 `~/.skilldock` is read **only**; nothing in it is modified or deleted (verified by hashing the tree before and after in tests). Tag `auto/pre-migrate/<ts>` is created on the empty or existing store first.
 
@@ -1169,9 +1208,9 @@ Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`
 | `~/.skilldock/skills/<name>` | Copied into `store/skills/<id>` (no `.git`); git remote + HEAD to `[source]` |
 | Tags (`data/skill-tags.json`, `state.json`) | `tags` |
 | Tool enablement | Read from links on disk (truth), not SkillDock's persisted Chinese labels; existing links into `~/.skilldock/skills` are re-pointed to the store on first apply (planned as updates, shown in the plan) |
-| `config/settings.json` | theme, language, default editor, agents-cli compat, install activation |
+| `config/settings.json` | theme, default editor, agents-cli compat, install activation (language dropped: English only) |
 | `credentials/github.json` | Offer to move the token into the OS keyring for a `token` remote; never copied into the store |
-| `backup/repo` | Bare-cloned to `<SDN_HOME>/imports/skilldock-backup.git` (history preserved, read-only); the wizard can import one chosen node's MCP + skills as a migration commit |
+| `backup/repo` | Bare-cloned to `<LOADOUT_HOME>/imports/skilldock-backup.git` (history preserved, read-only); the wizard can import one chosen node's MCP + skills as a migration commit |
 | Plugins, SkillHub state | Not migrated (non-goal); listed in the report |
 
 The report (GUI page and `--json`) lists every item: migrated, needs review, skipped (with reason). Running both apps against the same client files afterwards causes churn; the wizard recommends disabling SkillDock's MCP sync or uninstalling it, and offers to keep `~/.skilldock` untouched for rollback.
@@ -1189,9 +1228,10 @@ First run: detect clients, run the Scan (§8.6) over user scope; offer "Add proj
 - Paths from Known Folders (`FOLDERID_Profile`, `RoamingAppData`, `LocalAppData`); `HOME` ignored (Git Bash/MSYS set it).
 - Long paths (`\\?\` prefix internally); CRLF and BOM preserved per file.
 - `ReplaceFileW` atomic replace; retry on sharing violations (editors and Claude Code hold files briefly).
-- Junctions for skill links; Job Objects in `sdn exec`.
+- Junctions for skill links; Job Objects in `loadout exec`.
 - Claude Desktop MSIX virtualized config detection (§7.3).
-- Installer: NSIS per-user (no admin), adds `sdn.exe` to the user `PATH`; optional MSI. Code signing is Q14 (unsigned builds trigger SmartScreen).
+- Installer: NSIS per-user (no admin) into `%LOCALAPPDATA%\Programs\Loadout`, adds `loadout.exe` to the user `PATH`; optional MSI.
+- **Code signing**: release builds are signed with **Azure Trusted Signing** through Dailen's existing code-signing kit. Tauri `bundle.windows.signCommand` runs `pwsh -File scripts/sign-windows.ps1 "%1"`, which calls the kit. The kit location, Trusted Signing account, endpoint and certificate profile come from environment variables (`LOADOUT_SIGN_KIT`, `LOADOUT_SIGN_ACCOUNT`, `LOADOUT_SIGN_ENDPOINT`, `LOADOUT_SIGN_PROFILE`) that exist only in the release job (Azure login through a GitHub OIDC federated credential, no stored client secret [verify the kit accepts an existing Azure login]) or on Dailen's Windows machine. When they are absent the script prints "unsigned dev build" and exits 0, so local and implementer builds stay unsigned. Signed: `loadout.exe`, the app executable and the NSIS installer; the release job checks each with `signtool verify /pa`.
 
 ### 16.2 Arch Linux on Hyprland/Wayland (first-class)
 
@@ -1199,7 +1239,8 @@ First run: detect clients, run the Scan (§8.6) over user scope; offer "Add proj
 - WebKitGTK 4.1 (Tauri 2). Documented and auto-detected workaround toggle for blank windows on some GPU/driver combinations (`WEBKIT_DISABLE_DMABUF_RENDERER=1`), settable in `local-settings.toml` and applied by a launcher wrapper.
 - Native decorations; no custom title bar; works under tiling; file dialogs through xdg-desktop-portal.
 - OS keyring needs a Secret Service provider (gnome-keyring, KWallet, or KeePassXC); `provider_unavailable` with that hint otherwise.
-- Packages: AppImage, `.deb`, `.rpm` from CI; AUR `sdn-bin` (from release tarball) and `sdn` (from source) PKGBUILDs maintained in `packaging/aur/`. In-app updater disabled in AUR/deb/rpm builds.
+- Packages: AppImage, `.deb`, `.rpm` from CI; AUR `loadout-bin` (from release tarball) and `loadout` (from source) PKGBUILDs maintained in `packaging/aur/`. In-app updater disabled in AUR/deb/rpm builds.
+- 1Password CLI is optional and currently absent on Dailen's Arch/Omarchy machine; Loadout degrades as described in §11.11.
 - CI: build on Ubuntu 22.04 (AppImage glibc baseline) and an `archlinux:latest` container job running `cargo test --workspace`, `npm test` and `makepkg --nobuild` validation.
 
 ### 16.3 macOS (nice-to-have)
@@ -1215,7 +1256,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 ## 17. Security
 
 - Project manifests can define stdio commands, so binding a folder is like running its code. Trust is per manifest content hash (`state/trust.json`); a changed manifest (e.g. after `git pull`) shows its diff and needs re-trust before project apply.
-- Tauri: CSP on, minimal capabilities, every command validates paths (must be inside known targets, project roots or `SDN_HOME`).
+- Tauri: CSP on, minimal capabilities, every command validates paths (must be inside known targets, project roots or `LOADOUT_HOME`).
 - Zip-slip and symlink-escape checks on skill import (SkillDock's `marketplace_package.rs` limits kept: 500 files, 5 MB per file, 20 MB total for archives).
 - Logs: redaction layer for any string that equals a resolved secret or matches the classifier.
 - Failure feedback: no automatic recording of config contents (SkillDock recorded every failure with paths and config); "Copy diagnostic report" is explicit and redacted.
@@ -1240,81 +1281,254 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 
 ## 19. Testing strategy
 
-1. **Hermetic environment.** `sdn-testkit::TempHome` builds a temp root with `home/`, `appdata/`, `localappdata/`, `xdg/`, and projects; produces an `Env` and `RootedFs`. Any access outside the root panics. CLI tests pass `--home` and set `HOME`/`USERPROFILE`/`APPDATA`/`XDG_*`/`CODEX_HOME`/`COPILOT_HOME`/`CLAUDE_CONFIG_DIR`/`PI_CODING_AGENT_DIR` to the temp root. No test may touch real agent configs.
+1. **Hermetic environment.** `loadout-testkit::TempHome` builds a temp root with `home/`, `appdata/`, `localappdata/`, `xdg/`, and projects; produces an `Env` and `RootedFs`. Any access outside the root panics. CLI tests run with `env_clear()`, pass `--home`, and set only `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`XDG_*`/`CODEX_HOME`/`COPILOT_HOME`/`CLAUDE_CONFIG_DIR`/`PI_CODING_AGENT_DIR`/`LOADOUT_HOME` inside the temp root and a stub-only `PATH`. No test may touch real agent configs, real secrets, the real keyring, a real `op`/`gh`, or the network (§20.1).
 2. **Fixtures.** `fixtures/clients/<client>/<case>/` with real-world-shaped inputs: comments, CRLF, BOM, unicode, trailing commas (JSONC), unrelated keys, foreign servers, legacy shapes (Codex `[mcp.servers]`, Gemini `httpUrl`/`url`, OpenCode command arrays, Continue arrays), a large sanitized `~/.claude.json` with `projects` map.
 3. **Golden tests** (`insta`): `to_native` per client x transport x delivery mode; upsert/remove/disable resulting file text; effective config for a fixture folder tree; semantic diffs; plan rendering; migration of a fixture `~/.skilldock` (including SkillDock-written `mcp-filter`/`mcp-remote` wrappers and plaintext secrets).
 4. **Property tests** (`proptest`): no-op edits are byte-identical; upsert-then-remove restores original bytes; foreign entries byte-identical after any operation; canonicalization idempotent.
 5. **Apply scenarios**: every row of the planning table (8.3), CAS race (file changed between plan and write), crash mid-apply (journal reporting), lock contention between two processes, Windows sharing-violation retry.
 6. **Store and remotes**: commit-per-op and trailers; tags; restore whole/partial; merge matrix (entity type x change kind x side); two simulated machines syncing through a temp folder with `repo-per-machine`; partial-sync simulation (refs without objects); git remote tests against a local bare repo via the system git (skipped with a notice when git is absent); offline operation with git absent.
-7. **Secrets**: ref grammar; delivery selection matrix; leak scanner on every commit (test walks all objects in the test store and asserts no planted secret value appears); `op` stub binary on `PATH` emulating `op read`, `op run --environment`, locked and missing states; in-memory keyring; `sdn exec` passthrough (stdin/stdout bytes untouched, stderr only for errors, exit codes, Windows job-object kill).
+7. **Secrets**: ref grammar; delivery selection matrix; leak scanner on every commit (test walks all objects in the test store and asserts no planted secret value appears); `op` stub binary on `PATH` emulating `op read`, `op run --environment`, `op environment secret list`, `--version`, locked, missing and not-installed states (the stub fails any test that calls `op environment read`); in-memory keyring; `loadout exec` passthrough (stdin/stdout bytes untouched, stderr only for errors, exit codes, Windows job-object kill, service account token visible to `op` only).
 8. **Frontend**: Vitest + Testing Library against a typed mock transport (explicit, test-only); component tests for pills, resolver, effective matrix, history diff. Visual parity checklist against SkillDock screenshots (`docs/images/*.png`) for Skills, MCP, Tools, Settings.
-9. **E2E smoke**: `tauri-driver` (WebDriver) on Windows and Linux CI: launch with temp `SDN_HOME`/`HOME`, add a server, enable for Cursor, assert `home/.cursor/mcp.json` content and a new commit.
-10. **Real-client verification** (manual, documented script `scripts/verify-clients.md`): on Dailen's Windows and Arch machines, with temp config dirs where clients support overrides, run each client's own lister (`claude mcp list`, `codex mcp list`, `gemini mcp list`, `pi mcp list`, `grok mcp list`, omp `/mcp list`) to confirm written configs load. Clears `[verify]` markers.
+9. **E2E smoke**: `tauri-driver` (WebDriver) on Windows and Linux CI: launch with temp `LOADOUT_HOME`/`HOME`, add a server, enable for Claude Code, assert `home/.claude.json` content and a new commit.
+10. **Real-client verification** (manual, by Dailen, never by the implementer; script `scripts/verify-clients.md`): gate V1 (Tier A) and V2 (Tier B) on the Windows and Arch machines, with throwaway `LOADOUT_HOME` and client override dirs where supported, run each client's own lister (`claude mcp list`, `codex mcp list`, `pi mcp list`, omp `/mcp list`, Copilot and Cursor MCP views) to confirm written configs load. Clears `[verify]` markers.
 11. **CI matrix**: windows-latest, ubuntu-22.04, archlinux container, macos-latest; `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo deny check`, `npm test`, `tsc --noEmit`, bundle build.
 
 ---
 
-## 20. Milestones
+## 20. Build process and milestones
 
-Each milestone is sized for one AI coding-agent session (roughly one focused PR). Every milestone ends with green CI on all legs and updated docs.
+### 20.1 How milestones are built
 
-| # | Title | Scope | Acceptance criteria |
-|---|---|---|---|
-| M0 | Bootstrap | Cargo workspace (`sdn-core`, `sdn-cli`, `sdn-testkit`, `src-tauri`); SkillDock frontend shell, `tokens.css` and components ported with attribution headers; Plugins/Publish/Install-market hidden behind flags; CI matrix; LICENSE, THIRD_PARTY_NOTICES, cargo-deny | CI green on 4 legs; NSIS and AppImage/deb artifacts built; app opens with SkillDock-identical shell and empty pages; `sdn --version` works; no `wanghuan9` URLs or OAuth ids in the tree (CI grep) |
-| M1 | Core model and store | `Env`/`Fs` with `RootedFs`; schemas (server, secrets, project, machine, clients, settings, skill-meta) with validation and JSON Schema export; git2 store init/open; `Store::transaction` with trailers; `sdn server add/ls/show/rm`, `sdn history` | Schema error tests; each CLI mutation yields exactly one commit with correct trailers; tests never escape temp root |
-| M2 | Format-preserving editors | JSON/JSONC CST editor, TOML in-place editor, YAML span splice, JSON5 read-only; BOM/CRLF/indent detection | Property tests (no-op identical, upsert/remove round trip, foreign bytes untouched); comment-retention fixtures pass for every format |
-| M3 | Adapters I | Adapter framework (spec table, caps, mappers, detection); Claude Code (user, project, local, `disabledMcpServers`), Claude Desktop (incl. MSIX), Cursor, VS Code (variants, profiles), Copilot, Codex | Golden `to_native`/`from_native` for stdio/http/sse per client; unsupported transport yields `blocked`; detection tests per OS via `Env` |
-| M4 | Adapters II | Windsurf, Devin, Gemini, Antigravity, OpenCode, Pi, omp (profiles), Grok; Ported tier table; compat-source declarations | Same as M3 for these clients; Codex legacy table never deleted (regression test for SkillDock bug) |
-| M5 | Apply engine (system scope) | Ledger with HMAC, planner (8.3), executor (CAS, backups, atomic write, journal), global lock; `sdn status/diff/apply/import/adopt` | Every planning-table row has a scenario test; foreign entries untouched; identical entries auto-adopt; disable never deletes foreign entries; second `apply` is zero-write |
-| M6 | Project scope | Manifests (+local), trust store, layering and deep merge, effective config and provenance, shared-file handling, project suppression caps; `sdn project ...`, `sdn effective` | Golden effective output for a fixture tree; project files written for every first-class client with a project target; `cannot_suppress_in_project` and `unset_not_expressible` warnings tested; untrusted manifest blocks apply |
-| M7 | Secrets | Ref grammar, catalog, machine overrides, providers (env, keyring, op, op-env), delivery modes and per-client rendering, `sdn exec`, `sdn env`, leak scanner, extraction classifier, statuses; `sdn secrets ...` | No planted secret value in any store object across the whole test suite; op stub tests incl. locked/missing; exec transparency tests on Windows and Linux; inline refused for git-tracked project files |
-| M8 | History, tags, restore | Semantic diff, tags (user + auto with retention), restore whole/partial as new commit, client-file backup restore; `sdn tag/show/restore/backup --no-push` | Restore is undoable (restore of restore returns original tree); project-manifest write-back requires confirmation flag; retention pruning tested |
-| M9 | Remotes and merge | Git remotes via system git with `system`/`gh`/`token` auth and `sdn git-credential`; folder `repo-per-machine`, `mirror`, `archive`; entity-level 3-way merge, `MERGE_STATE.json`, resolution API; `restore --from` | Two-machine sync via temp folder converges; conflict scenarios produce field-level conflicts, never silent local-wins; works with git binary absent (folder remotes OK, git remotes `git_not_found`); no token in env or argv of spawned git (asserted) |
-| M10 | GUI I: shell, MCP, Tools | tauri-specta typed IPC, TanStack Query, scope switcher (System only), MCP page parity (list/grid, pills with new states, edit dialog Form/TOML/Preview, paste-anything, tool discovery), Tools page, Apply drawer (instant + review) | WebDriver smoke: add server, enable Cursor, file written in temp HOME, commit created; parity checklist vs SkillDock screenshots signed off by Dailen |
-| M11 | GUI II: Projects and drift | Projects page, add folder/init/trust flows, scope switcher with projects, effective matrix with provenance, drift/conflict/collision resolver | Smoke: add folder, init private manifest, add project server, see `.cursor/mcp.json` written and matrix provenance correct; resolver actions covered by component tests |
-| M12 | GUI III: History, remotes, secrets | History page (filter, semantic/raw diff, restore, tags, zip download, client-file backups), Settings Versioning & Backup (remote wizard, status), Secrets screen (providers, aliases, fixes, 1Password Environment mapping), merge conflict resolver, new-machine secrets checklist | Smoke: tag, change, restore tag, apply; folder remote push shows status; missing-secret badge appears after restore into a fresh temp HOME |
-| M13 | Skills core and CLI | Skill store + meta, YAML frontmatter, git/local install, link (junction/symlink)/copy, ledger integration, project scope with `.git/info/exclude`, agents-cli scan, tool-dir classification, update check; `sdn skills ...` | Junction created without admin on Windows CI; real dir never overwritten; project links excluded from git status of a fixture repo; upstream removed => `source_unreachable`, content intact |
-| M14 | Skills GUI | Port SkillDock Skills page (list/grid/grouped, source tabs, detail, pills, file browser, diff), Install > Skill (Git, Local), scope-aware | Parity checklist for Skills screenshots; smoke: install local skill, enable for Claude Code, link exists |
-| M15 | Migration | SkillDock importer (all rows of 15.1) + first-run client scan wizard (GUI + `sdn migrate skilldock`) | Fixture `~/.skilldock` migrates to expected golden store; `~/.skilldock` tree hash unchanged; wrapper entries offered for replacement; report lists every item |
-| M16 | Packaging and release | Windows NSIS (per-user, PATH), AppImage/deb/rpm, AUR PKGBUILDs, macOS DMG; optional updater with configurable endpoint; user docs (README, user guide, adapter contribution guide, verify-clients script) | Fresh install on Windows 11 and Arch/Hyprland VMs passes the manual checklist; app fully usable with updater disabled and no network |
-| M17 | Optional post-v1 | Plugins port, optional catalog sources (official MCP Registry, skills.sh, ClawHub) with isolation, Tier 2 project scopes, macOS polish, nested project manifests | Defined when scheduled |
+Implementer: GLM-5.3-Flash via NVIDIA NIM (about 50 tokens/s), **one milestone per session**. Reviewer: Opus reviews every milestone diff before merge. The NIM endpoint logs prompts, so every brief, prompt and pasted file is treated as public.
+
+Session rules (pasted verbatim at the top of every implementer session; Opus rejects a milestone that breaks one):
+
+1. **Scope.** Read the spec sections named in the brief, the brief itself, and the files it lists. Create or modify only the listed files, plus `Cargo.lock`, `package-lock.json`, `insta` snapshots next to listed tests, and `docs/milestones/M<N>.md`. If anything else must change, stop and record it under "Blockers" in the completion note.
+2. **No real data.** No real secrets, tokens, 1Password vault or item names, Environment ids, real client config files, machine names or personal paths in code, fixtures, snapshots, logs or prompts. Fixtures are synthetic, hand-written in the shape of real files, never copied from a machine. Token-shaped values needed by scanner tests are assembled at runtime from fragments (for example `["gh", "p_", "FAKE0000..."]`), so the repository never contains a string matching a real token format.
+3. **Hermetic tests.** Core tests use `loadout_testkit::TempHome` with `RootedFs` (panics on any path outside the temp root). CLI tests spawn the binary with `env_clear()` and set only temp-root `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_*`, `LOADOUT_HOME` and a `PATH` made of the testkit stub dir (plus system git only for tests that need it). No test reads the real home, the real OS keyring, a real `op`/`gh`, or the network. 1Password is the `op-stub` binary; the keyring is the in-memory backend; git remotes are local bare repos.
+4. **Done means:** `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` and the brief's acceptance commands pass on the session's OS; CI is green on all legs; `docs/milestones/M<N>.md` lists files changed, tests added, deviations from this spec and any `[verify]` items introduced.
+5. **Dependencies.** Only crates and npm packages named in the brief or in §4. Any other addition is listed with its license in the completion note; `cargo deny check` must pass.
+6. **Scripts.** PowerShell scripts are `.ps1` files run with `pwsh -File`, ASCII only (no em dash characters), never inlined through `bash -Command "..."`. Bash scripts start with `set -euo pipefail`.
+7. **No real-machine actions.** The implementer never runs Loadout against a real profile and never edits real agent configs. `[verify]` checks are run by Dailen at gates V1 and V2.
+
+Opus review checklist (every milestone): the brief's acceptance tests exist and assert behavior (not wiring); ownership invariants (§8.4) hold; no secret value can reach the store, logs or IPC; `loadout-core` has no `std::env`, `dirs::*` or `SystemTime::now` outside `env.rs`; no files outside the list; brand strings come from `brand.rs`.
+
+### 20.2 Order and client tiers
+
+Daily clients land first. Tier A (Claude Code, omp, Pi, Codex, Claude Desktop on Windows) gets adapters in M4 and M5, end-to-end apply and secrets in M6 to M8, and real-client verification at gate V1 before any other client is added. Tier B (VS Code Stable with Copilot, Cursor) follows in M10 and gate V2. Tier C and D come after the GUI.
 
 ```mermaid
 flowchart LR
-  M0 --> M1 --> M2 --> M3 --> M4 --> M5 --> M6
-  M5 --> M7
-  M1 --> M8 --> M9
-  M6 --> M10 --> M11
-  M7 --> M12
-  M9 --> M12
-  M5 --> M13 --> M14
-  M10 --> M14
-  M7 --> M15
-  M13 --> M15
-  M12 --> M16
-  M14 --> M16
-  M15 --> M16
+  M0 --> M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7 --> M8 --> V1
+  V1 --> M9 --> M10 --> V2
+  M6 --> M11 --> M12 --> M13
+  V2 --> M14 --> M15 --> M16
+  M13 --> M17
+  M15 --> M17
+  M9 --> M18 --> M19
+  M15 --> M19
+  M8 --> M20
+  M18 --> M20
+  V2 --> M21 --> M22
+  M17 --> M23
+  M19 --> M23
+  M20 --> M23
+  M22 --> M23
 ```
+
+### 20.3 Milestone briefs
+
+Paths are relative to the repo root; `core/` abbreviates `crates/loadout-core/`, `cli/` abbreviates `crates/loadout-cli/`, `kit/` abbreviates `crates/loadout-testkit/`. Every test listed is new in that milestone.
+
+#### M0 Bootstrap
+
+- Spec: §4.1, §4.5, §18, §19 item 1, Appendix C.
+- Create: `Cargo.toml` (workspace), `rust-toolchain.toml`, `deny.toml`, `.github/workflows/ci.yml`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `scripts/check-no-baked-ids.sh`; `core/Cargo.toml`, `core/src/{lib,brand,env,fs,error,paths}.rs`; `cli/Cargo.toml`, `cli/src/main.rs`; `kit/Cargo.toml`, `kit/src/{lib,temp_home,rooted_fs}.rs`.
+- Build: brand constants (product name, binary, data dir names per OS, `LOADOUT_HOME`, `.loadout`, `dev.dailen.loadout`, trailer prefix `Loadout-`, keyring service `loadout`); `Env` (OS, known folders, vars, clock) built from the process only in `cli/`; `Fs` trait with `RealFs` and `RootedFs`; `paths::loadout_home(&Env)` per §4.5 including sync-root detection; `loadout --version`; `loadout doctor --paths [--json]`.
+- Tests: `core/tests/paths.rs` (Windows/Linux/macOS defaults from a fake `Env`; `HOME` ignored on Windows; `LOADOUT_HOME` override; a `.sync/ID` ancestor yields `sync_root_detected` with kind `resilio`); `kit/tests/rooted_fs.rs` (outside-root access panics); `cli/tests/cli_doctor.rs`.
+- Acceptance: `cargo test --workspace`; `scripts/check-no-baked-ids.sh` passes in CI (no `Ov23li`, `Iv1.`, `wanghuan9`).
+- Out of scope: Tauri and frontend (M14).
+
+#### M1 Schemas and validation
+
+- Spec: §5, §5.1 identifiers.
+- Create: `core/src/model/{mod,ids,server,secrets,project,machine,applied,clients,settings,skill_meta,validate}.rs`; `fixtures/store/valid/**`, `fixtures/store/invalid/**`; `core/tests/model.rs`; `docs/schema/*.json` (generated by a snapshot test).
+- Build: serde types, `toml_edit` load/save that keeps comments and unknown keys, validation per §5.2 with typed `ErrorCode`s, `schemars` export.
+- Tests: each invalid fixture yields its expected code; load then save of every valid fixture is byte-identical; a private-only project (`project.local.toml` with `id`) validates; unknown `enable.clients` id is a warning and survives a rewrite.
+- Acceptance: `cargo test -p loadout-core --test model`.
+
+#### M2 Store
+
+- Spec: §4.1 rules, §4.2, §9.1, §9.2, §9.3 (log only).
+- Create: `core/src/store/{mod,transaction,trailers,log,lock}.rs`; `cli/src/cmd/{mod,server,history}.rs`; `core/tests/store.rs`; `cli/tests/cli_server.rs`.
+- Build: git2 (`vendored-libgit2`, no network features); `init` writes `loadout.toml`; `Store::transaction` creates exactly one commit with trailers and the author from §9.2; no git config read or written; cross-process lock; `loadout server add|ls|show|rm`, `loadout history`.
+- Tests: one commit per mutation, bulk op is one commit; trailers round-trip; a bogus `user.name` in a TempHome `.gitconfig` never appears in commits; lock contention between two processes exits 6; works with no git binary on `PATH`.
+
+#### M3 Format editors (JSON, JSONC, TOML)
+
+- Spec: §7.2 (JSON, JSONC, TOML rows and common rules).
+- Create: `core/src/formats/{mod,text,jsonc,toml}.rs`; `fixtures/formats/{json,jsonc,toml}/**`; `core/tests/formats_props.rs`, `core/tests/formats_golden.rs`.
+- Build: `Document::parse(bytes, Format)`, `list`, `get`, `upsert`, `remove`, `set_list_member`, `to_bytes`.
+- Tests (proptest + insta): no-op edit is byte-identical; upsert then remove restores the original bytes; foreign entries byte-identical after any op; BOM, CRLF, indentation and final newline kept; strict JSON never gains comments or trailing commas; TOML edits inside an existing table keep its comments; a legacy `[mcp.servers]` table is untouched by edits to `[mcp_servers]`.
+- Out of scope: YAML and JSON5 (M22).
+
+#### M4 Adapter framework, Claude Code, Claude Desktop
+
+- Spec: §7.1, §7.3 and §7.4 rows `claude-code` and `claude-desktop`, §7.7.
+- Create: `core/src/adapters/{mod,spec,caps,location,detect,mapper,claude_code,claude_desktop}.rs`; `fixtures/clients/claude-code/**`, `fixtures/clients/claude-desktop/**`; `core/tests/adapters_claude.rs`; `scripts/verify-clients.md` (Claude sections).
+- Build: the declarative table with `Tier`; Claude Code user, project and local scopes, `disabledMcpServers` list membership, `CLAUDE_CONFIG_DIR`; Windows `projects` key lookup that accepts both slash styles on read and writes the style already present (default style is `[verify]`); Claude Desktop on Windows (Roaming path plus MSIX copy, `windows_shell_shim`, `restart_required`, stdio only), `not_supported_on_os` on Linux.
+- Tests: goldens `to_native`/`from_native` per transport; http on Claude Desktop is `blocked: unsupported_transport`; detection per OS through a fake `Env` and a fake registry probe; MSIX dual write is planned as two targets.
+
+#### M5 Codex, omp, Pi
+
+- Spec: §7.3 and §7.4 rows `codex`, `omp`, `pi`.
+- Create: `core/src/adapters/{codex,omp,pi}.rs`; `fixtures/clients/{codex,omp,pi}/**`; `core/tests/adapters_tier_a.rs`; extend `scripts/verify-clients.md`.
+- Build: Codex TOML (`env_vars`, `bearer_token_env_var`, `env_http_headers`, `enabled`, tool lists, `CODEX_HOME`, legacy table read-only, SSE blocked); omp (profiles, `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `$schema` skeleton, `disabledServers`/`enabledServers` preserved, timeout in ms); Pi (`!command`, timeout in s, `pi-mcp-adapter` detection reports `client_mcp_replaced_by_extension`, `-`/`_` name equivalence reported as `collision`).
+- Tests: goldens per transport; regression test that Codex legacy `[mcp.servers]` survives every op (SkillDock bug); omp profile targeting from `clients.toml`.
+
+#### M6 Apply engine (system scope), apply commits, rollback
+
+- Spec: §8 (all), §9.2.
+- Create: `core/src/apply/{mod,ledger,plan,exec,journal,backup,rollback}.rs`; `cli/src/cmd/{status,diff,apply,import,adopt,rollback}.rs`; `core/tests/{apply_plan,apply_exec,apply_rollback}.rs`; `cli/tests/cli_apply.rs`.
+- Tests: one scenario per row of the §8.3 table; CAS race re-plans; second apply makes zero writes; foreign entries byte-identical; identical entries auto-adopt; each apply run is exactly one commit with `Loadout-Apply` trailers and an updated `machines/<id>.applied.toml`; `loadout rollback <apply-id>` removes entries the apply created and restores prior desired state while a foreign entry added after the apply survives; backups are written with user-only permissions.
+
+#### M7 Secrets I: references, providers, scanner
+
+- Spec: §11.1 to §11.3, §11.7, §11.8, §11.11.
+- Create: `core/src/secrets/{mod,grammar,catalog,status,classify,scanner}.rs`, `core/src/secrets/providers/{mod,env,keyring,onepassword}.rs`; `kit/src/{op_stub,keyring_mem}.rs`, `kit/src/bin/op-stub.rs`; `cli/src/cmd/secrets.rs`; `core/tests/{secrets_grammar,secrets_providers,leak_scanner}.rs`.
+- Build: ref grammar; catalog with machine overlay; providers `env`, `keyring` (`keyring` crate, in-memory backend in tests), `op` (detect binary and version: missing yields `provider_unavailable` with message "1Password CLI not found"; below 2.41.0 no Environment support; below 2.42.0 no Environment name listing); scanner wired into `Store::transaction`.
+- Tests: `op-stub` modes ok, locked, missing item, not installed, version 2.40.0; a planted secret value never appears in any git object of the test store; classifier table from §11.7; `op environment read` is never invoked (stub fails the test if called).
+
+#### M8 Secrets II: delivery and `loadout exec`
+
+- Spec: §11.4 to §11.6, §11.9 (CLI part), §11.10.
+- Create: `core/src/secrets/{delivery,render}.rs`; `cli/src/cmd/{exec,env}.rs`, `cli/src/exec/{mod,unix,windows}.rs`; `core/tests/delivery_matrix.rs`; `cli/tests/cli_exec.rs`; `kit/src/bin/fake-mcp-server.rs`.
+- Tests: delivery matrix for Tier A clients; `loadout exec` passes stdin/stdout bytes unchanged to and from `fake-mcp-server`; errors only on stderr with prefix `loadout-exec:`; exit codes 77 and 78; Windows Job Object kills the child when exec is killed; Environment refs run through `op run --environment <id> --no-masking` with name remapping; `OP_SERVICE_ACCOUNT_TOKEN` reaches only `op`, never the server process; `inline` refused for shared targets; with `op` absent, launch-mode entries plan as `blocked: provider_unavailable`.
+
+#### V1 Gate: Tier A real-client verification (Dailen, not the implementer)
+
+Run the Tier A sections of `scripts/verify-clients.md` on the Windows machine (WDC-DAILEN1126) and the Arch/Omarchy machine with a throwaway `LOADOUT_HOME` and, where supported, override dirs (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`). Checks: each client's own lister shows the applied server; `loadout exec` starts a stdio server from each client; 1Password prompt behavior on Windows with and without a service account; "1Password CLI not found" path on Arch with keyring overrides; Claude Code `CLAUDE_CONFIG_DIR` and Windows project-key format; Codex project `enabled = false` merge semantics; Claude Desktop MSIX path. Results go to `docs/verify/<client>.md`; failures become fix briefs before M9; cleared items lose their `[verify]` marker in this spec.
+
+#### M9 Project scope
+
+- Spec: §5.5, §6, §8 for project targets, §17 (trust).
+- Create: `core/src/layering/{mod,manifest,merge,effective,trust}.rs`; `cli/src/cmd/{project,effective}.rs`; `fixtures/projects/**`; `core/tests/{layering,effective_golden}.rs`; `cli/tests/cli_project.rs`.
+- Tests: `loadout project init` defaults to private (writes `.loadout/project.local.toml` with `id`, appends `.loadout/` to `.git/info/exclude` of a git2-created fixture repo, `git status` stays clean); `--shared` writes `project.toml` and `.loadout/.gitignore`; effective-config golden for Tier A; untrusted or changed manifest blocks apply; a private entry never lands in a git-tracked `.mcp.json` (§6.5); `cannot_suppress_in_project` and `unset_not_expressible` warnings.
+
+#### M10 Tier B: VS Code with Copilot, Cursor
+
+- Spec: §7.3 and §7.4 rows `copilot`, `cursor`, `vscode-legacy`.
+- Create: `core/src/adapters/{copilot,cursor,vscode_legacy}.rs`; `fixtures/clients/{copilot,cursor,vscode-legacy}/**`; `core/tests/adapters_tier_b.rs`; extend `scripts/verify-clients.md`.
+- Tests: Copilot writes `$COPILOT_HOME/mcp-config.json` (else `~/.copilot/mcp-config.json`) and `<P>/.mcp.json` as one shared file with Claude Code (union of entries); `${NAME}` refs in `command`, `args`, `env` and header values; `tools` filter; never emits `inputs`, `envFile`, `dev` or `sandbox`; legacy `.vscode/mcp.json` and profile `mcp.json` are byte-identical after every op, import works, `${input:...}` values are flagged `needs_manual_secret`; Cursor user and project files with `${env:NAME}`.
+
+#### V2 Gate: Tier B verification (Dailen)
+
+VS Code Stable with Copilot and Cursor on Windows, plus project scope for all Tier A and B clients on both machines. Same recording rules as V1.
+
+#### M11 History, tags, restore
+
+- Spec: §9.3 to §9.5.
+- Create: `core/src/store/{diff,tags,restore}.rs`; `cli/src/cmd/{tag,show,restore,backup}.rs`; `core/tests/history.rs`; `cli/tests/cli_restore.rs`.
+- Tests: semantic diff goldens; auto tags and 90-day retention with a fake clock; restore of a restore returns the original tree; partial restore by entity; other machines' `machines/*` files untouched; project-manifest write-back requires `--yes`; client-file backup restore goes through CAS.
+
+#### M12 Folder remotes (NAS, Resilio) and merge
+
+- Spec: §9.6 (folder), §9.8, §9.9.
+- Create: `core/src/remote/{mod,config,folder,unc}.rs`, `core/src/store/merge.rs`; `cli/src/cmd/remote.rs`; `core/tests/{remote_folder,merge_matrix}.rs`.
+- Tests: two TempHome machines converge through a temp "NAS" dir with `repo-per-machine`; unmounted path reports `remote_unreachable` and never blocks local commits; mapped drive letter normalized to UNC through a faked `WNetGetUniversalNameW` trait; partial sibling reports `remote_incomplete`; merge matrix (entity type x change kind x side), never silent local-wins; `loadout restore --from` for repo, mirror and zip.
+
+#### M13 Git remotes (GitHub)
+
+- Spec: §9.6 (git), §9.7, §9.8.
+- Create: `core/src/remote/{git,credential,gh}.rs`; `cli/src/cmd/git_credential.rs`; `kit/src/bin/gh-stub.rs`; `core/tests/remote_git.rs`.
+- Tests: push and pull against a local bare repo through system git (skipped with a notice when git is absent); `auth = gh` passes the helper flags from §9.6 (asserted with `gh-stub`); no token in env or argv of any spawned git (asserted); "Create private repository" calls `gh repo create --private` on the stub.
+
+#### M14 GUI I: shell and typed IPC
+
+- Spec: §4.3, §13.1, Appendix A.
+- Create: `src-tauri/{Cargo.toml,tauri.conf.json,build.rs}`, `src-tauri/capabilities/default.json`, `src-tauri/src/{main,commands}.rs`; `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`; `src/main.tsx`, `src/app/App.tsx`, `src/styles/tokens.css`, `src/app/components/**` (ported per Appendix A), `src/i18n/en.ts`, `src/ipc/{bindings,transport}.ts`, `src/test/mockTransport.ts`; `src/app/App.test.tsx`.
+- Build: SkillDock shell port with attribution headers; identifier `dev.dailen.loadout`; CSP on; English strings only; scope switcher (System only); empty pages; Plugins and Publish hidden by flag.
+- Acceptance: `npm test`, `npx tsc --noEmit`, `cargo tauri build --debug` on Windows and Linux CI; Dailen signs off shell parity against SkillDock screenshots.
+
+#### M15 GUI II: MCP page, Tools page, apply drawer
+
+- Spec: §13.2, §13.4 (drawer), §13.7 (Tools).
+- Create: `src/app/routes/mcp/**`, `src/app/routes/tools/**`, `src/app/apply/**`, `src-tauri/src/commands/{servers,apply,tools}.rs`; component tests next to each component; `tests/e2e/smoke_mcp.spec.ts` (tauri-driver).
+- Tests: pill states; edit dialog Form/TOML/Preview with masked values; paste-anything conversion; instant apply creates one commit and the history shows "Undo this apply"; e2e: add server, enable for Claude Code, file written in temp HOME.
+
+#### M16 GUI III: Projects, effective matrix, drift resolver
+
+- Spec: §13.3, §13.4 (resolver).
+- Create: `src/app/routes/projects/**`, `src/app/resolver/**`, `src-tauri/src/commands/{projects,effective,resolve}.rs`; component tests; `tests/e2e/smoke_project.spec.ts`.
+- Tests: add folder, init (private preselected), trust review; matrix provenance; resolver actions.
+
+#### M17 GUI IV: History, remotes, secrets
+
+- Spec: §13.5, §13.6 items 4 and 5, §11.9.
+- Create: `src/app/routes/history/**`, `src/app/routes/settings/{versioning,secrets}/**`, `src-tauri/src/commands/{history,remotes,secrets}.rs`; component tests; `tests/e2e/smoke_history.spec.ts`.
+- Tests: tag, change, restore tag, apply; one-click rollback of an apply; NAS folder remote status; "1Password CLI not found" provider state; missing-secret checklist after restore into a fresh TempHome.
+
+#### M18 Skills core and CLI
+
+- Spec: §12, §7.6 (Tier A and B rows).
+- Create: `core/src/skills/{mod,store,frontmatter,install,link,classify,agents_cli}.rs`; `cli/src/cmd/skills.rs`; `fixtures/skills/**`; `core/tests/skills.rs`.
+- Tests: junction created without admin on Windows CI; a real dir is never overwritten; project links listed in `.git/info/exclude` and `git status` clean; upstream removed yields `source_unreachable` with content intact.
+
+#### M19 Skills GUI
+
+- Spec: §13.7 (Skills, Install).
+- Create: `src/app/routes/skills/**`, `src/app/routes/install/**`, `src-tauri/src/commands/skills.rs`; component tests; `tests/e2e/smoke_skills.spec.ts`.
+- Tests: install a local skill, enable for Claude Code, link exists; parity sign-off for Skills screenshots.
+
+#### M20 Migration
+
+- Spec: §15.
+- Create: `core/src/migrate/{mod,skilldock,scan}.rs`; `cli/src/cmd/migrate.rs`; `src/app/routes/migrate/**`; `fixtures/skilldock-home/**` (synthetic); `core/tests/migrate.rs`.
+- Tests: fixture `~/.skilldock` migrates to a golden store; `~/.skilldock` tree hash unchanged; wrapper entries offered for replacement; plaintext values routed to the extraction wizard; report lists every item.
+
+#### M21 Tier C adapters: Gemini, Antigravity, OpenCode, Grok
+
+- Spec: §7.3 and §7.4 rows for those clients.
+- Create: `core/src/adapters/{gemini,antigravity,opencode,grok}.rs`; fixtures; `core/tests/adapters_tier_c.rs`; extend `scripts/verify-clients.md`.
+- Tests: goldens; compat-source duplicates flagged for Grok; OpenCode command arrays.
+
+#### M22 Tier D: Windsurf, Devin Desktop, YAML and JSON5 editors, ported clients
+
+- Spec: §7.2 (YAML, JSON5 rows), §7.3 rows `windsurf`, `devin`, §7.5.
+- Create: `core/src/formats/{yaml,json5}.rs`; `core/src/adapters/{windsurf,devin,ported}.rs`; fixtures; `core/tests/{formats_yaml,adapters_tier_d}.rs`.
+- Tests: YAML span splice keeps unrelated bytes; anchors make the target `read_only_format`; JSON5 files that are not JSONC are read-only; ported table golden per client (user scope only).
+
+#### M23 Packaging, signing, release
+
+- Spec: §16.
+- Create: `packaging/aur/{loadout,loadout-bin}/PKGBUILD`, `scripts/sign-windows.ps1`, `.github/workflows/release.yml`, `docs/user-guide.md`, `docs/adapters.md`; modify `src-tauri/tauri.conf.json` (bundle, `signCommand`, updater).
+- Tests: CI builds NSIS, AppImage, deb, rpm; `makepkg --nobuild` in the Arch container; unsigned local build works without signing variables; release job signs with Azure Trusted Signing and verifies with `signtool verify /pa`; app fully usable with updater disabled and no network.
+
+#### Post-v1 (not scheduled)
+
+Plugins and marketplaces, optional catalog sources (official MCP Registry, skills.sh, ClawHub), Tier C and D project scopes, nested project manifests, macOS polish and notarization.
 
 ---
 
-## 21. Open questions for Dailen
+## 21. Decisions (2026-11-14)
 
-1. **Name**: pick from Appendix C (or another); it fixes binary, data dir and manifest dir names.
-2. **Data dir**: platform-native default (`%LOCALAPPDATA%\sdn`, `~/.local/share/sdn`) or a dotdir like SkillDock (`~/.sdn`)? Either way it must not live inside a Resilio folder.
-3. **Plugins, Publish, marketplaces**: drop, defer to M17 (spec default), or keep in v1?
-4. **VS Code**: which do you use: Copilot harness (`~/.copilot/mcp-config.json` + root `.mcp.json`), the deprecated editor format (`mcp.json` / `.vscode/mcp.json`, removal Feb 2027), Insiders, VSCodium, profiles? Spec supports all; this sets defaults.
-5. **Windsurf vs Devin Desktop**: which is installed now (Windsurf was renamed Devin Desktop in June 2026 with new config paths)?
-6. **1Password delivery default**: `launch` via `sdn exec` (no plaintext on disk, possible approval prompts when clients start servers, or a service account token in the keyring to avoid prompts) versus `inline` (plaintext in user-scope client files, resolved at apply). Is a 1Password service account acceptable?
-7. **1Password Developer Environments**: one Environment for MCP secrets or several? Is 1Password CLI 2.42+ installed on both machines?
-8. **Project manifest**: `.sdn/project.toml` (dir, room for local file and skills) versus a single root `sdn.toml`? Default Shared or Private on init?
-9. **Project skills**: link + `.git/info/exclude` (spec default) or committed copies?
-10. **Apply mode default**: Instant (SkillDock behavior, spec default) or Review?
-11. **Remotes**: which first: GitHub private repo, NAS path, Resilio folder? Is the `repo-per-machine` layout on Resilio acceptable? Which NAS protocol (SMB on Windows, NFS/SMB mount on Arch)?
-12. **Claude Desktop on Arch**: do you run an unofficial build there, i.e. should the Linux adapter be enabled by default?
-13. **Language**: English only, or keep SkillDock's zh-CN catalog?
-14. **Windows code signing**: acceptable to ship unsigned (SmartScreen warning) for personal use?
-15. **Clients in daily use** on each machine, to order M3/M4 and the `[verify]` checks.
+| # | Topic | Decision | Where |
+|---|---|---|---|
+| 1 | Name | **Loadout**; crates `loadout-core`/`loadout-cli`, CLI `loadout`, launcher `loadout exec`, app id `dev.dailen.loadout`; fallback `mcp-loadout` | Conventions, App. C |
+| 2 | Data dir | Per-OS standard (`%LOCALAPPDATA%\Loadout`, `~/.local/share/loadout`, `~/Library/Application Support/Loadout`); never inside Resilio (detect and warn) | §4.5 |
+| 3 | Plugins, marketplace | Deferred post-v1 | §2, §20.3 |
+| 4 | VS Code | Stable with GitHub Copilot; write Copilot native files; `.vscode/mcp.json` legacy read/import only | §7.3 |
+| 5 | Windsurf, Devin Desktop | Not installed: Tier D, best effort, M22 | §7.3, §20.3 |
+| 6 | 1Password delivery | `loadout exec` resolves at server start, values never on disk; service account optional to avoid prompts | §11.4, §11.5 |
+| 7 | 1Password Environments | One Environment for MCP secrets; CLI 2.42.0 on Windows, absent on Arch (graceful degrade); never `op environment read` | §11.2, §11.11 |
+| 8 | Manifest | `.loadout/project.toml` (shared) and `project.local.toml` (private); new manifests default to private | §5.5 |
+| 9 | Project skills | Links, hidden through `.git/info/exclude` | §12.3 |
+| 10 | Apply | Instant; every apply is a history commit with one-click rollback | §8.7, §9.2 |
+| 11 | Remotes | NAS first (foxnas SMB/UNC, CIFS mount on Linux), then GitHub private repo via `gh`/git credentials, then Resilio repo-per-machine | §9.6 |
+| 12 | Claude Desktop | Windows only | §7.3 |
+| 13 | Language | English only | §4.3 |
+| 14 | Windows signing | Azure Trusted Signing through the existing code-signing kit; unsigned local dev builds | §16.1 |
+| 15 | Client priority | Tier A: Claude Code, omp, Pi, Codex, Claude Desktop; Tier B: VS Code (Copilot), Cursor; rest later | §7, §20.2 |
 
 ---
 
@@ -1326,7 +1540,7 @@ flowchart LR
 | `src/features/skills/components/*` (cards, `ToolSyncPanel`, `ToolManageDialog`, `SkillDiffView`, file dialogs) | Port, swap data layer to typed IPC + TanStack Query |
 | `src/app/routes/mcp.tsx` | Port layout and copy; rewrite logic (no placeholder regex, no Chinese error parsing, bulk commands) |
 | `src/app/routes/settings.tsx` | Port sections; replace Account & Backup with Versioning & Backup and Secrets |
-| `src/app/i18n.tsx`, `backend-i18n/*` | Keep `en` (and `zh-CN` per Q13); drop backend string localization (errors are codes now) |
+| `src/app/i18n.tsx`, `backend-i18n/*` | Keep the `en` strings only (English-only product); drop `zh-CN` and backend string localization (errors are codes now) |
 | `src-tauri/src/tool_adapters.rs`, path tables in `mcp_manager.rs`/`commands.rs`/`library.rs` | Data merged into the single adapter table |
 | `library.rs` junction + link detection, `mcp_manager.rs` `write_text_value`/`replace_file` | Port logic (with fsync and unique temp names added) |
 | `mcp_manager.rs` tool discovery over stdio/http | Port core idea; no wrappers |
@@ -1347,14 +1561,38 @@ flowchart LR
 - Claude Desktop config locations incl. MSIX issue (secondary): https://eseospace.com/blog/claude-desktop-config-file-location/
 - Cursor MCP (`${env:NAME}` interpolation): https://cursor.com/docs/mcp
 - 1Password Environments, programmatic read and `op run --environment`: https://www.1password.dev/environments/read-environment-variables
+- 1Password CLI 2.42.0 local help (`op environment secret list --help`, `op run --help`): `--environment`, `--no-masking`, `--format json`, values of non-concealed secrets returned without `--reveal`
+- AUR `1password-cli` (2.41.1 on 2026-11-14): https://aur.archlinux.org/packages/1password-cli ; Omarchy base package list includes `1password-cli`: https://github.com/basecamp/omarchy/blob/master/install/omarchy-base.packages
+- Name checks: crates.io API, registry.npmjs.org, AUR RPC v5, `winget search`/`winget show`, GitHub search API (all 2026-11-14)
 - SkillDock source (read-only): `../skilldock` at `181b52b`
 
-## Appendix C: Name suggestions
+## Appendix C: Name and collision check (2026-11-14)
 
-Collision checks (crates.io, AUR, winget, GitHub orgs) not yet done.
+Decision: **Loadout**.
 
-1. **Berth**: where a vessel is assigned its place; CLI `berth apply`. Keeps the dock lineage.
-2. **Loadout**: the set of tools an agent carries, per machine and per project; CLI `loadout apply`.
-3. **Harbormaster**: the one who decides what goes where across docks; CLI `hm`.
-4. **Mooring**: secure, versioned, recoverable attachment; CLI `moor`.
-5. **Slipway**: where vessels are built and launched; CLI `slip`.
+| Identifier | Value |
+|---|---|
+| Product / window title | Loadout |
+| CLI binary | `loadout` (`loadout.exe`); launcher subcommand `loadout exec` |
+| Crates | `loadout-core` (lib), `loadout-cli` (bin `loadout`), `loadout-testkit` (unpublished) |
+| Tauri identifier | `dev.dailen.loadout` |
+| Data dir | `%LOCALAPPDATA%\Loadout`, `${XDG_DATA_HOME:-~/.local/share}/loadout`, `~/Library/Application Support/Loadout` |
+| Env override | `LOADOUT_HOME` |
+| Project dir | `<P>/.loadout/` (`project.toml`, `project.local.toml`) |
+| GitHub repo | `DailenG/loadout` (available) |
+| winget id | `DailenG.Loadout` (moniker `loadout` is taken) |
+| AUR | `loadout` (source), `loadout-bin` (release tarball) |
+
+Collision results:
+
+| Registry | `loadout` | `loadout-mcp` | `mcp-loadout` |
+|---|---|---|---|
+| crates.io | **Taken**: `loadout` 0.1.0 (massa-kj, "declarative environment management tool", 38 downloads). `loadout-core` and `loadout-cli` are free | free | free |
+| npm | **Taken**: stale 2022 "Markout module loader" (we publish nothing to npm) | **Taken**: MCP server bridging Agent Skills (genecyber, 0.1.0, 2026-01), same niche | free |
+| AUR | free (only `aiman-git` mentions "Loadout" in its description) | free | free |
+| winget | **Taken**: `TheCodeSaiyan.Loadout` 0.118.1, moniker `loadout`, an AI-agent launcher CLI (ntatschner/loadout-cli) that ships a `loadout` binary for Windows, Linux (deb/rpm) and macOS; msstore "LOADOUT Launcher" | free | free |
+| GitHub | User `loadout` taken (inactive). Same-niche repos: migsilva89/loadout (Swift macOS app, about 104 stars, shows what coding assistants load including MCP servers), elleryfamilia/loadout (Rust context kits for agents; binary `load`), MK27MK/loadout (Claude Code harness manager), sukoji/loadout, netwaif/loadout | no repo with that exact name | no repo with that exact name |
+
+Risk: the name is crowded in exactly this niche. The hard conflict is the **binary name**: ntatschner's `loadout` CLI installs a `loadout` executable through winget, deb and rpm, so `loadout exec` in a client config could start the wrong program. Mitigations, required by this spec: user-scope and private targets reference the launcher by absolute path (§11.5), `loadout doctor` checks that `loadout` on `PATH` answers `loadout --identify` with `dev.dailen.loadout`, and users install with `cargo install loadout-cli` (never `cargo install loadout`).
+
+Fallback: **`mcp-loadout`** (free on all five registries checked). `loadout-mcp` is free on crates.io, AUR, winget and GitHub but taken on npm by an MCP/Agent Skills project, which invites confusion. Switch if a release channel blocks `loadout` or the PATH collision shows up on Dailen's machines. All brand strings live in `core/src/brand.rs` (M0), so a rename touches that module, the crate names and the docs.
