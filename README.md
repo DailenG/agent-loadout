@@ -6,8 +6,10 @@ GitHub Copilot, Cursor and more) from one versioned, offline store. It writes
 each client's native config files, never touches entries it did not create,
 and keeps secret values out of the store.
 
-Status: early development. The design is in [SPEC.md](SPEC.md); milestone M0
-(workspace bootstrap) is in place. Nothing is released yet.
+Status: early development. The design is in [SPEC.md](SPEC.md); milestones M0
+(workspace bootstrap) and M1 (store schemas and validation) are in place.
+Nothing is released yet. JSON Schemas for store files, for editor completion,
+are in [docs/schema](docs/schema).
 
 ## Build
 
