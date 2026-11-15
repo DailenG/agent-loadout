@@ -1,6 +1,6 @@
 # Loadout (agent-loadout): Specification
 
-Status: draft v2 for review (2026-11-14), formerly "SkillDock Next"; project renamed to `agent-loadout` on 2026-11-14 (display name and binary stay "Loadout"/`loadout`). Dailen's answers are folded in (§21 Decisions). Spec only; nothing here is implemented.
+Status: draft v2 for review (2026-11-14), formerly "SkillDock Next"; project renamed to `agent-loadout` on 2026-11-14 (display name and binary stay "Loadout"/`loadout`). The maintainer's answers are folded in (§21 Decisions). Spec only; nothing here is implemented.
 
 Conventions:
 
@@ -45,8 +45,8 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 
 1. **SkillDock-identical GUI** (layout, flows, look) on Tauri 2, backed by a reusable Rust core crate shared with a CLI (`loadout apply|status|diff|backup|restore` and more).
 2. **MCP management at two scopes:** system (user-wide) and project (any folder with a manifest that layers over system). Writes every client's native project-level config. Shows the effective config per folder with per-entry provenance.
-3. **Versioned store:** every change and every apply is a commit in a local git repo under the app data dir (fully offline). History, semantic diff, restore any version, one-click rollback of any apply, named tags. Remotes (NAS, GitHub, Resilio) are optional push targets.
-4. **Vendor independence:** nothing breaks if any vendor, upstream repo or service disappears. No baked-in OAuth client ids. Remote auth uses the user's own git credentials or a user-supplied OAuth app id. Plain folders (NAS, Resilio) are first-class remotes.
+3. **Versioned store:** every change and every apply is a commit in a local git repo under the app data dir (fully offline). History, semantic diff, restore any version, one-click rollback of any apply, named tags. Backup remotes are optional push targets: any git URL, or any local, network or synced folder. None is configured by default.
+4. **Vendor independence:** nothing breaks if any vendor, upstream repo or service disappears. No baked-in OAuth client ids. Remote auth uses the user's own git credentials or a user-supplied OAuth app id. Plain folders (USB drive, NAS share, a folder synced by any sync tool) are first-class remotes.
 5. **Secrets by reference only:** `${env:NAME}`, `op://vault/item/field`, 1Password Environments, OS keyring. 1Password values are fetched by the launcher (`loadout exec`) at server start and never written to disk. No secret value ever enters the store, a snapshot or a remote. Restore on a new machine shows "missing secret" state; a machine without the 1Password CLI degrades to env and keyring refs.
 6. **Clients by tier** (Decision 15). Tier A, daily, built and verified first: Claude Code, omp, Pi, Codex, Claude Desktop (Windows only). Tier B, daily: VS Code Stable with GitHub Copilot, Cursor. Tier C: Gemini CLI, Antigravity, OpenCode, Grok Build. Tier D, best effort: Windsurf and Devin Desktop (not installed), the legacy VS Code editor format (read/import only), and all other SkillDock clients at user scope. Format-preserving edits; never touch entries the app did not create; drift detection with adopt/import.
 7. **Skills:** keep SkillDock's store, link/copy distribution, `~/.agents/skills` scan; add project scope.
@@ -97,7 +97,7 @@ agent-loadout/                 (Cargo workspace + private package.json, never pu
       src/env.rs               Env + Fs facade (paths, OS, vars); injected everywhere
       src/model/               schemas: server, secrets, project, machine, applied, settings, skill-meta
       src/store/               git2-backed store: transactions, commits, tags, log, diff, restore, merge
-      src/remote/              git (system git CLI), folder (repo-per-machine, mirror, archive), UNC resolution
+      src/remote/              git (system git CLI), folder (per-machine subfolders: repo, mirror, archive), sync-artifact filter, UNC resolution
       src/formats/             format-preserving editors: json/jsonc, toml, then yaml, json5 (read)
       src/adapters/            AdapterSpec table + mappers per client; detection
       src/layering/            manifests, merge, effective config, provenance
@@ -164,7 +164,7 @@ The GUI watches target files, manifests and skill dirs with `notify` (debounced 
 | Linux | `${XDG_DATA_HOME:-~/.local/share}/loadout` |
 | macOS | `~/Library/Application Support/Loadout` |
 
-`LOADOUT_HOME` must never live inside a Resilio folder or any other file-sync root (OneDrive, Dropbox, Syncthing, Google Drive): sync tools corrupt live git repos. Detection walks the ancestors of the resolved path for a Resilio `.sync` dir (containing `ID` or `IgnoreList`) or a Syncthing `.stfolder`, and compares against the OneDrive, Dropbox and Google Drive roots from their known registry and config locations. On a hit the GUI shows a blocking warning that needs an explicit "use anyway" (recorded in `state/local-settings.toml`), the CLI repeats the warning on every mutating command, and `loadout doctor` reports `sync_root_detected`. The defaults never resolve into a sync root; the check guards overrides. Sync folders are for **folder remotes** (§9.6), not for `LOADOUT_HOME`.
+`LOADOUT_HOME` (the live store and state) must never live inside a file-sync root (OneDrive, Dropbox, Google Drive, Syncthing, Resilio Sync or similar): sync tools corrupt live git repos and lock files. Detection walks the ancestors of the resolved path for a Resilio `.sync` dir (containing `ID` or `IgnoreList`) or a Syncthing `.stfolder`, and compares against the OneDrive, Dropbox and Google Drive roots from their known registry and config locations. On a hit the GUI shows a blocking warning that needs an explicit "use anyway" (recorded in `state/local-settings.toml`), the CLI repeats the warning on every mutating command, and `loadout doctor` reports `sync_root_detected`. The defaults never resolve into a sync root; the check guards overrides. The rule covers only the live data folder: a **backup** folder remote inside a synced folder is supported and safe (§9.6), because each machine writes only its own subfolder there through immutable objects and atomic renames, and nothing in it is a live working repo.
 
 ```
 <LOADOUT_HOME>/
@@ -360,7 +360,7 @@ Written only by the machine it describes (so merges never conflict on it).
 ```toml
 schema = 1
 machine_id = "01JCX5B7K3M9N1P5Q7R3S9T1V5"
-label = "arch-omarchy"
+label = "laptop"
 os = "linux"
 
 [enable]
@@ -627,7 +627,7 @@ A client is "detected" when any probe passes: its config dir exists, its executa
     "delivery": "env"
   }, {
     "kind": "list_member", "client": "claude-code", "file": "~/.claude.json",
-    "container": "/projects/C:\\Users\\<user>\\...\\skilldock-next/disabledMcpServers", "key": "slack"
+    "container": "/projects/C:\\Users\\<user>\\Code\\skilldock-next/disabledMcpServers", "key": "slack"
   }, {
     "kind": "skill_link", "client": "claude-code", "scope": "user",
     "path": "~/.claude/skills/repo-conventions", "method": "junction",
@@ -737,7 +737,7 @@ server: update github (env.GITHUB_TOOLSETS)
 Loadout-Op: server.update
 Loadout-Entity: server/github
 Loadout-Scope: system
-Loadout-Machine: 01JCX3R8Q6T5W1V9Y2Z7A4B6C8 (dailen-desktop)
+Loadout-Machine: 01JCX3R8Q6T5W1V9Y2Z7A4B6C8 (desktop)
 Loadout-Client: loadout-gui/0.1.0
 Loadout-Apply: 01JCX4A0M2N8P6Q4R2S0T8U6V4 ok
 ```
@@ -770,51 +770,79 @@ Loadout-Apply: 01JCX4A0M2N8P6Q4R2S0T8U6V4 ok
 
 ### 9.6 Remotes (optional)
 
-Remotes are machine-local config (`state/remotes.toml`), because URLs, mount paths and auth differ per machine. The Add remote wizard offers them in this order, which is also the recommended setup:
+Remotes are backup and sync targets for the store. **No remote is configured by default, and none is privileged or ranked**: every configured remote gets the same push, pull and status treatment, and the UI lists them in the order the user added them. Which remotes a user has is personal setup and lives only in machine-local config (`state/remotes.toml`), because URLs, mount paths and auth differ per machine; the store, the spec and the binary carry no remote names, hosts or paths. First run offers to add one (§15.2); skipping leaves the store local-only and Settings shows "No backup remote".
 
-1. **NAS (foxnas)**: folder remote on the SMB share, `repo-per-machine`. Windows: a UNC path (`\\foxnas\<share>\loadout`) or a mapped drive letter; a drive letter is kept as typed but resolved to its UNC path with `WNetGetUniversalNameW` before each push, so pushes also work from processes that lack the mapping (elevated shells, scheduled tasks). Linux: the CIFS mount path (for example `/mnt/foxnas/<share>/loadout`, mounted by fstab or a systemd automount). Loadout never mounts shares and never stores SMB credentials. An unmounted or unreachable path reports `remote_unreachable`, is retried on the next push trigger, and never blocks local work.
-2. **GitHub private repository**: git remote using the user's existing `gh` login or git credentials (`auth = gh` or `system`). §9.7 can create the repo.
-3. **Resilio**: folder remote inside a Resilio Sync folder, `repo-per-machine` (one copy per machine, written only by that machine).
+A remote is one of two kinds:
+
+| Kind | What it is | Examples | Transport |
+|---|---|---|---|
+| `git` | Any git remote URL, authenticated with the user's own credentials | GitHub, GitLab, Gitea/Forgejo, Bitbucket, a self-hosted server; `https://`, `ssh://` and scp-style `user@host:path` URLs | system `git` CLI |
+| `folder` | A local or network directory | USB or external drive, NAS share (UNC path, mapped drive, or a mounted SMB/NFS path), a folder synced by Dropbox, OneDrive, Google Drive, Syncthing, Resilio Sync or similar | git2 local transport (no git CLI) |
 
 ```toml
+# state/remotes.toml: illustrative only; every name, URL and path is the user's own
 [[remote]]
-name = "foxnas"
-kind = "folder"
-path = "\\\\foxnas\\backup\\loadout"   # share name is per machine; Linux: "/mnt/foxnas/backup/loadout"
-mode = "repo-per-machine"   # repo-per-machine | mirror | archive
+name = "origin"
+kind = "git"
+url = "git@git.example.com:<user>/loadout-store.git"
+auth = "system"             # system | gh | token
 push = "on-commit"          # manual | on-commit | interval:15m
 pull = "on-start"           # manual | on-start | interval:15m
 
 [[remote]]
-name = "github"
-kind = "git"
-url = "https://github.com/DailenG/loadout-store.git"
-auth = "gh"                 # system | gh | token
-push = "on-commit"
-pull = "on-start"
-
-[[remote]]
-name = "resilio"
+name = "usb"
 kind = "folder"
-path = "D:\\Backups\\loadout"
-mode = "repo-per-machine"
+path = "E:\\Backups\\loadout"   # any local, mapped, UNC or mounted path, e.g. "/media/<user>/backup/loadout"
+mode = "repo-per-machine"   # repo-per-machine | mirror | archive
 push = "on-commit"
+pull = "manual"
 ```
+
+Any remote that cannot be reached (drive unplugged, share unmounted, host offline) reports `remote_unreachable`, is retried on the next push trigger, and never blocks local work. Loadout never mounts drives or shares and never stores SMB or NFS credentials.
 
 #### Git remotes
 
-- Executed with the system `git` CLI in `store/`: `git push <url> refs/heads/main:refs/heads/main 'refs/tags/*:refs/tags/*'` and `git fetch <url> +refs/heads/main:refs/remotes/<name>/main '+refs/tags/*:refs/tags/*'`. Progress parsed from stderr; idle timeout 120 s.
-- `auth = system`: no flags; whatever the user's git does (GCM, SSH agent, `gh auth setup-git`, any helper).
-- `auth = gh`: `git -c credential.helper= -c credential.helper='!gh auth git-credential'`.
-- `auth = token`: `git -c credential.helper= -c credential.helper='!"<abs path>/loadout" git-credential --remote <name>'`; `loadout git-credential` implements the git credential protocol and returns `username=x-access-token` plus a token read from the OS keyring. No askpass shell scripts (SkillDock's `git-askpass.sh` needed `sh` on Windows), no token in environment variables or argv.
+- Executed with the system `git` CLI in `store/`: `git push <url> refs/heads/main:refs/heads/main 'refs/tags/*:refs/tags/*'` and `git fetch <url> +refs/heads/main:refs/remotes/<name>/main '+refs/tags/*:refs/tags/*'`. Progress parsed from stderr; idle timeout 120 s. The URL is passed to git unchanged; Loadout has no host-specific code paths except the optional `gh` helper and §9.7.
+- `auth = system` (default): no flags; whatever the user's git does (Git Credential Manager, SSH agent and `~/.ssh/config`, `gh auth setup-git`, any helper). Loadout never creates or manages SSH keys.
+- `auth = gh`: `git -c credential.helper= -c credential.helper='!gh auth git-credential'`; offered only for GitHub URLs when `gh` is installed.
+- `auth = token`: `git -c credential.helper= -c credential.helper='!"<abs path>/loadout" git-credential --remote <name>'`; `loadout git-credential` implements the git credential protocol and returns the remote's `username` (default `x-access-token`, which GitHub accepts; other hosts may need the account name [verify per host]) plus a token read from the OS keyring. No askpass shell scripts (SkillDock's `git-askpass.sh` needed `sh` on Windows), no token in environment variables or argv.
 
 #### Folder remotes
 
-- **`repo-per-machine`** (default for every folder remote: NAS shares and sync folders alike): layout `<path>/<store_id>/<machine_id>.git`, a bare repo written **only** by its machine via git2 local transport. Other machines only read it. A single writer per file set is what makes file-sync tools and SMB shares safe: git objects are immutable files and refs change by atomic rename, so neither a sync tool nor a network share ever sees two writers on one file. Pull fetches every sibling `*.git` and merges (§9.9). A partially synced sibling (refs ahead of objects) fails fetch with missing objects and is reported as `remote_incomplete` (retry later), not as an error. No git CLI needed.
-- **`mirror`**: export-only, human-browsable copy of the HEAD tree at `<path>/<store_id>/<machine_id>/latest/` plus `EXPORT.json` (`commit`, `time`, `machine`, `schema`). Overwritten each push via temp dir + rename.
-- **`archive`**: export-only `<path>/<store_id>/<machine_id>/loadout-<yyyymmdd-hhmmss>-<shortsha>.zip` containing the HEAD tree and `EXPORT.json`; keeps the newest `keep` archives.
-- `loadout restore --from <dir|zip|bare-repo>` bootstraps a new machine from any of the three.
+Every folder remote, in every mode, is written as **one subfolder per machine**:
+
+```
+<path>/
+  <store_id>/                         one logical store (§9.1)
+    <machine_id>/                     written only by that machine
+      machine.json                    manifest, written last (below)
+      store.git/                      repo-per-machine: bare repo
+      latest/                         mirror: HEAD tree + EXPORT.json
+      archives/loadout-<yyyymmdd-hhmmss>-<shortsha>.zip   archive
+    <machine_id>/ ...                 other machines, read-only to this one
+```
+
+- **Why per machine.** No file under a folder remote is ever written by two machines, so a sync tool or a network share never has to reconcile concurrent edits of the same file. Inside its subfolder a machine writes git objects (immutable files) and replaces refs, exports and `machine.json` by temp file plus atomic rename. This is what makes a folder remote inside Dropbox, OneDrive, Google Drive, Syncthing or Resilio Sync safe, unlike `LOADOUT_HOME` (§4.5). The rule holds for USB drives and NAS shares too, where several machines may write the same folder at different times.
+- **Subfolder name** is the stable `machine_id` (ULID from `state/machine.toml`), never a hostname or label, so renaming a machine does not fork its backups. The human label lives in `machine.json`.
+- **`machine.json`**: `{ "schema": 1, "store_id", "machine_id", "label", "os", "app_version", "pushed_at", "head": "<oid>", "tags": { "<name>": "<oid>" }, "mirror": "<oid>", "archives": ["<file>"] }`. Written after objects, refs and exports are complete. Readers trust only the refs and files it lists.
+- **`repo-per-machine`** (default): `store.git` is a bare repo written via git2 local transport. Push cannot be rejected (single writer).
+- **`mirror`**: export-only, human-browsable copy of the HEAD tree in `latest/` plus `EXPORT.json` (`commit`, `time`, `machine`, `schema`). Replaced each push via temp dir + rename.
+- **`archive`**: export-only zip of the HEAD tree plus `EXPORT.json` in `archives/`; keeps the newest `keep` archives.
+- **Pull** fetches, from every sibling machine subfolder with a `store.git`, the `head` and `tags` listed in its `machine.json`, and merges them (§9.9). A sibling whose manifest arrived before its objects fails with missing objects and reports `remote_incomplete` (retry later), not an error.
+- **Restore lists machines.** `loadout restore --from <path>` and the GUI "Restore from remote..." scan `<path>` for stores and, per store, list each machine subfolder with label, OS, last push time and head commit subject; the user picks the machine to restore from (CLI `--machine <id|label>`; an ambiguous label fails and lists the ids). `loadout remote machines <name>` prints the same list for a configured folder remote. A path that points directly at a machine subfolder, a bare repo or a zip skips the listing.
+- **Windows paths**: a UNC path (`\\server\share\...`) or a mapped drive letter; a drive letter is kept as typed but resolved to its UNC path with `WNetGetUniversalNameW` before each push, so pushes also work from processes that lack the mapping (elevated shells, scheduled tasks). Linux and macOS: any mounted path.
 - A single shared bare repo in a synced folder or share is supported only as `kind = "git"` with a `file://` URL and shows a warning (two machines writing the same refs through a sync tool or SMB can corrupt it).
+
+**Sync artifacts are ignored.** Readers (pull, restore, machine listing, `doctor`) accept only names that match their exact grammar (ULID machine dirs, `machine.json`, `store.git`, `latest/`, `archives/loadout-*.zip`) and only refs listed in `machine.json`; everything else under a folder remote is skipped. That allowlist also catches conflict copies whose names cannot be predicted (OneDrive appends the computer name). Names that match a known sync-tool conflict or temp pattern are additionally reported as `sync_artifact_ignored` (info level, listed by `loadout doctor`). They are never read and never deleted: deleting a Resilio `.Conflict` file can delete the real file on a peer.
+
+| Sync tool | Conflict copies | Temp and metadata |
+|---|---|---|
+| Dropbox | `* (*conflicted copy*)*`, `* (Case Conflict*)*`, `* (Selective Sync Conflict*)*` | `.dropbox`, `.dropbox.attr`, `.dropbox.cache/` |
+| OneDrive | `<name>-<computer name>.<ext>`, `<name>-<computer name>-<n>.<ext>` (caught by the allowlist) | none known |
+| Google Drive | `* (<n>).*` | `.tmp.drivedownload/`, `.tmp.driveupload/` [verify] |
+| Syncthing | `*.sync-conflict-<yyyymmdd>-<hhmmss>-<device>*` | `.syncthing.*.tmp`, `~syncthing~*.tmp`, `.stfolder`, `.stversions/`, `.stignore` |
+| Resilio Sync | `*.Conflict*` (`name.Conflict.ext`, `name.Conflict1`) | `*.!sync`, `*.rsls` [verify], `.sync/` |
+| Any | | `.DS_Store`, `Thumbs.db`, `desktop.ini`, `~$*` |
 
 ### 9.7 GitHub conveniences (optional, never required)
 
@@ -829,7 +857,7 @@ push = "on-commit"
 ### 9.9 Pull and merge
 
 1. Tag `auto/pre-pull/<ts>`.
-2. Fetch each remote head (`repo-per-machine`: every sibling).
+2. Fetch each remote head (folder remotes: every machine subfolder, §9.6).
 3. Per incoming head: ancestor of HEAD: nothing; HEAD is its ancestor: fast-forward; otherwise **entity-level 3-way merge** against the merge base:
    - Entities: `servers/<id>.toml`, `secrets.toml` per alias, `clients.toml` and `settings.toml` per key, `projects/<id>/*` per server/skill key, `skill-meta/<id>.toml` per field, `skills/<id>/**` per file (text 3-way via git2 `merge_file`; binary: conflict), `machines/<id>.toml` and `machines/<id>.applied.toml` always taken from the newer side of that machine's own history (single writer, never a conflict).
    - TOML entities are parsed and merged per field: changed on one side: take it; both changed identically: take it; both changed differently, or delete versus modify: **conflict** for that field. Nothing is silently resolved in favor of local (SkillDock did that for MCP, preferences and plugins).
@@ -848,7 +876,7 @@ Rules (each is a release-blocking test or review checklist item):
 1. **No compiled-in credentials or client ids.** No OAuth client id, API key or token appears in the binary. A CI check greps release artifacts and source for known id patterns (`Ov23li`, `Iv1.`, `ghp_`, `github_pat_`).
 2. **Every core feature works offline with no account**: editing, apply, drift, history, tags, restore, folder remotes, skills from local folders.
 3. **Remote auth is the user's**: system git credentials (GCM, SSH keys, `gh`), a PAT the user pastes (stored in the OS keyring), or device flow with an OAuth app id the user registers and enters. Nothing depends on an app registration owned by anyone else.
-4. **Any git host or none.** GitHub is one URL among many; folders (NAS, Resilio) are first-class.
+4. **Any git host or none.** A git remote is just a URL (GitHub, GitLab, Gitea, self-hosted, SSH); folders (USB drive, NAS share, synced folder) are first-class. No remote is built in, preferred or configured by default.
 5. **Data is plain and portable.** The store is a git repo of TOML and Markdown readable without this app; exports are zip files. A user can leave and keep everything.
 6. **No runtime fetches from third parties.** No unpinned `npx` wrappers in client configs, no scraping, no silent `npx --yes skills` download (SkillDock did all three). Optional network features (catalogs, skill update checks, tool discovery for remote servers, app updates) are off or degrade to "unreachable" without breaking anything.
 7. **Updater is optional and configurable.** Endpoint and public key live in Settings with a default pointing at the release repo of this project (`DailenG/agent-loadout`); the app runs normally with the updater disabled. Linux packages (AUR, deb, rpm) disable the in-app updater.
@@ -905,7 +933,7 @@ Provider URIs are not allowed inline in templates; they must go through an alias
 
 1. `${env:X}` refs: `env` when the client expands that field; otherwise `launch` for stdio (exec reads `X` from the environment it inherits from the client); otherwise `inline` from Loadout's environment, with warning `inline_env_fallback`.
 2. Provider refs (`op`, `op-env`, `keyring`):
-   - stdio: `launch`. Values are fetched when the server starts and are never written to disk. If the launcher binary cannot be resolved the entry is `blocked: launcher_not_found`; if the provider is unavailable on this machine (no `op` on the Arch machine) it is `blocked: provider_unavailable` unless the machine overlay maps the alias to another provider (§5.6, §11.11). Neither case falls back to `inline` silently.
+   - stdio: `launch`. Values are fetched when the server starts and are never written to disk. If the launcher binary cannot be resolved the entry is `blocked: launcher_not_found`; if the provider is unavailable on this machine (for example `op` not installed) it is `blocked: provider_unavailable` unless the machine overlay maps the alias to another provider (§5.6, §11.11). Neither case falls back to `inline` silently.
    - http/sse headers: `command` where supported (`!"<abs path>/loadout" secret get --ref <ref>` for omp/Pi; `headersHelper` running `loadout secret-header` for Claude Code); Codex `bearer_token_env_var`/`env_http_headers` through `env`; else `env` if the user enabled "export provider secrets to my environment" (§11.6); else `blocked: no_secret_free_delivery`, with fixes "export to environment" or "allow inline for this server".
 3. `inline` is refused for targets classified as shared (project files tracked by git, or flagged shared). Those get `blocked: secret_in_shared_file` with fixes: switch to `env` or `launch`, or move the server to the project-local layer.
 
@@ -958,14 +986,14 @@ After `restore --from` or a first pull:
 
 ### 11.10 1Password Developer Environments bulk mapping
 
-"Map a 1Password Environment" (Settings > Secrets, `loadout secrets map-op-env <ENV-ID>`): Dailen uses one Environment for all MCP secrets; its id is saved as `[onepassword] environment` in `secrets.toml` (an identifier, not a secret). Loadout runs `op environment secret list <id> --format json` (CLI 2.42.0+) and keeps only the names, creating aliases `op-env://<id>/<NAME>` in bulk for the selected names. Secrets marked "show value by default" come back with values even without `--reveal`, so the parser drops every value field immediately and never logs the raw output. Below 2.42.0 the user types the names instead.
+"Map a 1Password Environment" (Settings > Secrets, `loadout secrets map-op-env <ENV-ID>`): the store supports one Environment for MCP secrets; its id is saved as `[onepassword] environment` in `secrets.toml` (an identifier, not a secret). Loadout runs `op environment secret list <id> --format json` (CLI 2.42.0+) and keeps only the names, creating aliases `op-env://<id>/<NAME>` in bulk for the selected names. Secrets marked "show value by default" come back with values even without `--reveal`, so the parser drops every value field immediately and never logs the raw output. Below 2.42.0 the user types the names instead.
 
 ### 11.11 1Password CLI availability per machine
 
 - Detection: `op` on `PATH` (on Windows also `%LOCALAPPDATA%\Microsoft\WinGet\Links`), `op --version`; sign-in state only on an explicit "Check" (it may prompt).
 - Version gates: below 2.41.0, Environment refs are `provider_too_old`; below 2.42.0, Environment name listing is disabled. Item refs (`op read`) work on any 2.x.
-- Windows (WDC-DAILEN1126): CLI 2.42.0 installed through WinGet; every feature available.
-- Arch/Omarchy: CLI not installed. Settings > Secrets and `loadout secrets providers` show **"1Password CLI not found"**; `op`/`op-env` aliases are `provider_unavailable` and the servers using them are blocked **on this machine only**; env and keyring refs work normally. Each blocked alias offers "Use keyring on this machine" or "Use environment variable", which writes a machine-overlay ref (§5.6).
+- Machine with CLI 2.42.0 or newer: every feature available.
+- Machine without the CLI: Settings > Secrets and `loadout secrets providers` show **"1Password CLI not found"**; `op`/`op-env` aliases are `provider_unavailable` and the servers using them are blocked **on this machine only**; env and keyring refs work normally. Each blocked alias offers "Use keyring on this machine" or "Use environment variable", which writes a machine-overlay ref (§5.6).
 - Install guidance (user guide and Settings link): `yay -S 1password-cli` (AUR; 2.41.1 on 2026-11-14, enough for `op read` and `op run --environment`, not yet for name listing) or 1Password's official Linux packages; then enable the desktop app's CLI integration (1Password > Settings > Developer) or set a service account token (§11.5).
 
 ---
@@ -1086,7 +1114,7 @@ Project scope: the list shows the **effective** servers for the folder; actions 
 +------------------------------------------------------------------------------------+
 | Projects                                        [+ Add folder] [Init manifest...]  |
 +------------------------------------------------------------------------------------+
-| skilldock-next   C:\Users\<user>\Code\skilldock-next              |
+| skilldock-next   C:\Users\<user>\Code\skilldock-next                              |
 |   Shared manifest · 3 servers · 2 skills · 5 clients · ✓ trusted · 1 pending     |
 |   [Open] [Effective config] [Apply] [Remove from list]                             |
 | home-lab         D:\Code\home-lab   Private manifest · ⚠ manifest changed (git pull)|
@@ -1120,14 +1148,14 @@ Clicking a cell shows the provenance chain (winner file, shadowed entries, reade
 +-------------------------------------------------------------------------------------+
 | History                  [filter: all v] [entity...]   [Tag current...] [Remotes ▸] |
 +-------------------------------------------------------------------------------------+
-| ● apply: 2 files (claude-code, codex)          dailen-desktop · 2 min ago          |
-| ● server: update github (env.GITHUB_TOOLSETS)   dailen-desktop · 2 min ago          |
-| ● project skilldock-next: add postgres          dailen-desktop · 1 h ago  🏷 pre-reset|
-| ● merge: foxnas/arch-laptop                     arch-laptop · yesterday              |
+| ● apply: 2 files (claude-code, codex)          desktop · 2 min ago                 |
+| ● server: update github (env.GITHUB_TOOLSETS)   desktop · 2 min ago                 |
+| ● project skilldock-next: add postgres          desktop · 1 h ago  🏷 pre-reset       |
+| ● merge: nas/laptop                             laptop · yesterday                   |
 |   [Show diff] [Undo this apply] [Restore this version] [Restore entity...] [Tag]    |
 |   [Download zip]                                                                    |
 +-------------------------------------------------------------------------------------+
-| Remotes: foxnas ✓ in sync · github ✓ in sync · resilio ↑2                           |
+| Remotes: nas ✓ in sync · origin ✓ in sync · usb ↑2                                  |
 | Conflicts (1): secrets.toml GITHUB_PAT ref differs  [Resolve]                        |
 +-------------------------------------------------------------------------------------+
 ```
@@ -1139,7 +1167,7 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 1. App Preferences (as SkillDock, minus language: storage folder with Open, default editor, Agent Skills CLI compatibility, appearance, header style, tag filter layout, card layout). The UI is English only.
 2. Apply Behavior (new): **Instant** (default, SkillDock-like: each change applies immediately and becomes one commit) or Review; disable behavior (remove vs native disable); pull apply (manual/auto).
 3. Install Behavior (as SkillDock): enable new skills / new MCPs by default.
-4. Versioning & Backup (replaces "Account & Backup"): remotes list with status; Add remote wizard offering, in order, **NAS folder**, **GitHub private repository**, **Resilio folder**, other Git URL; auth choice per git remote (System git credentials, gh, Token in keyring, Device flow with your own OAuth app id); push/pull buttons; auto tag retention.
+4. Versioning & Backup (replaces "Account & Backup"): remotes list with status, or "No backup remote" with an Add button; Add remote wizard with two equal choices, **Git URL** and **Folder** (the folder picker accepts local, mapped, UNC and mounted paths and notes when the folder is inside a sync tool's folder: supported, one subfolder per machine); auth choice per git remote (System git credentials, gh for GitHub URLs, Token in keyring, Device flow with your own OAuth app id); push/pull buttons; "Restore from remote..." with the machine list (§9.6); auto tag retention.
 5. Secrets (new): providers status (1Password CLI version and sign-in state, or "1Password CLI not found" with install steps from §11.11; OS keyring backend; Secret Service on Linux), service account token set/clear, alias list with status and fixes, "Map a 1Password Environment", "Check all".
 6. Software Updates: enable/disable, endpoint, public key; hidden on Linux package builds.
 7. Cache; Tool Status (as SkillDock).
@@ -1166,11 +1194,11 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 | `loadout effective [PATH] [--client C]` | Effective config with provenance |
 | `loadout backup [-m MSG] [--tag NAME] [--remote NAME\|--all] [--no-push]` | Ensure state is committed (no-op if clean), optional tag, push to remotes |
 | `loadout restore <REV\|TAG> [--path ENTITY]... [--apply]` | Restore store version as new commit (auto tag first) |
-| `loadout restore --from <DIR\|ZIP\|BARE-REPO>` | Bootstrap a new machine from a folder/zip/repo export |
+| `loadout restore --from <DIR\|ZIP\|BARE-REPO> [--machine ID\|LABEL]` | Bootstrap a new machine from a folder remote, zip or repo; a folder remote lists its machines to pick from (§9.6) |
 | `loadout restore --files <APPLY-ID> [--file PATH]` | Restore client files byte-for-byte from pre-apply backups |
 | `loadout history [--entity server/github] [--limit N]`, `loadout show <REV>` | History and details |
 | `loadout tag <NAME> [REV] [-m MSG]`, `loadout tag --list`, `loadout tag --delete NAME` | Tags |
-| `loadout remote add folder <NAME> <PATH> [--mode repo-per-machine\|mirror\|archive]` / `add git <NAME> <URL> [--auth system\|gh\|token]` / `ls` / `rm` / `push [NAME]` / `pull [NAME]` | Remotes |
+| `loadout remote add folder <NAME> <PATH> [--mode repo-per-machine\|mirror\|archive]` / `add git <NAME> <URL> [--auth system\|gh\|token] [--username U]` / `ls` / `rm` / `push [NAME]` / `pull [NAME]` / `machines NAME` | Remotes (none by default); `machines` lists a folder remote's machine subfolders |
 | `loadout server ls\|show\|add\|edit\|rm <ID>`, `loadout server enable\|disable <ID> --client C... [--project PATH [--shared]]` | Server CRUD and enablement (project writes default to the private layer) |
 | `loadout project init [PATH] [--shared]`, `share ID`, `add PATH`, `ls`, `rm ID`, `trust PATH` | Projects; init is private unless `--shared`; `share` moves private entries into `project.toml` |
 | `loadout import [--scan] [--client C] [--scope ...]`, `loadout adopt [ENTRY...] [--all-identical]` | Import and adopt |
@@ -1217,7 +1245,7 @@ The report (GUI page and `--json`) lists every item: migrated, needs review, ski
 
 ### 15.2 From existing client configs (no SkillDock)
 
-First run: detect clients, run the Scan (§8.6) over user scope; offer "Add project folders" to scan their project files too. Nothing is written to client files during migration; the first apply is a separate, previewed step.
+First run: detect clients, run the Scan (§8.6) over user scope; offer "Add project folders" to scan their project files too. Nothing is written to client files during migration; the first apply is a separate, previewed step. The wizard ends with an optional "Add a backup remote" step offering Git URL and Folder as equal choices (§9.6); "Not now" leaves the store local-only. No remote is preconfigured.
 
 ---
 
@@ -1231,7 +1259,7 @@ First run: detect clients, run the Scan (§8.6) over user scope; offer "Add proj
 - Junctions for skill links; Job Objects in `loadout exec`.
 - Claude Desktop MSIX virtualized config detection (§7.3).
 - Installer: NSIS per-user (no admin) into `%LOCALAPPDATA%\Programs\Loadout`, adds `loadout.exe` to the user `PATH`; optional MSI. winget package id `DailenG.AgentLoadout` (Appendix C).
-- **Code signing**: release builds are signed with **Azure Trusted Signing** through Dailen's existing code-signing kit. Tauri `bundle.windows.signCommand` runs `pwsh -File scripts/sign-windows.ps1 "%1"`, which calls the kit. The kit location, Trusted Signing account, endpoint and certificate profile come from environment variables (`LOADOUT_SIGN_KIT`, `LOADOUT_SIGN_ACCOUNT`, `LOADOUT_SIGN_ENDPOINT`, `LOADOUT_SIGN_PROFILE`) that exist only in the release job (Azure login through a GitHub OIDC federated credential, no stored client secret [verify the kit accepts an existing Azure login]) or on Dailen's Windows machine. When they are absent the script prints "unsigned dev build" and exits 0, so local and implementer builds stay unsigned. Signed: `loadout.exe`, the app executable and the NSIS installer; the release job checks each with `signtool verify /pa`.
+- **Code signing**: release builds are signed with **Azure Trusted Signing** through the maintainer's code-signing kit. Tauri `bundle.windows.signCommand` runs `pwsh -File scripts/sign-windows.ps1 "%1"`, which calls the kit. The kit location, Trusted Signing account, endpoint and certificate profile come from environment variables (`LOADOUT_SIGN_KIT`, `LOADOUT_SIGN_ACCOUNT`, `LOADOUT_SIGN_ENDPOINT`, `LOADOUT_SIGN_PROFILE`) that exist only in the release job (Azure login through a GitHub OIDC federated credential, no stored client secret [verify the kit accepts an existing Azure login]) or on the maintainer's signing machine. When they are absent the script prints "unsigned dev build" and exits 0, so local and contributor builds stay unsigned. Signed: `loadout.exe`, the app executable and the NSIS installer; the release job checks each with `signtool verify /pa`.
 
 ### 16.2 Arch Linux on Hyprland/Wayland (first-class)
 
@@ -1240,7 +1268,7 @@ First run: detect clients, run the Scan (§8.6) over user scope; offer "Add proj
 - Native decorations; no custom title bar; works under tiling; file dialogs through xdg-desktop-portal.
 - OS keyring needs a Secret Service provider (gnome-keyring, KWallet, or KeePassXC); `provider_unavailable` with that hint otherwise.
 - Packages: AppImage, `.deb`, `.rpm` from CI; AUR `agent-loadout-bin` (from release tarball) and `agent-loadout` (from source) PKGBUILDs maintained in `packaging/aur/`; both install the binary as `loadout`. In-app updater disabled in AUR/deb/rpm builds.
-- 1Password CLI is optional and currently absent on Dailen's Arch/Omarchy machine; Loadout degrades as described in §11.11.
+- 1Password CLI is optional; on a machine without it Loadout degrades as described in §11.11.
 - CI: build on Ubuntu 22.04 (AppImage glibc baseline) and an `archlinux:latest` container job running `cargo test --workspace`, `npm test` and `makepkg --nobuild` validation.
 
 ### 16.3 macOS (nice-to-have)
@@ -1269,7 +1297,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 - License: MIT.
 - `LICENSE` contains this project's copyright line **and** SkillDock's notice, because portions are derived from it:
   - `Copyright (c) 2026 wanghuan` (SkillDock, MIT)
-  - `Copyright (c) 2026 <Dailen's legal name>` (this project)
+  - `Copyright (c) 2026 <maintainer's legal name>` (this project)
 - `THIRD_PARTY_NOTICES.md` lists every reused file with origin (`DailenG/skilldock@181b52b <path>`), license and copyright, plus full license texts. Files derived from SkillDock keep a header comment: `// Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan`.
 - Expected reuse from SkillDock: `tokens.css`, shell layout (`App.tsx` structure), `AppSelect`, `AppTooltip`, `BatchActions`, notifications, `ToolSyncPanel`, `ToolManageDialog`, `SkillDiffView`, skill list/card components, i18n catalog, tool logo set, the client path tables, the Windows junction and `ReplaceFileW` logic. Rewritten from scratch: `mcp_manager.rs`, `backup_*.rs`, `github_*.rs`, `commands.rs`, `plugin_manager.rs`.
 - CC Switch, agentsync, rulesync, MCPM, ruler (all MIT): ideas freely; any copied code gets the same header and a notice entry.
@@ -1290,7 +1318,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 7. **Secrets**: ref grammar; delivery selection matrix; leak scanner on every commit (test walks all objects in the test store and asserts no planted secret value appears); `op` stub binary on `PATH` emulating `op read`, `op run --environment`, `op environment secret list`, `--version`, locked, missing and not-installed states (the stub fails any test that calls `op environment read`); in-memory keyring; `loadout exec` passthrough (stdin/stdout bytes untouched, stderr only for errors, exit codes, Windows job-object kill, service account token visible to `op` only).
 8. **Frontend**: Vitest + Testing Library against a typed mock transport (explicit, test-only); component tests for pills, resolver, effective matrix, history diff. Visual parity checklist against SkillDock screenshots (`docs/images/*.png`) for Skills, MCP, Tools, Settings.
 9. **E2E smoke**: `tauri-driver` (WebDriver) on Windows and Linux CI: launch with temp `LOADOUT_HOME`/`HOME`, add a server, enable for Claude Code, assert `home/.claude.json` content and a new commit.
-10. **Real-client verification** (manual, by Dailen, never by the implementer; script `scripts/verify-clients.md`): gate V1 (Tier A) and V2 (Tier B) on the Windows and Arch machines, with throwaway `LOADOUT_HOME` and client override dirs where supported, run each client's own lister (`claude mcp list`, `codex mcp list`, `pi mcp list`, omp `/mcp list`, Copilot and Cursor MCP views) to confirm written configs load. Clears `[verify]` markers.
+10. **Real-client verification** (manual, by the maintainer, never by the implementer; script `scripts/verify-clients.md`): gate V1 (Tier A) and V2 (Tier B) on a Windows 11 machine and an Arch Linux machine, with throwaway `LOADOUT_HOME` and client override dirs where supported, run each client's own lister (`claude mcp list`, `codex mcp list`, `pi mcp list`, omp `/mcp list`, Copilot and Cursor MCP views) to confirm written configs load. Clears `[verify]` markers.
 11. **CI matrix**: windows-latest, ubuntu-22.04, archlinux container, macos-latest; `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo deny check`, `npm test`, `tsc --noEmit`, bundle build.
 
 ---
@@ -1309,7 +1337,7 @@ Session rules (pasted verbatim at the top of every implementer session; Opus rej
 4. **Done means:** `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` and the brief's acceptance commands pass on the session's OS; CI is green on all legs; `docs/milestones/M<N>.md` lists files changed, tests added, deviations from this spec and any `[verify]` items introduced.
 5. **Dependencies.** Only crates and npm packages named in the brief or in §4. Any other addition is listed with its license in the completion note; `cargo deny check` must pass.
 6. **Scripts.** PowerShell scripts are `.ps1` files run with `pwsh -File`, ASCII only (no em dash characters), never inlined through `bash -Command "..."`. Bash scripts start with `set -euo pipefail`.
-7. **No real-machine actions.** The implementer never runs Loadout against a real profile and never edits real agent configs. `[verify]` checks are run by Dailen at gates V1 and V2.
+7. **No real-machine actions.** The implementer never runs Loadout against a real profile and never edits real agent configs. `[verify]` checks are run by the maintainer at gates V1 and V2.
 
 Opus review checklist (every milestone): the brief's acceptance tests exist and assert behavior (not wiring); ownership invariants (§8.4) hold; no secret value can reach the store, logs or IPC; `agent-loadout-core` has no `std::env`, `dirs::*` or `SystemTime::now` outside `env.rs`; no files outside the list; brand strings come from `brand.rs`.
 
@@ -1405,9 +1433,9 @@ Paths are relative to the repo root; `core/` abbreviates `crates/agent-loadout-c
 - Create: `core/src/secrets/{delivery,render}.rs`; `cli/src/cmd/{exec,env}.rs`, `cli/src/exec/{mod,unix,windows}.rs`; `core/tests/delivery_matrix.rs`; `cli/tests/cli_exec.rs`; `kit/src/bin/fake-mcp-server.rs`.
 - Tests: delivery matrix for Tier A clients; `loadout exec` passes stdin/stdout bytes unchanged to and from `fake-mcp-server`; errors only on stderr with prefix `loadout-exec:`; exit codes 77 and 78; Windows Job Object kills the child when exec is killed; Environment refs run through `op run --environment <id> --no-masking` with name remapping; `OP_SERVICE_ACCOUNT_TOKEN` reaches only `op`, never the server process; `inline` refused for shared targets; with `op` absent, launch-mode entries plan as `blocked: provider_unavailable`.
 
-#### V1 Gate: Tier A real-client verification (Dailen, not the implementer)
+#### V1 Gate: Tier A real-client verification (maintainer, not the implementer)
 
-Run the Tier A sections of `scripts/verify-clients.md` on the Windows machine (WDC-DAILEN1126) and the Arch/Omarchy machine with a throwaway `LOADOUT_HOME` and, where supported, override dirs (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`). Checks: each client's own lister shows the applied server; `loadout exec` starts a stdio server from each client; 1Password prompt behavior on Windows with and without a service account; "1Password CLI not found" path on Arch with keyring overrides; Claude Code `CLAUDE_CONFIG_DIR` and Windows project-key format; Codex project `enabled = false` merge semantics; Claude Desktop MSIX path. Results go to `docs/verify/<client>.md`; failures become fix briefs before M9; cleared items lose their `[verify]` marker in this spec.
+Run the Tier A sections of `scripts/verify-clients.md` on a Windows 11 machine and an Arch Linux machine without the 1Password CLI, with a throwaway `LOADOUT_HOME` and, where supported, override dirs (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`). Checks: each client's own lister shows the applied server; `loadout exec` starts a stdio server from each client; 1Password prompt behavior on Windows with and without a service account; "1Password CLI not found" path on the machine without `op`, with keyring overrides; Claude Code `CLAUDE_CONFIG_DIR` and Windows project-key format; Codex project `enabled = false` merge semantics; Claude Desktop MSIX path. Results go to `docs/verify/<client>.md`; failures become fix briefs before M9; cleared items lose their `[verify]` marker in this spec.
 
 #### M9 Project scope
 
@@ -1421,7 +1449,7 @@ Run the Tier A sections of `scripts/verify-clients.md` on the Windows machine (W
 - Create: `core/src/adapters/{copilot,cursor,vscode_legacy}.rs`; `fixtures/clients/{copilot,cursor,vscode-legacy}/**`; `core/tests/adapters_tier_b.rs`; extend `scripts/verify-clients.md`.
 - Tests: Copilot writes `$COPILOT_HOME/mcp-config.json` (else `~/.copilot/mcp-config.json`) and `<P>/.mcp.json` as one shared file with Claude Code (union of entries); `${NAME}` refs in `command`, `args`, `env` and header values; `tools` filter; never emits `inputs`, `envFile`, `dev` or `sandbox`; legacy `.vscode/mcp.json` and profile `mcp.json` are byte-identical after every op, import works, `${input:...}` values are flagged `needs_manual_secret`; Cursor user and project files with `${env:NAME}`.
 
-#### V2 Gate: Tier B verification (Dailen)
+#### V2 Gate: Tier B verification (maintainer)
 
 VS Code Stable with Copilot and Cursor on Windows, plus project scope for all Tier A and B clients on both machines. Same recording rules as V1.
 
@@ -1431,24 +1459,24 @@ VS Code Stable with Copilot and Cursor on Windows, plus project scope for all Ti
 - Create: `core/src/store/{diff,tags,restore}.rs`; `cli/src/cmd/{tag,show,restore,backup}.rs`; `core/tests/history.rs`; `cli/tests/cli_restore.rs`.
 - Tests: semantic diff goldens; auto tags and 90-day retention with a fake clock; restore of a restore returns the original tree; partial restore by entity; other machines' `machines/*` files untouched; project-manifest write-back requires `--yes`; client-file backup restore goes through CAS.
 
-#### M12 Folder remotes (NAS, Resilio) and merge
+#### M12 Folder remotes and merge
 
 - Spec: §9.6 (folder), §9.8, §9.9.
-- Create: `core/src/remote/{mod,config,folder,unc}.rs`, `core/src/store/merge.rs`; `cli/src/cmd/remote.rs`; `core/tests/{remote_folder,merge_matrix}.rs`.
-- Tests: two TempHome machines converge through a temp "NAS" dir with `repo-per-machine`; unmounted path reports `remote_unreachable` and never blocks local commits; mapped drive letter normalized to UNC through a faked `WNetGetUniversalNameW` trait; partial sibling reports `remote_incomplete`; merge matrix (entity type x change kind x side), never silent local-wins; `loadout restore --from` for repo, mirror and zip.
+- Create: `core/src/remote/{mod,config,folder,manifest,sync_artifacts,unc}.rs`, `core/src/store/merge.rs`; `cli/src/cmd/remote.rs`; `core/tests/{remote_folder,sync_artifacts,merge_matrix}.rs`.
+- Tests: two TempHome machines converge through a temp folder with `repo-per-machine`; each machine writes only under `<store_id>/<machine_id>/` (the sibling subfolder's bytes are unchanged after every push) and `machine.json` is written last; no remote exists after `init`; unmounted path reports `remote_unreachable` and never blocks local commits; mapped drive letter normalized to UNC through a faked `WNetGetUniversalNameW` trait; partial sibling reports `remote_incomplete`; planted sync artifacts (a Syncthing `.sync-conflict-` tag ref, a Dropbox `(conflicted copy)` of `machine.json`, a Resilio `.Conflict` machine dir, a `*.!sync` temp file, a ref not listed in `machine.json`) are ignored, left in place and reported as `sync_artifact_ignored`; `loadout restore --from <folder>` lists machines by label and restores the chosen one (`--machine` by id and by label; ambiguous label fails); merge matrix (entity type x change kind x side), never silent local-wins; `loadout restore --from` for repo, mirror and zip.
 
-#### M13 Git remotes (GitHub)
+#### M13 Git remotes
 
 - Spec: §9.6 (git), §9.7, §9.8.
 - Create: `core/src/remote/{git,credential,gh}.rs`; `cli/src/cmd/git_credential.rs`; `kit/src/bin/gh-stub.rs`; `core/tests/remote_git.rs`.
-- Tests: push and pull against a local bare repo through system git (skipped with a notice when git is absent); `auth = gh` passes the helper flags from §9.6 (asserted with `gh-stub`); no token in env or argv of any spawned git (asserted); "Create private repository" calls `gh repo create --private` on the stub.
+- Tests: push and pull against a local bare repo through system git (skipped with a notice when git is absent); an scp-style SSH URL is passed to git unchanged with `auth = system`; `auth = gh` passes the helper flags from §9.6 (asserted with `gh-stub`); `auth = token` returns the remote's `username`; no token in env or argv of any spawned git (asserted); "Create private repository" calls `gh repo create --private` on the stub.
 
 #### M14 GUI I: shell and typed IPC
 
 - Spec: §4.3, §13.1, Appendix A.
 - Create: `src-tauri/{Cargo.toml,tauri.conf.json,build.rs}`, `src-tauri/capabilities/default.json`, `src-tauri/src/{main,commands}.rs`; `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`; `src/main.tsx`, `src/app/App.tsx`, `src/styles/tokens.css`, `src/app/components/**` (ported per Appendix A), `src/i18n/en.ts`, `src/ipc/{bindings,transport}.ts`, `src/test/mockTransport.ts`; `src/app/App.test.tsx`.
 - Build: SkillDock shell port with attribution headers; identifier `dev.dailen.loadout`; CSP on; English strings only; scope switcher (System only); empty pages; Plugins and Publish hidden by flag.
-- Acceptance: `npm test`, `npx tsc --noEmit`, `cargo tauri build --debug` on Windows and Linux CI; Dailen signs off shell parity against SkillDock screenshots.
+- Acceptance: `npm test`, `npx tsc --noEmit`, `cargo tauri build --debug` on Windows and Linux CI; the maintainer signs off shell parity against SkillDock screenshots.
 
 #### M15 GUI II: MCP page, Tools page, apply drawer
 
@@ -1466,7 +1494,7 @@ VS Code Stable with Copilot and Cursor on Windows, plus project scope for all Ti
 
 - Spec: §13.5, §13.6 items 4 and 5, §11.9.
 - Create: `src/app/routes/history/**`, `src/app/routes/settings/{versioning,secrets}/**`, `src-tauri/src/commands/{history,remotes,secrets}.rs`; component tests; `tests/e2e/smoke_history.spec.ts`.
-- Tests: tag, change, restore tag, apply; one-click rollback of an apply; NAS folder remote status; "1Password CLI not found" provider state; missing-secret checklist after restore into a fresh TempHome.
+- Tests: tag, change, restore tag, apply; one-click rollback of an apply; folder remote status; first-run "Add a backup remote" step where "Not now" leaves `remotes.toml` empty and Settings shows "No backup remote"; "Restore from remote..." machine picker; "1Password CLI not found" provider state; missing-secret checklist after restore into a fresh TempHome.
 
 #### M18 Skills core and CLI
 
@@ -1515,16 +1543,16 @@ Plugins and marketplaces, optional catalog sources (official MCP Registry, skill
 | # | Topic | Decision | Where |
 |---|---|---|---|
 | 1 | Name | Project/repo/package **agent-loadout** (repo `DailenG/agent-loadout`); display name **Loadout**; crates `agent-loadout-core` (lib), `agent-loadout` (CLI, bin `loadout`, `cargo install agent-loadout`), `agent-loadout-app` (Tauri); AUR `agent-loadout`/`agent-loadout-bin`; winget `DailenG.AgentLoadout`; launcher `loadout exec`, `.loadout/`, `LOADOUT_HOME`, app id `dev.dailen.loadout` unchanged; no npm package; no fallback name | Conventions, §4.1, §16, App. C |
-| 2 | Data dir | Per-OS standard (`%LOCALAPPDATA%\Loadout`, `~/.local/share/loadout`, `~/Library/Application Support/Loadout`); never inside Resilio (detect and warn) | §4.5 |
+| 2 | Data dir | Per-OS standard (`%LOCALAPPDATA%\Loadout`, `~/.local/share/loadout`, `~/Library/Application Support/Loadout`); never inside a file-sync root (detect and warn). Backup folder remotes inside synced folders are fine (per-machine subfolders) | §4.5, §9.6 |
 | 3 | Plugins, marketplace | Deferred post-v1 | §2, §20.3 |
 | 4 | VS Code | Stable with GitHub Copilot; write Copilot native files; `.vscode/mcp.json` legacy read/import only | §7.3 |
 | 5 | Windsurf, Devin Desktop | Not installed: Tier D, best effort, M22 | §7.3, §20.3 |
 | 6 | 1Password delivery | `loadout exec` resolves at server start, values never on disk; service account optional to avoid prompts | §11.4, §11.5 |
-| 7 | 1Password Environments | One Environment for MCP secrets; CLI 2.42.0 on Windows, absent on Arch (graceful degrade); never `op environment read` | §11.2, §11.11 |
+| 7 | 1Password Environments | One Environment for MCP secrets; CLI optional per machine (graceful degrade when absent or too old); never `op environment read` | §11.2, §11.11 |
 | 8 | Manifest | `.loadout/project.toml` (shared) and `project.local.toml` (private); new manifests default to private | §5.5 |
 | 9 | Project skills | Links, hidden through `.git/info/exclude` | §12.3 |
 | 10 | Apply | Instant; every apply is a history commit with one-click rollback | §8.7, §9.2 |
-| 11 | Remotes | NAS first (foxnas SMB/UNC, CIFS mount on Linux), then GitHub private repo via `gh`/git credentials, then Resilio repo-per-machine | §9.6 |
+| 11 | Remotes | Two generic kinds: any git URL with the user's own credentials (GitHub, GitLab, Gitea, self-hosted, SSH), or any local, network or synced folder written as one subfolder per machine; restore lists machines; sync conflict and temp files ignored. No default remote, none privileged or ordered; first run offers to add one. A user's own remotes live in `state/remotes.toml`, never in the spec | §9.6, §15.2 |
 | 12 | Claude Desktop | Windows only | §7.3 |
 | 13 | Language | English only | §4.3 |
 | 14 | Windows signing | Azure Trusted Signing through the existing code-signing kit; unsigned local dev builds | §16.1 |
