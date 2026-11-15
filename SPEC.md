@@ -1,10 +1,10 @@
-# Loadout: Specification
+# Loadout (agent-loadout): Specification
 
-Status: draft v2 for review (2026-11-14), formerly "SkillDock Next". Dailen's answers are folded in (§21 Decisions). Spec only; nothing here is implemented.
+Status: draft v2 for review (2026-11-14), formerly "SkillDock Next"; project renamed to `agent-loadout` on 2026-11-14 (display name and binary stay "Loadout"/`loadout`). Dailen's answers are folded in (§21 Decisions). Spec only; nothing here is implemented.
 
 Conventions:
 
-- Product name: **Loadout** (identifiers and the name-collision check are in Appendix C). Every brand string (binary, data dir, manifest dir, env vars, app id, commit-trailer and keyring prefixes) comes from one module, `loadout-core::brand`.
+- Names: project, repository and package name **agent-loadout**; product display name **Loadout**; typed CLI binary `loadout`. Identifiers and the name-collision check are in Appendix C. Every brand string (binary, data dir, manifest dir, env vars, app id, commit-trailer and keyring prefixes, package and repo names) comes from one module, `agent_loadout_core::brand`.
 - MUST / SHOULD / MAY carry RFC 2119 meaning.
 - `[verify]` marks a client behavior that was not confirmed against primary docs on 2026-11-14. The adapter that depends on it MUST ship with a fixture test plus a manual check against the real client before it is marked stable.
 - `~` is the user profile directory. On Windows this is the Known Folder `FOLDERID_Profile` (`%USERPROFILE%`), **never** `$HOME`. `<P>` is a project root folder.
@@ -90,9 +90,9 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 ### 4.1 Repository and crates
 
 ```
-loadout/                       (Cargo workspace + npm package)
+agent-loadout/                 (Cargo workspace + private package.json, never published to npm)
   crates/
-    loadout-core/              lib: everything below, no Tauri dependency
+    agent-loadout-core/        lib: everything below, no Tauri dependency
       src/brand.rs             single source of brand strings (names, dirs, env var, app id, prefixes)
       src/env.rs               Env + Fs facade (paths, OS, vars); injected everywhere
       src/model/               schemas: server, secrets, project, machine, applied, settings, skill-meta
@@ -106,16 +106,16 @@ loadout/                       (Cargo workspace + npm package)
       src/skills/              skill store, frontmatter, link/junction/copy, agents-cli scan
       src/migrate/             SkillDock importer, first-run client scan
       src/events.rs            typed change events (for GUI watchers and CLI output)
-    loadout-cli/               bin `loadout` (clap); thin over loadout-core; also `loadout exec`, `loadout git-credential`
-    loadout-testkit/           dev-dependency: temp HOME builder, fixtures, fake providers, op/gh stubs
-  src-tauri/                   bin: Tauri app (identifier dev.dailen.loadout); commands are thin wrappers over loadout-core
+    agent-loadout/             CLI crate (`cargo install agent-loadout`), bin `loadout` (clap); thin over agent-loadout-core; also `loadout exec`, `loadout git-credential`
+    agent-loadout-testkit/     dev-dependency (unpublished): temp HOME builder, fixtures, fake providers, op/gh stubs
+  src-tauri/                   crate `agent-loadout-app` (unpublished), bin: Tauri app (productName Loadout, `mainBinaryName` `agent-loadout-app` so it never clashes with `loadout.exe` on case-insensitive file systems; identifier dev.dailen.loadout); commands are thin wrappers over agent-loadout-core
   src/                         React frontend (ported from SkillDock)
   fixtures/                    client config fixtures + golden outputs (shared by Rust tests)
 ```
 
 Rules:
 
-- `loadout-core` MUST NOT read process-global state directly (`std::env`, `dirs::home_dir`, `SystemTime::now`). It receives an `Env` (paths, OS, env vars, clock) and an `Fs` trait object. Tests use `RootedFs`, which panics on any path outside the temp root. This is the guarantee that tests never touch real agent configs.
+- `agent-loadout-core` MUST NOT read process-global state directly (`std::env`, `dirs::home_dir`, `SystemTime::now`). It receives an `Env` (paths, OS, env vars, clock) and an `Fs` trait object. Tests use `RootedFs`, which panics on any path outside the temp root. This is the guarantee that tests never touch real agent configs.
 - Errors are typed: `enum CoreError { code: ErrorCode, ... }` with stable `snake_case` codes (`parse_error`, `foreign_entry`, `missing_secret`, ...). The frontend and CLI localize from codes. No localized strings cross the IPC boundary as state.
 - All mutating core APIs go through `Store::transaction(op, |tx| ...)`, which validates, writes store files, runs the leak scanner and commits once (§9.2).
 - One cross-process lock `<LOADOUT_HOME>/state/loadout.lock` (`fd-lock`) is held by any process mutating the store, ledger or client files. GUI and CLI can run concurrently; the second waits up to 10 s, then fails with `locked`.
@@ -142,7 +142,7 @@ Rules:
 flowchart LR
   GUI[React UI] -- typed invoke/events --> APP[src-tauri]
   CLI[loadout CLI] --> CORE
-  APP --> CORE[loadout-core]
+  APP --> CORE[agent-loadout-core]
   CORE --> STORE[(store git repo)]
   CORE --> STATE[(state: ledger, remotes, trust)]
   CORE --> FILES[client config files and skill dirs]
@@ -851,7 +851,7 @@ Rules (each is a release-blocking test or review checklist item):
 4. **Any git host or none.** GitHub is one URL among many; folders (NAS, Resilio) are first-class.
 5. **Data is plain and portable.** The store is a git repo of TOML and Markdown readable without this app; exports are zip files. A user can leave and keep everything.
 6. **No runtime fetches from third parties.** No unpinned `npx` wrappers in client configs, no scraping, no silent `npx --yes skills` download (SkillDock did all three). Optional network features (catalogs, skill update checks, tool discovery for remote servers, app updates) are off or degrade to "unreachable" without breaking anything.
-7. **Updater is optional and configurable.** Endpoint and public key live in Settings with a default pointing at the release repo of this project; the app runs normally with the updater disabled. Linux packages (AUR, deb, rpm) disable the in-app updater.
+7. **Updater is optional and configurable.** Endpoint and public key live in Settings with a default pointing at the release repo of this project (`DailenG/agent-loadout`); the app runs normally with the updater disabled. Linux packages (AUR, deb, rpm) disable the in-app updater.
 8. **Skill content is vendored** in the store; upstream repos are only update sources. A deleted upstream shows `source_unreachable` and nothing else changes.
 9. **Third-party CLIs are optional providers** (`op`, `gh`, `git`, `skills`). Each missing one disables only its own feature, with a clear status.
 
@@ -1230,7 +1230,7 @@ First run: detect clients, run the Scan (§8.6) over user scope; offer "Add proj
 - `ReplaceFileW` atomic replace; retry on sharing violations (editors and Claude Code hold files briefly).
 - Junctions for skill links; Job Objects in `loadout exec`.
 - Claude Desktop MSIX virtualized config detection (§7.3).
-- Installer: NSIS per-user (no admin) into `%LOCALAPPDATA%\Programs\Loadout`, adds `loadout.exe` to the user `PATH`; optional MSI.
+- Installer: NSIS per-user (no admin) into `%LOCALAPPDATA%\Programs\Loadout`, adds `loadout.exe` to the user `PATH`; optional MSI. winget package id `DailenG.AgentLoadout` (Appendix C).
 - **Code signing**: release builds are signed with **Azure Trusted Signing** through Dailen's existing code-signing kit. Tauri `bundle.windows.signCommand` runs `pwsh -File scripts/sign-windows.ps1 "%1"`, which calls the kit. The kit location, Trusted Signing account, endpoint and certificate profile come from environment variables (`LOADOUT_SIGN_KIT`, `LOADOUT_SIGN_ACCOUNT`, `LOADOUT_SIGN_ENDPOINT`, `LOADOUT_SIGN_PROFILE`) that exist only in the release job (Azure login through a GitHub OIDC federated credential, no stored client secret [verify the kit accepts an existing Azure login]) or on Dailen's Windows machine. When they are absent the script prints "unsigned dev build" and exits 0, so local and implementer builds stay unsigned. Signed: `loadout.exe`, the app executable and the NSIS installer; the release job checks each with `signtool verify /pa`.
 
 ### 16.2 Arch Linux on Hyprland/Wayland (first-class)
@@ -1239,7 +1239,7 @@ First run: detect clients, run the Scan (§8.6) over user scope; offer "Add proj
 - WebKitGTK 4.1 (Tauri 2). Documented and auto-detected workaround toggle for blank windows on some GPU/driver combinations (`WEBKIT_DISABLE_DMABUF_RENDERER=1`), settable in `local-settings.toml` and applied by a launcher wrapper.
 - Native decorations; no custom title bar; works under tiling; file dialogs through xdg-desktop-portal.
 - OS keyring needs a Secret Service provider (gnome-keyring, KWallet, or KeePassXC); `provider_unavailable` with that hint otherwise.
-- Packages: AppImage, `.deb`, `.rpm` from CI; AUR `loadout-bin` (from release tarball) and `loadout` (from source) PKGBUILDs maintained in `packaging/aur/`. In-app updater disabled in AUR/deb/rpm builds.
+- Packages: AppImage, `.deb`, `.rpm` from CI; AUR `agent-loadout-bin` (from release tarball) and `agent-loadout` (from source) PKGBUILDs maintained in `packaging/aur/`; both install the binary as `loadout`. In-app updater disabled in AUR/deb/rpm builds.
 - 1Password CLI is optional and currently absent on Dailen's Arch/Omarchy machine; Loadout degrades as described in §11.11.
 - CI: build on Ubuntu 22.04 (AppImage glibc baseline) and an `archlinux:latest` container job running `cargo test --workspace`, `npm test` and `makepkg --nobuild` validation.
 
@@ -1249,7 +1249,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 
 ### 16.4 Updates
 
-`tauri-plugin-updater` only on Windows (and AppImage), endpoint and public key configurable, default pointing at this project's GitHub releases, off switch in Settings. Release signing key is the project's own (SkillDock's fork key is not reused).
+`tauri-plugin-updater` only on Windows (and AppImage), endpoint and public key configurable, default pointing at this project's GitHub releases (`https://github.com/DailenG/agent-loadout/releases/latest/download/latest.json`), off switch in Settings. Release signing key is the project's own (SkillDock's fork key is not reused).
 
 ---
 
@@ -1281,7 +1281,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 
 ## 19. Testing strategy
 
-1. **Hermetic environment.** `loadout-testkit::TempHome` builds a temp root with `home/`, `appdata/`, `localappdata/`, `xdg/`, and projects; produces an `Env` and `RootedFs`. Any access outside the root panics. CLI tests run with `env_clear()`, pass `--home`, and set only `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`XDG_*`/`CODEX_HOME`/`COPILOT_HOME`/`CLAUDE_CONFIG_DIR`/`PI_CODING_AGENT_DIR`/`LOADOUT_HOME` inside the temp root and a stub-only `PATH`. No test may touch real agent configs, real secrets, the real keyring, a real `op`/`gh`, or the network (§20.1).
+1. **Hermetic environment.** `agent_loadout_testkit::TempHome` builds a temp root with `home/`, `appdata/`, `localappdata/`, `xdg/`, and projects; produces an `Env` and `RootedFs`. Any access outside the root panics. CLI tests run with `env_clear()`, pass `--home`, and set only `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`XDG_*`/`CODEX_HOME`/`COPILOT_HOME`/`CLAUDE_CONFIG_DIR`/`PI_CODING_AGENT_DIR`/`LOADOUT_HOME` inside the temp root and a stub-only `PATH`. No test may touch real agent configs, real secrets, the real keyring, a real `op`/`gh`, or the network (§20.1).
 2. **Fixtures.** `fixtures/clients/<client>/<case>/` with real-world-shaped inputs: comments, CRLF, BOM, unicode, trailing commas (JSONC), unrelated keys, foreign servers, legacy shapes (Codex `[mcp.servers]`, Gemini `httpUrl`/`url`, OpenCode command arrays, Continue arrays), a large sanitized `~/.claude.json` with `projects` map.
 3. **Golden tests** (`insta`): `to_native` per client x transport x delivery mode; upsert/remove/disable resulting file text; effective config for a fixture folder tree; semantic diffs; plan rendering; migration of a fixture `~/.skilldock` (including SkillDock-written `mcp-filter`/`mcp-remote` wrappers and plaintext secrets).
 4. **Property tests** (`proptest`): no-op edits are byte-identical; upsert-then-remove restores original bytes; foreign entries byte-identical after any operation; canonicalization idempotent.
@@ -1311,7 +1311,7 @@ Session rules (pasted verbatim at the top of every implementer session; Opus rej
 6. **Scripts.** PowerShell scripts are `.ps1` files run with `pwsh -File`, ASCII only (no em dash characters), never inlined through `bash -Command "..."`. Bash scripts start with `set -euo pipefail`.
 7. **No real-machine actions.** The implementer never runs Loadout against a real profile and never edits real agent configs. `[verify]` checks are run by Dailen at gates V1 and V2.
 
-Opus review checklist (every milestone): the brief's acceptance tests exist and assert behavior (not wiring); ownership invariants (§8.4) hold; no secret value can reach the store, logs or IPC; `loadout-core` has no `std::env`, `dirs::*` or `SystemTime::now` outside `env.rs`; no files outside the list; brand strings come from `brand.rs`.
+Opus review checklist (every milestone): the brief's acceptance tests exist and assert behavior (not wiring); ownership invariants (§8.4) hold; no secret value can reach the store, logs or IPC; `agent-loadout-core` has no `std::env`, `dirs::*` or `SystemTime::now` outside `env.rs`; no files outside the list; brand strings come from `brand.rs`.
 
 ### 20.2 Order and client tiers
 
@@ -1338,13 +1338,13 @@ flowchart LR
 
 ### 20.3 Milestone briefs
 
-Paths are relative to the repo root; `core/` abbreviates `crates/loadout-core/`, `cli/` abbreviates `crates/loadout-cli/`, `kit/` abbreviates `crates/loadout-testkit/`. Every test listed is new in that milestone.
+Paths are relative to the repo root; `core/` abbreviates `crates/agent-loadout-core/`, `cli/` abbreviates `crates/agent-loadout/`, `kit/` abbreviates `crates/agent-loadout-testkit/`. Every test listed is new in that milestone.
 
 #### M0 Bootstrap
 
 - Spec: §4.1, §4.5, §18, §19 item 1, Appendix C.
 - Create: `Cargo.toml` (workspace), `rust-toolchain.toml`, `deny.toml`, `.github/workflows/ci.yml`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `scripts/check-no-baked-ids.sh`; `core/Cargo.toml`, `core/src/{lib,brand,env,fs,error,paths}.rs`; `cli/Cargo.toml`, `cli/src/main.rs`; `kit/Cargo.toml`, `kit/src/{lib,temp_home,rooted_fs}.rs`.
-- Build: brand constants (product name, binary, data dir names per OS, `LOADOUT_HOME`, `.loadout`, `dev.dailen.loadout`, trailer prefix `Loadout-`, keyring service `loadout`); `Env` (OS, known folders, vars, clock) built from the process only in `cli/`; `Fs` trait with `RealFs` and `RootedFs`; `paths::loadout_home(&Env)` per §4.5 including sync-root detection; `loadout --version`; `loadout doctor --paths [--json]`.
+- Build: brand constants (product name `Loadout`, project/package name `agent-loadout`, binary `loadout`, data dir names per OS, `LOADOUT_HOME`, `.loadout`, `dev.dailen.loadout`, trailer prefix `Loadout-`, keyring service `loadout`, repo `DailenG/agent-loadout`); `cli/Cargo.toml` declares package `agent-loadout` with `[[bin]] name = "loadout"`; `Env` (OS, known folders, vars, clock) built from the process only in `cli/`; `Fs` trait with `RealFs` and `RootedFs`; `paths::loadout_home(&Env)` per §4.5 including sync-root detection; `loadout --version`; `loadout doctor --paths [--json]`.
 - Tests: `core/tests/paths.rs` (Windows/Linux/macOS defaults from a fake `Env`; `HOME` ignored on Windows; `LOADOUT_HOME` override; a `.sync/ID` ancestor yields `sync_root_detected` with kind `resilio`); `kit/tests/rooted_fs.rs` (outside-root access panics); `cli/tests/cli_doctor.rs`.
 - Acceptance: `cargo test --workspace`; `scripts/check-no-baked-ids.sh` passes in CI (no `Ov23li`, `Iv1.`, `wanghuan9`).
 - Out of scope: Tauri and frontend (M14).
@@ -1355,7 +1355,7 @@ Paths are relative to the repo root; `core/` abbreviates `crates/loadout-core/`,
 - Create: `core/src/model/{mod,ids,server,secrets,project,machine,applied,clients,settings,skill_meta,validate}.rs`; `fixtures/store/valid/**`, `fixtures/store/invalid/**`; `core/tests/model.rs`; `docs/schema/*.json` (generated by a snapshot test).
 - Build: serde types, `toml_edit` load/save that keeps comments and unknown keys, validation per §5.2 with typed `ErrorCode`s, `schemars` export.
 - Tests: each invalid fixture yields its expected code; load then save of every valid fixture is byte-identical; a private-only project (`project.local.toml` with `id`) validates; unknown `enable.clients` id is a warning and survives a rewrite.
-- Acceptance: `cargo test -p loadout-core --test model`.
+- Acceptance: `cargo test -p agent-loadout-core --test model`.
 
 #### M2 Store
 
@@ -1501,7 +1501,7 @@ VS Code Stable with Copilot and Cursor on Windows, plus project scope for all Ti
 #### M23 Packaging, signing, release
 
 - Spec: §16.
-- Create: `packaging/aur/{loadout,loadout-bin}/PKGBUILD`, `scripts/sign-windows.ps1`, `.github/workflows/release.yml`, `docs/user-guide.md`, `docs/adapters.md`; modify `src-tauri/tauri.conf.json` (bundle, `signCommand`, updater).
+- Create: `packaging/aur/{agent-loadout,agent-loadout-bin}/PKGBUILD`, `packaging/winget/` manifest for `DailenG.AgentLoadout`, `scripts/sign-windows.ps1`, `.github/workflows/release.yml`, `docs/user-guide.md`, `docs/adapters.md`; modify `src-tauri/tauri.conf.json` (bundle, `signCommand`, updater).
 - Tests: CI builds NSIS, AppImage, deb, rpm; `makepkg --nobuild` in the Arch container; unsigned local build works without signing variables; release job signs with Azure Trusted Signing and verifies with `signtool verify /pa`; app fully usable with updater disabled and no network.
 
 #### Post-v1 (not scheduled)
@@ -1514,7 +1514,7 @@ Plugins and marketplaces, optional catalog sources (official MCP Registry, skill
 
 | # | Topic | Decision | Where |
 |---|---|---|---|
-| 1 | Name | **Loadout**; crates `loadout-core`/`loadout-cli`, CLI `loadout`, launcher `loadout exec`, app id `dev.dailen.loadout`; fallback `mcp-loadout` | Conventions, App. C |
+| 1 | Name | Project/repo/package **agent-loadout** (repo `DailenG/agent-loadout`); display name **Loadout**; crates `agent-loadout-core` (lib), `agent-loadout` (CLI, bin `loadout`, `cargo install agent-loadout`), `agent-loadout-app` (Tauri); AUR `agent-loadout`/`agent-loadout-bin`; winget `DailenG.AgentLoadout`; launcher `loadout exec`, `.loadout/`, `LOADOUT_HOME`, app id `dev.dailen.loadout` unchanged; no npm package; no fallback name | Conventions, §4.1, §16, App. C |
 | 2 | Data dir | Per-OS standard (`%LOCALAPPDATA%\Loadout`, `~/.local/share/loadout`, `~/Library/Application Support/Loadout`); never inside Resilio (detect and warn) | §4.5 |
 | 3 | Plugins, marketplace | Deferred post-v1 | §2, §20.3 |
 | 4 | VS Code | Stable with GitHub Copilot; write Copilot native files; `.vscode/mcp.json` legacy read/import only | §7.3 |
@@ -1563,36 +1563,38 @@ Plugins and marketplaces, optional catalog sources (official MCP Registry, skill
 - 1Password Environments, programmatic read and `op run --environment`: https://www.1password.dev/environments/read-environment-variables
 - 1Password CLI 2.42.0 local help (`op environment secret list --help`, `op run --help`): `--environment`, `--no-masking`, `--format json`, values of non-concealed secrets returned without `--reveal`
 - AUR `1password-cli` (2.41.1 on 2026-11-14): https://aur.archlinux.org/packages/1password-cli ; Omarchy base package list includes `1password-cli`: https://github.com/basecamp/omarchy/blob/master/install/omarchy-base.packages
-- Name checks: crates.io API, registry.npmjs.org, AUR RPC v5, `winget search`/`winget show`, GitHub search API (all 2026-11-14)
+- Name checks for `loadout`, `mcp-loadout` and `agent-loadout`: crates.io API, registry.npmjs.org, AUR RPC v5, `winget search`/`winget show`, GitHub search (all 2026-11-14)
 - SkillDock source (read-only): `../skilldock` at `181b52b`
 
 ## Appendix C: Name and collision check (2026-11-14)
 
-Decision: **Loadout**.
+Decision: project, repository and package name **agent-loadout**; product display name **Loadout**; typed CLI binary `loadout`.
 
 | Identifier | Value |
 |---|---|
 | Product / window title | Loadout |
+| Project / package name | `agent-loadout` |
 | CLI binary | `loadout` (`loadout.exe`); launcher subcommand `loadout exec` |
-| Crates | `loadout-core` (lib), `loadout-cli` (bin `loadout`), `loadout-testkit` (unpublished) |
+| Crates | `agent-loadout-core` (lib), `agent-loadout` (CLI, bin `loadout`; install with `cargo install agent-loadout`), `agent-loadout-app` (Tauri app, unpublished), `agent-loadout-testkit` (unpublished) |
 | Tauri identifier | `dev.dailen.loadout` |
 | Data dir | `%LOCALAPPDATA%\Loadout`, `${XDG_DATA_HOME:-~/.local/share}/loadout`, `~/Library/Application Support/Loadout` |
 | Env override | `LOADOUT_HOME` |
 | Project dir | `<P>/.loadout/` (`project.toml`, `project.local.toml`) |
-| GitHub repo | `DailenG/loadout` (available) |
-| winget id | `DailenG.Loadout` (moniker `loadout` is taken) |
-| AUR | `loadout` (source), `loadout-bin` (release tarball) |
+| GitHub repo | `DailenG/agent-loadout` |
+| winget id | `DailenG.AgentLoadout` |
+| AUR | `agent-loadout` (source), `agent-loadout-bin` (release tarball) |
+| npm | none (the frontend `package.json` is private) |
 
 Collision results:
 
-| Registry | `loadout` | `loadout-mcp` | `mcp-loadout` |
+| Registry | `agent-loadout` (package/repo) | `loadout` (binary, display name) | `mcp-loadout` (alternative) |
 |---|---|---|---|
-| crates.io | **Taken**: `loadout` 0.1.0 (massa-kj, "declarative environment management tool", 38 downloads). `loadout-core` and `loadout-cli` are free | free | free |
-| npm | **Taken**: stale 2022 "Markout module loader" (we publish nothing to npm) | **Taken**: MCP server bridging Agent Skills (genecyber, 0.1.0, 2026-01), same niche | free |
-| AUR | free (only `aiman-git` mentions "Loadout" in its description) | free | free |
-| winget | **Taken**: `TheCodeSaiyan.Loadout` 0.118.1, moniker `loadout`, an AI-agent launcher CLI (ntatschner/loadout-cli) that ships a `loadout` binary for Windows, Linux (deb/rpm) and macOS; msstore "LOADOUT Launcher" | free | free |
-| GitHub | User `loadout` taken (inactive). Same-niche repos: migsilva89/loadout (Swift macOS app, about 104 stars, shows what coding assistants load including MCP servers), elleryfamilia/loadout (Rust context kits for agents; binary `load`), MK27MK/loadout (Claude Code harness manager), sukoji/loadout, netwaif/loadout | no repo with that exact name | no repo with that exact name |
+| crates.io | free | **Taken**: `loadout` 0.1.0 (massa-kj, "declarative environment management tool", 38 downloads) | free |
+| npm | **Taken**: `agent-loadout` 1.2.0 (conorluddy, terminal bootstrap tool, 2026-03); we publish nothing to npm | **Taken**: stale 2022 "Markout module loader" | free |
+| AUR | free | free (only `aiman-git` mentions "Loadout" in its description) | free |
+| winget | no package found | **Taken**: `TheCodeSaiyan.Loadout` 0.118.1, moniker `loadout`, an AI-agent launcher CLI (ntatschner/loadout-cli) that ships a `loadout` binary for Windows, Linux (deb/rpm) and macOS; msstore "LOADOUT Launcher" | free |
+| GitHub | small unrelated repos with that name (e.g. JinchengGao-Infty/agent-loadout, 3 stars) | User `loadout` taken (inactive). Same-niche repos: migsilva89/loadout (Swift macOS app, about 104 stars, shows what coding assistants load including MCP servers), elleryfamilia/loadout (Rust context kits for agents; binary `load`), MK27MK/loadout (Claude Code harness manager), sukoji/loadout, netwaif/loadout | no repo with that exact name |
 
-Risk: the name is crowded in exactly this niche. The hard conflict is the **binary name**: ntatschner's `loadout` CLI installs a `loadout` executable through winget, deb and rpm, so `loadout exec` in a client config could start the wrong program. Mitigations, required by this spec: user-scope and private targets reference the launcher by absolute path (§11.5), `loadout doctor` checks that `loadout` on `PATH` answers `loadout --identify` with `dev.dailen.loadout`, and users install with `cargo install loadout-cli` (never `cargo install loadout`).
+Risk: the `agent-loadout` package and repo names are clear on every channel we publish to (crates.io, AUR, winget, GitHub releases); the npm clash does not matter because nothing is published there. The display name stays crowded in this niche, and the hard conflict remains the **binary name**: ntatschner's `loadout` CLI (`TheCodeSaiyan.Loadout`) installs a `loadout` executable through winget, deb and rpm, so `loadout exec` in a client config could start the wrong program. Mitigations, required by this spec: user-scope and private targets reference the launcher by absolute path (§11.5), and `loadout doctor` checks that `loadout` on `PATH` answers `loadout --identify` with `dev.dailen.loadout`. The crates.io name `loadout` belongs to an unrelated crate, so documentation always says `cargo install agent-loadout`.
 
-Fallback: **`mcp-loadout`** (free on all five registries checked). `loadout-mcp` is free on crates.io, AUR, winget and GitHub but taken on npm by an MCP/Agent Skills project, which invites confusion. Switch if a release channel blocks `loadout` or the PATH collision shows up on Dailen's machines. All brand strings live in `core/src/brand.rs` (M0), so a rename touches that module, the crate names and the docs.
+Alternative (not a planned fallback): `mcp-loadout` is free on all five registries checked. All brand strings live in `core/src/brand.rs` (M0), so a later rename touches that module, the crate names and the docs.
