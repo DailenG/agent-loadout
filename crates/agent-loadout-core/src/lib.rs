@@ -9,6 +9,7 @@ pub mod brand;
 pub mod env;
 pub mod error;
 pub mod fs;
+pub mod model;
 pub mod paths;
 
 pub use env::{Clock, Env, EnvBuilder, FixedClock, KnownFolder, Os, SystemClock};

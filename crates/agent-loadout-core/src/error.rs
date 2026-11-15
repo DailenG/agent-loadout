@@ -8,10 +8,36 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorCode {
-    /// A path argument or override is unusable (for example relative).
+    /// A path argument, override or path field is unusable (for example
+    /// relative, or personal where a placeholder is required).
     InvalidPath,
     /// The user profile directory could not be determined.
     ProfileNotFound,
+    /// A file could not be read or written.
+    IoError,
+    /// A file is not valid TOML.
+    ParseError,
+    /// A store file declares a `schema` version this build does not read.
+    UnsupportedSchema,
+    /// A required field is absent.
+    MissingField,
+    /// A field has the wrong type or a value outside its allowed set.
+    InvalidValue,
+    /// An identifier breaks the rules of SPEC 5.1.
+    InvalidId,
+    /// An id disagrees with the file or directory name that holds it.
+    IdMismatch,
+    /// A field is present where the rest of the definition forbids it
+    /// (for example `url` on a stdio server).
+    FieldNotAllowed,
+    /// A `client.<id>` key is not in that client's passthrough allowlist.
+    PassthroughNotAllowed,
+    /// A template or secret reference does not parse (SPEC 11.2).
+    InvalidRef,
+    /// A client id is not in the adapter table. Warning: kept as written.
+    UnknownClient,
+    /// An OS name is not `windows`, `linux` or `macos`. Warning: kept as written.
+    UnknownOs,
 }
 
 impl ErrorCode {
@@ -19,6 +45,18 @@ impl ErrorCode {
         match self {
             ErrorCode::InvalidPath => "invalid_path",
             ErrorCode::ProfileNotFound => "profile_not_found",
+            ErrorCode::IoError => "io_error",
+            ErrorCode::ParseError => "parse_error",
+            ErrorCode::UnsupportedSchema => "unsupported_schema",
+            ErrorCode::MissingField => "missing_field",
+            ErrorCode::InvalidValue => "invalid_value",
+            ErrorCode::InvalidId => "invalid_id",
+            ErrorCode::IdMismatch => "id_mismatch",
+            ErrorCode::FieldNotAllowed => "field_not_allowed",
+            ErrorCode::PassthroughNotAllowed => "passthrough_not_allowed",
+            ErrorCode::InvalidRef => "invalid_ref",
+            ErrorCode::UnknownClient => "unknown_client",
+            ErrorCode::UnknownOs => "unknown_os",
         }
     }
 }
