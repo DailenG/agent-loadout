@@ -15,7 +15,7 @@ pub enum ErrorCode {
     ProfileNotFound,
     /// A file could not be read or written.
     IoError,
-    /// A file is not valid TOML.
+    /// A file is not valid UTF-8, or not valid in its format (TOML, JSON, JSONC).
     ParseError,
     /// A store file declares a `schema` version this build does not read.
     UnsupportedSchema,
@@ -46,6 +46,9 @@ pub enum ErrorCode {
     AlreadyExists,
     /// No entity with this id exists.
     NotFound,
+    /// A native client file parses, but a value on the path being read or
+    /// edited has another kind (for example `mcpServers` is an array).
+    UnexpectedShape,
 }
 
 impl ErrorCode {
@@ -69,6 +72,7 @@ impl ErrorCode {
             ErrorCode::GitError => "git_error",
             ErrorCode::AlreadyExists => "already_exists",
             ErrorCode::NotFound => "not_found",
+            ErrorCode::UnexpectedShape => "unexpected_shape",
         }
     }
 }

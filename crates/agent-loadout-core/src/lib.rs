@@ -8,6 +8,7 @@
 pub mod brand;
 pub mod env;
 pub mod error;
+pub mod formats;
 pub mod fs;
 pub mod model;
 pub mod paths;
