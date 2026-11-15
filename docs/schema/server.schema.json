@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout MCP server (store/servers/<id>.toml)",
+  "description": "`store/servers/<id>.toml`: one MCP server.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Arguments (stdio).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "client": {
+      "description": "Native passthrough fields per client id, checked against that\nclient's allowlist; `native_name` is accepted for every client.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "command": {
+      "description": "Executable (stdio).",
+      "type": "string"
+    },
+    "cwd": {
+      "description": "Working directory (stdio); may use `${home}`, `${project}`, `${loadout_home}`.",
+      "type": "string"
+    },
+    "delivery": {
+      "$ref": "#/$defs/Delivery"
+    },
+    "description": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "enable": {
+      "description": "System scope (user-wide) enablement.",
+      "$ref": "#/$defs/Enable"
+    },
+    "env": {
+      "description": "Environment (stdio); values are references or literal non-secrets.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "headers": {
+      "description": "HTTP headers (http, sse); values may hold references.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "id": {
+      "description": "Server id; equals the file name.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "meta": {
+      "$ref": "#/$defs/Meta"
+    },
+    "os": {
+      "description": "Per-OS overrides, deep-merged over the definition.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ServerOverride"
+      }
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tools": {
+      "description": "Tool filters, written only through native fields.",
+      "$ref": "#/$defs/ToolFilter"
+    },
+    "transport": {
+      "description": "`stdio`, `http` or `sse`.",
+      "$ref": "#/$defs/Transport"
+    },
+    "url": {
+      "description": "Endpoint (http, sse).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "id"
+  ],
+  "$defs": {
+    "ClientSelection": {
+      "description": "\"all-detected\" or a list of client ids",
+      "oneOf": [
+        {
+          "const": "all-detected"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "Delivery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/DeliveryMode"
+        }
+      }
+    },
+    "DeliveryMode": {
+      "description": "How secret references reach the server (SPEC 11.4).",
+      "type": "string",
+      "enum": [
+        "auto",
+        "env",
+        "launch",
+        "command",
+        "inline"
+      ]
+    },
+    "Enable": {
+      "type": "object",
+      "properties": {
+        "clients": {
+          "description": "Client ids, or \"all-detected\". Unknown ids are a warning and are kept.",
+          "$ref": "#/$defs/ClientSelection"
+        }
+      }
+    },
+    "Meta": {
+      "type": "object",
+      "properties": {
+        "homepage": {
+          "type": "string"
+        },
+        "origin": {
+          "description": "`manual`, `imported:<client>`, `migrated:skilldock` or `catalog:<source>`.",
+          "type": "string"
+        }
+      }
+    },
+    "ServerOverride": {
+      "description": "Field overrides deep-merged over a server (`[os.<name>]`, machine overlay).",
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "ToolFilter": {
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Only these tools.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Never these tools.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Transport": {
+      "type": "string",
+      "enum": [
+        "stdio",
+        "http",
+        "sse"
+      ]
+    }
+  }
+}

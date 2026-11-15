@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout portable settings (store/settings.toml)",
+  "type": "object",
+  "properties": {
+    "agents_cli_compat": {
+      "description": "Scan `~/.agents/skills` read-only (SPEC 12.4).",
+      "type": "boolean"
+    },
+    "apply_mode": {
+      "$ref": "#/$defs/ApplyMode"
+    },
+    "list_view": {
+      "description": "List view preferences, owned by the GUI.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "new_server_enable": {
+      "$ref": "#/$defs/NewItemEnable"
+    },
+    "new_skill_enable": {
+      "$ref": "#/$defs/NewItemEnable"
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "theme": {
+      "$ref": "#/$defs/Theme"
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "ApplyMode": {
+      "description": "When edits reach client files.",
+      "oneOf": [
+        {
+          "description": "Apply with every edit (default).",
+          "type": "string",
+          "const": "instant"
+        },
+        {
+          "description": "Collect changes for an explicit apply.",
+          "type": "string",
+          "const": "review"
+        }
+      ]
+    },
+    "NewItemEnable": {
+      "description": "Initial enablement of newly added servers or skills.",
+      "type": "string",
+      "enum": [
+        "all-detected",
+        "none"
+      ]
+    },
+    "Theme": {
+      "type": "string",
+      "enum": [
+        "light",
+        "dark",
+        "system"
+      ]
+    }
+  }
+}

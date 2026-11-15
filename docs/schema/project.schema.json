@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout project manifest (.loadout/project.toml, .loadout/project.local.toml)",
+  "description": "Both manifest files share this schema.",
+  "type": "object",
+  "properties": {
+    "defaults": {
+      "$ref": "#/$defs/ProjectDefaults"
+    },
+    "id": {
+      "description": "Project id. Required in `project.toml`, and in `project.local.toml`\nwhen there is no shared file (a private project).",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "servers": {
+      "description": "Servers by name: overrides (`from`), suppressions (`enabled = false`)\nor complete project-only definitions.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ProjectServer"
+      }
+    },
+    "skills": {
+      "$ref": "#/$defs/ProjectSkills"
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "ClientSelection": {
+      "description": "\"all-detected\" or a list of client ids",
+      "oneOf": [
+        {
+          "const": "all-detected"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "Delivery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/DeliveryMode"
+        }
+      }
+    },
+    "DeliveryMode": {
+      "description": "How secret references reach the server (SPEC 11.4).",
+      "type": "string",
+      "enum": [
+        "auto",
+        "env",
+        "launch",
+        "command",
+        "inline"
+      ]
+    },
+    "Meta": {
+      "type": "object",
+      "properties": {
+        "homepage": {
+          "type": "string"
+        },
+        "origin": {
+          "description": "`manual`, `imported:<client>`, `migrated:skilldock` or `catalog:<source>`.",
+          "type": "string"
+        }
+      }
+    },
+    "ProjectDefaults": {
+      "type": "object",
+      "properties": {
+        "clients": {
+          "description": "Clients that receive project-scope files.",
+          "$ref": "#/$defs/ClientSelection"
+        }
+      }
+    },
+    "ProjectServer": {
+      "description": "A server definition without identity: shared by store servers and\nproject-only servers.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Arguments (stdio).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "client": {
+          "description": "Native passthrough fields per client id, checked against that\nclient's allowlist; `native_name` is accepted for every client.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "clients": {
+          "description": "Clients that get this entry; defaults to `defaults.clients`.",
+          "$ref": "#/$defs/ClientSelection"
+        },
+        "command": {
+          "description": "Executable (stdio).",
+          "type": "string"
+        },
+        "cwd": {
+          "description": "Working directory (stdio); may use `${home}`, `${project}`, `${loadout_home}`.",
+          "type": "string"
+        },
+        "delivery": {
+          "$ref": "#/$defs/Delivery"
+        },
+        "description": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "enabled": {
+          "description": "`false` alone suppresses the same-named system server in this folder.",
+          "type": "boolean"
+        },
+        "env": {
+          "description": "Environment (stdio); values are references or literal non-secrets.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "from": {
+          "description": "Store server used as the base of this entry.",
+          "type": "string"
+        },
+        "headers": {
+          "description": "HTTP headers (http, sse); values may hold references.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "os": {
+          "description": "Per-OS overrides, deep-merged over the definition.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ServerOverride"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tools": {
+          "description": "Tool filters, written only through native fields.",
+          "$ref": "#/$defs/ToolFilter"
+        },
+        "transport": {
+          "description": "`stdio`, `http` or `sse`.",
+          "$ref": "#/$defs/Transport"
+        },
+        "unset": {
+          "description": "Inherited keys to remove, as dotted paths (`env.FOO`, `headers.X-Debug`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "description": "Endpoint (http, sse).",
+          "type": "string"
+        }
+      }
+    },
+    "ProjectSkills": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "description": "Skill ids enabled in this project.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "share": {
+          "description": "`false`: link and hide via `.git/info/exclude`; `true`: copy files.",
+          "type": "boolean"
+        }
+      }
+    },
+    "ServerOverride": {
+      "description": "Field overrides deep-merged over a server (`[os.<name>]`, machine overlay).",
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "ToolFilter": {
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Only these tools.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Never these tools.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Transport": {
+      "type": "string",
+      "enum": [
+        "stdio",
+        "http",
+        "sse"
+      ]
+    }
+  }
+}

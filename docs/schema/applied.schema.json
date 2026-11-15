@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout apply record (store/machines/<machine-id>.applied.toml)",
+  "type": "object",
+  "properties": {
+    "apply_id": {
+      "description": "ULID of the apply run.",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "machine_id": {
+      "description": "ULID; equals the file name without `.applied.toml`.",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "outcome": {
+      "$ref": "#/$defs/ApplyOutcome"
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "store_revision": {
+      "description": "Store commit that was applied.",
+      "type": "string"
+    },
+    "targets": {
+      "description": "One record per target file.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AppliedTarget"
+      }
+    },
+    "time": {
+      "description": "When the run finished (TOML offset date-time).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "trigger": {
+      "$ref": "#/$defs/ApplyTrigger"
+    }
+  },
+  "required": [
+    "schema",
+    "machine_id",
+    "apply_id",
+    "time",
+    "store_revision",
+    "trigger",
+    "outcome"
+  ],
+  "$defs": {
+    "AppliedTarget": {
+      "type": "object",
+      "properties": {
+        "client": {
+          "type": "string"
+        },
+        "create": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "disable": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "file": {
+          "description": "Target file written with `~` or `<P>` placeholders, never a personal path.",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ApplyOutcome"
+        },
+        "project_id": {
+          "description": "Required for project scopes.",
+          "type": "string"
+        },
+        "remove": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "update": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "client",
+        "scope",
+        "file",
+        "create",
+        "update",
+        "remove",
+        "disable",
+        "outcome"
+      ]
+    },
+    "ApplyOutcome": {
+      "description": "Result of an apply run or of one target (also the `Loadout-Apply` trailer).",
+      "type": "string",
+      "enum": [
+        "ok",
+        "partial",
+        "blocked",
+        "failed"
+      ]
+    },
+    "ApplyTrigger": {
+      "description": "What started an apply run.",
+      "type": "string",
+      "enum": [
+        "instant",
+        "review",
+        "restore",
+        "rollback",
+        "pull"
+      ]
+    },
+    "Scope": {
+      "description": "Layer a target belongs to (SPEC 6.1).",
+      "type": "string",
+      "enum": [
+        "user",
+        "project",
+        "project-local"
+      ]
+    }
+  }
+}

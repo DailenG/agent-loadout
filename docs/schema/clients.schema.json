@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout client preferences (store/clients.toml)",
+  "description": "`store/clients.toml`: one table per client id.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    }
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/ClientPrefs"
+  },
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "ClientPrefs": {
+      "description": "Per-client preferences. Keys a client does not use are ignored by it.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "`false` opts the client out of everything; `true` forces it on even\nwhen it is not detected.",
+          "type": "boolean"
+        },
+        "import_profiles": {
+          "description": "VS Code profiles to import from (`vscode-legacy`).",
+          "$ref": "#/$defs/ProfileSelection"
+        },
+        "import_variants": {
+          "description": "VS Code variants to import from (`vscode-legacy`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "profiles": {
+          "description": "Named profiles to target (omp).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "project_local_target": {
+          "description": "Where the private project layer goes (Claude Code: `local-scope`).",
+          "type": "string"
+        },
+        "project_shared_target": {
+          "description": "Where the shared project layer goes (Claude Code: `.mcp.json`).",
+          "type": "string"
+        }
+      }
+    },
+    "ProfileSelection": {
+      "description": "\"default\", \"all\" or a list of profile ids",
+      "oneOf": [
+        {
+          "enum": [
+            "default",
+            "all"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    }
+  }
+}

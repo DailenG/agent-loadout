@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout machine overlay (store/machines/<machine-id>.toml)",
+  "type": "object",
+  "properties": {
+    "enable": {
+      "$ref": "#/$defs/MachineEnable"
+    },
+    "label": {
+      "description": "Human label, also the commit author name.",
+      "type": "string"
+    },
+    "machine_id": {
+      "description": "ULID; equals the file name.",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "os": {
+      "description": "`windows`, `linux` or `macos`.",
+      "type": "string"
+    },
+    "projects": {
+      "description": "Where each project lives on this machine, by project id.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/MachineProject"
+      }
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "secrets": {
+      "description": "Per-machine reference overrides by alias.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/SecretEntry"
+      }
+    },
+    "servers": {
+      "description": "Per-machine field overrides for system servers, by server id.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ServerOverride"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "machine_id",
+    "label",
+    "os"
+  ],
+  "$defs": {
+    "MachineEnable": {
+      "type": "object",
+      "properties": {
+        "exclude_clients": {
+          "description": "Clients never written on this machine.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "MachineProject": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Absolute project folder on this machine.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "SecretEntry": {
+      "description": "One alias. Also the shape of a per-machine override (SPEC 5.6).",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "env_name": {
+          "description": "Environment variable name used by env delivery (default: the alias).",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Provider reference: `env:NAME`, `op://vault/item/field`,\n`op-env://<environment-id>/<NAME>` or `keyring://<service>/<account>`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ]
+    },
+    "ServerOverride": {
+      "description": "Field overrides deep-merged over a server (`[os.<name>]`, machine overlay).",
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "Transport": {
+      "type": "string",
+      "enum": [
+        "stdio",
+        "http",
+        "sse"
+      ]
+    }
+  }
+}
