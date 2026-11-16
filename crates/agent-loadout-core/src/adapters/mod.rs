@@ -4,15 +4,24 @@
 pub mod caps;
 pub mod claude_code;
 pub mod claude_desktop;
+pub mod codex;
 pub mod detect;
 pub mod location;
 pub mod mapper;
+pub mod omp;
+pub mod pi;
 pub mod spec;
 
-pub use spec::{AdapterSpec, ContainerPath, McpSpec, Target, Tier};
+pub use spec::{AdapterSpec, ContainerPath, McpSpec, Profiles, Target, Tier};
 
 /// Every client with an adapter, in table order (SPEC 7.3).
-pub static ADAPTERS: [&AdapterSpec; 2] = [&claude_code::SPEC, &claude_desktop::SPEC];
+pub static ADAPTERS: [&AdapterSpec; 5] = [
+    &claude_code::SPEC,
+    &omp::SPEC,
+    &pi::SPEC,
+    &codex::SPEC,
+    &claude_desktop::SPEC,
+];
 
 /// The adapter for client `id`.
 pub fn adapter(id: &str) -> Option<&'static AdapterSpec> {
