@@ -2,8 +2,14 @@
 //!
 //! [`OpStub::install`] copies the stub into a directory (a `TempHome`'s
 //! `bin/`) as `op` (`op.exe`), next to an `op-stub.json` that says what it
-//! answers: version, signed in or locked, items and Environments. The stub
-//! appends every call (its arguments, never a value) to `op-stub.log`.
+//! answers: version, signed in or locked, items, Environments and an
+//! accepted service account token. The stub appends every call (its
+//! arguments, never a value) to `op-stub.log`, plus the line
+//! [`SERVICE_ACCOUNT_SEEN`] when the call had `OP_SERVICE_ACCOUNT_TOKEN`.
+//!
+//! `op run --environment <id> [--no-masking] -- <cmd>` starts `<cmd>` with
+//! the Environment's variables added; without `--no-masking` it replaces
+//! their values in the command's stdout, as 1Password does.
 //!
 //! `op environment read` is forbidden: the stub refuses it, and dropping
 //! the [`OpStub`] fails the test when it was ever called.
@@ -19,6 +25,10 @@ pub const CONFIG_FILE: &str = "op-stub.json";
 pub const LOG_FILE: &str = "op-stub.log";
 /// Log prefix of a forbidden call.
 pub const FORBIDDEN: &str = "FORBIDDEN";
+/// Log line of a call that had `OP_SERVICE_ACCOUNT_TOKEN` set.
+pub const SERVICE_ACCOUNT_SEEN: &str = "env OP_SERVICE_ACCOUNT_TOKEN";
+/// What `op run` writes instead of a value without `--no-masking`.
+pub const CONCEALED: &str = "<concealed by 1Password>";
 
 /// Signed in, or every call needs sign-in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -41,6 +51,9 @@ pub struct OpStubConfig {
     /// list` (values are included, as 1Password does for "show value by
     /// default" secrets; the parser must drop them).
     pub environments: BTreeMap<String, BTreeMap<String, String>>,
+    /// The service account token `op` accepts, if any.
+    #[serde(default)]
+    pub service_account_token: Option<String>,
 }
 
 impl Default for OpStubConfig {
@@ -50,6 +63,7 @@ impl Default for OpStubConfig {
             mode: OpStubMode::Ok,
             items: BTreeMap::new(),
             environments: BTreeMap::new(),
+            service_account_token: None,
         }
     }
 }
@@ -107,6 +121,13 @@ impl OpStub {
         self.save()
     }
 
+    /// Accept `token` as `OP_SERVICE_ACCOUNT_TOKEN`: with it, calls succeed
+    /// even when the desktop app is locked; another token fails.
+    pub fn set_service_account_token(&mut self, token: &str) -> &mut Self {
+        self.config.service_account_token = Some(token.to_owned());
+        self.save()
+    }
+
     /// Every call so far, one line of arguments each.
     pub fn calls(&self) -> Vec<String> {
         std::fs::read_to_string(self.dir.join(LOG_FILE))
@@ -142,13 +163,18 @@ impl Drop for OpStub {
     }
 }
 
-/// The built `op-stub` binary, uplifted into the profile directory
-/// (`target/debug`) that holds the running test executable (in `deps/` or
-/// `build/<package>/<hash>/out/`). `cargo test --workspace` builds it; a
-/// single-package run of another crate may need `cargo build -p
-/// agent-loadout-testkit --bin op-stub` first.
+/// The built `op-stub` binary. See [`built_binary`].
 pub fn binary() -> PathBuf {
-    let name = format!("op-stub{}", std::env::consts::EXE_SUFFIX);
+    built_binary("op-stub")
+}
+
+/// A binary of this crate (`op-stub`, `fake-mcp-server`), uplifted into the
+/// profile directory (`target/debug`) that holds the running test
+/// executable (in `deps/` or `build/<package>/<hash>/out/`). `cargo test
+/// --workspace` builds them; a single-package run of another crate may need
+/// `cargo build -p agent-loadout-testkit --bins` first.
+pub fn built_binary(stem: &str) -> PathBuf {
+    let name = format!("{stem}{}", std::env::consts::EXE_SUFFIX);
     let exe = std::env::current_exe().expect("current test executable");
     exe.ancestors()
         .skip(1)
@@ -157,7 +183,7 @@ pub fn binary() -> PathBuf {
         .find(|candidate| candidate.is_file())
         .unwrap_or_else(|| {
             panic!(
-                "{name} not found near {}; run `cargo build -p agent-loadout-testkit --bin op-stub` \
+                "{name} not found near {}; run `cargo build -p agent-loadout-testkit --bins` \
                  (`cargo test --workspace` builds it)",
                 exe.display()
             )

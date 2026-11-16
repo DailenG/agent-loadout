@@ -107,9 +107,18 @@ impl TempHome {
         RootedFs::new(self.root())
     }
 
+    /// The keyring file a debug `loadout` binary uses instead of the OS
+    /// keyring when [`TempHome::command`] starts it: a JSON object of
+    /// `"<service>/<account>": "<value>"`.
+    pub fn keyring_file(&self) -> PathBuf {
+        self.root().join("keyring.json")
+    }
+
     /// A command with a cleared environment that sees only this temp root:
-    /// `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_*` and a `PATH`
-    /// holding only `bin/`. The working directory is the temp root.
+    /// `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_*`, a `PATH`
+    /// holding only `bin/`, and `LOADOUT_TEST_KEYRING` (debug builds of
+    /// `loadout` use [`TempHome::keyring_file`] instead of the OS keyring).
+    /// The working directory is the temp root.
     pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
         let mut command = Command::new(program);
         command
@@ -119,7 +128,8 @@ impl TempHome {
             .env("USERPROFILE", self.home())
             .env("APPDATA", self.appdata())
             .env("LOCALAPPDATA", self.local_appdata())
-            .env("PATH", self.bin());
+            .env("PATH", self.bin())
+            .env("LOADOUT_TEST_KEYRING", self.keyring_file());
         for (var, sub) in XDG_DIRS {
             command.env(var, self.xdg().join(sub));
         }
