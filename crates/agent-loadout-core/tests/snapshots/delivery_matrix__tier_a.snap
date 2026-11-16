@@ -1,0 +1,378 @@
+---
+source: crates/agent-loadout-core/tests/delivery_matrix.rs
+expression: golden
+---
+## claude-code (linux)
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "/opt/loadout/bin/loadout",
+      "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "envtoken": {
+      "type": "stdio",
+      "command": "/opt/loadout/bin/loadout",
+      "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+    },
+    "hass": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "HASS_TOKEN": "${HASS_TOKEN}"
+      }
+    },
+    "renamed": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "API_KEY": "${HASS_TOKEN}"
+      }
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.example.test/mcp",
+      "headers": {
+        "X-Team": "fake-team"
+      },
+      "headersHelper": "'/opt/loadout/bin/loadout' secret-header --ref 'LINEAR_TOKEN=keyring://loadout/LINEAR_TOKEN' 'Authorization=Bearer {secret:LINEAR_TOKEN}'"
+    },
+    "stored": {
+      "type": "stdio",
+      "command": "stored-mcp",
+      "args": [],
+      "env": {
+        "STORED_TOKEN": "fake-linear-token-0001"
+      }
+    }
+  }
+}
+
+# delivery
+github: launch
+envtoken: launch
+hass: env
+renamed: env
+linear: command
+tracker: blocked no_secret_free_delivery: Claude Code cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
+stored: inline
+
+## claude-code (windows)
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "envtoken": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+    },
+    "hass": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "HASS_TOKEN": "${HASS_TOKEN}"
+      }
+    },
+    "renamed": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "API_KEY": "${HASS_TOKEN}"
+      }
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.example.test/mcp",
+      "headers": {
+        "X-Team": "fake-team"
+      },
+      "headersHelper": "\"C:\\Program Files\\Loadout\\loadout.exe\" secret-header --ref \"LINEAR_TOKEN=keyring://loadout/LINEAR_TOKEN\" \"Authorization=Bearer {secret:LINEAR_TOKEN}\""
+    },
+    "stored": {
+      "type": "stdio",
+      "command": "stored-mcp",
+      "args": [],
+      "env": {
+        "STORED_TOKEN": "fake-linear-token-0001"
+      }
+    }
+  }
+}
+
+# delivery
+github: launch
+envtoken: launch
+hass: env
+renamed: env
+linear: command
+tracker: blocked no_secret_free_delivery: Claude Code cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
+stored: inline
+
+## omp (linux)
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "/opt/loadout/bin/loadout",
+      "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "envtoken": {
+      "type": "stdio",
+      "command": "/opt/loadout/bin/loadout",
+      "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+    },
+    "hass": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "HASS_TOKEN": "${HASS_TOKEN}"
+      }
+    },
+    "renamed": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "API_KEY": "${HASS_TOKEN}"
+      }
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.example.test/mcp",
+      "headers": {
+        "Authorization": "!'/opt/loadout/bin/loadout' secret get --ref 'LINEAR_TOKEN=keyring://loadout/LINEAR_TOKEN' --template 'Bearer {secret:LINEAR_TOKEN}'",
+        "X-Team": "fake-team"
+      }
+    },
+    "stored": {
+      "type": "stdio",
+      "command": "stored-mcp",
+      "args": [],
+      "env": {
+        "STORED_TOKEN": "fake-linear-token-0001"
+      }
+    }
+  }
+}
+
+# delivery
+github: launch
+envtoken: launch
+hass: env
+renamed: env
+linear: command
+tracker: blocked no_secret_free_delivery: oh-my-pi cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
+stored: inline
+
+## omp (windows)
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "envtoken": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+    },
+    "hass": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "HASS_TOKEN": "${HASS_TOKEN}"
+      }
+    },
+    "renamed": {
+      "type": "stdio",
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "API_KEY": "${HASS_TOKEN}"
+      }
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.example.test/mcp",
+      "headers": {
+        "Authorization": "!\"C:\\Program Files\\Loadout\\loadout.exe\" secret get --ref \"LINEAR_TOKEN=keyring://loadout/LINEAR_TOKEN\" --template \"Bearer {secret:LINEAR_TOKEN}\"",
+        "X-Team": "fake-team"
+      }
+    },
+    "stored": {
+      "type": "stdio",
+      "command": "stored-mcp",
+      "args": [],
+      "env": {
+        "STORED_TOKEN": "fake-linear-token-0001"
+      }
+    }
+  }
+}
+
+# delivery
+github: launch
+envtoken: launch
+hass: env
+renamed: env
+linear: command
+tracker: blocked no_secret_free_delivery: oh-my-pi cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
+stored: inline
+
+## pi (linux)
+{
+  "mcpServers": {
+    "github": {
+      "command": "/opt/loadout/bin/loadout",
+      "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "envtoken": {
+      "command": "/opt/loadout/bin/loadout",
+      "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+    },
+    "hass": {
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "HASS_TOKEN": "${HASS_TOKEN}"
+      }
+    },
+    "renamed": {
+      "command": "hass-mcp",
+      "args": [],
+      "env": {
+        "API_KEY": "${HASS_TOKEN}"
+      }
+    },
+    "linear": {
+      "url": "https://mcp.example.test/mcp",
+      "headers": {
+        "Authorization": "!'/opt/loadout/bin/loadout' secret get --ref 'LINEAR_TOKEN=keyring://loadout/LINEAR_TOKEN' --template 'Bearer {secret:LINEAR_TOKEN}'",
+        "X-Team": "fake-team"
+      }
+    },
+    "stored": {
+      "command": "stored-mcp",
+      "args": [],
+      "env": {
+        "STORED_TOKEN": "fake-linear-token-0001"
+      }
+    }
+  }
+}
+
+# delivery
+github: launch
+envtoken: launch
+hass: env
+renamed: env
+linear: command
+tracker: blocked no_secret_free_delivery: Pi cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
+stored: inline
+
+## codex (linux)
+[mcp_servers.github]
+command = "/opt/loadout/bin/loadout"
+args = ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOOLSETS = "repos,issues" }
+
+[mcp_servers.envtoken]
+command = "/opt/loadout/bin/loadout"
+args = ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+
+[mcp_servers.hass]
+command = "hass-mcp"
+args = []
+env_vars = ["HASS_TOKEN"]
+
+[mcp_servers.renamed]
+command = "/opt/loadout/bin/loadout"
+args = ["exec", "--ref", "API_KEY=env:HASS_TOKEN", "--", "hass-mcp"]
+
+[mcp_servers.linear]
+url = "https://mcp.example.test/mcp"
+bearer_token_env_var = "LINEAR_TOKEN"
+http_headers = { X-Team = "fake-team" }
+
+[mcp_servers.stored]
+command = "stored-mcp"
+args = []
+env = { STORED_TOKEN = "fake-linear-token-0001" }
+
+# delivery
+github: launch
+envtoken: launch
+hass: env
+renamed: launch
+linear: env
+tracker: blocked no_secret_free_delivery: Codex cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
+stored: inline
+
+## claude-desktop (windows)
+{
+  "mcpServers": {
+    "github": {
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "envtoken": {
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
+    },
+    "hass": {
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "HASS_TOKEN=env:HASS_TOKEN", "--", "hass-mcp"]
+    },
+    "renamed": {
+      "command": "C:\\Program Files\\Loadout\\loadout.exe",
+      "args": ["exec", "--ref", "API_KEY=env:HASS_TOKEN", "--", "hass-mcp"]
+    },
+    "stored": {
+      "command": "stored-mcp",
+      "args": [],
+      "env": {
+        "STORED_TOKEN": "fake-linear-token-0001"
+      }
+    }
+  }
+}
+
+# delivery
+github: launch
+envtoken: launch
+hass: launch
+renamed: launch
+linear: blocked unsupported_transport: the client cannot run "http" servers
+tracker: blocked unsupported_transport: the client cannot run "http" servers
+stored: inline
