@@ -2,6 +2,9 @@
 //! express natively. The planner and the delivery renderer read these;
 //! mappers enforce the ones that shape an entry.
 
+use std::time::Duration;
+
+use crate::formats::NativeValue;
 use crate::model::server::Transport;
 
 /// The transports a client can run.
@@ -102,8 +105,12 @@ pub enum ProjectDisable {
     /// file at this container path (Claude Code
     /// `projects["<P>"].disabledMcpServers`).
     ListMember(crate::adapters::spec::ContainerPath),
-    /// A project entry with `enabled: false` (omp, OpenCode, Codex).
-    EnabledFalse,
+    /// A project entry with `enabled: false` under the same name. With
+    /// `partial`, the entry holds nothing else: the client merges it over
+    /// the user entry (Pi, Codex). Otherwise it is the whole user entry with
+    /// `enabled: false`, because the project entry replaces the user one
+    /// (omp).
+    EnabledFalse { partial: bool },
 }
 
 /// How a client combines a project entry with a same-named user entry.
@@ -164,6 +171,47 @@ pub enum ToolFilterMech {
     Allow(&'static str),
 }
 
+/// The unit of a native timeout field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeUnit {
+    Seconds,
+    Milliseconds,
+}
+
+/// A native timeout field and its unit (omp `timeout` in milliseconds, Pi
+/// `timeout` in seconds). Timeouts are passthrough fields, so a value keeps
+/// the unit of the client it is written for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeoutField {
+    pub key: &'static str,
+    pub unit: TimeUnit,
+}
+
+impl TimeoutField {
+    /// The duration a native value stands for: a non-negative, finite
+    /// number in this field's unit. `None` for anything else.
+    pub fn duration(&self, value: &NativeValue) -> Option<Duration> {
+        let amount = match *value {
+            NativeValue::Integer(amount) => u64::try_from(amount).ok()? as f64,
+            NativeValue::Float(amount) if amount.is_finite() && amount >= 0.0 => amount,
+            _ => return None,
+        };
+        let seconds = match self.unit {
+            TimeUnit::Seconds => amount,
+            TimeUnit::Milliseconds => amount / 1000.0,
+        };
+        Duration::try_from_secs_f64(seconds).ok()
+    }
+
+    /// What a value of this field must be, for error messages.
+    pub const fn expected(&self) -> &'static str {
+        match self.unit {
+            TimeUnit::Seconds => "a non-negative number of seconds",
+            TimeUnit::Milliseconds => "a non-negative number of milliseconds",
+        }
+    }
+}
+
 /// A client's MCP capabilities (SPEC 7.1, table 7.4).
 #[derive(Debug, Clone, Copy)]
 pub struct Caps {
@@ -188,6 +236,8 @@ pub struct Caps {
     /// The client spawns stdio servers without a shell, so Windows `.cmd`
     /// shims (`npx`) run through `cmd /c` (SPEC 5.2).
     pub windows_shell_shim: bool,
+    /// Native timeout fields (all passthrough), with their units.
+    pub timeouts: &'static [TimeoutField],
     /// Native fields a server may pass through in `[client.<id>]`.
     pub passthrough_allowlist: &'static [&'static str],
 }

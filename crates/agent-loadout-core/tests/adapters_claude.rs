@@ -8,14 +8,16 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use agent_loadout_core::adapters::detect::{self, Evidence, RegistryProbe};
 use agent_loadout_core::adapters::mapper::{
     EntryMapper, Launch, MapError, RemoteLaunch, RenderedServer, ServerDef, StdioLaunch, WriteCx,
 };
 use agent_loadout_core::adapters::{AdapterSpec, claude_code, claude_desktop};
-use agent_loadout_core::formats::{Document, Format, NativeMap, NativeValue};
+use agent_loadout_core::formats::{Document, Format, NativeValue};
 use agent_loadout_core::model::applied::Scope;
+use agent_loadout_core::model::clients::ClientPrefs;
 use agent_loadout_core::model::server::{ServerFields, Transport};
 use agent_loadout_core::{CoreError, ErrorCode, Fs, Os};
 use agent_loadout_testkit::{RootedFs, TempHome};
@@ -23,6 +25,8 @@ use agent_loadout_testkit::{RootedFs, TempHome};
 const CODE: &AdapterSpec = &claude_code::SPEC;
 const DESKTOP: &AdapterSpec = &claude_desktop::SPEC;
 const SERVERS: &[&str] = &["mcpServers"];
+/// No `clients.toml` preferences.
+static NO_PREFS: LazyLock<ClientPrefs> = LazyLock::new(ClientPrefs::default);
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -64,16 +68,15 @@ fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 fn stdio(name: &str, command: &str, args: &[&str], env: &[(&str, &str)]) -> RenderedServer {
-    RenderedServer {
-        name: name.to_owned(),
-        launch: Launch::Stdio(StdioLaunch {
+    RenderedServer::new(
+        name,
+        Launch::Stdio(StdioLaunch {
             command: command.to_owned(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
             env: map(env),
-            cwd: None,
+            ..StdioLaunch::default()
         }),
-        passthrough: NativeMap::new(),
-    }
+    )
 }
 
 fn remote(
@@ -87,16 +90,16 @@ fn remote(
         url: url.to_owned(),
         headers: map(headers),
         headers_helper: helper.map(str::to_owned),
+        ..RemoteLaunch::default()
     };
-    RenderedServer {
-        name: name.to_owned(),
-        launch: match transport {
+    RenderedServer::new(
+        name,
+        match transport {
             Transport::Http => Launch::Http(launch),
             Transport::Sse => Launch::Sse(launch),
             Transport::Stdio => unreachable!("remote transports only"),
         },
-        passthrough: NativeMap::new(),
-    }
+    )
 }
 
 fn write(spec: &AdapterSpec, os: Os, server: &RenderedServer) -> Result<NativeValue, MapError> {
@@ -484,20 +487,22 @@ fn claude_code_targets_per_scope() {
     let project = home.projects().join("app");
     for os in [Os::Windows, Os::Linux, Os::MacOs] {
         let env = home.env(os);
-        let user = CODE.mcp_targets(&env, &fs, Scope::User, None).unwrap();
+        let user = CODE
+            .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+            .unwrap();
         assert_eq!(user.len(), 1);
         assert_eq!(user[0].file, home.home().join(".claude.json"));
         assert_eq!(user[0].container.segments(), ["mcpServers"]);
         assert!(user[0].warnings.is_empty());
 
         let shared = CODE
-            .mcp_targets(&env, &fs, Scope::Project, Some(&project))
+            .mcp_targets(&env, &fs, Scope::Project, Some(&project), &NO_PREFS)
             .unwrap();
         assert_eq!(shared[0].file, project.join(".mcp.json"));
         assert_eq!(shared[0].container.segments(), ["mcpServers"]);
 
         let local = CODE
-            .mcp_targets(&env, &fs, Scope::ProjectLocal, Some(&project))
+            .mcp_targets(&env, &fs, Scope::ProjectLocal, Some(&project), &NO_PREFS)
             .unwrap();
         assert_eq!(local[0].file, home.home().join(".claude.json"));
         let keys = local[0]
@@ -510,7 +515,7 @@ fn claude_code_targets_per_scope() {
         );
 
         let err = CODE
-            .mcp_targets(&env, &fs, Scope::Project, None)
+            .mcp_targets(&env, &fs, Scope::Project, None, &NO_PREFS)
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::InvalidPath);
     }
@@ -523,14 +528,18 @@ fn claude_code_targets_per_scope() {
         .var("CLAUDE_CONFIG_DIR", &config)
         .build();
     for scope in [Scope::User, Scope::ProjectLocal] {
-        let targets = CODE.mcp_targets(&env, &fs, scope, Some(&project)).unwrap();
+        let targets = CODE
+            .mcp_targets(&env, &fs, scope, Some(&project), &NO_PREFS)
+            .unwrap();
         assert_eq!(targets[0].file, config.join(".claude.json"));
     }
     let env = home
         .env_builder(Os::Linux)
         .var("CLAUDE_CONFIG_DIR", "relative/dir")
         .build();
-    let targets = CODE.mcp_targets(&env, &fs, Scope::User, None).unwrap();
+    let targets = CODE
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+        .unwrap();
     assert_eq!(targets[0].file, home.home().join(".claude.json"));
 }
 
@@ -545,7 +554,9 @@ fn claude_desktop_targets_per_os() {
     let env = home.env(Os::Windows);
 
     // No MSIX install: one target, created if missing.
-    let targets = DESKTOP.mcp_targets(&env, &fs, Scope::User, None).unwrap();
+    let targets = DESKTOP
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+        .unwrap();
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].file, roaming);
     assert!(targets[0].warnings.is_empty());
@@ -556,7 +567,9 @@ fn claude_desktop_targets_per_os() {
         .join("Packages")
         .join("Claude_0000fake0000");
     std::fs::create_dir_all(&package).unwrap();
-    let targets = DESKTOP.mcp_targets(&env, &fs, Scope::User, None).unwrap();
+    let targets = DESKTOP
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+        .unwrap();
     assert_eq!(targets.len(), 1);
 
     // With the copy present, both files are planned, with a warning.
@@ -566,7 +579,9 @@ fn claude_desktop_targets_per_os() {
         .join("Claude")
         .join("claude_desktop_config.json");
     put(&copy, "{}\n");
-    let targets = DESKTOP.mcp_targets(&env, &fs, Scope::User, None).unwrap();
+    let targets = DESKTOP
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+        .unwrap();
     let files: Vec<&Path> = targets.iter().map(|t| t.file.as_path()).collect();
     assert_eq!(files, [roaming.as_path(), copy.as_path()]);
     assert!(targets[0].warnings.is_empty());
@@ -582,14 +597,16 @@ fn claude_desktop_targets_per_os() {
     let project = home.projects().join("app");
     for scope in [Scope::Project, Scope::ProjectLocal] {
         let err = DESKTOP
-            .mcp_targets(&env, &fs, scope, Some(&project))
+            .mcp_targets(&env, &fs, scope, Some(&project), &NO_PREFS)
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::ScopeNotSupported);
     }
 
     // macOS: best effort, no MSIX.
     let env = home.env(Os::MacOs);
-    let targets = DESKTOP.mcp_targets(&env, &fs, Scope::User, None).unwrap();
+    let targets = DESKTOP
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+        .unwrap();
     assert_eq!(targets.len(), 1);
     assert_eq!(
         targets[0].file,
@@ -605,12 +622,14 @@ fn claude_desktop_targets_per_os() {
     let env = home.env(Os::Linux);
     for scope in [Scope::User, Scope::Project] {
         let err = DESKTOP
-            .mcp_targets(&env, &fs, scope, Some(&project))
+            .mcp_targets(&env, &fs, scope, Some(&project), &NO_PREFS)
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::NotSupportedOnOs);
         assert_eq!(err.code().as_str(), "not_supported_on_os");
     }
-    let err = DESKTOP.suppression_target(&env, &fs, &project).unwrap_err();
+    let err = DESKTOP
+        .suppression_target(&env, &fs, &project, &NO_PREFS)
+        .unwrap_err();
     assert_eq!(err.code(), ErrorCode::NotSupportedOnOs);
 }
 
@@ -686,7 +705,7 @@ fn claude_code_suppresses_user_servers_through_disabled_mcp_servers() {
     let env = home.env(Os::Windows);
     let project = home.projects().join("app");
     let target = CODE
-        .suppression_target(&env, &fs, &project)
+        .suppression_target(&env, &fs, &project, &NO_PREFS)
         .unwrap()
         .unwrap();
     assert_eq!(target.file, home.home().join(".claude.json"));
@@ -697,7 +716,7 @@ fn claude_code_suppresses_user_servers_through_disabled_mcp_servers() {
     );
     assert!(
         DESKTOP
-            .suppression_target(&env, &fs, &project)
+            .suppression_target(&env, &fs, &project, &NO_PREFS)
             .unwrap()
             .is_none()
     );
@@ -745,7 +764,7 @@ fn a_target_round_trips_through_the_file_it_names() {
     put(&file, &original);
 
     let target = DESKTOP
-        .mcp_targets(&env, &fs, Scope::User, None)
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
         .unwrap()
         .remove(0);
     let mut doc = Document::parse(

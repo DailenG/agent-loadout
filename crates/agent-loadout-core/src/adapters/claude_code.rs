@@ -13,8 +13,8 @@ use crate::adapters::caps::{
 };
 use crate::adapters::detect::Probe;
 use crate::adapters::location::Location;
-use crate::adapters::mapper::McpServersJson;
-use crate::adapters::spec::{AdapterSpec, ContainerPath, McpSpec, Tier};
+use crate::adapters::mapper::{McpServersJson, word_name};
+use crate::adapters::spec::{AdapterSpec, ContainerPath, McpSpec, Tier, exact_names};
 use crate::env::Os;
 use crate::formats::Format;
 use crate::model::clients::passthrough_of;
@@ -59,13 +59,19 @@ const CAPS: Caps = Caps {
     restart_required: false,
     tool_filter: None,
     windows_shell_shim: false,
+    timeouts: &[],
     passthrough_allowlist: passthrough_of(ID),
 };
 
+/// Names are `[A-Za-z0-9_-]+` (SPEC 5.1).
 static MAPPER: McpServersJson = McpServersJson {
     caps: &CAPS,
     type_field: true,
-    valid_name,
+    remote_type: true,
+    cwd: false,
+    http_aliases: &[],
+    url_implies_http: false,
+    valid_name: word_name,
 };
 
 pub static SPEC: AdapterSpec = AdapterSpec {
@@ -81,24 +87,21 @@ pub static SPEC: AdapterSpec = AdapterSpec {
         oses: &[Os::Windows, Os::Linux, Os::MacOs],
         user: &[USER_FILE],
         user_mirrors: &[],
+        profiles: None,
         project: &[Location::Project(".mcp.json")],
         project_local: &[USER_FILE],
         format: Format::Json,
+        skeleton: "",
         container: ContainerPath(&["mcpServers"]),
         project_local_container: ContainerPath(&[
             "projects",
             ContainerPath::PROJECT_KEY,
             "mcpServers",
         ]),
+        legacy_containers: &[],
+        same_name: exact_names,
+        replaced_by: &[],
         mapper: &MAPPER,
         caps: CAPS,
     }),
 };
-
-/// Claude Code server names: `[A-Za-z0-9_-]+` (SPEC 5.1).
-fn valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-}

@@ -64,6 +64,14 @@ pub enum ErrorCode {
     /// Warning: an MSIX install keeps its own copy of a client file, so both
     /// copies are written (Claude Desktop on Windows).
     MsixDualWrite,
+    /// Warning: a client treats another entry name as the same server (Pi
+    /// counts names that differ only in `-` and `_` as one), so writing the
+    /// entry would clash with it.
+    Collision,
+    /// Warning: an installed extension takes over the client's MCP support
+    /// (Pi with `pi-mcp-adapter`), so the client's own MCP config may not be
+    /// what loads.
+    ClientMcpReplacedByExtension,
 }
 
 impl ErrorCode {
@@ -93,6 +101,8 @@ impl ErrorCode {
             ErrorCode::UnsupportedTransport => "unsupported_transport",
             ErrorCode::UnsupportedField => "unsupported_field",
             ErrorCode::MsixDualWrite => "msix_dual_write",
+            ErrorCode::Collision => "collision",
+            ErrorCode::ClientMcpReplacedByExtension => "client_mcp_replaced_by_extension",
         }
     }
 }

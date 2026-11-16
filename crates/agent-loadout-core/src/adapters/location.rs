@@ -26,6 +26,14 @@ pub enum Location {
         fallback: &'static Location,
         rel: &'static str,
     },
+    /// `~/<name>/<rel>`, where `name` is the value of `var` when it is a
+    /// relative path without `..`, else `default` (omp `PI_CONFIG_DIR`, a
+    /// directory name under home).
+    HomeNamedDir {
+        var: &'static str,
+        default: &'static str,
+        rel: &'static str,
+    },
     /// `<P>/<rel>`.
     Project(&'static str),
     /// Every existing path under `base` matching `pattern`, where a segment
@@ -55,6 +63,14 @@ impl Location {
                     Some(base) => (base, rel),
                     None => (fallback.resolve(env, project)?, rel),
                 }
+            }
+            Location::HomeNamedDir { var, default, rel } => {
+                let name = env
+                    .var(var)
+                    .map(PathBuf::from)
+                    .filter(|name| is_plain_relative(name))
+                    .unwrap_or_else(|| PathBuf::from(default));
+                (env.home().join(name), rel)
             }
             Location::Project(rel) => (project?.to_path_buf(), rel),
             Location::Glob { .. } => return None,
@@ -87,6 +103,15 @@ impl Location {
                 .collect(),
         }
     }
+}
+
+/// A non-empty relative path made of plain names only (no root, drive,
+/// `.` or `..`), so joining it to a base stays inside the base.
+fn is_plain_relative(path: &Path) -> bool {
+    path.components().next().is_some()
+        && path
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 
 /// `base` joined with the `/`-separated `rel`, one component at a time so

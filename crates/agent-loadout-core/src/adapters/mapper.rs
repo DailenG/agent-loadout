@@ -3,13 +3,14 @@
 //! for equality and hashing.
 //!
 //! [`McpServersJson`] maps the common `mcpServers.<name>` JSON shape used by
-//! both Claude clients; what differs between them comes from their
-//! [`Caps`] and name rule.
+//! the Claude clients, omp and Pi; what differs between them comes from
+//! their [`Caps`], a few shape switches and a name rule. Codex has its own
+//! TOML mapper (`crate::adapters::codex`) built on the helpers here.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::adapters::caps::{Caps, CommandRef};
+use crate::adapters::caps::{Caps, CommandRef, DisableMech, ToolFilterMech};
 use crate::env::Os;
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{NativeMap, NativeValue};
@@ -23,9 +24,30 @@ pub struct RenderedServer {
     /// The native entry key (the server id or its `native_name`).
     pub name: String,
     pub launch: Launch,
+    /// `false` writes the entry natively disabled (`enabled: false`, SPEC
+    /// 8.4, 11.9). A client without that mechanism blocks the target
+    /// (`unsupported_field`).
+    pub enabled: bool,
+    /// The tool filter (`[tools]`), written through the client's native
+    /// fields ([`Caps::tool_filter`]). A client without them blocks the
+    /// target; dropping the filter instead is the renderer's choice.
+    pub tools: ToolLists,
     /// `[client.<id>]` fields other than `native_name`, already checked
     /// against the client's passthrough allowlist.
     pub passthrough: NativeMap,
+}
+
+impl RenderedServer {
+    /// An enabled server without a tool filter or passthrough fields.
+    pub fn new(name: impl Into<String>, launch: Launch) -> Self {
+        Self {
+            name: name.into(),
+            launch,
+            enabled: true,
+            tools: ToolLists::default(),
+            passthrough: NativeMap::new(),
+        }
+    }
 }
 
 /// How the client starts or reaches the server.
@@ -51,6 +73,10 @@ pub struct StdioLaunch {
     pub command: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    /// Variables the client copies from its own environment into the
+    /// server's under the same name (`env` delivery on a client with
+    /// `EnvRefSyntax::CodexForward`: Codex `env_vars`).
+    pub forward_env: Vec<String>,
     pub cwd: Option<String>,
 }
 
@@ -61,6 +87,25 @@ pub struct RemoteLaunch {
     /// A command printing a JSON object of headers, run by the client at
     /// connect time (`command` delivery on Claude Code, SPEC 11.4).
     pub headers_helper: Option<String>,
+    /// A variable whose value the client sends as `Authorization: Bearer
+    /// <value>` (Codex `bearer_token_env_var`).
+    pub bearer_env: Option<String>,
+    /// Header name to the variable whose value the client sends as that
+    /// header (Codex `env_http_headers`).
+    pub headers_env: BTreeMap<String, String>,
+}
+
+/// A tool filter: only `allow` (when set), never `deny`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolLists {
+    pub allow: Option<Vec<String>>,
+    pub deny: Option<Vec<String>>,
+}
+
+impl ToolLists {
+    pub fn is_empty(&self) -> bool {
+        self.allow.is_none() && self.deny.is_none()
+    }
 }
 
 /// Context of one write.
@@ -74,11 +119,19 @@ pub struct WriteCx<'a> {
 
 /// A native entry read back as a server definition (import, adopt, the
 /// post-write self check).
+///
+/// Values a client forwards from its environment by name (Codex
+/// `env_vars`, `bearer_token_env_var`, `env_http_headers`) read back as
+/// `${env:NAME}` references in `env` and `headers` (SPEC 11.2).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ServerDef {
     /// Launch and connection fields; `transport` is always set.
     pub fields: ServerFields,
     pub headers_helper: Option<String>,
+    /// The entry is natively disabled (`enabled: false`).
+    pub disabled: bool,
+    /// The native tool filter.
+    pub tools: ToolLists,
     /// Allowlisted native fields, for `[client.<id>]`.
     pub passthrough: NativeMap,
     /// Native fields with no canonical or passthrough equivalent. Reported
@@ -177,28 +230,41 @@ pub trait EntryMapper: Sync {
     fn canonical(&self, value: &NativeValue) -> Canonical;
 }
 
-/// Keys the `mcpServers` mapper models. `cwd` is not one: neither Claude
-/// client has it, so a native `cwd` is unmapped and kept.
+/// Keys every `mcpServers` entry may have.
 const MODELED_KEYS: [&str; 6] = ["type", "command", "args", "env", "url", "headers"];
 const HEADERS_HELPER: &str = "headersHelper";
 const TYPE: &str = "type";
+const CWD: &str = "cwd";
+const ENABLED: &str = "enabled";
 
 /// Commands that are `.cmd` or `.bat` shims on Windows (npm-installed
 /// launchers), which a client spawning without a shell cannot start.
 const WINDOWS_SHIMS: [&str; 7] = ["npx", "npm", "pnpm", "pnpx", "yarn", "yarnpkg", "corepack"];
 
-/// The `mcpServers.<name>` JSON entry: `{type, command, args, env}` or
-/// `{type, url, headers, headersHelper}` (SPEC 7.3).
+/// The `mcpServers.<name>` JSON entry: `{type, command, args, env, cwd}` or
+/// `{type, url, headers, headersHelper}`, plus `enabled` for clients that
+/// disable natively (SPEC 7.3).
 ///
 /// Stdio entries are written with `command` and `args`, plus `env` when it
-/// has variables (or the existing entry has the key). With `type_field`,
-/// every stdio entry gets `type`; remote entries always do, since the type
-/// is what tells them apart.
+/// has variables (or the existing entry has the key).
 #[derive(Debug)]
 pub struct McpServersJson {
     pub caps: &'static Caps,
     /// Write `type: "stdio"` on stdio entries.
     pub type_field: bool,
+    /// Write `type` on http entries. SSE entries always get it, since a
+    /// bare `url` reads as http.
+    pub remote_type: bool,
+    /// The client has a native `cwd` field. Without it a server with `cwd`
+    /// blocks, and a native `cwd` is unmapped and kept.
+    pub cwd: bool,
+    /// Other native `type` spellings of http (Pi `streamable-http`).
+    pub http_aliases: &'static [&'static str],
+    /// The client runs an untyped `url` entry as http, so a missing `type`
+    /// equals `http` in the canonical form (omp, Pi). Without it, an
+    /// untyped remote entry is not the one Loadout writes (Claude Code
+    /// requires `type`).
+    pub url_implies_http: bool,
     /// Whether an entry key is valid for the client.
     pub valid_name: fn(&str) -> bool,
 }
@@ -210,8 +276,22 @@ impl McpServersJson {
 
     fn is_modeled(&self, key: &str) -> bool {
         MODELED_KEYS.contains(&key)
+            || (key == CWD && self.cwd)
             || (key == HEADERS_HELPER && self.headers_helper())
+            || (key == ENABLED && disables_natively(self.caps))
+            || is_tool_key(self.caps, key)
             || self.caps.passthrough_allowlist.contains(&key)
+    }
+
+    /// The type the client gives an entry without `type`.
+    fn inferred_type(&self, entry: &NativeMap) -> Option<&'static str> {
+        if entry.contains_key("command") {
+            Some("stdio")
+        } else if entry.contains_key("url") && self.url_implies_http {
+            Some("http")
+        } else {
+            None
+        }
     }
 }
 
@@ -221,26 +301,15 @@ impl EntryMapper for McpServersJson {
         server: &RenderedServer,
         cx: &WriteCx<'_>,
     ) -> Result<NativeValue, MapError> {
-        if !(self.valid_name)(&server.name) {
-            return Err(MapError::InvalidName {
-                name: server.name.clone(),
-            });
-        }
-        let transport = server.launch.transport();
-        if !self.caps.transports.contains(transport) {
-            return Err(MapError::UnsupportedTransport {
-                transport: transport.as_str().to_owned(),
-            });
-        }
-        let existing = cx.existing.and_then(NativeValue::as_object);
-        // An empty map is written only when the entry already has the key,
-        // so an update does not churn `"env": {}` (equal canonically).
+        check_name(self.valid_name, &server.name)?;
+        let transport = check_transport(self.caps, &server.launch)?;
+        let existing = existing_entry(cx);
         let keep_empty = |key: &str| existing.is_some_and(|entry| entry.contains_key(key));
         let mut entry = NativeMap::new();
         match &server.launch {
             Launch::Stdio(stdio) => {
-                if stdio.cwd.is_some() {
-                    return unsupported("cwd");
+                if !stdio.forward_env.is_empty() {
+                    return unsupported("env_vars");
                 }
                 if self.type_field {
                     entry.insert(TYPE, "stdio".into());
@@ -255,9 +324,23 @@ impl EntryMapper for McpServersJson {
                 if !stdio.env.is_empty() || keep_empty("env") {
                     entry.insert("env", string_map(&stdio.env));
                 }
+                if let Some(cwd) = &stdio.cwd {
+                    if !self.cwd {
+                        return unsupported(CWD);
+                    }
+                    entry.insert(CWD, cwd.as_str().into());
+                }
             }
             Launch::Http(remote) | Launch::Sse(remote) => {
-                entry.insert(TYPE, transport.as_str().into());
+                if remote.bearer_env.is_some() {
+                    return unsupported("bearer_token_env_var");
+                }
+                if !remote.headers_env.is_empty() {
+                    return unsupported("env_http_headers");
+                }
+                if self.remote_type || transport == Transport::Sse {
+                    entry.insert(TYPE, transport.as_str().into());
+                }
                 entry.insert("url", remote.url.as_str().into());
                 if !remote.headers.is_empty() || keep_empty("headers") {
                     entry.insert("headers", string_map(&remote.headers));
@@ -270,17 +353,10 @@ impl EntryMapper for McpServersJson {
                 }
             }
         }
-        for (key, value) in server.passthrough.iter() {
-            if !self.caps.passthrough_allowlist.contains(&key) {
-                return unsupported(key);
-            }
-            entry.insert(key, value.clone());
-        }
-        for (key, value) in existing.into_iter().flat_map(NativeMap::iter) {
-            if !self.is_modeled(key) {
-                entry.insert(key, value.clone());
-            }
-        }
+        write_enabled(&mut entry, self.caps, server, existing)?;
+        write_tools(&mut entry, self.caps, &server.tools)?;
+        write_passthrough(&mut entry, self.caps, server)?;
+        carry_over(&mut entry, existing, |key| self.is_modeled(key));
         Ok(NativeValue::Object(entry))
     }
 
@@ -294,6 +370,7 @@ impl EntryMapper for McpServersJson {
                 "stdio" => Transport::Stdio,
                 "http" => Transport::Http,
                 "sse" => Transport::Sse,
+                alias if self.http_aliases.contains(&alias) => Transport::Http,
                 other => {
                     return Err(MapError::UnsupportedTransport {
                         transport: other.to_owned(),
@@ -310,7 +387,11 @@ impl EntryMapper for McpServersJson {
             transport: Some(transport),
             command: string_field(entry, "command")?,
             args: string_list(entry, "args")?,
-            cwd: None,
+            cwd: if self.cwd {
+                string_field(entry, CWD)?
+            } else {
+                None
+            },
             url: string_field(entry, "url")?,
             headers: string_map_field(entry, "headers")?,
             env: string_map_field(entry, "env")?,
@@ -324,18 +405,14 @@ impl EntryMapper for McpServersJson {
         }
         let mut def = ServerDef {
             fields,
+            disabled: read_disabled(entry, self.caps)?,
+            tools: read_tools(entry, self.caps)?,
             ..ServerDef::default()
         };
         if self.headers_helper() {
             def.headers_helper = string_field(entry, HEADERS_HELPER)?;
         }
-        for (key, value) in entry.iter() {
-            if self.caps.passthrough_allowlist.contains(&key) {
-                def.passthrough.insert(key, value.clone());
-            } else if !self.is_modeled(key) {
-                def.unmapped.insert(key, value.clone());
-            }
-        }
+        split_rest(&mut def, entry, self.caps, |key| self.is_modeled(key));
         Ok(def)
     }
 
@@ -344,43 +421,231 @@ impl EntryMapper for McpServersJson {
             return Canonical::of(value);
         };
         let mut entry = entry.clone();
-        if entry.get(TYPE).and_then(NativeValue::as_str) == Some("stdio")
-            && entry.contains_key("command")
-        {
-            entry.remove(TYPE);
-        }
-        for key in ["args", "env", "headers"] {
-            let empty = match entry.get(key) {
-                Some(NativeValue::Array(items)) => items.is_empty(),
-                Some(NativeValue::Object(map)) => map.is_empty(),
-                _ => false,
+        if let Some(kind) = entry.get(TYPE).and_then(NativeValue::as_str) {
+            let kind = if self.http_aliases.contains(&kind) {
+                "http"
+            } else {
+                kind
             };
-            if empty {
-                entry.remove(key);
+            if Some(kind) == self.inferred_type(&entry) {
+                entry.remove(TYPE);
+            } else {
+                entry.insert(TYPE, kind.into());
             }
         }
+        drop_empty(&mut entry, &["args", "env", "headers"]);
+        drop_default_enabled(&mut entry, self.caps);
         Canonical::of(&NativeValue::Object(entry))
     }
 }
 
-fn unsupported<T>(field: &str) -> Result<T, MapError> {
+// ---------------------------------------------------------------------------
+// Shared by the mappers
+
+/// `[A-Za-z0-9_-]+`, the entry name rule of Claude Code (SPEC 5.1), Codex
+/// and Pi.
+pub fn word_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// The existing entry of a write, when it is an object.
+pub(crate) fn existing_entry<'a>(cx: &WriteCx<'a>) -> Option<&'a NativeMap> {
+    cx.existing.and_then(NativeValue::as_object)
+}
+
+pub(crate) fn check_name(valid: fn(&str) -> bool, name: &str) -> Result<(), MapError> {
+    if valid(name) {
+        Ok(())
+    } else {
+        Err(MapError::InvalidName {
+            name: name.to_owned(),
+        })
+    }
+}
+
+pub(crate) fn check_transport(caps: &Caps, launch: &Launch) -> Result<Transport, MapError> {
+    let transport = launch.transport();
+    if caps.transports.contains(transport) {
+        Ok(transport)
+    } else {
+        Err(MapError::UnsupportedTransport {
+            transport: transport.as_str().to_owned(),
+        })
+    }
+}
+
+fn disables_natively(caps: &Caps) -> bool {
+    caps.native_disable == Some(DisableMech::EnabledFalse)
+}
+
+/// `enabled: false` for a disabled server; `enabled: true` only when the
+/// existing entry has the key, so an update does not churn it.
+pub(crate) fn write_enabled(
+    entry: &mut NativeMap,
+    caps: &Caps,
+    server: &RenderedServer,
+    existing: Option<&NativeMap>,
+) -> Result<(), MapError> {
+    if !server.enabled {
+        if !disables_natively(caps) {
+            return unsupported(ENABLED);
+        }
+        entry.insert(ENABLED, NativeValue::Bool(false));
+    } else if disables_natively(caps) && existing.is_some_and(|entry| entry.contains_key(ENABLED)) {
+        entry.insert(ENABLED, NativeValue::Bool(true));
+    }
+    Ok(())
+}
+
+pub(crate) fn read_disabled(entry: &NativeMap, caps: &Caps) -> Result<bool, MapError> {
+    if !disables_natively(caps) {
+        return Ok(false);
+    }
+    match entry.get(ENABLED) {
+        None => Ok(false),
+        Some(NativeValue::Bool(enabled)) => Ok(!enabled),
+        Some(_) => shape(ENABLED, "a boolean"),
+    }
+}
+
+/// Removes `enabled: true`, the default, when the client models `enabled`.
+pub(crate) fn drop_default_enabled(entry: &mut NativeMap, caps: &Caps) {
+    if disables_natively(caps) && entry.get(ENABLED) == Some(&NativeValue::Bool(true)) {
+        entry.remove(ENABLED);
+    }
+}
+
+/// Whether `key` is one of the client's native tool filter fields.
+pub(crate) fn is_tool_key(caps: &Caps, key: &str) -> bool {
+    match caps.tool_filter {
+        Some(ToolFilterMech::AllowDeny { allow, deny }) => key == allow || key == deny,
+        Some(ToolFilterMech::Allow(allow)) => key == allow,
+        None => false,
+    }
+}
+
+pub(crate) fn write_tools(
+    entry: &mut NativeMap,
+    caps: &Caps,
+    tools: &ToolLists,
+) -> Result<(), MapError> {
+    let (allow_key, deny_key) = match caps.tool_filter {
+        _ if tools.is_empty() => return Ok(()),
+        Some(ToolFilterMech::AllowDeny { allow, deny }) => (allow, Some(deny)),
+        Some(ToolFilterMech::Allow(allow)) => (allow, None),
+        None => return unsupported("tools"),
+    };
+    if let Some(allow) = &tools.allow {
+        entry.insert(allow_key, strings(allow.clone()));
+    }
+    if let Some(deny) = &tools.deny {
+        let Some(deny_key) = deny_key else {
+            return unsupported("tools.deny");
+        };
+        entry.insert(deny_key, strings(deny.clone()));
+    }
+    Ok(())
+}
+
+pub(crate) fn read_tools(entry: &NativeMap, caps: &Caps) -> Result<ToolLists, MapError> {
+    Ok(match caps.tool_filter {
+        Some(ToolFilterMech::AllowDeny { allow, deny }) => ToolLists {
+            allow: string_list(entry, allow)?,
+            deny: string_list(entry, deny)?,
+        },
+        Some(ToolFilterMech::Allow(allow)) => ToolLists {
+            allow: string_list(entry, allow)?,
+            deny: None,
+        },
+        None => ToolLists::default(),
+    })
+}
+
+/// Writes the allowlisted passthrough fields; a timeout must be a
+/// non-negative number in the client's unit.
+pub(crate) fn write_passthrough(
+    entry: &mut NativeMap,
+    caps: &Caps,
+    server: &RenderedServer,
+) -> Result<(), MapError> {
+    for (key, value) in server.passthrough.iter() {
+        if !caps.passthrough_allowlist.contains(&key) {
+            return unsupported(key);
+        }
+        if let Some(timeout) = caps.timeouts.iter().find(|timeout| timeout.key == key)
+            && timeout.duration(value).is_none()
+        {
+            return shape(key, timeout.expected());
+        }
+        entry.insert(key, value.clone());
+    }
+    Ok(())
+}
+
+/// Copies the keys of `existing` the mapper does not model.
+pub(crate) fn carry_over(
+    entry: &mut NativeMap,
+    existing: Option<&NativeMap>,
+    is_modeled: impl Fn(&str) -> bool,
+) {
+    for (key, value) in existing.into_iter().flat_map(NativeMap::iter) {
+        if !is_modeled(key) {
+            entry.insert(key, value.clone());
+        }
+    }
+}
+
+/// Files the keys of `entry` that are passthrough or unmodeled.
+pub(crate) fn split_rest(
+    def: &mut ServerDef,
+    entry: &NativeMap,
+    caps: &Caps,
+    is_modeled: impl Fn(&str) -> bool,
+) {
+    for (key, value) in entry.iter() {
+        if caps.passthrough_allowlist.contains(&key) {
+            def.passthrough.insert(key, value.clone());
+        } else if !is_modeled(key) {
+            def.unmapped.insert(key, value.clone());
+        }
+    }
+}
+
+/// Removes keys holding an empty array or object.
+pub(crate) fn drop_empty(entry: &mut NativeMap, keys: &[&str]) {
+    for key in keys {
+        let empty = match entry.get(key) {
+            Some(NativeValue::Array(items)) => items.is_empty(),
+            Some(NativeValue::Object(map)) => map.is_empty(),
+            _ => false,
+        };
+        if empty {
+            entry.remove(key);
+        }
+    }
+}
+
+pub(crate) fn unsupported<T>(field: &str) -> Result<T, MapError> {
     Err(MapError::UnsupportedField {
         field: field.to_owned(),
     })
 }
 
-fn shape<T>(field: &str, expected: &'static str) -> Result<T, MapError> {
+pub(crate) fn shape<T>(field: &str, expected: &'static str) -> Result<T, MapError> {
     Err(MapError::UnexpectedShape {
         field: field.to_owned(),
         expected,
     })
 }
 
-fn strings(items: Vec<String>) -> NativeValue {
+pub(crate) fn strings(items: Vec<String>) -> NativeValue {
     NativeValue::Array(items.into_iter().map(NativeValue::String).collect())
 }
 
-fn string_map(map: &BTreeMap<String, String>) -> NativeValue {
+pub(crate) fn string_map(map: &BTreeMap<String, String>) -> NativeValue {
     NativeValue::Object(
         map.iter()
             .map(|(key, value)| (key.as_str(), NativeValue::from(value.as_str())))
@@ -388,7 +653,7 @@ fn string_map(map: &BTreeMap<String, String>) -> NativeValue {
     )
 }
 
-fn string_field(entry: &NativeMap, key: &str) -> Result<Option<String>, MapError> {
+pub(crate) fn string_field(entry: &NativeMap, key: &str) -> Result<Option<String>, MapError> {
     match entry.get(key) {
         None => Ok(None),
         Some(NativeValue::String(value)) => Ok(Some(value.clone())),
@@ -396,7 +661,7 @@ fn string_field(entry: &NativeMap, key: &str) -> Result<Option<String>, MapError
     }
 }
 
-fn string_list(entry: &NativeMap, key: &str) -> Result<Option<Vec<String>>, MapError> {
+pub(crate) fn string_list(entry: &NativeMap, key: &str) -> Result<Option<Vec<String>>, MapError> {
     let Some(value) = entry.get(key) else {
         return Ok(None);
     };
@@ -415,7 +680,7 @@ fn string_list(entry: &NativeMap, key: &str) -> Result<Option<Vec<String>>, MapE
         })
 }
 
-fn string_map_field(
+pub(crate) fn string_map_field(
     entry: &NativeMap,
     key: &str,
 ) -> Result<Option<BTreeMap<String, String>>, MapError> {

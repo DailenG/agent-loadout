@@ -12,7 +12,7 @@ use crate::adapters::caps::{Caps, FieldSet, ProjectSemantics, Source, TransportS
 use crate::adapters::detect::Probe;
 use crate::adapters::location::Location;
 use crate::adapters::mapper::McpServersJson;
-use crate::adapters::spec::{AdapterSpec, ContainerPath, McpSpec, Tier};
+use crate::adapters::spec::{AdapterSpec, ContainerPath, McpSpec, Tier, exact_names};
 use crate::env::Os;
 use crate::formats::Format;
 use crate::model::clients::passthrough_of;
@@ -44,12 +44,17 @@ const CAPS: Caps = Caps {
     restart_required: true,
     tool_filter: None,
     windows_shell_shim: true,
+    timeouts: &[],
     passthrough_allowlist: passthrough_of(ID),
 };
 
 static MAPPER: McpServersJson = McpServersJson {
     caps: &CAPS,
     type_field: false,
+    remote_type: false,
+    cwd: false,
+    http_aliases: &[],
+    url_implies_http: false,
     valid_name: |name| !name.is_empty(),
 };
 
@@ -70,11 +75,16 @@ pub static SPEC: AdapterSpec = AdapterSpec {
         oses: &[Os::Windows, Os::MacOs],
         user: &[CONFIG],
         user_mirrors: &[MSIX_CONFIG],
+        profiles: None,
         project: &[],
         project_local: &[],
         format: Format::Json,
+        skeleton: "",
         container: ContainerPath(&["mcpServers"]),
         project_local_container: ContainerPath(&["mcpServers"]),
+        legacy_containers: &[],
+        same_name: exact_names,
+        replaced_by: &[],
         mapper: &MAPPER,
         caps: CAPS,
     }),
