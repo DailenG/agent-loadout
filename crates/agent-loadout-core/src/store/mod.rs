@@ -13,6 +13,7 @@
 
 mod lock;
 mod log;
+mod revision;
 mod trailers;
 mod transaction;
 
@@ -36,8 +37,45 @@ use crate::paths::LoadoutHome;
 
 pub use lock::{LOCK_FILE, LOCK_TIMEOUT, StoreLock};
 pub use log::{LogEntry, LogFilter, entity_paths};
+pub use revision::Revision;
 pub use trailers::{ApplyRef, MachineRef, Scope, Trailers, compose_message, message_summary};
 pub use transaction::{Committed, Operation, Transaction};
+
+/// Read access to store files: the working tree ([`Store`]), the working
+/// tree plus staged changes ([`Transaction`]) or a past commit
+/// ([`Revision`]).
+pub trait StoreRead {
+    /// A store file as text; `None` if it does not exist.
+    fn read_file(&self, relative: &str) -> Result<Option<String>, CoreError>;
+
+    /// Names of the files (not directories) directly in the store-relative
+    /// directory `dir`, sorted; empty if it does not exist.
+    fn list_files(&self, dir: &str) -> Result<Vec<String>, CoreError>;
+}
+
+impl StoreRead for Store<'_> {
+    fn read_file(&self, relative: &str) -> Result<Option<String>, CoreError> {
+        self.read_to_string(relative)
+    }
+
+    fn list_files(&self, dir: &str) -> Result<Vec<String>, CoreError> {
+        let path = self.path(dir)?;
+        if !self.fs.is_dir(&path) {
+            return Ok(Vec::new());
+        }
+        let entries = self
+            .fs
+            .read_dir(&path)
+            .map_err(|err| io_error("cannot list directory", &path, &err))?;
+        let mut names: Vec<String> = entries
+            .iter()
+            .filter(|entry| !self.fs.is_dir(entry))
+            .filter_map(|entry| entry.file_name()?.to_str().map(str::to_owned))
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+}
 
 /// The store branch.
 pub const BRANCH: &str = "main";

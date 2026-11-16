@@ -11,8 +11,10 @@ use crate::error::{CoreError, ErrorCode};
 use crate::model::server::Server;
 use crate::model::{StoreDocument, StoreFile, TomlDocument, validate_store_file};
 use crate::store::lock::{LOCK_TIMEOUT, StoreLock};
-use crate::store::trailers::{MachineRef, Scope, Trailers, compose_message};
-use crate::store::{CommitId, Machine, Store, check_relative, git_error, io_error, server_path};
+use crate::store::trailers::{ApplyRef, MachineRef, Scope, Trailers, compose_message};
+use crate::store::{
+    CommitId, Machine, Store, StoreRead, check_relative, git_error, io_error, server_path,
+};
 
 /// What a transaction does, for its commit message and trailers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +23,7 @@ pub struct Operation {
     summary: String,
     entities: Vec<String>,
     scope: Scope,
+    apply: Option<ApplyRef>,
 }
 
 impl Operation {
@@ -32,6 +35,7 @@ impl Operation {
             summary: summary.into(),
             entities: Vec::new(),
             scope: Scope::System,
+            apply: None,
         }
     }
 
@@ -78,7 +82,7 @@ impl Operation {
                 label: machine.label.clone(),
             }),
             client: Some(client.to_owned()),
-            apply: None,
+            apply: self.apply.clone(),
             other: Vec::new(),
         }
     }
@@ -99,10 +103,46 @@ pub(crate) type Changes = BTreeMap<String, Option<Vec<u8>>>;
 /// Changes staged inside [`Store::transaction`]. Reads see staged changes.
 pub struct Transaction<'a> {
     store: &'a Store<'a>,
+    machine: Machine,
+    operation: Operation,
     changes: Changes,
 }
 
 impl Transaction<'_> {
+    /// The store this transaction commits to.
+    pub fn store(&self) -> &Store<'_> {
+        self.store
+    }
+
+    /// The machine making the change (the commit author).
+    pub fn machine(&self) -> &Machine {
+        &self.machine
+    }
+
+    /// Replaces the commit subject (an apply run names its files only once
+    /// it has run).
+    pub fn set_summary(&mut self, summary: impl Into<String>) {
+        self.operation.summary = summary.into();
+    }
+
+    /// Adds a `Loadout-Entity` trailer, once per entity.
+    pub fn add_entity(&mut self, entity: impl Into<String>) {
+        let entity = entity.into();
+        if !self.operation.entities.contains(&entity) {
+            self.operation.entities.push(entity);
+        }
+    }
+
+    /// Sets the `Loadout-Apply: <apply-id> <outcome>` trailer.
+    pub fn set_apply(&mut self, apply: ApplyRef) {
+        self.operation.apply = Some(apply);
+    }
+
+    /// Whether anything is staged.
+    pub fn has_changes(&self) -> bool {
+        !self.changes.is_empty()
+    }
+
     /// A store file as this transaction sees it; `None` if absent.
     pub fn read_to_string(&self, relative: &str) -> Result<Option<String>, CoreError> {
         check_relative(relative)?;
@@ -166,6 +206,32 @@ impl Transaction<'_> {
     }
 }
 
+impl StoreRead for Transaction<'_> {
+    fn read_file(&self, relative: &str) -> Result<Option<String>, CoreError> {
+        self.read_to_string(relative)
+    }
+
+    fn list_files(&self, dir: &str) -> Result<Vec<String>, CoreError> {
+        let mut names = self.store.list_files(dir)?;
+        let prefix = format!("{dir}/");
+        for (relative, change) in &self.changes {
+            let Some(name) = relative.strip_prefix(&prefix) else {
+                continue;
+            };
+            if name.contains('/') {
+                continue;
+            }
+            match change {
+                Some(_) if !names.iter().any(|known| known == name) => names.push(name.to_owned()),
+                Some(_) => {}
+                None => names.retain(|known| known != name),
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+}
+
 impl Store<'_> {
     /// Runs one mutation: takes the cross-process lock (waiting up to
     /// [`LOCK_TIMEOUT`]), lets `f` stage changes, validates every staged
@@ -184,10 +250,13 @@ impl Store<'_> {
         let machine = Machine::load_or_create(&self.env, self.fs, &self.state_dir)?;
         let mut tx = Transaction {
             store: self,
+            machine,
+            operation,
             changes: Changes::new(),
         };
         let value = f(&mut tx)?;
-        let commit = self.commit_changes(&machine, &operation, tx.changes)?;
+        tx.operation.check()?;
+        let commit = self.commit_changes(&tx.machine, &tx.operation, tx.changes)?;
         Ok(Committed { value, commit })
     }
 

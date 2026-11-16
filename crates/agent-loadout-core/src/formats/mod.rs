@@ -150,6 +150,13 @@ impl NativeMap {
             .map(|(_, value)| value)
     }
 
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut NativeValue> {
+        self.entries
+            .iter_mut()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value)
+    }
+
     pub fn contains_key(&self, key: &str) -> bool {
         self.get(key).is_some()
     }

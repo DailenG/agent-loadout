@@ -69,7 +69,7 @@
           "minimum": 0
         },
         "file": {
-          "description": "Target file written with `~` or `<P>` placeholders, never a personal path.",
+          "description": "Target file written with a `~/`, `<P>/`, `%NAME%/` or `$NAME/`\nplaceholder root, never a personal path.",
           "type": "string"
         },
         "outcome": {

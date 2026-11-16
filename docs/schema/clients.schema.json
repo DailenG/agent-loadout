@@ -37,6 +37,10 @@
             "type": "string"
           }
         },
+        "native_disable": {
+          "description": "`true`: an owned entry that is no longer desired is disabled through\nthe client's native mechanism (`enabled = false`) instead of being\nremoved, when the client has one (SPEC 8.4).",
+          "type": "boolean"
+        },
         "profiles": {
           "description": "Named profiles to target (omp).",
           "type": "array",

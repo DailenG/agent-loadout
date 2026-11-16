@@ -262,6 +262,11 @@ pub struct ClientPrefs {
     /// when it is not detected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    /// `true`: an owned entry that is no longer desired is disabled through
+    /// the client's native mechanism (`enabled = false`) instead of being
+    /// removed, when the client has one (SPEC 8.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_disable: Option<bool>,
     /// Where the shared project layer goes (Claude Code: `.mcp.json`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_shared_target: Option<String>,

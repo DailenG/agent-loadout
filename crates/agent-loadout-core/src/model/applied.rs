@@ -78,7 +78,8 @@ pub struct AppliedTarget {
     /// Required for project scopes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-    /// Target file written with `~` or `<P>` placeholders, never a personal path.
+    /// Target file written with a `~/`, `<P>/`, `%NAME%/` or `$NAME/`
+    /// placeholder root, never a personal path.
     pub file: String,
     pub create: u32,
     pub update: u32,
@@ -136,7 +137,10 @@ impl AppliedRecord {
                 d.error(
                     ErrorCode::InvalidPath,
                     join(&path, "file"),
-                    format!("{:?} must start with `~/` or `<P>/`", target.file),
+                    format!(
+                        "{:?} must start with `~/`, `<P>/`, `%NAME%/` or `$NAME/`",
+                        target.file
+                    ),
                 );
             }
         }
@@ -144,6 +148,20 @@ impl AppliedRecord {
     }
 }
 
+/// `~/`, `<P>/`, or a known folder or variable placeholder: `%APPDATA%/`
+/// (Windows spelling) or `$XDG_CONFIG_HOME/` (Unix spelling). Never an
+/// absolute path, which would be personal.
 fn has_placeholder_root(file: &str) -> bool {
-    ["~/", "<P>/"].iter().any(|root| file.starts_with(root))
+    if ["~/", "<P>/"].iter().any(|root| file.starts_with(root)) {
+        return true;
+    }
+    let var = |name: &str| ids::is_valid(IdKind::EnvVar, name);
+    if let Some(rest) = file.strip_prefix('%')
+        && let Some((name, _)) = rest.split_once("%/")
+    {
+        return var(name);
+    }
+    file.strip_prefix('$')
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(name, _)| var(name))
 }

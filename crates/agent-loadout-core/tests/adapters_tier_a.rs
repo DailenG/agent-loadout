@@ -1292,6 +1292,24 @@ impl Fs for ReadOnlyFs {
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         self.0.read_to_string(path)
     }
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.0.read(path)
+    }
+    fn write_new(&self, path: &Path, _: &[u8], _: Option<&Path>) -> io::Result<()> {
+        panic!("detection wrote {}", path.display())
+    }
+    fn replace(&self, _: &Path, to: &Path) -> io::Result<()> {
+        panic!("detection replaced {}", to.display())
+    }
+    fn write_private(&self, path: &Path, _: &[u8]) -> io::Result<()> {
+        panic!("detection wrote {}", path.display())
+    }
+    fn create_private_dir_all(&self, path: &Path) -> io::Result<()> {
+        panic!("detection created {}", path.display())
+    }
+    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        panic!("detection removed {}", path.display())
+    }
     fn write(&self, path: &Path, _: &[u8]) -> io::Result<()> {
         panic!("detection wrote {}", path.display())
     }

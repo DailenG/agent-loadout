@@ -72,6 +72,32 @@ pub enum ErrorCode {
     /// (Pi with `pi-mcp-adapter`), so the client's own MCP config may not be
     /// what loads.
     ClientMcpReplacedByExtension,
+    /// A client file kept changing between planning and writing (SPEC 8.4
+    /// step 1, after three re-plans). The file is left as it is.
+    FileChangedDuringApply,
+    /// The edited file did not read back as planned: an owned entry differs
+    /// from the desired one, or something outside the owned entries changed
+    /// (SPEC 8.4 step 3). The file is left as it is.
+    SelfCheckFailed,
+    /// Another process kept a client file open for longer than the retry
+    /// window (Windows sharing violation, SPEC 8.4 step 4).
+    FileLocked,
+    /// No delivery mode of this build can bring a reference (`${secret:..}`,
+    /// or `${env:..}` in a field the client does not expand) to this client.
+    /// The entry is blocked; nothing is written in plain text.
+    DeliveryUnavailable,
+    /// Warning: a known client has no adapter in this build yet, so nothing
+    /// is written for it.
+    NoAdapter,
+    /// A native entry holds literal values that may be secrets; importing it
+    /// needs secret extraction (SPEC 11.7) instead of copying the values.
+    NeedsSecretExtraction,
+    /// The operation changes state that later operations changed too and
+    /// needs an explicit confirmation (rolling back an older apply, SPEC 8.7).
+    ConfirmationRequired,
+    /// Warning: an apply run did not finish; its journal lists what each
+    /// file got (SPEC 8.4 step 6). Nothing is replayed.
+    UnfinishedApply,
 }
 
 impl ErrorCode {
@@ -103,6 +129,14 @@ impl ErrorCode {
             ErrorCode::MsixDualWrite => "msix_dual_write",
             ErrorCode::Collision => "collision",
             ErrorCode::ClientMcpReplacedByExtension => "client_mcp_replaced_by_extension",
+            ErrorCode::FileChangedDuringApply => "file_changed_during_apply",
+            ErrorCode::SelfCheckFailed => "self_check_failed",
+            ErrorCode::FileLocked => "file_locked",
+            ErrorCode::DeliveryUnavailable => "delivery_unavailable",
+            ErrorCode::NoAdapter => "no_adapter",
+            ErrorCode::NeedsSecretExtraction => "needs_secret_extraction",
+            ErrorCode::ConfirmationRequired => "confirmation_required",
+            ErrorCode::UnfinishedApply => "unfinished_apply",
         }
     }
 }

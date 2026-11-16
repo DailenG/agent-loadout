@@ -56,16 +56,41 @@ impl Fs for RootedFs {
         RealFs.read_to_string(self.check(path))
     }
 
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        RealFs.read(self.check(path))
+    }
+
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         RealFs.write(self.check(path), contents)
+    }
+
+    fn write_new(&self, path: &Path, contents: &[u8], like: Option<&Path>) -> io::Result<()> {
+        let like = like.map(|like| self.check(like));
+        RealFs.write_new(self.check(path), contents, like)
+    }
+
+    fn replace(&self, from: &Path, to: &Path) -> io::Result<()> {
+        RealFs.replace(self.check(from), self.check(to))
+    }
+
+    fn write_private(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        RealFs.write_private(self.check(path), contents)
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         RealFs.create_dir_all(self.check(path))
     }
 
+    fn create_private_dir_all(&self, path: &Path) -> io::Result<()> {
+        RealFs.create_private_dir_all(self.check(path))
+    }
+
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         RealFs.remove_file(self.check(path))
+    }
+
+    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        RealFs.remove_dir_all(self.check(path))
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
