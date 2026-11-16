@@ -17,6 +17,7 @@ use agent_loadout_core::model::applied::ApplyTrigger;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::server::{Enable, Server, Transport};
 use agent_loadout_core::paths::{LoadoutHome, loadout_home};
+use agent_loadout_core::secrets::delivery::DeliveryEnv;
 use agent_loadout_core::store::{
     CommitId, LogEntry, LogFilter, Operation, Store, Transaction, server_path,
 };
