@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use agent_loadout_core::paths::{self, LoadoutHome, SyncRoot};
+use agent_loadout_core::store::{HistoryFinding, Store};
 use agent_loadout_core::{CoreError, Env, ErrorCode, KnownFolder, Os, RealFs, SystemClock, brand};
 use clap::{Args, Parser, Subcommand};
 use serde_json::{Value, json};
@@ -53,6 +54,8 @@ enum Command {
     Import(cmd::import::ImportArgs),
     /// Take ownership of foreign or changed client entries.
     Adopt(cmd::adopt::AdoptArgs),
+    /// Secret references: aliases, providers and their status.
+    Secrets(cmd::secrets::SecretsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -60,6 +63,10 @@ struct DoctorArgs {
     /// Also report the resolved OS folders and data directory layout.
     #[arg(long)]
     paths: bool,
+    /// Also scan every store commit for secrets (reports only; history is
+    /// never rewritten).
+    #[arg(long)]
+    scan_history: bool,
 }
 
 fn main() -> ExitCode {
@@ -96,6 +103,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Rollback(args) => cmd::rollback::run(&context()?, args),
         Command::Import(args) => cmd::import::run(&context()?, args),
         Command::Adopt(args) => cmd::adopt::run(&context()?, args),
+        Command::Secrets(args) => cmd::secrets::run(&context()?, args),
     }
 }
 
@@ -171,11 +179,23 @@ fn absolute(path: &Path) -> Result<PathBuf, CoreError> {
 fn doctor(env: &Env, flag: Option<&Path>, args: &DoctorArgs, json: bool) -> Result<(), CoreError> {
     let home = paths::loadout_home(env, &RealFs, flag)?;
     let findings: Vec<&SyncRoot> = home.sync_root.iter().collect();
+    let leaks = if args.scan_history {
+        match Store::open(env, &RealFs, &home, &cmd::client_name())? {
+            Some(store) => store.scan_history()?,
+            None => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
 
     if json {
         let mut doc = json!({
             "schema": JSON_SCHEMA,
-            "findings": findings.iter().map(|root| sync_root_finding_json(root)).collect::<Vec<_>>(),
+            "findings": findings
+                .iter()
+                .map(|root| sync_root_finding_json(root))
+                .chain(leaks.iter().map(leak_finding_json))
+                .collect::<Vec<_>>(),
         });
         if args.paths {
             doc["paths"] = paths_json(env, &home);
@@ -190,13 +210,32 @@ fn doctor(env: &Env, flag: Option<&Path>, args: &DoctorArgs, json: bool) -> Resu
         }
         println!();
     }
-    if findings.is_empty() {
+    if findings.is_empty() && leaks.is_empty() {
         println!("No problems found.");
     }
     for root in findings {
         println!("warning[sync_root_detected]: {}", sync_root_warning(root));
     }
+    for leak in &leaks {
+        println!(
+            "warning[leak_detected]: commit {} {}",
+            leak.commit.short(),
+            leak.finding
+        );
+    }
     Ok(())
+}
+
+fn leak_finding_json(leak: &HistoryFinding) -> Value {
+    json!({
+        "code": "leak_detected",
+        "severity": "warning",
+        "commit": leak.commit.to_string(),
+        "file": leak.finding.file,
+        "line": leak.finding.line,
+        "key": leak.finding.key,
+        "reason": leak.finding.kind.as_str(),
+    })
 }
 
 fn paths_table(env: &Env, home: &LoadoutHome) -> Vec<(&'static str, String)> {

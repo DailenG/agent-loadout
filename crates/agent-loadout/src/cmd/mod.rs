@@ -7,6 +7,7 @@ pub mod diff;
 pub mod history;
 pub mod import;
 pub mod rollback;
+pub mod secrets;
 pub mod server;
 pub mod status;
 
