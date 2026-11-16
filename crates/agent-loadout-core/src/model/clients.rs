@@ -32,8 +32,10 @@ const fn client(id: &'static str, passthrough: &'static [&'static str]) -> Known
     KnownClient { id, passthrough }
 }
 
-/// Every client id of SPEC 7.3 and 7.5, in table order. The adapter table
-/// (M4) takes this over; until then validation reads it from here.
+/// Every client id of SPEC 7.3 and 7.5, in table order, with its
+/// passthrough allowlist. Validation reads ids from here because most
+/// clients have no adapter yet; adapters (`crate::adapters`) take their
+/// allowlist from here through [`passthrough_of`], so there is one list.
 pub const KNOWN_CLIENTS: &[KnownClient] = &[
     // Tier A
     client("claude-code", &[]),
@@ -82,6 +84,34 @@ pub const KNOWN_CLIENTS: &[KnownClient] = &[
 /// The table entry for `id`, if the client is known.
 pub fn known_client(id: &str) -> Option<&'static KnownClient> {
     KNOWN_CLIENTS.iter().find(|client| client.id == id)
+}
+
+/// The passthrough allowlist of known client `id`, for the adapter table.
+/// Used in constants, where an unknown id fails the build.
+pub const fn passthrough_of(id: &str) -> &'static [&'static str] {
+    let mut index = 0;
+    while index < KNOWN_CLIENTS.len() {
+        if const_str_eq(KNOWN_CLIENTS[index].id, id) {
+            return KNOWN_CLIENTS[index].passthrough;
+        }
+        index += 1;
+    }
+    panic!("passthrough_of: unknown client id");
+}
+
+const fn const_str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < a.len() {
+        if a[index] != b[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 const ALL_DETECTED: &str = "all-detected";

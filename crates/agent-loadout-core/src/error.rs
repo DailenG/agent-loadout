@@ -49,6 +49,21 @@ pub enum ErrorCode {
     /// A native client file parses, but a value on the path being read or
     /// edited has another kind (for example `mcpServers` is an array).
     UnexpectedShape,
+    /// A client has no target on this operating system (Claude Desktop on
+    /// Linux).
+    NotSupportedOnOs,
+    /// A client has no target in the requested scope (Claude Desktop at
+    /// project scope).
+    ScopeNotSupported,
+    /// A client cannot run a server over this transport (HTTP on Claude
+    /// Desktop). The target is blocked; nothing is dropped silently.
+    UnsupportedTransport,
+    /// A client has no native field for a set server field (`cwd` on Claude
+    /// Desktop). The target is blocked; nothing is dropped silently.
+    UnsupportedField,
+    /// Warning: an MSIX install keeps its own copy of a client file, so both
+    /// copies are written (Claude Desktop on Windows).
+    MsixDualWrite,
 }
 
 impl ErrorCode {
@@ -73,6 +88,11 @@ impl ErrorCode {
             ErrorCode::AlreadyExists => "already_exists",
             ErrorCode::NotFound => "not_found",
             ErrorCode::UnexpectedShape => "unexpected_shape",
+            ErrorCode::NotSupportedOnOs => "not_supported_on_os",
+            ErrorCode::ScopeNotSupported => "scope_not_supported",
+            ErrorCode::UnsupportedTransport => "unsupported_transport",
+            ErrorCode::UnsupportedField => "unsupported_field",
+            ErrorCode::MsixDualWrite => "msix_dual_write",
         }
     }
 }

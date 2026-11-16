@@ -5,6 +5,7 @@
 //! [`Fs`]; the CLI and the app build them from the process, tests build them
 //! from a temp root.
 
+pub mod adapters;
 pub mod brand;
 pub mod env;
 pub mod error;
