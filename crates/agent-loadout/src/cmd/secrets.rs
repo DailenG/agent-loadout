@@ -1,23 +1,29 @@
-//! `loadout secrets ls|check|providers|set|clear` (SPEC 11, 14).
+//! `loadout secrets ls|check|providers|set|clear|map-op-env|service-account`
+//! (SPEC 11, 14).
 //!
-//! Values never pass through arguments or output: `set --keyring` reads the
-//! value from piped stdin, `check` prints statuses only. `providers` only
-//! detects (`op --version`); `check` resolves and may make 1Password ask
-//! for approval, so it runs on request only (SPEC 11.11).
+//! Values never pass through arguments or output: `set --keyring` and
+//! `service-account set` read the value from piped stdin, `check` prints
+//! statuses only. `providers` only detects (`op --version`); `check`
+//! resolves and may make 1Password ask for approval, so it runs on request
+//! only (SPEC 11.11). `check` is the missing-secret checklist of SPEC 11.9:
+//! each alias with its status, the servers and clients that need it, and
+//! the fixes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{IsTerminal, Read};
 use std::sync::Arc;
 
+use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::brand;
+use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::secrets::catalog::{
     self, AliasStatus, AliasUpdate, Catalog, SetScope, keyring_parts,
 };
-use agent_loadout_core::secrets::grammar::SecretRef;
-use agent_loadout_core::secrets::providers::keyring::{KeyringBackend, OsKeyring};
-use agent_loadout_core::secrets::providers::onepassword::OpCli;
+use agent_loadout_core::secrets::delivery::{SERVICE_ACCOUNT_KEYRING_ACCOUNT, op_env};
+use agent_loadout_core::secrets::grammar::{SecretRef, is_op_environment_id};
+use agent_loadout_core::secrets::providers::onepassword::OpFeature;
 use agent_loadout_core::secrets::providers::{self, ProviderInfo, Resolver};
 use agent_loadout_core::secrets::scanner::SecretMemory;
 use agent_loadout_core::secrets::status::SecretStatus;
@@ -26,12 +32,10 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
-use super::{Context, JSON_SCHEMA, instant_apply, print_json, print_report, report_json};
-
-/// Exit code when a checked alias cannot be resolved (SPEC 14).
-const EXIT_MISSING_SECRETS: u8 = 5;
-
-static OS_KEYRING: OsKeyring = OsKeyring;
+use super::{
+    Context, EXIT_MISSING_SECRETS, JSON_SCHEMA, instant_apply, print_json, print_report,
+    report_json,
+};
 
 #[derive(Debug, Args)]
 pub struct SecretsArgs {
@@ -43,8 +47,10 @@ pub struct SecretsArgs {
 enum SecretsCommand {
     /// List aliases with this machine's reference and the servers using them.
     Ls,
-    /// Resolve aliases and report their status (never their values); exits
-    /// 5 when one cannot be resolved. May prompt for 1Password approval.
+    /// The missing-secret checklist: resolve aliases and report their
+    /// status (never their values), the servers and clients that need them
+    /// and how to fix them; exits 5 when one cannot be resolved. May prompt
+    /// for 1Password approval.
     Check {
         /// Aliases to check [default: every alias defined or used].
         aliases: Vec<String>,
@@ -58,6 +64,15 @@ enum SecretsCommand {
     Clear {
         /// Secret alias.
         alias: String,
+    },
+    /// Map the variables of a 1Password Environment to aliases
+    /// (`op-env://<ENV-ID>/<NAME>`) and save the Environment id.
+    MapOpEnv(MapOpEnvArgs),
+    /// The 1Password service account token in the OS keyring, passed by
+    /// `loadout exec` to `op` only.
+    ServiceAccount {
+        #[command(subcommand)]
+        command: ServiceAccountCommand,
     },
 }
 
@@ -89,6 +104,28 @@ struct SetArgs {
     env_name: Option<String>,
 }
 
+#[derive(Debug, Args)]
+struct MapOpEnvArgs {
+    /// 1Password Environment id.
+    #[arg(value_name = "ENV-ID")]
+    environment: String,
+    /// Map these variable names (repeatable). Needed below CLI 2.42.0,
+    /// which cannot list them.
+    #[arg(long = "name", value_name = "NAME")]
+    names: Vec<String>,
+    /// Map every variable the Environment lists.
+    #[arg(long, conflicts_with = "names")]
+    all: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum ServiceAccountCommand {
+    /// Store the token piped on stdin in the OS keyring.
+    Set,
+    /// Delete the token from the OS keyring.
+    Clear,
+}
+
 pub fn run(ctx: &Context, args: &SecretsArgs) -> Result<u8, CoreError> {
     match &args.command {
         SecretsCommand::Ls => list(ctx).map(|()| 0),
@@ -96,6 +133,8 @@ pub fn run(ctx: &Context, args: &SecretsArgs) -> Result<u8, CoreError> {
         SecretsCommand::Providers => providers(ctx).map(|()| 0),
         SecretsCommand::Set(args) => set(ctx, args).map(|()| 0),
         SecretsCommand::Clear { alias } => clear(ctx, alias).map(|()| 0),
+        SecretsCommand::MapOpEnv(args) => map_op_env(ctx, args).map(|()| 0),
+        SecretsCommand::ServiceAccount { command } => service_account(ctx, command).map(|()| 0),
     }
 }
 
@@ -107,11 +146,15 @@ fn load(
     let Some(store) = store else {
         return Ok((Catalog::default(), BTreeMap::new()));
     };
-    let machine = Machine::load(ctx.fs(), &ctx.home.state_dir())?.map(|machine| machine.id);
+    let machine = machine_id(ctx)?;
     Ok((
         Catalog::load(store, machine.as_deref())?,
         catalog::usage(store, machine.as_deref())?,
     ))
+}
+
+fn machine_id(ctx: &Context) -> Result<Option<String>, CoreError> {
+    Ok(Machine::load(ctx.fs(), &ctx.home.state_dir())?.map(|machine| machine.id))
 }
 
 fn memory(store: Option<&Store<'_>>) -> Result<Arc<SecretMemory>, CoreError> {
@@ -171,8 +214,12 @@ fn list(ctx: &Context) -> Result<(), CoreError> {
 fn check(ctx: &Context, only: &[String]) -> Result<u8, CoreError> {
     let store = ctx.open_store()?;
     let (catalog, usage) = load(ctx, store.as_ref())?;
-    let op = OpCli::detect(&ctx.env, ctx.fs());
-    let resolver = Resolver::new(&ctx.env, &OS_KEYRING, &op, memory(store.as_ref())?);
+    let desired = match &store {
+        Some(store) => DesiredState::load(store, machine_id(ctx)?.as_deref())?,
+        None => DesiredState::empty(),
+    };
+    let env = op_env(&ctx.env, ctx.keyring());
+    let resolver = Resolver::new(&env, ctx.keyring(), ctx.op(), memory(store.as_ref())?);
     let statuses = catalog::check(&catalog, &usage, &resolver, only);
     let blocked = statuses.iter().any(|status| {
         !matches!(
@@ -183,7 +230,10 @@ fn check(ctx: &Context, only: &[String]) -> Result<u8, CoreError> {
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
-            "aliases": statuses.iter().map(status_json).collect::<Vec<_>>(),
+            "aliases": statuses
+                .iter()
+                .map(|status| status_json(status, &desired))
+                .collect::<Vec<_>>(),
         }));
     } else if statuses.is_empty() {
         println!("No secret aliases.");
@@ -200,12 +250,75 @@ fn check(ctx: &Context, only: &[String]) -> Result<u8, CoreError> {
                 status.resolution.status.as_str(),
                 status.alias
             );
+            for (server, clients) in needed_by(status, &desired) {
+                let clients = if clients.is_empty() {
+                    "not enabled".to_owned()
+                } else {
+                    clients.join(", ")
+                };
+                println!("{:<22}   needed by {server} ({clients})", "");
+            }
+            for fix in fixes(status) {
+                println!("{:<22}   fix: {fix}", "");
+            }
         }
     }
     Ok(if blocked { EXIT_MISSING_SECRETS } else { 0 })
 }
 
-fn status_json(status: &AliasStatus) -> Value {
+/// Each server using the alias, with the clients it is enabled for.
+fn needed_by(status: &AliasStatus, desired: &DesiredState) -> Vec<(String, Vec<String>)> {
+    status
+        .servers
+        .iter()
+        .map(|id| {
+            let clients = match desired
+                .servers
+                .get(id)
+                .and_then(|server| server.enable.as_ref())
+                .and_then(|enable| enable.clients.as_ref())
+            {
+                Some(ClientSelection::List(ids)) => ids.clone(),
+                Some(ClientSelection::AllDetected) => vec!["all-detected".to_owned()],
+                None => Vec::new(),
+            };
+            (id.clone(), clients)
+        })
+        .collect()
+}
+
+/// The quick fixes of SPEC 11.9 for an alias that is not resolved; "skip
+/// for now" is doing nothing.
+fn fixes(status: &AliasStatus) -> Vec<String> {
+    let bin = brand::BIN_NAME;
+    let alias = &status.alias;
+    let set = |machine: &str| {
+        vec![
+            format!("pipe the value into `{bin} secrets set {alias} --keyring{machine}`"),
+            format!("`{bin} secrets set {alias} --ref op://<vault>/<item>/<field>{machine}`"),
+            format!(
+                "`{bin} secrets set {alias} --ref env:<NAME>{machine}` and set NAME in the clients' environment"
+            ),
+        ]
+    };
+    match status.resolution.status {
+        SecretStatus::Resolved | SecretStatus::Unverifiable => Vec::new(),
+        SecretStatus::ProviderUnavailable | SecretStatus::ProviderTooOld => set(" --this-machine"),
+        SecretStatus::Locked => vec![
+            "sign in to 1Password or approve its prompt, then check again".to_owned(),
+            format!(
+                "pipe a 1Password service account token into `{bin} secrets service-account set`"
+            ),
+        ],
+        SecretStatus::Missing | SecretStatus::Error => set(""),
+    }
+}
+
+fn status_json(status: &AliasStatus, desired: &DesiredState) -> Value {
+    let clients: BTreeSet<String> = needed_by(status, desired)
+        .into_iter()
+        .flat_map(|(_, clients)| clients)
+        .collect();
     json!({
         "alias": status.alias,
         "ref": status.reference,
@@ -213,12 +326,13 @@ fn status_json(status: &AliasStatus) -> Value {
         "status": status.resolution.status.as_str(),
         "message": status.resolution.message,
         "servers": status.servers,
+        "clients": clients,
+        "fixes": fixes(status),
     })
 }
 
 fn providers(ctx: &Context) -> Result<(), CoreError> {
-    let op = OpCli::detect(&ctx.env, ctx.fs());
-    let infos = providers::describe(&OS_KEYRING, &op);
+    let infos = providers::describe(ctx.keyring(), ctx.op());
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
@@ -286,11 +400,9 @@ fn set(ctx: &Context, args: &SetArgs) -> Result<(), CoreError> {
     let store = ctx.open_store_for_change()?;
     if let Some(value) = &value {
         let (service, account) = keyring_parts(&reference)?;
-        let op = OpCli::NotFound;
-        let resolver = Resolver::new(&ctx.env, &OS_KEYRING, &op, store.secret_memory().clone());
-        resolver
-            .set_keyring(service, account, value)
-            .map_err(|resolution| resolution.into_error(&format!("cannot store {}", args.alias)))?;
+        store_in_keyring(ctx, &store, service, account, value).map_err(|err| {
+            CoreError::new(err.code(), format!("cannot store {}: {err}", args.alias))
+        })?;
     }
     let scope = if args.this_machine {
         SetScope::Machine
@@ -328,7 +440,10 @@ fn set(ctx: &Context, args: &SetArgs) -> Result<(), CoreError> {
         }));
     } else {
         if value.is_some() {
-            println!("Stored the value of {alias} in the {}.", OS_KEYRING.name());
+            println!(
+                "Stored the value of {alias} in the {}.",
+                ctx.keyring().name()
+            );
         }
         println!(
             "Set {alias} to {reference} (commit {}).",
@@ -339,6 +454,26 @@ fn set(ctx: &Context, args: &SetArgs) -> Result<(), CoreError> {
         }
     }
     Ok(())
+}
+
+/// Stores `value` in the keyring and remembers it, so the store refuses
+/// to commit it.
+fn store_in_keyring(
+    ctx: &Context,
+    store: &Store<'_>,
+    service: &str,
+    account: &str,
+    value: &SecretValue,
+) -> Result<(), CoreError> {
+    let resolver = Resolver::new(
+        &ctx.env,
+        ctx.keyring(),
+        &providers::onepassword::OpCli::NotFound,
+        store.secret_memory().clone(),
+    );
+    resolver
+        .set_keyring(service, account, value)
+        .map_err(|resolution| resolution.into_error(account))
 }
 
 /// The value piped on stdin, without its final line break. A terminal is
@@ -377,10 +512,9 @@ fn clear(ctx: &Context, alias: &str) -> Result<(), CoreError> {
     })?;
     let reference = entry.parsed()?;
     let (service, account) = keyring_parts(&reference)?;
-    let op = OpCli::NotFound;
-    let resolver = Resolver::new(&ctx.env, &OS_KEYRING, &op, memory(store.as_ref())?);
-    let deleted = resolver
-        .delete_keyring(service, account)
+    let deleted = ctx
+        .keyring()
+        .delete(service, account)
         .map_err(|resolution| resolution.into_error(&format!("cannot clear {alias}")))?;
     if ctx.json {
         print_json(&json!({
@@ -393,6 +527,179 @@ fn clear(ctx: &Context, alias: &str) -> Result<(), CoreError> {
         println!("Deleted the keyring entry of {alias} ({reference}).");
     } else {
         println!("{alias} had no keyring entry ({reference}).");
+    }
+    Ok(())
+}
+
+/// `secrets map-op-env <ENV-ID>` (SPEC 11.10): lists the Environment's
+/// variable names (CLI 2.42.0+; values are dropped while parsing) and maps
+/// the selected ones to aliases named like the variables. Aliases that
+/// already point elsewhere are kept and reported.
+fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<(), CoreError> {
+    let id = &args.environment;
+    if !is_op_environment_id(id) {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("invalid 1Password Environment id {id:?}"),
+        ));
+    }
+    for name in &args.names {
+        ids::check(IdKind::SecretAlias, name)?;
+    }
+    let op = ctx.op();
+    op.require(OpFeature::Environments)
+        .map_err(|resolution| resolution.into_error("1Password Environments"))?;
+    let listed = if op.supports(OpFeature::EnvironmentListing) {
+        let env = op_env(&ctx.env, ctx.keyring());
+        Some(
+            op.list_environment(&env, id)
+                .map_err(|resolution| resolution.into_error(&format!("Environment {id}")))?,
+        )
+    } else {
+        None
+    };
+    let selected: Vec<String> = match (&listed, args.all) {
+        (Some(listed), true) => listed.clone(),
+        (None, true) => {
+            return Err(CoreError::new(
+                ErrorCode::ProviderTooOld,
+                "listing Environment variables needs 1Password CLI 2.42.0 or newer; name them \
+                 with --name",
+            ));
+        }
+        (Some(listed), false) => {
+            if let Some(unknown) = args.names.iter().find(|name| !listed.contains(name)) {
+                return Err(CoreError::new(
+                    ErrorCode::NotFound,
+                    format!("{unknown} is not a variable of 1Password Environment {id}"),
+                ));
+            }
+            args.names.clone()
+        }
+        (None, false) => args.names.clone(),
+    };
+    if selected.is_empty() {
+        let names = listed.unwrap_or_default();
+        if ctx.json {
+            print_json(&json!({ "schema": JSON_SCHEMA, "environment": id, "names": names }));
+        } else {
+            for name in &names {
+                println!("{name}");
+            }
+            eprintln!("Pick names with --name NAME (repeatable) or map them all with --all.");
+        }
+        return Ok(());
+    }
+    for name in &selected {
+        ids::check(IdKind::SecretAlias, name)?;
+    }
+
+    let store = ctx.open_store_for_change()?;
+    let machine = machine_id(ctx)?;
+    let catalog = Catalog::load(&store, machine.as_deref())?;
+    let mut mapped = Vec::new();
+    let mut kept = Vec::new();
+    for name in &selected {
+        let reference = SecretRef::OnePasswordEnvironment {
+            environment: id.clone(),
+            name: name.clone(),
+        };
+        match catalog.get(name).map(|alias| alias.parsed()) {
+            Some(Ok(SecretRef::OnePasswordEnvironment { .. })) | None => {
+                mapped.push((name.clone(), reference));
+            }
+            Some(_) => kept.push(name.clone()),
+        }
+    }
+    let ax = ctx.apply_env();
+    let summary = format!("secrets: map 1Password Environment {id}");
+    let committed = store.transaction(Operation::new("secrets.map-op-env", summary), |tx| {
+        tx.add_entity("secrets".to_owned());
+        let previous = catalog::stage_environment(tx, id)?;
+        for (alias, reference) in &mapped {
+            let update = AliasUpdate {
+                reference: reference.clone(),
+                description: None,
+                env_name: None,
+            };
+            catalog::stage_set(tx, alias, &update, SetScope::Store)?;
+        }
+        Ok((previous, instant_apply(tx, &ax)?))
+    })?;
+    let (previous, report) = committed.value;
+    let aliases: Vec<&str> = mapped.iter().map(|(alias, _)| alias.as_str()).collect();
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "environment": id,
+            "replaced_environment": previous,
+            "mapped": aliases,
+            "kept": kept,
+            "commit": committed.commit.as_ref().map(ToString::to_string),
+            "apply": report.as_ref().map(|r| report_json(r, committed.commit.as_ref())),
+        }));
+    } else {
+        if let Some(previous) = &previous {
+            println!("Replaced 1Password Environment {previous} with {id}.");
+        }
+        println!(
+            "Mapped {} to 1Password Environment {id} (commit {}).",
+            aliases.join(", "),
+            committed.commit.as_ref().map_or("none", |c| c.short())
+        );
+        for alias in &kept {
+            eprintln!("warning[already_exists]: {alias} already points to another reference; kept");
+        }
+        if let Some(report) = &report {
+            print_report(report, committed.commit.as_ref());
+        }
+    }
+    Ok(())
+}
+
+/// `secrets service-account set|clear` (SPEC 11.5): the token lives only
+/// in the OS keyring, as `keyring://loadout/OP_SERVICE_ACCOUNT_TOKEN`.
+fn service_account(ctx: &Context, command: &ServiceAccountCommand) -> Result<(), CoreError> {
+    let service = brand::KEYRING_SERVICE;
+    let account = SERVICE_ACCOUNT_KEYRING_ACCOUNT;
+    let reference = format!("keyring://{service}/{account}");
+    let changed = match command {
+        ServiceAccountCommand::Set => {
+            let token = read_value()?;
+            ctx.keyring()
+                .set(service, account, &token)
+                .map_err(|resolution| resolution.into_error("cannot store the token"))?;
+            true
+        }
+        ServiceAccountCommand::Clear => ctx
+            .keyring()
+            .delete(service, account)
+            .map_err(|resolution| resolution.into_error("cannot clear the token"))?,
+    };
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "ref": reference,
+            "stored": matches!(command, ServiceAccountCommand::Set),
+            "changed": changed,
+        }));
+        return Ok(());
+    }
+    match (command, changed) {
+        (ServiceAccountCommand::Set, _) => {
+            println!(
+                "Stored the 1Password service account token in the {} ({reference}). `{} exec` \
+                 passes it to `op` only.",
+                ctx.keyring().name(),
+                brand::BIN_NAME
+            );
+            eprintln!(
+                "note: no approval prompts, but a long-lived token now rests in the keyring; scope \
+                 the account read-only to the MCP Environment and the vaults with op:// items."
+            );
+        }
+        (ServiceAccountCommand::Clear, true) => println!("Deleted the service account token."),
+        (ServiceAccountCommand::Clear, false) => println!("No service account token was stored."),
     }
     Ok(())
 }

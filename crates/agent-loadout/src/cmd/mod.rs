@@ -4,6 +4,8 @@
 pub mod adopt;
 pub mod apply;
 pub mod diff;
+pub mod env;
+pub mod exec;
 pub mod history;
 pub mod import;
 pub mod rollback;
@@ -22,6 +24,9 @@ use agent_loadout_core::model::Diagnostic;
 use agent_loadout_core::model::applied::{ApplyOutcome, ApplyTrigger};
 use agent_loadout_core::model::settings::ApplyMode;
 use agent_loadout_core::paths::{LoadoutHome, SyncRoot, SyncRootKind};
+use agent_loadout_core::secrets::delivery::DeliveryEnv;
+use agent_loadout_core::secrets::providers::keyring::KeyringBackend;
+use agent_loadout_core::secrets::providers::onepassword::OpCli;
 use agent_loadout_core::store::{CommitId, Store, Transaction};
 use agent_loadout_core::{CoreError, Env, ErrorCode, Fs, RealFs, brand};
 use serde_json::{Value, json};
@@ -34,6 +39,8 @@ pub const JSON_SCHEMA: u32 = 1;
 pub const EXIT_PENDING: u8 = 3;
 /// Exit code for entries that need a decision (SPEC 14).
 pub const EXIT_UNRESOLVED: u8 = 4;
+/// Exit code for entries or aliases blocked by missing secrets (SPEC 14).
+pub const EXIT_MISSING_SECRETS: u8 = 5;
 /// Exit code for a lock timeout (SPEC 14).
 const EXIT_LOCKED: u8 = 6;
 
@@ -50,11 +57,29 @@ pub struct Context {
     pub json: bool,
     /// `--yes`: confirmations are answered yes.
     pub yes: bool,
+    /// The keyring, the 1Password CLI and this binary as the launcher.
+    pub delivery: DeliveryEnv,
+}
+
+/// This machine's delivery environment: the running binary as the
+/// `loadout exec` launcher, and the CLI's keyring.
+pub fn delivery_env(env: &Env) -> DeliveryEnv {
+    let launcher = std::env::current_exe().ok();
+    DeliveryEnv::new(launcher, crate::keyring::keyring(env))
 }
 
 impl Context {
-    fn fs(&self) -> &'static dyn Fs {
+    pub fn fs(&self) -> &'static dyn Fs {
         &REAL_FS
+    }
+
+    pub fn keyring(&self) -> &dyn KeyringBackend {
+        self.delivery.keyring()
+    }
+
+    /// The 1Password CLI (detected on first use).
+    pub fn op(&self) -> &OpCli {
+        self.delivery.op(&self.env, self.fs())
     }
 
     /// What an apply runs against.
@@ -64,6 +89,7 @@ impl Context {
             fs: self.fs(),
             home: &self.home,
             registry: &NO_REGISTRY,
+            delivery: &self.delivery,
         }
     }
 
@@ -88,13 +114,28 @@ pub fn client_name() -> String {
 }
 
 /// Process exit code for a failed command: 4 for a needed confirmation,
-/// 6 for `locked`, else 1.
+/// 5 for a missing secret, 6 for `locked`, else 1.
 pub fn exit_code(err: &CoreError) -> u8 {
     match err.code() {
         ErrorCode::Locked => EXIT_LOCKED,
         ErrorCode::ConfirmationRequired => EXIT_UNRESOLVED,
+        ErrorCode::MissingSecret => EXIT_MISSING_SECRETS,
         _ => 1,
     }
+}
+
+/// Whether an entry is blocked because a secret cannot be had on this
+/// machine (SPEC 11.9, 14 exit code 5).
+pub fn blocked_by_secret(entry: &EntryPlan) -> bool {
+    entry.problem.as_ref().is_some_and(|err| {
+        matches!(
+            err.code(),
+            ErrorCode::MissingSecret
+                | ErrorCode::SecretLocked
+                | ErrorCode::ProviderUnavailable
+                | ErrorCode::ProviderTooOld
+        )
+    })
 }
 
 /// In instant mode (`apply_mode`, the default), applies a staged store edit
@@ -116,7 +157,7 @@ pub fn instant_apply(
 }
 
 /// The exit code of an apply run: 1 when a file failed, 4 when entries
-/// need a decision, else 0.
+/// need a decision, 5 when entries are blocked by missing secrets, else 0.
 pub fn apply_exit_code(report: &ApplyReport) -> u8 {
     if report
         .targets
@@ -126,6 +167,13 @@ pub fn apply_exit_code(report: &ApplyReport) -> u8 {
         1
     } else if report.unresolved() > 0 {
         EXIT_UNRESOLVED
+    } else if report
+        .targets
+        .iter()
+        .flat_map(|target| &target.entries)
+        .any(blocked_by_secret)
+    {
+        EXIT_MISSING_SECRETS
     } else {
         0
     }

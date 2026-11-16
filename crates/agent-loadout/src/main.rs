@@ -2,7 +2,10 @@
 //! an [`Env`] from the running process.
 
 mod cmd;
+mod exec;
+mod keyring;
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -56,6 +59,16 @@ enum Command {
     Adopt(cmd::adopt::AdoptArgs),
     /// Secret references: aliases, providers and their status.
     Secrets(cmd::secrets::SecretsArgs),
+    /// Print export statements for secret aliases.
+    Env(cmd::env::EnvArgs),
+    /// Print one resolved value (internal, for client command hooks).
+    Secret(cmd::env::SecretArgs),
+    /// Print resolved headers as JSON (internal, for Claude Code
+    /// `headersHelper`).
+    SecretHeader(cmd::env::SecretHeaderArgs),
+    /// Start an MCP server with secrets from its references (launch
+    /// delivery); never writes to stdout.
+    Exec(cmd::exec::ExecArgs),
 }
 
 #[derive(Debug, Args)]
@@ -70,6 +83,10 @@ struct DoctorArgs {
 }
 
 fn main() -> ExitCode {
+    let argv: Vec<OsString> = std::env::args_os().collect();
+    if let Some(args) = cmd::exec::exec_args(&argv) {
+        exec::main(args);
+    }
     let cli = Cli::parse();
     match run(&cli) {
         Ok(code) => ExitCode::from(code),
@@ -87,6 +104,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
     let context = || -> Result<Context, CoreError> {
         Ok(Context {
             home: paths::loadout_home(&env, &RealFs, flag.as_deref())?,
+            delivery: cmd::delivery_env(&env),
             env: env.clone(),
             json: cli.json,
             yes: cli.yes,
@@ -104,6 +122,11 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Import(args) => cmd::import::run(&context()?, args),
         Command::Adopt(args) => cmd::adopt::run(&context()?, args),
         Command::Secrets(args) => cmd::secrets::run(&context()?, args),
+        Command::Env(args) => cmd::env::run_env(&context()?, args),
+        Command::Secret(args) => cmd::env::run_secret(&context()?, args),
+        Command::SecretHeader(args) => cmd::env::run_header(&context()?, args),
+        // `exec_args` takes every `loadout exec` command line before clap.
+        Command::Exec(args) => exec::main(&args.args),
     }
 }
 
