@@ -17,6 +17,10 @@ clap.workspace = true
 dirs.workspace = true
 serde_json.workspace = true
 
+# `loadout exec` ties the server to a kill-on-close Job Object (SPEC 11.5).
+[target.'cfg(windows)'.dependencies]
+win32job.workspace = true
+
 [dev-dependencies]
 agent-loadout-testkit.workspace = true
 

@@ -37,6 +37,9 @@ tempfile = "3"
 toml = "1"
 toml_edit = "0.25"
 windows-permissions = "0.2"
+# Job Objects for `loadout exec` on Windows (SPEC 11.5): a safe wrapper, so
+# the workspace keeps `unsafe_code = "forbid"`.
+win32job = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
