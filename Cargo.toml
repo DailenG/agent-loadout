@@ -23,6 +23,9 @@ git2 = { version = "0.21", default-features = false, features = ["vendored-libgi
 hmac = "0.13"
 insta = { version = "1", default-features = false }
 jsonc-parser = { version = "0.34", features = ["cst"] }
+# OS keyring (SPEC 11.2): Windows Credential Manager, macOS Keychain,
+# Secret Service on Linux (pure Rust zbus client, no libdbus).
+keyring = "4"
 proptest = { version = "1", default-features = false, features = ["std"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
