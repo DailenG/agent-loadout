@@ -1,0 +1,24 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(CODEX, Os::Windows, &docs)"
+---
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "example-docs-mcp"]
+env = { DOCS_ROOT = "/srv/example/docs" }
+env_vars = ["DOCS_TOKEN"]
+cwd = "/srv/example"
+disabled_tools = ["delete_page"]
+startup_timeout_sec = 20
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-docs-mcp"]
+cwd = "/srv/example"
+
+[env]
+DOCS_ROOT = "/srv/example/docs"
+DOCS_TOKEN = "${env:DOCS_TOKEN}"
+# tools.deny: ["delete_page"]
+# passthrough startup_timeout_sec: Integer(20)

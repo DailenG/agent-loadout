@@ -1,0 +1,31 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(OMP, Os::Windows, &notes)"
+---
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "notes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "example-notes-mcp"],
+      "env": {
+        "NOTES_TOKEN": "!\"/opt/example/bin/loadout\" secret get --ref example"
+      },
+      "cwd": "${HOME}/notes",
+      "timeout": 30000,
+      "instructions": false
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-notes-mcp"]
+cwd = "${HOME}/notes"
+
+[env]
+NOTES_TOKEN = '!"/opt/example/bin/loadout" secret get --ref example'
+# passthrough timeout: Integer(30000)
+# passthrough instructions: Bool(false)

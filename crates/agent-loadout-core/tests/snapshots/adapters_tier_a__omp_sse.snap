@@ -1,0 +1,19 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(OMP, Os::Linux, &events)"
+---
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse",
+      "enabled": false
+    }
+  }
+}
+
+# read back
+transport = "sse"
+url = "https://events.example.com/sse"
+# disabled

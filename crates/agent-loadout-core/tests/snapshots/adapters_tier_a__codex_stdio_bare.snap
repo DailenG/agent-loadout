@@ -1,0 +1,12 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(CODEX, Os::Linux, &bare)"
+---
+[mcp_servers.bare]
+command = "example-local-mcp"
+args = []
+
+# read back
+transport = "stdio"
+command = "example-local-mcp"
+args = []

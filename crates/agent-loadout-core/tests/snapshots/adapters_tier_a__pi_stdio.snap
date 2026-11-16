@@ -1,0 +1,29 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(PI, Os::Windows, &files)"
+---
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "example-fs-mcp", "."],
+      "env": {
+        "FS_TOKEN": "!example-secret-cli read fs"
+      },
+      "cwd": "~/work",
+      "timeout": 30,
+      "exposure": "direct"
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-fs-mcp", "."]
+cwd = "~/work"
+
+[env]
+FS_TOKEN = "!example-secret-cli read fs"
+# passthrough timeout: Integer(30)
+# passthrough exposure: String("direct")

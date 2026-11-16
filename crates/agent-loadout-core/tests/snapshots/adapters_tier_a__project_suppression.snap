@@ -1,0 +1,32 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: out
+---
+## codex
+[mcp_servers.docs]
+enabled = false
+
+## omp
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "docs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "example-docs-mcp"],
+      "env": {
+        "DOCS_ROOT": "/srv/example/docs"
+      },
+      "enabled": false
+    }
+  }
+}
+
+## pi
+{
+  "mcpServers": {
+    "docs": {
+      "enabled": false
+    }
+  }
+}

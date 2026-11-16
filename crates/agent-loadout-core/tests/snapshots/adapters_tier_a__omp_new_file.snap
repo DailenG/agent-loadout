@@ -1,0 +1,14 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: text(&doc)
+---
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "notes": {
+      "type": "stdio",
+      "command": "example-notes-mcp",
+      "args": []
+    }
+  }
+}

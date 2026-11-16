@@ -1,0 +1,10 @@
+{
+  "defaultProvider": "example-provider",
+  "packages": [
+    "npm:@example/pi-tools@1.0.0",
+    {
+      "source": "npm:pi-mcp-adapter@1.4.0",
+      "skills": []
+    }
+  ]
+}

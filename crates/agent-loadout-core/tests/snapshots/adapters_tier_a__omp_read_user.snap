@@ -1,0 +1,33 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "read_all(OMP, &omp, servers(OMP))"
+---
+## notes
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-notes-mcp"]
+cwd = "/srv/example/notes"
+
+[env]
+NOTES_TOKEN = "!example-secret-cli read notes"
+# passthrough timeout: Integer(30000)
+# unmapped requestIdFormat: String("string")
+## search
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${SEARCH_TOKEN}"
+# disabled
+# passthrough instructions: Bool(false)
+## events
+transport = "sse"
+url = "https://events.example.com/sse"
+## socket
+error[unsupported_transport]: the client cannot run "ws" servers
+## plain-env
+transport = "stdio"
+command = "example-plain-mcp"
+
+[env]
+EXAMPLE_TOKEN = "EXAMPLE_TOKEN"

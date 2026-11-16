@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "example-fs-mcp", "."],
+      "cwd": "~/work",
+      "timeout": 30,
+      "exposure": "direct"
+    },
+    "docs": {
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "!example-secret-cli read docs"
+      },
+      "description": "Search and read the example docs",
+      "toolExposure": {
+        "search_*": "direct",
+        "delete_*": "hidden"
+      }
+    },
+    "typed": {
+      "type": "streamable-http",
+      "url": "https://typed.example.com/mcp"
+    },
+    "old-events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    },
+    "my_tool": {
+      "command": "example-my-tool",
+      "enabled": false
+    }
+  },
+  "autoEnableCodemode": false
+}

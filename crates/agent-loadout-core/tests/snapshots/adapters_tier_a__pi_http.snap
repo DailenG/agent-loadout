@@ -1,0 +1,23 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(PI, Os::Linux, &docs)"
+---
+{
+  "mcpServers": {
+    "docs": {
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "!example-secret-cli read docs"
+      },
+      "enabled": false
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://docs.example.com/mcp"
+
+[headers]
+Authorization = "!example-secret-cli read docs"
+# disabled

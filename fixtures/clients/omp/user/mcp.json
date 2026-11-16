@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "notes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "example-notes-mcp"],
+      "env": {
+        "NOTES_TOKEN": "!example-secret-cli read notes"
+      },
+      "cwd": "/srv/example/notes",
+      "timeout": 30000,
+      "requestIdFormat": "string"
+    },
+    "search": {
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${SEARCH_TOKEN}"
+      },
+      "instructions": false,
+      "enabled": false
+    },
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    },
+    "socket": {
+      "type": "ws",
+      "url": "wss://socket.example.com/mcp"
+    },
+    "plain-env": {
+      "command": "example-plain-mcp",
+      "env": {
+        "EXAMPLE_TOKEN": "EXAMPLE_TOKEN"
+      }
+    }
+  },
+  "disabledServers": ["events"],
+  "enabledServers": ["search"]
+}

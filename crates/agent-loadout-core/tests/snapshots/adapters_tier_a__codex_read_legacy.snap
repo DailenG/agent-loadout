@@ -1,0 +1,11 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "read_all(CODEX, &codex, legacy)"
+---
+## legacy-tool
+transport = "stdio"
+command = "legacy-tool"
+args = ["--stdio"]
+## docs
+transport = "stdio"
+command = "old-docs-mcp"

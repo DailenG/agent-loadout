@@ -1,0 +1,29 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "read_all(PI, &pi, servers(PI))"
+---
+## filesystem
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-fs-mcp", "."]
+cwd = "~/work"
+# passthrough timeout: Integer(30)
+# passthrough exposure: String("direct")
+## docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+
+[headers]
+Authorization = "!example-secret-cli read docs"
+# unmapped description: String("Search and read the example docs")
+# unmapped toolExposure: Object(NativeMap { entries: [("search_*", String("direct")), ("delete_*", String("hidden"))] })
+## typed
+transport = "http"
+url = "https://typed.example.com/mcp"
+## old-events
+transport = "sse"
+url = "https://events.example.com/sse"
+## my_tool
+transport = "stdio"
+command = "example-my-tool"
+# disabled

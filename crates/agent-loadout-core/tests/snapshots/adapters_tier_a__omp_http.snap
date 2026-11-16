@@ -1,0 +1,23 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "golden(OMP, Os::Linux, &search)"
+---
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "search": {
+      "type": "http",
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${SEARCH_TOKEN}"
+      }
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${SEARCH_TOKEN}"

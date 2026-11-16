@@ -1,0 +1,52 @@
+# Codex configuration (synthetic fixture)
+model = "example-model"
+approval_policy = "on-request"
+
+[projects."/home/demo/work/sample-app"]
+trust_level = "trusted"
+
+# MCP servers
+
+[mcp_servers.docs]
+command = "npx"   # launcher
+args = ["-y", "example-docs-mcp"]
+env_vars = ["DOCS_TOKEN"]
+# Wait a little longer on first start.
+startup_timeout_sec = 20
+required = true
+
+[mcp_servers.docs.env]
+DOCS_ROOT = "/srv/example/docs"
+
+[mcp_servers.tracker]
+url = "https://tracker.example.com/mcp"
+bearer_token_env_var = "TRACKER_TOKEN"
+http_headers = { "X-Client" = "example-fixture" }
+env_http_headers = { "X-Workspace" = "TRACKER_WORKSPACE" }
+enabled = false
+enabled_tools = ["search", "read"]
+
+[mcp_servers.scoped]
+command = "example-scoped-mcp"
+env_vars = [{ name = "SCOPED_KEY", source = "local" }]
+disabled_tools = ["delete"]
+tool_timeout_sec = 2.5
+
+[mcp_servers.remote-vars]
+command = "example-remote-mcp"
+env_vars = [{ name = "REMOTE_KEY", source = "remote" }]
+
+[mcp_servers.both]
+command = "example-mcp"
+url = "https://both.example.com/mcp"
+
+# Written by an older version; read-only for Loadout.
+[mcp.servers.legacy-tool]
+command = "legacy-tool"
+args = ["--stdio"]
+
+[mcp.servers.docs]
+command = "old-docs-mcp"
+
+[sandbox_workspace_write]
+network_access = false

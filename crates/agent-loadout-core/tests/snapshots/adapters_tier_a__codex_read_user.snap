@@ -1,0 +1,36 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_a.rs
+expression: "read_all(CODEX, &codex, servers(CODEX))"
+---
+## docs
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-docs-mcp"]
+
+[env]
+DOCS_ROOT = "/srv/example/docs"
+DOCS_TOKEN = "${env:DOCS_TOKEN}"
+# passthrough startup_timeout_sec: Integer(20)
+# unmapped required: Bool(true)
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${env:TRACKER_TOKEN}"
+X-Client = "example-fixture"
+X-Workspace = "${env:TRACKER_WORKSPACE}"
+# disabled
+# tools.allow: ["search", "read"]
+## scoped
+transport = "stdio"
+command = "example-scoped-mcp"
+
+[env]
+SCOPED_KEY = "${env:SCOPED_KEY}"
+# tools.deny: ["delete"]
+# passthrough tool_timeout_sec: Float(2.5)
+## remote-vars
+error[unexpected_shape]: `env_vars` must be an array of variable names (or `{ name, source = "local" }` tables)
+## both
+error[unexpected_shape]: `url` must be absent when `command` is set
