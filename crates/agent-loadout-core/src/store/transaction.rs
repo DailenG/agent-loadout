@@ -10,6 +10,7 @@ use git2::{Commit, IndexEntry, IndexTime, Oid, Tree};
 use crate::error::{CoreError, ErrorCode};
 use crate::model::server::Server;
 use crate::model::{StoreDocument, StoreFile, TomlDocument, validate_store_file};
+use crate::secrets::scanner::{ALLOWLIST_FILE, Allowlist, leak_error, scan_text};
 use crate::store::lock::{LOCK_TIMEOUT, StoreLock};
 use crate::store::trailers::{ApplyRef, MachineRef, Scope, Trailers, compose_message};
 use crate::store::{
@@ -235,11 +236,11 @@ impl StoreRead for Transaction<'_> {
 impl Store<'_> {
     /// Runs one mutation: takes the cross-process lock (waiting up to
     /// [`LOCK_TIMEOUT`]), lets `f` stage changes, validates every staged
-    /// store file, writes them to the working tree and creates exactly one
-    /// commit with the [`Operation`]'s trailers. When `f` or validation
-    /// fails nothing is written and nothing is committed.
-    ///
-    /// The leak scanner (SPEC 11.8) joins this pipeline in M7.
+    /// store file, runs the leak scanner (SPEC 11.8) over the staged files
+    /// and the commit message, writes them to the working tree and creates
+    /// exactly one commit with the [`Operation`]'s trailers. When `f`,
+    /// validation or the scanner fails nothing is written and nothing is
+    /// committed.
     pub fn transaction<'s, T>(
         &'s self,
         operation: Operation,
@@ -260,7 +261,9 @@ impl Store<'_> {
         Ok(Committed { value, commit })
     }
 
-    /// Validates, writes and commits `changes`. The caller holds the lock.
+    /// Validates, scans, writes and commits `changes`. The caller holds the
+    /// lock. The scanner runs before the first blob reaches the object
+    /// database.
     pub(crate) fn commit_changes(
         &self,
         machine: &Machine,
@@ -271,6 +274,11 @@ impl Store<'_> {
             return Ok(None);
         }
         self.validate_changes(&changes)?;
+        let message = compose_message(
+            &operation.summary,
+            &operation.trailers(machine, &self.client),
+        );
+        self.scan_changes(&changes, &message)?;
 
         let parent = match self.repo.head() {
             Ok(head) => Some(head.peel_to_commit().map_err(git_error)?),
@@ -305,13 +313,37 @@ impl Store<'_> {
         }
 
         let tree = self.repo.find_tree(tree_id).map_err(git_error)?;
-        let message = compose_message(
-            &operation.summary,
-            &operation.trailers(machine, &self.client),
-        );
         let oid = self.commit(machine, &message, &tree, parent.as_ref())?;
         index.write().map_err(git_error)?;
         Ok(Some(CommitId::from_oid(oid)))
+    }
+
+    /// The leak scanner over every staged file and the commit message.
+    fn scan_changes(&self, changes: &Changes, message: &str) -> Result<(), CoreError> {
+        let allow_text = match changes.get(ALLOWLIST_FILE) {
+            Some(Some(bytes)) => Some(String::from_utf8_lossy(bytes).into_owned()),
+            Some(None) => None,
+            None => self.read_to_string(ALLOWLIST_FILE)?,
+        };
+        let allow = Allowlist::parse(allow_text.as_deref().unwrap_or_default());
+        let mut findings = Vec::new();
+        for (relative, change) in changes {
+            if let Some(bytes) = change {
+                let toml = relative.ends_with(".toml");
+                findings.extend(scan_text(relative, bytes, toml, &self.secrets, &allow));
+            }
+        }
+        findings.extend(scan_text(
+            "commit message",
+            message.as_bytes(),
+            false,
+            &self.secrets,
+            &allow,
+        ));
+        match leak_error(&findings) {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     /// Schema validation of every staged store file (SPEC 5); the first

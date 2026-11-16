@@ -15,10 +15,11 @@ use crate::model::clients::{ClientPrefsFile, ClientSelection, known_client};
 use crate::model::ids::{self, IdKind};
 use crate::model::machine::MachineOverlay;
 use crate::model::project::{ManifestLayer, ProjectManifest};
-use crate::model::secrets::{SecretCatalog, SecretRef, parse_template};
+use crate::model::secrets::SecretCatalog;
 use crate::model::server::Server;
 use crate::model::settings::Settings;
 use crate::model::skill_meta::SkillMeta;
+use crate::secrets::grammar::{SecretRef, parse_template};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {

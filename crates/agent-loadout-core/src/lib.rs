@@ -14,6 +14,7 @@ pub mod formats;
 pub mod fs;
 pub mod model;
 pub mod paths;
+pub mod secrets;
 pub mod store;
 
 pub use env::{Clock, Env, EnvBuilder, FixedClock, KnownFolder, Os, SystemClock};

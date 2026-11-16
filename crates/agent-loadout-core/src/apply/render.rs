@@ -25,9 +25,9 @@ use crate::model::clients::{
     ClientPrefs, ClientPrefsFile, ClientSelection, NATIVE_NAME_KEY, known_client,
 };
 use crate::model::machine::MachineOverlay;
-use crate::model::secrets::{PathVar, TemplatePart, parse_template};
 use crate::model::server::{DeliveryMode, Server, ServerFields, Transport};
 use crate::model::settings::{ApplyMode, Settings};
+use crate::secrets::grammar::{PathVar, TemplatePart, parse_template};
 use crate::store::StoreRead;
 
 /// Everything the system layer is computed from, read from one view of the

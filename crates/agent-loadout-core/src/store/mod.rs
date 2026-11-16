@@ -19,6 +19,7 @@ mod transaction;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use git2::{Commit, Repository, RepositoryInitOptions, Signature};
@@ -34,9 +35,10 @@ use crate::model::ids::{self, IdKind};
 use crate::model::server::Server;
 use crate::model::{SCHEMA_VERSION, StoreModel, TomlDocument};
 use crate::paths::LoadoutHome;
+use crate::secrets::scanner::SecretMemory;
 
 pub use lock::{LOCK_FILE, LOCK_TIMEOUT, StoreLock};
-pub use log::{LogEntry, LogFilter, entity_paths};
+pub use log::{HistoryFinding, LogEntry, LogFilter, entity_paths};
 pub use revision::Revision;
 pub use trailers::{ApplyRef, MachineRef, Scope, Trailers, compose_message, message_summary};
 pub use transaction::{Committed, Operation, Transaction};
@@ -247,6 +249,8 @@ pub struct Store<'a> {
     repo: Repository,
     identity: StoreIdentity,
     client: String,
+    /// Values resolved in this process; every commit is scanned for them.
+    secrets: Arc<SecretMemory>,
 }
 
 impl fmt::Debug for Store<'_> {
@@ -289,6 +293,7 @@ impl<'a> Store<'a> {
             repo,
             identity,
             client: client.to_owned(),
+            secrets: Arc::new(SecretMemory::new()?),
         }))
     }
 
@@ -353,6 +358,7 @@ impl<'a> Store<'a> {
             repo,
             identity,
             client: client.to_owned(),
+            secrets: Arc::new(SecretMemory::new()?),
         };
         let operation = Operation::new(
             "store.init",
@@ -371,6 +377,18 @@ impl<'a> Store<'a> {
     /// The store working tree.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The environment the store was opened with.
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
+    /// Hashes of the secret values this process resolved. Share it with
+    /// every [`crate::secrets::providers::Resolver`] of the process, so
+    /// commits holding a resolved value are refused (SPEC 11.8).
+    pub fn secret_memory(&self) -> &Arc<SecretMemory> {
+        &self.secrets
     }
 
     pub fn identity(&self) -> &StoreIdentity {

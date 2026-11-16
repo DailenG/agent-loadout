@@ -248,7 +248,7 @@ fn rollback_last_and_older_runs() {
 #[test]
 fn import_scans_and_adopts_identical_entries() {
     let cli = Cli::new();
-    let text = "{\n  \"mcpServers\": {\n    \"docs\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@example/docs-mcp\"],\n      \"env\": {\"DOCS_TOKEN\": \"${DOCS_TOKEN}\"}\n    },\n    \"chatty\": {\"type\": \"stdio\", \"command\": \"chatty\", \"env\": {\"LOG_LEVEL\": \"info\"}}\n  }\n}\n";
+    let text = "{\n  \"mcpServers\": {\n    \"docs\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@example/docs-mcp\"],\n      \"env\": {\"DOCS_TOKEN\": \"${DOCS_TOKEN}\"}\n    },\n    \"chatty\": {\"type\": \"stdio\", \"command\": \"chatty\", \"env\": {\"LOG_LEVEL\": \"info\", \"CHATTY_API_KEY\": \"not-a-reference\"}}\n  }\n}\n";
     std::fs::write(cli.claude(), text).unwrap();
 
     let scan = cli.ok(&["import", "--scan"]);

@@ -13,9 +13,7 @@ use agent_loadout_core::model::clients::{ClientPrefsFile, ClientSelection};
 use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::model::machine::MachineOverlay;
 use agent_loadout_core::model::project::{ManifestLayer, ProjectManifest};
-use agent_loadout_core::model::secrets::{
-    PathVar, SecretCatalog, SecretRef, TemplatePart, parse_template,
-};
+use agent_loadout_core::model::secrets::SecretCatalog;
 use agent_loadout_core::model::server::Server;
 use agent_loadout_core::model::settings::Settings;
 use agent_loadout_core::model::skill_meta::SkillMeta;
@@ -422,116 +420,6 @@ fn parse_errors_point_at_the_field() {
             (code, path),
             "{text:?}: {err}"
         );
-    }
-}
-
-#[test]
-fn template_grammar() {
-    use TemplatePart::{Env, Literal, Secret, Var};
-    let ok: [(&str, Vec<TemplatePart>); 6] = [
-        ("plain", vec![Literal("plain".into())]),
-        ("", vec![]),
-        (
-            "Bearer ${secret:LINEAR_TOKEN}",
-            vec![Literal("Bearer ".into()), Secret("LINEAR_TOKEN".into())],
-        ),
-        (
-            "${home}/x:${env:PATH}${project}${loadout_home}",
-            vec![
-                Var(PathVar::Home),
-                Literal("/x:".into()),
-                Env("PATH".into()),
-                Var(PathVar::Project),
-                Var(PathVar::LoadoutHome),
-            ],
-        ),
-        (
-            "$${env:X} and $5 and $",
-            vec![Literal("${env:X} and $5 and $".into())],
-        ),
-        (
-            "op://not/a/ref/here",
-            vec![Literal("op://not/a/ref/here".into())],
-        ),
-    ];
-    for (text, parts) in ok {
-        assert_eq!(parse_template(text).unwrap(), parts, "{text:?}");
-    }
-    for bad in [
-        "${GITHUB_TOKEN}",
-        "${env:}",
-        "${env:1BAD}",
-        "${secret:has-dash}",
-        "${op://v/i/f}",
-        "${keyring://loadout/X}",
-        "tail ${env:HOME",
-        "${}",
-    ] {
-        let err = parse_template(bad).unwrap_err();
-        assert_eq!(err.code(), ErrorCode::InvalidRef, "{bad:?}");
-    }
-}
-
-#[test]
-fn secret_reference_grammar() {
-    assert_eq!(
-        SecretRef::parse("env:HASS_TOKEN").unwrap(),
-        SecretRef::Env {
-            name: "HASS_TOKEN".into()
-        }
-    );
-    assert_eq!(
-        SecretRef::parse("op://Example Vault/Fake Item/credential").unwrap(),
-        SecretRef::OnePassword {
-            vault: "Example Vault".into(),
-            item: "Fake Item".into(),
-            section: None,
-            field: "credential".into(),
-            query: None,
-        }
-    );
-    assert_eq!(
-        SecretRef::parse("op://v/i/s/f?attribute=otp").unwrap(),
-        SecretRef::OnePassword {
-            vault: "v".into(),
-            item: "i".into(),
-            section: Some("s".into()),
-            field: "f".into(),
-            query: Some("attribute=otp".into()),
-        }
-    );
-    assert_eq!(
-        SecretRef::parse("op-env://fakeenv0000/LINEAR_TOKEN").unwrap(),
-        SecretRef::OnePasswordEnvironment {
-            environment: "fakeenv0000".into(),
-            name: "LINEAR_TOKEN".into()
-        }
-    );
-    assert_eq!(
-        SecretRef::parse("keyring://loadout/team/OPENAI_API_KEY").unwrap(),
-        SecretRef::Keyring {
-            service: "loadout".into(),
-            account: "team/OPENAI_API_KEY".into()
-        }
-    );
-    for bad in [
-        "",
-        "HASS_TOKEN",
-        "env:",
-        "env:BAD-NAME",
-        "op://v/i",
-        "op://v//f",
-        "op://v/i/s/f/extra",
-        "op://v/i/f?attribute",
-        "op-env://UPPER/NAME",
-        "op-env://env0000",
-        "keyring://loadout",
-        "keyring:///account",
-        "${secret:X}",
-        "https://example.com/secret",
-    ] {
-        let err = SecretRef::parse(bad).unwrap_err();
-        assert_eq!(err.code(), ErrorCode::InvalidRef, "{bad:?}");
     }
 }
 

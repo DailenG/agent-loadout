@@ -10,11 +10,11 @@
 //! - [`stage_resolutions`] carries out `import` decisions of a plan ("import
 //!   their change", "respect the deletion").
 //!
-//! Secret extraction (SPEC 11.7) arrives with the secrets milestones. Until
-//! then an entry is imported only when its `env` and `headers` values are
-//! references and no argument or URL looks like it carries a credential;
-//! anything else is `needs_secret_extraction`, so no literal value that may
-//! be a secret reaches the store.
+//! Secret extraction (SPEC 11.7): every literal in `env`, `headers`,
+//! `args` and the URL goes through the classifier. Sensitive literals make
+//! the entry `needs_secret_extraction` (the extraction destinations are the
+//! import wizard's), so no value that may be a secret reaches the store;
+//! non-sensitive literals (`LOG_LEVEL = "info"`) are imported as written.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -32,8 +32,8 @@ use crate::model::TomlDocument;
 use crate::model::applied::Scope;
 use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
 use crate::model::ids::{self, IdKind};
-use crate::model::secrets::{TemplatePart, parse_template};
 use crate::model::server::{Enable, Meta, Server, ServerFields, ToolFilter};
+use crate::secrets::classify::{classify_args_import, classify_import};
 use crate::store::{Transaction, server_path};
 
 /// A native entry as store fields.
@@ -90,7 +90,12 @@ pub fn server_from_native(
             .iter()
             .map(|arg| convert(arg, FieldSet::ARGS))
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(arg) = args.iter().find(|arg| looks_sensitive(arg)) {
+        let flagged = classify_args_import(&args);
+        if let Some((arg, _)) = args
+            .iter()
+            .zip(flagged)
+            .find(|(_, reason)| reason.is_some())
+        {
             return Err(needs_extraction(format!("argument {arg:?}")));
         }
         fields.args = (!args.is_empty()).then_some(args);
@@ -100,7 +105,7 @@ pub fn server_from_native(
     }
     if let Some(url) = &native.url {
         let url = convert(url, FieldSet::URL)?;
-        if url_has_credentials(&url) {
+        if classify_import(None, &url).is_some() {
             return Err(needs_extraction("the URL".to_owned()));
         }
         fields.url = Some(url);
@@ -112,7 +117,7 @@ pub fn server_from_native(
         let mut map = BTreeMap::new();
         for (name, value) in source.iter().flatten() {
             let value = convert(value, field)?;
-            if !value.is_empty() && !holds_reference(&value) {
+            if classify_import(Some(name), &value).is_some() {
                 return Err(needs_extraction(format!("the literal value of {name:?}")));
             }
             map.insert(name.clone(), value);
@@ -140,43 +145,6 @@ fn needs_extraction(what: String) -> CoreError {
         ErrorCode::NeedsSecretExtraction,
         format!("{what} may be a secret; it needs secret extraction before import"),
     )
-}
-
-fn holds_reference(value: &str) -> bool {
-    parse_template(value).is_ok_and(|parts| {
-        parts
-            .iter()
-            .any(|part| matches!(part, TemplatePart::Env(_)))
-    })
-}
-
-/// Words that mark a credential in an argument or URL (a subset of the
-/// SPEC 11.7 classifier, until the classifier lands).
-const SENSITIVE_WORDS: [&str; 10] = [
-    "token",
-    "secret",
-    "password",
-    "passwd",
-    "apikey",
-    "api_key",
-    "api-key",
-    "credential",
-    "bearer",
-    "private_key",
-];
-
-fn looks_sensitive(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    SENSITIVE_WORDS.iter().any(|word| lower.contains(word)) && !holds_reference(text)
-}
-
-fn url_has_credentials(url: &str) -> bool {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    authority.contains('@')
-        || url
-            .split_once('?')
-            .is_some_and(|(_, query)| looks_sensitive(query))
 }
 
 fn to_toml(value: &NativeValue) -> Result<toml::Value, CoreError> {

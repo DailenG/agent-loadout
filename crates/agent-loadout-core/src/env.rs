@@ -118,6 +118,14 @@ impl Env {
             .filter(|value| !value.is_empty())
     }
 
+    /// Every variable (names upper-cased on Windows), for the environment
+    /// of a child process the core starts (the 1Password CLI).
+    pub fn vars(&self) -> impl Iterator<Item = (&str, &OsStr)> {
+        self.vars
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_os_str()))
+    }
+
     /// The current time from the injected clock.
     pub fn now(&self) -> SystemTime {
         self.clock.now()

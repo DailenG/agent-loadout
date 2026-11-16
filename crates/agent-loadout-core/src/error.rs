@@ -98,6 +98,24 @@ pub enum ErrorCode {
     /// Warning: an apply run did not finish; its journal lists what each
     /// file got (SPEC 8.4 step 6). Nothing is replayed.
     UnfinishedApply,
+    /// A staged store file or commit message holds what looks like a
+    /// secret, or a value resolved during this process (SPEC 11.8). Nothing
+    /// is written or committed.
+    LeakDetected,
+    /// A secret reference has no value: env var unset, keyring entry or
+    /// 1Password item absent, alias not defined (SPEC 11.3 `missing`).
+    MissingSecret,
+    /// 1Password (or the keyring) needs sign-in or approval (SPEC 11.3
+    /// `locked`).
+    SecretLocked,
+    /// A secret provider is not on this machine ("1Password CLI not
+    /// found", no Secret Service; SPEC 11.3 `provider_unavailable`).
+    ProviderUnavailable,
+    /// A secret provider is older than a feature needs (SPEC 11.11).
+    ProviderTooOld,
+    /// A secret provider failed for another reason, or the value cannot be
+    /// read from here (SPEC 11.3 `error`, `unverifiable`).
+    SecretError,
 }
 
 impl ErrorCode {
@@ -137,6 +155,12 @@ impl ErrorCode {
             ErrorCode::NeedsSecretExtraction => "needs_secret_extraction",
             ErrorCode::ConfirmationRequired => "confirmation_required",
             ErrorCode::UnfinishedApply => "unfinished_apply",
+            ErrorCode::LeakDetected => "leak_detected",
+            ErrorCode::MissingSecret => "missing_secret",
+            ErrorCode::SecretLocked => "secret_locked",
+            ErrorCode::ProviderUnavailable => "provider_unavailable",
+            ErrorCode::ProviderTooOld => "provider_too_old",
+            ErrorCode::SecretError => "secret_error",
         }
     }
 }

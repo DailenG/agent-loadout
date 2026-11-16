@@ -17,9 +17,10 @@ from the projects below. Every derived source file carries this header:
 
 | File in this repository | Origin | License | Copyright |
 |---|---|---|---|
+| `crates/agent-loadout-core/src/secrets/classify.rs` (`SENSITIVE_ARGUMENT_NAMES` and the argument-name rule of `is_sensitive_argument_name`, SPEC 11.7) | `src-tauri/src/mcp_manager.rs` (`SENSITIVE_ARGUMENT_NAMES`, `is_sensitive_name`) | MIT | Copyright (c) 2026 wanghuan |
 
-No SkillDock file has been ported yet. Each port adds a row here with its
-origin path at `DailenG/skilldock@181b52b`.
+Each further port adds a row here with its origin path at
+`DailenG/skilldock@181b52b`.
 
 ### License text
 

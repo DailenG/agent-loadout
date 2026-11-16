@@ -1,14 +1,25 @@
 //! Store history (SPEC 9.3, log only): commits with op, entities, scope,
-//! machine and time, filtered by entity or scope.
+//! machine and time, filtered by entity or scope; and the leak scan of the
+//! whole history (SPEC 11.8, `loadout doctor --scan-history`).
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use git2::{Commit, Oid, Sort, Tree};
+use git2::{Commit, ObjectType, Oid, Sort, Tree, TreeWalkMode, TreeWalkResult};
 
 use crate::error::CoreError;
+use crate::secrets::scanner::{ALLOWLIST_FILE, Allowlist, LeakFinding, scan_text};
 use crate::store::trailers::{Scope, Trailers, message_summary};
 use crate::store::{CommitId, Store, git_error, utc_datetime};
+
+/// A possible leak in a past commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryFinding {
+    /// The newest commit holding the flagged file version (or message).
+    pub commit: CommitId,
+    pub finding: LeakFinding,
+}
 
 /// One store commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +122,62 @@ impl Store<'_> {
             });
         }
         Ok(entries)
+    }
+
+    /// The leak scanner over every commit message and every file version
+    /// reachable from HEAD (SPEC 11.8), for stores imported from
+    /// elsewhere. Reports only; history is never rewritten. Each file
+    /// version is scanned once, at the newest commit holding it; the
+    /// working tree's allowlist applies.
+    pub fn scan_history(&self) -> Result<Vec<HistoryFinding>, CoreError> {
+        let allow = Allowlist::parse(&self.read_to_string(ALLOWLIST_FILE)?.unwrap_or_default());
+        let mut walk = self.repo.revwalk().map_err(git_error)?;
+        walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
+            .map_err(git_error)?;
+        walk.push_head().map_err(git_error)?;
+        let mut seen = HashSet::new();
+        let mut findings = Vec::new();
+        for oid in walk {
+            let commit = self
+                .repo
+                .find_commit(oid.map_err(git_error)?)
+                .map_err(git_error)?;
+            let id = CommitId::from_oid(commit.id());
+            let mut found = scan_text(
+                "commit message",
+                commit.message_bytes(),
+                false,
+                &self.secrets,
+                &allow,
+            );
+            let mut blobs = Vec::new();
+            commit
+                .tree()
+                .map_err(git_error)?
+                .walk(TreeWalkMode::PreOrder, |root, entry| {
+                    if entry.kind() == Some(ObjectType::Blob) && seen.insert(entry.id()) {
+                        let name = String::from_utf8_lossy(entry.name_bytes());
+                        blobs.push((format!("{root}{name}"), entry.id()));
+                    }
+                    TreeWalkResult::Ok
+                })
+                .map_err(git_error)?;
+            for (path, blob) in blobs {
+                let blob = self.repo.find_blob(blob).map_err(git_error)?;
+                found.extend(scan_text(
+                    &path,
+                    blob.content(),
+                    path.ends_with(".toml"),
+                    &self.secrets,
+                    &allow,
+                ));
+            }
+            findings.extend(found.into_iter().map(|finding| HistoryFinding {
+                commit: id.clone(),
+                finding,
+            }));
+        }
+        Ok(findings)
     }
 }
 

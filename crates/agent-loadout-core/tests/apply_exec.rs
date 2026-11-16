@@ -607,11 +607,11 @@ fn journals_record_every_file_and_report_unfinished_runs() {
 #[test]
 fn import_scans_collapses_identical_entries_and_adopts_them() {
     let fx = Fx::new();
-    let docs = r#"{"type": "stdio", "command": "npx", "args": ["-y", "@example/docs-mcp"], "env": {"DOCS_TOKEN": "${DOCS_TOKEN}"}}"#;
+    let docs = r#"{"type": "stdio", "command": "npx", "args": ["-y", "@example/docs-mcp"], "env": {"DOCS_TOKEN": "${DOCS_TOKEN}", "LOG_LEVEL": "info"}}"#;
     fx.write(
         &fx.claude(),
         &format!(
-            "{{\n  \"mcpServers\": {{\n    \"docs\": {docs},\n    \"chatty\": {{\"type\": \"stdio\", \"command\": \"chatty\", \"env\": {{\"LOG_LEVEL\": \"info\"}}}}\n  }}\n}}\n"
+            "{{\n  \"mcpServers\": {{\n    \"docs\": {docs},\n    \"chatty\": {{\"type\": \"stdio\", \"command\": \"chatty\", \"env\": {{\"LOG_LEVEL\": \"info\", \"CHATTY_API_KEY\": \"not-a-reference\"}}}}\n  }}\n}}\n"
         ),
     );
     fx.write(
@@ -636,6 +636,9 @@ fn import_scans_collapses_identical_entries_and_adopts_them() {
         def.fields.env.as_ref().unwrap()["DOCS_TOKEN"],
         "${env:DOCS_TOKEN}"
     );
+    // Non-sensitive literals are imported as written (SPEC 11.7); a
+    // literal under a credential name needs extraction.
+    assert_eq!(def.fields.env.as_ref().unwrap()["LOG_LEVEL"], "info");
     let chatty = candidates.iter().find(|c| c.name == "chatty").unwrap();
     assert_eq!(
         chatty.sources[0].def.as_ref().unwrap_err().code(),
@@ -679,6 +682,7 @@ fn import_scans_collapses_identical_entries_and_adopts_them() {
         server.contains("DOCS_TOKEN = \"${env:DOCS_TOKEN}\""),
         "{server}"
     );
+    assert!(server.contains("LOG_LEVEL = \"info\""), "{server}");
     assert!(
         server.contains("origin = \"imported:claude-code\""),
         "{server}"
