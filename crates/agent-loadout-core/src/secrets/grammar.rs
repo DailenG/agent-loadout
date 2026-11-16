@@ -156,7 +156,7 @@ impl fmt::Display for SecretRef {
 }
 
 /// 1Password Environment ids are lower-case alphanumeric.
-pub(crate) fn is_op_environment_id(value: &str) -> bool {
+pub fn is_op_environment_id(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()

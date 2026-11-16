@@ -217,6 +217,33 @@ pub fn stage_set(
     }
 }
 
+/// Stages `[onepassword] environment = <id>` in `secrets.toml`: the one
+/// 1Password Environment holding MCP secrets (SPEC 11.10). Returns the
+/// id it replaces, if another one was set.
+pub fn stage_environment(
+    tx: &mut Transaction<'_>,
+    environment: &str,
+) -> Result<Option<String>, CoreError> {
+    if !crate::secrets::grammar::is_op_environment_id(environment) {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("invalid 1Password Environment id {environment:?}"),
+        ));
+    }
+    let mut doc = load_doc::<SecretCatalog>(tx, CATALOG_FILE)?
+        .unwrap_or_else(|| TomlDocument::new(SecretCatalog::new()));
+    let onepassword = doc
+        .value_mut()
+        .onepassword
+        .get_or_insert_with(Default::default);
+    let previous = onepassword
+        .environment
+        .replace(environment.to_owned())
+        .filter(|previous| previous != environment);
+    tx.write(CATALOG_FILE, doc.to_text()?)?;
+    Ok(previous)
+}
+
 /// Aliases the servers use (`${secret:ALIAS}` in any string field of
 /// `servers/*.toml`, and of this machine's server overrides), each with the
 /// server ids that use it. Files that do not parse are skipped; validation

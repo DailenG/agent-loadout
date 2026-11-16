@@ -7,6 +7,8 @@
 //!   what resolving found.
 //! - [`classify`] and [`scanner`]: the SPEC 11.7 classifier and the leak
 //!   scanner every store commit passes through.
+//! - [`delivery`] and [`render`]: how references reach a server for one
+//!   client (SPEC 11.4: `env`, `launch`, `command`, `inline`).
 //!
 //! Values exist only in memory, inside a [`SecretValue`]: it has no
 //! `Display`, no `Serialize`, and its `Debug` is redacted, so a value
@@ -17,8 +19,10 @@
 
 pub mod catalog;
 pub mod classify;
+pub mod delivery;
 pub mod grammar;
 pub mod providers;
+pub mod render;
 pub mod scanner;
 pub mod status;
 

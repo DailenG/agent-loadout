@@ -3,6 +3,10 @@
   "title": "Loadout machine overlay (store/machines/<machine-id>.toml)",
   "type": "object",
   "properties": {
+    "delivery": {
+      "description": "How secrets are delivered on this machine (SPEC 11.4, 11.6).",
+      "$ref": "#/$defs/MachineDelivery"
+    },
     "enable": {
       "$ref": "#/$defs/MachineEnable"
     },
@@ -54,6 +58,16 @@
     "os"
   ],
   "$defs": {
+    "MachineDelivery": {
+      "description": "Per-machine delivery choices.",
+      "type": "object",
+      "properties": {
+        "export_provider_secrets": {
+          "description": "The user exports provider secrets to the clients' environment on\nthis machine (`loadout env --export`, SPEC 11.6), so `auto`\ndelivery may use `env` for provider references a client cannot get\notherwise (SPEC 11.4 rule 2).",
+          "type": "boolean"
+        }
+      }
+    },
     "MachineEnable": {
       "type": "object",
       "properties": {

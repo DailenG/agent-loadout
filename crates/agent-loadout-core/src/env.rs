@@ -126,6 +126,14 @@ impl Env {
             .map(|(name, value)| (name.as_str(), value.as_os_str()))
     }
 
+    /// A copy with `name` set to `value`, for the environment of one child
+    /// process (the 1Password CLI with a service account token).
+    pub fn with_var(&self, name: &str, value: impl Into<OsString>) -> Env {
+        let mut env = self.clone();
+        env.vars.insert(var_key(env.os, name), value.into());
+        env
+    }
+
     /// The current time from the injected clock.
     pub fn now(&self) -> SystemTime {
         self.clock.now()

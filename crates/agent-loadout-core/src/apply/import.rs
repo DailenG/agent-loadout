@@ -34,6 +34,7 @@ use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
 use crate::model::ids::{self, IdKind};
 use crate::model::server::{Enable, Meta, Server, ServerFields, ToolFilter};
 use crate::secrets::classify::{classify_args_import, classify_import};
+use crate::secrets::delivery::Sharing;
 use crate::store::{Transaction, server_path};
 
 /// A native entry as store fields.
@@ -407,7 +408,7 @@ pub fn stage_adopt_identical(
     desired: &DesiredState,
     candidates: &[Candidate],
 ) -> Result<Vec<String>, CoreError> {
-    let cx = ax.render_cx();
+    let cx = ax.render_cx(tx.store().secret_memory().clone());
     let mut adopted = Vec::new();
     for candidate in candidates {
         for source in &candidate.sources {
@@ -429,9 +430,10 @@ pub fn stage_adopt_identical(
             if enabled {
                 continue;
             }
-            let Ok((rendered, _)) = render(&cx, desired, server, spec) else {
+            let Ok(rendered) = render(&cx, desired, server, spec, Sharing::Private) else {
                 continue;
             };
+            let rendered = rendered.server;
             let mcp = spec.mcp.as_ref().expect("rendered clients have MCP");
             let cx_write = WriteCx {
                 os: ax.env.os(),

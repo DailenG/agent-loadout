@@ -2,19 +2,21 @@
 //! [`RenderedServer`] per server and client.
 //!
 //! Rendering resolves OS overrides and the machine overlay, fills path
-//! variables and writes `${env:NAME}` references in the client's own syntax
-//! where the client expands that field (`env` delivery, SPEC 11.4 rule 1).
-//! Every other reference blocks the entry with `delivery_unavailable`: the
-//! `launch`, `command` and `inline` modes and `${secret:..}` arrive with
-//! the secrets milestones, and nothing is ever written in plain text in
-//! their place.
+//! variables and delivers every reference through
+//! [`crate::secrets::render`] (SPEC 11.4): `env` in the client's own
+//! syntax, `launch` through `loadout exec`, `command` through the client's
+//! command hooks, or `inline`. A reference with no allowed mode blocks the
+//! entry; nothing is ever written in plain text in its place.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::adapters::caps::{Caps, EnvRefSyntax, FieldSet};
 use crate::adapters::detect::{RegistryProbe, detect};
-use crate::adapters::mapper::{Launch, RemoteLaunch, RenderedServer, StdioLaunch, ToolLists};
+use crate::adapters::mapper::{
+    Launch, MapError, RemoteLaunch, RenderedServer, StdioLaunch, ToolLists,
+};
 use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
 use crate::env::Env;
 use crate::error::{CoreError, ErrorCode};
@@ -27,7 +29,12 @@ use crate::model::clients::{
 use crate::model::machine::MachineOverlay;
 use crate::model::server::{DeliveryMode, Server, ServerFields, Transport};
 use crate::model::settings::{ApplyMode, Settings};
-use crate::secrets::grammar::{PathVar, TemplatePart, parse_template};
+use crate::secrets::SecretValue;
+use crate::secrets::catalog::Catalog;
+use crate::secrets::delivery::{DeliveryEnv, Mode, Policy, Sharing};
+use crate::secrets::grammar::{TemplatePart, parse_template};
+use crate::secrets::render::{EnvValue, HeaderValue, RenderEnv, Renderer};
+use crate::secrets::scanner::SecretMemory;
 use crate::store::StoreRead;
 
 /// Everything the system layer is computed from, read from one view of the
@@ -43,12 +50,15 @@ pub struct DesiredState {
     /// This machine's overlay (`machines/<machine-id>.toml`).
     pub overlay: Option<MachineOverlay>,
     pub settings: Settings,
+    /// `secrets.toml` with this machine's overlay applied.
+    pub catalog: Catalog,
 }
 
 impl DesiredState {
-    /// Loads the desired state. A broken `clients.toml`, `settings.toml` or
-    /// machine overlay fails the whole load, since it changes every target;
-    /// a broken server file only marks that server [`DesiredState::invalid`].
+    /// Loads the desired state. A broken `clients.toml`, `settings.toml`,
+    /// `secrets.toml` or machine overlay fails the whole load, since it
+    /// changes every target; a broken server file only marks that server
+    /// [`DesiredState::invalid`].
     pub fn load(src: &dyn StoreRead, machine_id: Option<&str>) -> Result<Self, CoreError> {
         let mut servers = BTreeMap::new();
         let mut invalid = BTreeMap::new();
@@ -105,12 +115,14 @@ impl DesiredState {
             }
             None => None,
         };
+        let catalog = Catalog::load(src, machine_id)?;
         Ok(Self {
             servers,
             invalid,
             clients,
             overlay,
             settings,
+            catalog,
         })
     }
 
@@ -122,12 +134,23 @@ impl DesiredState {
             clients: ClientPrefsFile::new(),
             overlay: None,
             settings: Settings::new(),
+            catalog: Catalog::default(),
         }
     }
 
     /// `apply_mode` from `settings.toml`; instant by default (SPEC 5.7).
     pub fn apply_mode(&self) -> ApplyMode {
         self.settings.apply_mode.unwrap_or(ApplyMode::Instant)
+    }
+
+    /// Whether this machine exports provider secrets to the environment
+    /// (`[delivery] export_provider_secrets` in the overlay).
+    pub fn export_provider_secrets(&self) -> bool {
+        self.overlay
+            .as_ref()
+            .and_then(|overlay| overlay.delivery.as_ref())
+            .and_then(|delivery| delivery.export_provider_secrets)
+            == Some(true)
     }
 
     /// The `clients.toml` table of a client (empty when absent).
@@ -185,8 +208,13 @@ pub struct DesiredEntry {
     /// The rendered server, or why it cannot be written (the entry is
     /// `blocked`).
     pub server: Result<RenderedServer, CoreError>,
-    /// `env` when the entry holds client-expanded references.
+    /// The entry's delivery mode (`env`, `command`, `launch`, `inline`)
+    /// when it holds references.
     pub delivery: Option<&'static str>,
+    /// Values written in plain text (`inline`), masked in diffs.
+    pub inline: Vec<SecretValue>,
+    /// Delivery warnings (`inline_env_fallback`).
+    pub warnings: Vec<CoreError>,
 }
 
 /// The system layer for this machine.
@@ -201,12 +229,16 @@ pub struct Rendering {
 }
 
 /// Where rendering happens: the paths `${home}` and `${loadout_home}` stand
-/// for, and what detection may look at.
+/// for, what detection may look at, this machine's secret providers and the
+/// launcher, and the store's [`SecretMemory`] (values read while rendering
+/// are recorded there, so the store refuses to commit them).
 pub struct RenderCx<'a> {
     pub env: &'a Env,
     pub fs: &'a dyn Fs,
     pub loadout_home: &'a Path,
     pub registry: &'a dyn RegistryProbe,
+    pub delivery: &'a DeliveryEnv,
+    pub memory: Arc<SecretMemory>,
 }
 
 /// Renders every enabled store server for every client it is enabled for
@@ -260,15 +292,27 @@ pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
                 continue;
             }
             let name = native_name(server, spec.id);
-            let rendered = render(cx, desired, server, spec);
-            let delivery = rendered.as_ref().ok().and_then(|(_, delivery)| *delivery);
-            rendering.entries.push(DesiredEntry {
-                client: spec.id,
-                server_id: id.clone(),
-                name,
-                server: rendered.map(|(server, _)| server),
-                delivery,
-            });
+            let entry = match render(cx, desired, server, spec, Sharing::Private) {
+                Ok(out) => DesiredEntry {
+                    client: spec.id,
+                    server_id: id.clone(),
+                    name,
+                    server: Ok(out.server),
+                    delivery: out.delivery.map(Mode::as_str),
+                    inline: out.inline,
+                    warnings: out.warnings,
+                },
+                Err(err) => DesiredEntry {
+                    client: spec.id,
+                    server_id: id.clone(),
+                    name,
+                    server: Err(err),
+                    delivery: None,
+                    inline: Vec::new(),
+                    warnings: Vec::new(),
+                },
+            };
+            rendering.entries.push(entry);
         }
     }
     rendering.clients = ADAPTERS
@@ -341,13 +385,25 @@ fn effective_fields(server: &Server, env: &Env, overlay: Option<&MachineOverlay>
     fields
 }
 
-/// One server for one client, with the delivery mode it used.
+/// One server rendered for one client.
+#[derive(Debug, Clone)]
+pub struct RenderOutput {
+    pub server: RenderedServer,
+    /// The entry's most consequential delivery mode, if it holds references.
+    pub delivery: Option<Mode>,
+    /// Values written in plain text (`inline`).
+    pub inline: Vec<SecretValue>,
+    pub warnings: Vec<CoreError>,
+}
+
+/// One server for one client and a target of the given [`Sharing`].
 pub fn render(
     cx: &RenderCx<'_>,
     desired: &DesiredState,
     server: &Server,
     spec: &AdapterSpec,
-) -> Result<(RenderedServer, Option<&'static str>), CoreError> {
+    sharing: Sharing,
+) -> Result<RenderOutput, CoreError> {
     let mcp = spec.mcp.as_ref().ok_or_else(|| {
         CoreError::new(
             ErrorCode::ScopeNotSupported,
@@ -355,47 +411,66 @@ pub fn render(
         )
     })?;
     let fields = effective_fields(server, cx.env, desired.overlay.as_ref());
-    let mut tx = Templates {
-        cx,
-        caps: &mcp.caps,
-        client: spec.display_name,
-        used_env: false,
-    };
-    let refs_allowed = matches!(
-        server.body.delivery.as_ref().and_then(|d| d.mode),
-        None | Some(DeliveryMode::Auto | DeliveryMode::Env)
-    );
     let transport = fields.transport.ok_or_else(|| {
         CoreError::new(
             ErrorCode::MissingField,
             "`transport` is required: stdio, http or sse",
         )
     })?;
+    // A transport the client cannot run blocks the entry before delivery
+    // is considered (the mapper reports the same error).
+    if !mcp.caps.transports.contains(transport) {
+        return Err(MapError::UnsupportedTransport {
+            transport: transport.as_str().to_owned(),
+        }
+        .into());
+    }
+    let rx = RenderEnv {
+        env: cx.env,
+        fs: cx.fs,
+        loadout_home: cx.loadout_home,
+        catalog: &desired.catalog,
+        delivery: cx.delivery,
+        memory: &cx.memory,
+    };
+    let policy = Policy {
+        requested: server
+            .body
+            .delivery
+            .as_ref()
+            .and_then(|delivery| delivery.mode)
+            .unwrap_or(DeliveryMode::Auto),
+        caps: &mcp.caps,
+        client: spec.display_name,
+        sharing,
+        export_provider_secrets: desired.export_provider_secrets(),
+    };
+    let mut r = Renderer::new(rx, policy, transport);
     let launch = match transport {
         Transport::Stdio => {
             let command = fields.command.clone().ok_or_else(|| {
                 CoreError::new(ErrorCode::MissingField, "stdio servers need `command`")
             })?;
             let mut stdio = StdioLaunch {
-                command: tx.render(&command, FieldSet::COMMAND)?,
+                command: r.value(&command, FieldSet::COMMAND)?,
                 ..StdioLaunch::default()
             };
             for arg in fields.args.iter().flatten() {
-                stdio.args.push(tx.render(arg, FieldSet::ARGS)?);
+                stdio.args.push(r.value(arg, FieldSet::ARGS)?);
             }
             for (key, value) in fields.env.iter().flatten() {
-                match tx.forwarded(value)? {
-                    Some(name) if name == *key => stdio.forward_env.push(name),
-                    _ => {
-                        stdio
-                            .env
-                            .insert(key.clone(), tx.render(value, FieldSet::ENV)?);
+                match r.env_value(key, value)? {
+                    EnvValue::Value(value) => {
+                        stdio.env.insert(key.clone(), value);
                     }
+                    EnvValue::Forward(name) => stdio.forward_env.push(name),
+                    EnvValue::Launched => {}
                 }
             }
             if let Some(cwd) = &fields.cwd {
-                stdio.cwd = Some(tx.render(cwd, FieldSet::CWD)?);
+                stdio.cwd = Some(r.value(cwd, FieldSet::CWD)?);
             }
+            r.finish_stdio(&mut stdio)?;
             Launch::Stdio(stdio)
         }
         Transport::Http | Transport::Sse => {
@@ -403,28 +478,22 @@ pub fn render(
                 CoreError::new(ErrorCode::MissingField, "remote servers need `url`")
             })?;
             let mut remote = RemoteLaunch {
-                url: tx.render(&url, FieldSet::URL)?,
+                url: r.value(&url, FieldSet::URL)?,
                 ..RemoteLaunch::default()
             };
             for (key, value) in fields.headers.iter().flatten() {
-                if key.eq_ignore_ascii_case("authorization")
-                    && let Some(rest) = value.strip_prefix("Bearer ")
-                    && let Some(name) = tx.forwarded(rest)?
-                {
-                    remote.bearer_env = Some(name);
-                    continue;
-                }
-                match tx.forwarded(value)? {
-                    Some(name) => {
+                match r.header(key, value)? {
+                    HeaderValue::Value(value) => {
+                        remote.headers.insert(key.clone(), value);
+                    }
+                    HeaderValue::Bearer(name) => remote.bearer_env = Some(name),
+                    HeaderValue::FromEnv(name) => {
                         remote.headers_env.insert(key.clone(), name);
                     }
-                    None => {
-                        remote
-                            .headers
-                            .insert(key.clone(), tx.render(value, FieldSet::HEADERS)?);
-                    }
+                    HeaderValue::Helper => {}
                 }
             }
+            r.finish_remote(&mut remote)?;
             match transport {
                 Transport::Http => Launch::Http(remote),
                 _ => Launch::Sse(remote),
@@ -440,7 +509,7 @@ pub fn render(
     {
         for (key, value) in table {
             if key != NATIVE_NAME_KEY {
-                passthrough.insert(key.clone(), tx.native(value)?);
+                passthrough.insert(key.clone(), native(&mut r, value)?);
             }
         }
     }
@@ -453,136 +522,43 @@ pub fn render(
             deny: tools.deny.clone(),
         })
         .unwrap_or_default();
-    if tx.used_env && !refs_allowed {
-        return Err(CoreError::new(
-            ErrorCode::DeliveryUnavailable,
-            "this build delivers references only in `env` mode (delivery.mode auto or env)",
-        ));
-    }
-    let rendered = RenderedServer {
-        name: native_name(server, spec.id),
-        launch,
-        enabled: true,
-        tools,
-        passthrough,
-    };
-    Ok((rendered, tx.used_env.then_some("env")))
+    Ok(RenderOutput {
+        server: RenderedServer {
+            name: native_name(server, spec.id),
+            launch,
+            enabled: true,
+            tools,
+            passthrough,
+        },
+        delivery: r.delivery(),
+        inline: std::mem::take(&mut r.inline),
+        warnings: std::mem::take(&mut r.warnings),
+    })
 }
 
-/// Template rendering for one client.
-struct Templates<'a, 'b> {
-    cx: &'a RenderCx<'b>,
-    caps: &'a Caps,
-    client: &'static str,
-    used_env: bool,
-}
-
-impl Templates<'_, '_> {
-    /// The client's spelling of a `${env:NAME}` reference in `field`, if
-    /// it expands references there itself.
-    fn env_syntax(&self, field: FieldSet) -> Option<EnvRefSyntax> {
-        self.caps
-            .env_ref
-            .filter(|syntax| *syntax != EnvRefSyntax::CodexForward)
-            .filter(|_| self.caps.env_ref_fields.contains(field) && field != FieldSet::NONE)
-    }
-
-    fn render(&mut self, text: &str, field: FieldSet) -> Result<String, CoreError> {
-        let syntax = self.env_syntax(field);
-        let mut out = String::new();
-        for part in parse_template(text)? {
-            match part {
-                TemplatePart::Literal(literal) => {
-                    if syntax.is_some() && literal.contains("${") {
-                        return Err(CoreError::new(
-                            ErrorCode::DeliveryUnavailable,
-                            format!(
-                                "{} would expand the literal `${{` in {text:?}; it has no escape for it",
-                                self.client
-                            ),
-                        ));
-                    }
-                    out.push_str(&literal);
-                }
-                TemplatePart::Var(PathVar::Home) => {
-                    out.push_str(&self.cx.env.home().to_string_lossy());
-                }
-                TemplatePart::Var(PathVar::LoadoutHome) => {
-                    out.push_str(&self.cx.loadout_home.to_string_lossy());
-                }
-                TemplatePart::Var(PathVar::Project) => {
-                    return Err(CoreError::new(
-                        ErrorCode::InvalidRef,
-                        format!("`${{project}}` in {text:?} has no value at system scope"),
-                    ));
-                }
-                TemplatePart::Env(name) => {
-                    let spelled = match syntax {
-                        Some(EnvRefSyntax::DollarBrace { .. }) => format!("${{{name}}}"),
-                        Some(EnvRefSyntax::DollarBraceEnv) => format!("${{env:{name}}}"),
-                        Some(EnvRefSyntax::BraceEnv) => format!("{{env:{name}}}"),
-                        Some(EnvRefSyntax::CodexForward) | None => {
-                            return Err(CoreError::new(
-                                ErrorCode::DeliveryUnavailable,
-                                format!(
-                                    "{} does not expand `${{env:{name}}}` in this field, and this build has no `launch` delivery yet",
-                                    self.client
-                                ),
-                            ));
-                        }
-                    };
-                    self.used_env = true;
-                    out.push_str(&spelled);
-                }
-                TemplatePart::Secret(alias) => {
-                    return Err(CoreError::new(
-                        ErrorCode::DeliveryUnavailable,
-                        format!("this build cannot deliver `${{secret:{alias}}}` to clients yet"),
-                    ));
-                }
+/// A passthrough value; strings may hold literals, path variables and
+/// references.
+fn native(r: &mut Renderer<'_>, value: &toml::Value) -> Result<NativeValue, CoreError> {
+    Ok(match value {
+        toml::Value::String(text) => NativeValue::String(r.value(text, FieldSet::NONE)?),
+        toml::Value::Integer(n) => NativeValue::Integer(*n),
+        toml::Value::Float(n) => NativeValue::Float(*n),
+        toml::Value::Boolean(b) => NativeValue::Bool(*b),
+        toml::Value::Datetime(d) => NativeValue::Datetime(d.to_string()),
+        toml::Value::Array(items) => NativeValue::Array(
+            items
+                .iter()
+                .map(|item| native(r, item))
+                .collect::<Result<_, _>>()?,
+        ),
+        toml::Value::Table(table) => {
+            let mut map = NativeMap::new();
+            for (key, item) in table {
+                map.insert(key.clone(), native(r, item)?);
             }
+            NativeValue::Object(map)
         }
-        Ok(out)
-    }
-
-    /// For a client that forwards variables by name (Codex): the variable
-    /// when `text` is exactly one `${env:NAME}` reference.
-    fn forwarded(&mut self, text: &str) -> Result<Option<String>, CoreError> {
-        if self.caps.env_ref != Some(EnvRefSyntax::CodexForward) {
-            return Ok(None);
-        }
-        match parse_template(text)?.as_slice() {
-            [TemplatePart::Env(name)] => {
-                self.used_env = true;
-                Ok(Some(name.clone()))
-            }
-            _ => Ok(None),
-        }
-    }
-
-    /// A passthrough value; strings may hold literals and path variables.
-    fn native(&mut self, value: &toml::Value) -> Result<NativeValue, CoreError> {
-        Ok(match value {
-            toml::Value::String(text) => NativeValue::String(self.render(text, FieldSet::NONE)?),
-            toml::Value::Integer(n) => NativeValue::Integer(*n),
-            toml::Value::Float(n) => NativeValue::Float(*n),
-            toml::Value::Boolean(b) => NativeValue::Bool(*b),
-            toml::Value::Datetime(d) => NativeValue::Datetime(d.to_string()),
-            toml::Value::Array(items) => NativeValue::Array(
-                items
-                    .iter()
-                    .map(|item| self.native(item))
-                    .collect::<Result<_, _>>()?,
-            ),
-            toml::Value::Table(table) => {
-                let mut map = NativeMap::new();
-                for (key, item) in table {
-                    map.insert(key.clone(), self.native(item)?);
-                }
-                NativeValue::Object(map)
-            }
-        })
-    }
+    })
 }
 
 /// A native string value as a store template (SPEC 11.2): the client's own

@@ -82,9 +82,10 @@ pub enum ErrorCode {
     /// Another process kept a client file open for longer than the retry
     /// window (Windows sharing violation, SPEC 8.4 step 4).
     FileLocked,
-    /// No delivery mode of this build can bring a reference (`${secret:..}`,
-    /// or `${env:..}` in a field the client does not expand) to this client.
-    /// The entry is blocked; nothing is written in plain text.
+    /// The delivery mode a server asks for (`delivery.mode`) cannot bring a
+    /// reference to this client and field, or a value cannot be written
+    /// without changing its meaning (a literal `${` the client would
+    /// expand). The entry is blocked; nothing is written in plain text.
     DeliveryUnavailable,
     /// Warning: a known client has no adapter in this build yet, so nothing
     /// is written for it.
@@ -116,6 +117,23 @@ pub enum ErrorCode {
     /// A secret provider failed for another reason, or the value cannot be
     /// read from here (SPEC 11.3 `error`, `unverifiable`).
     SecretError,
+    /// `launch` delivery needs the absolute path of the `loadout` binary
+    /// and it could not be resolved (SPEC 11.4, 11.5). The entry is
+    /// blocked; nothing falls back to `inline`.
+    LauncherNotFound,
+    /// A provider reference has no delivery mode that keeps its value out
+    /// of the client's config file for this client and field (SPEC 11.4
+    /// rule 2). Fixes: export to the environment, or allow `inline` for
+    /// the server.
+    NoSecretFreeDelivery,
+    /// `inline` delivery would write a secret value into a shared file
+    /// (SPEC 11.4 rule 3). Fixes: `env` or `launch`, or the project-local
+    /// layer.
+    SecretInSharedFile,
+    /// Warning: a `${env:NAME}` reference is written as the value of
+    /// Loadout's own environment, because the client cannot expand it
+    /// there and `launch` cannot carry it (SPEC 11.4 rule 1).
+    InlineEnvFallback,
 }
 
 impl ErrorCode {
@@ -161,6 +179,10 @@ impl ErrorCode {
             ErrorCode::ProviderUnavailable => "provider_unavailable",
             ErrorCode::ProviderTooOld => "provider_too_old",
             ErrorCode::SecretError => "secret_error",
+            ErrorCode::LauncherNotFound => "launcher_not_found",
+            ErrorCode::NoSecretFreeDelivery => "no_secret_free_delivery",
+            ErrorCode::SecretInSharedFile => "secret_in_shared_file",
+            ErrorCode::InlineEnvFallback => "inline_env_fallback",
         }
     }
 }

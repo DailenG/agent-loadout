@@ -23,6 +23,7 @@ pub mod render;
 pub mod rollback;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::adapters::ADAPTERS;
 use crate::adapters::detect::RegistryProbe;
@@ -31,6 +32,8 @@ use crate::env::{Env, KnownFolder, Os};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::paths::LoadoutHome;
+use crate::secrets::delivery::DeliveryEnv;
+use crate::secrets::scanner::SecretMemory;
 
 pub use exec::{ApplyReport, ApplyRequest, TargetResult, apply_in, preview, run};
 pub use plan::{
@@ -45,15 +48,21 @@ pub struct ApplyEnv<'a> {
     pub home: &'a LoadoutHome,
     /// For `all-detected` enablement; the CLI passes a registry-free probe.
     pub registry: &'a dyn RegistryProbe,
+    /// Secret providers and the `loadout` launcher (SPEC 11.4).
+    pub delivery: &'a DeliveryEnv,
 }
 
 impl<'a> ApplyEnv<'a> {
-    pub(crate) fn render_cx(&self) -> render::RenderCx<'a> {
+    /// The render context; values read while rendering go to `memory` (the
+    /// store's [`SecretMemory`]).
+    pub(crate) fn render_cx(&self, memory: Arc<SecretMemory>) -> render::RenderCx<'a> {
         render::RenderCx {
             env: self.env,
             fs: self.fs,
             loadout_home: &self.home.path,
             registry: self.registry,
+            delivery: self.delivery,
+            memory,
         }
     }
 }

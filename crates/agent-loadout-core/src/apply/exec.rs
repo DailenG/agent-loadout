@@ -112,7 +112,11 @@ pub fn preview(
         Some(key) => key,
         None => LedgerKey::from_bytes([0; 32]),
     };
-    plan::plan(&ax.render_cx(), &desired, &ledger, &key, options)
+    let memory = match store {
+        Some(store) => store.secret_memory().clone(),
+        None => std::sync::Arc::new(crate::secrets::scanner::SecretMemory::new()?),
+    };
+    plan::plan(&ax.render_cx(memory), &desired, &ledger, &key, options)
 }
 
 /// A standalone apply run in its own transaction: one commit when a file
@@ -138,7 +142,7 @@ pub fn apply_in(
 ) -> Result<ApplyReport, CoreError> {
     let state_dir = ax.home.state_dir();
     let machine = tx.machine().clone();
-    let cx = ax.render_cx();
+    let cx = ax.render_cx(tx.store().secret_memory().clone());
     let mut ledger = Ledger::load(ax.fs, &state_dir)?;
     let key = LedgerKey::load_or_create(ax.fs, &state_dir)?;
 

@@ -38,6 +38,9 @@ pub struct MachineOverlay {
     /// Where each project lives on this machine, by project id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projects: Option<BTreeMap<String, MachineProject>>,
+    /// How secrets are delivered on this machine (SPEC 11.4, 11.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<MachineDelivery>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -52,6 +55,20 @@ pub struct MachineEnable {
     /// Clients never written on this machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_clients: Option<Vec<String>>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub extra: toml::Table,
+}
+
+/// Per-machine delivery choices.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MachineDelivery {
+    /// The user exports provider secrets to the clients' environment on
+    /// this machine (`loadout env --export`, SPEC 11.6), so `auto`
+    /// delivery may use `env` for provider references a client cannot get
+    /// otherwise (SPEC 11.4 rule 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_provider_secrets: Option<bool>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -77,6 +94,7 @@ impl MachineOverlay {
             secrets: None,
             servers: None,
             projects: None,
+            delivery: None,
             extra: toml::Table::new(),
         }
     }

@@ -295,24 +295,47 @@ impl TargetPlan {
     }
 
     /// The change as a unified diff of the file text; empty when the file
-    /// stays as it is.
+    /// stays as it is. Values written by `inline` delivery are masked
+    /// (SPEC 8.3).
     pub fn diff(&self) -> String {
         let Some(after) = &self.after else {
             return String::new();
         };
-        let before = String::from_utf8_lossy(self.before.as_deref().unwrap_or_default());
-        let after = String::from_utf8_lossy(after);
+        let before = self.mask(&String::from_utf8_lossy(
+            self.before.as_deref().unwrap_or_default(),
+        ));
+        let after = self.mask(&String::from_utf8_lossy(after));
         let name = self.file.to_string_lossy();
         let old = if self.before.is_some() {
             format!("a/{name}")
         } else {
             "/dev/null".to_owned()
         };
-        TextDiff::from_lines(before.as_ref(), after.as_ref())
+        TextDiff::from_lines(before.as_str(), after.as_str())
             .unified_diff()
             .context_radius(3)
             .header(&old, &format!("b/{name}"))
             .to_string()
+    }
+
+    /// `text` with every inline value of this target, as written and as a
+    /// JSON or TOML string escape, replaced by `********`. Values shorter
+    /// than four characters are left alone: masking them would garble the
+    /// diff without hiding anything.
+    fn mask(&self, text: &str) -> String {
+        let mut text = text.to_owned();
+        for value in self.input.desired.iter().flat_map(|entry| &entry.inline) {
+            let raw = value.expose();
+            if raw.chars().count() < 4 {
+                continue;
+            }
+            let escaped = serde_json::to_string(raw).expect("a string serializes");
+            let escaped = &escaped[1..escaped.len() - 1];
+            for form in [escaped, raw] {
+                text = text.replace(form, "********");
+            }
+        }
+        text
     }
 }
 
@@ -479,7 +502,12 @@ pub(crate) fn plan_target(
         after: None,
         entries: Vec::new(),
         problem: None,
-        warnings: target.warnings.clone(),
+        warnings: target
+            .warnings
+            .iter()
+            .chain(input.desired.iter().flat_map(|entry| &entry.warnings))
+            .cloned()
+            .collect(),
         input: input.clone(),
     };
     let parsed = match &bytes {
