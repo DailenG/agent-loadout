@@ -11,9 +11,11 @@ Status: early development. The design is in [SPEC.md](SPEC.md); milestones M0
 store, `loadout server add|ls|show|rm`, `loadout history`), M3
 (format-preserving JSON, JSONC and TOML editors), M4 (client adapter
 framework with Claude Code and Claude Desktop adapters), M5 (Codex, omp
-and Pi adapters) and M6 (system-scope apply engine with an ownership ledger,
+and Pi adapters), M6 (system-scope apply engine with an ownership ledger,
 `loadout status|diff|apply|rollback|import|adopt`, one store commit per apply
-run) are in place.
+run) and M7 (secret references, env/keyring/1Password providers, the leak
+scanner on every store commit, `loadout secrets ls|check|providers|set|clear`)
+are in place.
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
