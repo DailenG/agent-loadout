@@ -15,7 +15,9 @@ M9.
 - Run each client's own lister to confirm what it loaded (`claude mcp list`,
   the Claude Desktop developer settings, `codex mcp list`, omp `/mcp list`,
   `pi mcp list`).
-- Until M6 (apply) lands, write entries by hand from the goldens in
+- Write Loadout's entries with `loadout server add <id> --client <client>`
+  (instant apply, M6) against the throwaway `LOADOUT_HOME`, or by hand from
+  the goldens in
   `crates/agent-loadout-core/tests/snapshots/adapters_claude__*.snap` and
   `adapters_tier_a__*.snap`.
 - Use synthetic server names and placeholder commands only (for example the
@@ -132,3 +134,20 @@ check.
 | PI-10 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
 | PI-11 | Map `[tools] deny` by hand: `"toolExposure": { "<tool>": "hidden" }`. | The tool is unreachable. Loadout does not write `toolExposure` yet (`Caps.tool_filter = None` for Pi); this confirms the mapping for a later brief. | SPEC 5.2 `[tools]` via Pi `toolExposure` |
 | PI-12 | Detection: `pi.exe`/`pi.cmd` on `PATH`, and a `~/.pi/agent` dir alone. | Either detects Pi. | SPEC 7.7, `Probe::Executable("pi")` |
+
+## Apply engine (M6), gate V1
+
+Machines: Windows 11 and Arch Linux. Every check uses the throwaway
+`LOADOUT_HOME` and override dirs from the client sections. None of these is
+a `[verify]` marker of SPEC 8; each checks an assumption the apply engine
+makes about running clients.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| AP-1 | In the CC-1 setup, start `claude` and keep it running. Run `loadout server add verify-apply --client claude-code -- npx -y @modelcontextprotocol/server-everything`. Use Claude Code for a minute (start a new conversation, change a setting), quit, then run `loadout status --client claude-code`. | `verify-apply` is still `synced`. If Claude Code's own rewrite of `.claude.json` dropped it, status shows `missing` (the next apply re-creates it); record when that happens. | `claude_code` caps `rewrites_file_at_runtime = true`; SPEC 8.4 compare-and-swap |
+| AP-2 | Windows: give a throwaway client file an explicit ACE and the hidden attribute (`icacls <file> /grant "<a local test group>:(R)"`, `attrib +h <file>`), record `icacls <file>` and `attrib <file>`, run `loadout apply` with a change for that file, record both again. | Same ACEs and attributes before and after. Loadout replaces files by rename after copying the original DACL and attributes onto the temp file (no `ReplaceFileW`, see `docs/milestones/M6.md`). | SPEC 8.4 step 4 "keeps ACLs and attributes"; `RealFs::write_new` and `RealFs::replace` |
+| AP-3 | Windows: with each Tier A client running, run `loadout apply` with a change to that client's file. | Record any client that keeps its config file open without delete sharing: Loadout then retries for 2 s and reports `file_locked` for that file only. | SPEC 8.4 step 4 sharing-violation retry |
+| AP-4 | Add two stdio servers that print their environment and arguments, for `claude-code`, `omp`, `pi` and `codex`: `verify-env` with `--env VERIFY_VALUE='${env:VERIFY_VALUE}'`, and `verify-arg` with the argument `'--tag=${env:VERIFY_VALUE}'`. Set `VERIFY_VALUE=verified` in the shell, start each client, connect both. | `verify-env`: Claude Code, omp and Pi get `${VERIFY_VALUE}` in `env`, Codex gets `env_vars = ["VERIFY_VALUE"]`; each server sees `verified`. `verify-arg`: Claude Code and omp get `${VERIFY_VALUE}` in `args` and pass `verified`; Pi and Codex do not expand arguments, so Loadout blocks the entry for them (`delivery_unavailable`). | `render.rs` `env` delivery per `Caps::env_ref` and `env_ref_fields` |
+| AP-5 | Hand-edit the throwaway store's `clients.toml` to `[omp] native_disable = true` (and the same for `pi`, `codex`), add a server for those clients, then run `loadout server rm <id>`. | Each entry stays with `enabled = false` and the client's lister shows it disabled. | SPEC 8.4 "native disable mechanism when clients.toml asks"; `ClientPrefs::native_disable` |
+| AP-6 | Windows: apply a server for `claude-desktop` while Claude Desktop runs. | The server appears only after a full restart. Loadout does not prompt for the restart yet (`restart_required` is not surfaced by the CLI); record whether it should. | `claude_desktop` caps `restart_required` |
+| AP-7 | Hand-add to each client file one entry with a `${VAR}` value, one with `${VAR:-default}` and one with a literal env value, then run `loadout import --scan`. | The `${VAR}` entry is importable (as `${env:VAR}`), `${VAR:-default}` is `unsupported_field`, the literal is `needs_secret_extraction`. `loadout import` then adopts the first without rewriting the file. | SPEC 8.6 import; `import::server_from_native` |
