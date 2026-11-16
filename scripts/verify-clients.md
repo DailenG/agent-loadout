@@ -9,12 +9,15 @@ M9.
 ## Ground rules
 
 - Use a throwaway `LOADOUT_HOME` and, where the client supports it, a
-  throwaway config dir (`CLAUDE_CONFIG_DIR`). Back up any real client file a
-  check touches before starting, and restore it afterwards.
+  throwaway config dir (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `PI_CODING_AGENT_DIR`). Back up any real client file a check touches
+  before starting, and restore it afterwards.
 - Run each client's own lister to confirm what it loaded (`claude mcp list`,
-  the Claude Desktop developer settings).
+  the Claude Desktop developer settings, `codex mcp list`, omp `/mcp list`,
+  `pi mcp list`).
 - Until M6 (apply) lands, write entries by hand from the goldens in
-  `crates/agent-loadout-core/tests/snapshots/adapters_claude__*.snap`.
+  `crates/agent-loadout-core/tests/snapshots/adapters_claude__*.snap` and
+  `adapters_tier_a__*.snap`.
 - Use synthetic server names and placeholder commands only (for example the
   `example-*` names from the fixtures, or a real public test server); never
   paste tokens into a client file for these checks.
@@ -71,3 +74,61 @@ foreach ($root in $roots) {
     }
 }
 ```
+
+## Codex (`codex`), gate V1
+
+Machines: Windows 11 and Arch Linux. Use `CODEX_HOME` pointing at a
+throwaway dir for every check.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| CX-1 | Set `CODEX_HOME` to an empty throwaway dir, add `[mcp_servers.verify-user]` (stdio) to `$CODEX_HOME/config.toml`, run `codex mcp list`. | The server is listed; `~/.codex` is not read. | SPEC 7.3 `$CODEX_HOME/config.toml`; `codex::USER_FILE` |
+| CX-2 | Put `[mcp_servers.verify-project]` in `<P>/.codex/config.toml`. Run `codex mcp list` in `<P>` before and after marking `<P>` trusted. | Listed only once `<P>` is trusted. | SPEC 7.3 trusted projects; `TrustGate::TrustedProject` |
+| CX-3 | With `verify-user` from CX-1, add only `[mcp_servers.verify-user]` `enabled = false` to the trusted `<P>/.codex/config.toml`. Run `codex mcp list` inside and outside `<P>`. Then replace it with a project table holding only `args = ["--other"]`. | Disabled inside `<P>`, enabled elsewhere. Record whether the `args`-only table merges over the user entry (deep merge) or replaces it. | SPEC 7.4 project `enabled = false` `[verify merge]`; DeepMerge `[verify]`; `ProjectDisable::EnabledFalse { partial: true }` |
+| CX-4 | Add `env_vars = ["VERIFY_FORWARD"]` to a stdio entry whose server reports its environment (a small script), set `VERIFY_FORWARD=1` in the shell, start `codex`. | The server sees `VERIFY_FORWARD=1`. | SPEC 11.4 Codex `env` delivery (`env_vars`) |
+| CX-5 | Point an http entry at a local echo endpoint with `bearer_token_env_var = "VERIFY_BEARER"` and `env_http_headers = { "X-Verify" = "VERIFY_HEADER" }`, both set in the shell. | Requests carry `Authorization: Bearer <value>` and `X-Verify: <value>`. | SPEC 7.3 Codex remote fields |
+| CX-6 | Add `[mcp_servers."verify.dotted"]`. | Record whether Codex loads it. Loadout blocks names outside `[A-Za-z0-9_-]` for Codex (`invalid_id`, fix: `native_name`). | `codex::CodexToml` name rule `[verify]` |
+| CX-7 | Add `[mcp.servers.verify-legacy]` (stdio) and run `codex mcp list`. | Record whether current Codex still loads the legacy table. Loadout reads it for import and never edits or deletes it. | SPEC 7.3 legacy `[mcp.servers]` read-only |
+| CX-8 | Windows: a stdio entry with plain `command = "npx"` (no `cmd /c`). | Record whether it connects. Loadout writes plain `npx` for Codex (`windows_shell_shim = false`). | SPEC 7.4 notes (no shim listed for codex) |
+| CX-9 | Add `enabled_tools = ["<one tool>"]` to a server, then replace it with `disabled_tools = ["<that tool>"]`. | Only that tool is offered, then every tool but it. | SPEC 7.3 tool lists; `ToolFilterMech::AllowDeny` |
+| CX-10 | Set `startup_timeout_sec = 1` on a slow-starting server, then `2.5`. | Startup times out after about 1 s; a fractional value is accepted. | `TimeoutField` seconds for `startup_timeout_sec`, `tool_timeout_sec` |
+| CX-11 | Detection: `codex.exe` (standalone) and, separately, `codex.cmd` (npm global) on `PATH`. | Both are real install shapes; the PATH probe tries each `PATHEXT` extension. | SPEC 7.7, `Probe::Executable("codex")` |
+
+## oh-my-pi (`omp`), gate V1
+
+Machines: Windows 11 and Arch Linux. Use `PI_CODING_AGENT_DIR` (default
+profile) or a throwaway `PI_CONFIG_DIR` name for every check.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| OMP-1 | Set `PI_CODING_AGENT_DIR` to a throwaway dir, add `verify-user` to `$PI_CODING_AGENT_DIR/mcp.json`, run `/mcp list`. | Listed, from that file. | SPEC 7.3 `PI_CODING_AGENT_DIR`; `omp::USER_FILE` |
+| OMP-2 | Unset it, set `PI_CONFIG_DIR=.omp-verify`, add `verify-root` to `~/.omp-verify/agent/mcp.json`, run `/mcp list`. Repeat with an absolute `PI_CONFIG_DIR`. | The relative name is a directory under home. Record what omp does with an absolute value (Loadout ignores absolute values and values with `..`, falling back to `.omp`). | SPEC 7.3 `PI_CONFIG_DIR`; `Location::HomeNamedDir` |
+| OMP-3 | Keep `PI_CODING_AGENT_DIR` set, start `omp --profile verify`, add `verify-profile` to `~/.omp/profiles/verify/agent/mcp.json`, run `/mcp list`. | Lists `verify-profile`, not `verify-user`: a named profile ignores `PI_CODING_AGENT_DIR`. | SPEC 7.3 named profiles; `omp_profile_targeting_from_clients_toml` |
+| OMP-4 | With `verify-user` in the user file, put the whole entry with `"enabled": false` in `<P>/.omp/mcp.json`; run `/mcp list` inside and outside `<P>`. Then replace it with `{ "enabled": false }` alone. | The full disabled entry suppresses `verify-user` inside `<P>`. Record whether the `enabled`-only entry is accepted and suppresses too (Loadout writes the full entry because the project entry replaces the user one). | SPEC 7.4 project `enabled: false`; `ProjectDisable::EnabledFalse { partial: false }` `[verify]` |
+| OMP-5 | Start from no file, write the `omp_new_file` golden (with the `$schema` line) by hand, run `/mcp list`, then `/mcp disable notes` and diff the file. | Loads. Record whether omp's own write keeps every other key and entry (it rewrites the file with `JSON.stringify`, two-space indent). | SPEC 7.2 omp skeleton; `rewrites_file_at_runtime = false` |
+| OMP-6 | Set `"timeout": 1000` on a tool that takes longer than a second. | The call times out after about 1 s (milliseconds). | SPEC 7.3 `timeout` (ms); `TimeoutField` milliseconds |
+| OMP-7 | Add `"env": { "VERIFY": "!echo verified" }` to a stdio server that reports its environment. | The server sees `VERIFY=verified`. | SPEC 7.4 `!command`; `CommandRef::Bang` |
+| OMP-8 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| OMP-9 | Add `verify-user` to the user file and also to `disabledServers`; then remove it from the list and add it to `enabledServers` with `"enabled": false` in the entry. | Hidden, then force-enabled. Loadout never edits either list. | SPEC 7.3 `disabledServers`/`enabledServers` preserved |
+| OMP-10 | With both omp and Pi installed, set `PI_CODING_AGENT_DIR` and start each. | Record whether both really read `$PI_CODING_AGENT_DIR/mcp.json`. If so, the two clients share one file whose `timeout` units differ (omp ms, Pi s); the planner must treat it as a shared file (SPEC 6.5). | `omp::USER_FILE`, `pi` agent dir |
+| OMP-11 | Detection: `omp` installed with Bun (`omp.exe` or `omp.cmd` on `PATH`), and a `~/.omp` dir alone. | Either detects omp. | SPEC 7.7, `Probe::Executable("omp")`, `Probe::Path(~/.omp)` |
+
+## Pi (`pi`), gate V1
+
+Machines: Windows 11 and Arch Linux. Use `PI_CODING_AGENT_DIR` for every
+check.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| PI-1 | Set `PI_CODING_AGENT_DIR` to an absolute throwaway dir, add `verify-user` to `$PI_CODING_AGENT_DIR/mcp.json`, run `pi mcp list`. Repeat with a `~/`-prefixed value. | Listed, from that file. Pi expands `~`; record it. Loadout uses only absolute values and otherwise falls back to `~/.pi/agent`. | SPEC 19 `PI_CODING_AGENT_DIR` `[verify]`; `pi` agent dir |
+| PI-2 | Put `verify-project` in `<P>/.pi/mcp.json`; run `pi mcp list` in `<P>` before and after trusting it. | Listed only after trust. | SPEC 7.3 project trust; `TrustGate::TrustedProject` |
+| PI-3 | With `verify-user` in the user file, put `"verify-user": { "enabled": false }` in the trusted `<P>/.pi/mcp.json`. | Disabled inside `<P>`, enabled elsewhere, with the user entry's other fields kept. | SPEC 7.4 project `{ "enabled": false }`; `ProjectDisable::EnabledFalse { partial: true }` |
+| PI-4 | Add both `verify-tool` and `verify_tool`. | Pi rejects the second as the same server. Loadout reports `collision` for such a pair. | SPEC 5.1, 20.3 M5 `-`/`_` equivalence |
+| PI-5 | Add an http entry without `type`, one with `"type": "streamable-http"` and one with `"type": "sse"`. | The first two connect over streamable HTTP; `sse` is rejected. Loadout writes no `type` and blocks SSE. | SPEC 7.3 optional `type`, no SSE |
+| PI-6 | Set `"timeout": 1` on a tool that takes longer than a second. | The call times out after about 1 s (seconds). | SPEC 7.3 `timeout` (s); `TimeoutField` seconds |
+| PI-7 | Add `"env": { "VERIFY": "!echo verified" }` and `"headers": { "X-Verify": "!echo verified" }`. | The server sees the command output. Also record whether a literal value that starts with `!` can be escaped: Loadout writes values as rendered, so a literal `!` value would run as a command. | SPEC 7.4 `!command`; `CommandRef::Bang` |
+| PI-8 | Install `pi-mcp-adapter` the documented way (`pi install npm:pi-mcp-adapter`), then with `-l` in `<P>`. Record the change to `~/.pi/agent/settings.json` and `<P>/.pi/settings.json`, and any files under `extensions/`. Start a session and run `/mcp`. | Pi's own MCP no longer reads `mcp.json`. Loadout reports `client_mcp_replaced_by_extension` from a `packages` entry naming `pi-mcp-adapter` or an `extensions/pi-mcp-adapter[.ts/.js]` path; record any other install shape. | SPEC 7.3 `pi-mcp-adapter`; `pi::MCP_ADAPTER` `[verify]` |
+| PI-9 | Set `"extensions": ["-builtin:mcp"]` in the user settings. | Pi stops loading MCP without a replacement. Loadout does not report this yet; record it for a follow-up brief. | SPEC 7.3 (not covered by Loadout) |
+| PI-10 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| PI-11 | Map `[tools] deny` by hand: `"toolExposure": { "<tool>": "hidden" }`. | The tool is unreachable. Loadout does not write `toolExposure` yet (`Caps.tool_filter = None` for Pi); this confirms the mapping for a later brief. | SPEC 5.2 `[tools]` via Pi `toolExposure` |
+| PI-12 | Detection: `pi.exe`/`pi.cmd` on `PATH`, and a `~/.pi/agent` dir alone. | Either detects Pi. | SPEC 7.7, `Probe::Executable("pi")` |

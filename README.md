@@ -9,8 +9,9 @@ and keeps secret values out of the store.
 Status: early development. The design is in [SPEC.md](SPEC.md); milestones M0
 (workspace bootstrap), M1 (store schemas and validation), M2 (git-backed
 store, `loadout server add|ls|show|rm`, `loadout history`), M3
-(format-preserving JSON, JSONC and TOML editors) and M4 (client adapter
-framework with Claude Code and Claude Desktop adapters) are in place.
+(format-preserving JSON, JSONC and TOML editors), M4 (client adapter
+framework with Claude Code and Claude Desktop adapters) and M5 (Codex, omp
+and Pi adapters) are in place.
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
