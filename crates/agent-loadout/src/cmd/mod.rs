@@ -1,24 +1,45 @@
 //! Store commands and the helpers every command shares: JSON output, error
-//! reporting and exit codes (SPEC 14).
+//! reporting, apply reports and exit codes (SPEC 14).
 
+pub mod adopt;
+pub mod apply;
+pub mod diff;
 pub mod history;
+pub mod import;
+pub mod rollback;
 pub mod server;
+pub mod status;
 
 use std::path::Path;
 
+use agent_loadout_core::adapters::detect::NoRegistry;
+use agent_loadout_core::apply::render::DesiredState;
+use agent_loadout_core::apply::{
+    ApplyEnv, ApplyReport, ApplyRequest, EntryPlan, PlanOptions, TargetResult, apply_in,
+};
 use agent_loadout_core::model::Diagnostic;
+use agent_loadout_core::model::applied::{ApplyOutcome, ApplyTrigger};
+use agent_loadout_core::model::settings::ApplyMode;
 use agent_loadout_core::paths::{LoadoutHome, SyncRoot, SyncRootKind};
-use agent_loadout_core::store::Store;
+use agent_loadout_core::store::{CommitId, Store, Transaction};
 use agent_loadout_core::{CoreError, Env, ErrorCode, Fs, RealFs, brand};
 use serde_json::{Value, json};
 
 /// Version of every `--json` document.
 pub const JSON_SCHEMA: u32 = 1;
 
+/// Exit code for pending changes or drift (`status --check`,
+/// `diff --exit-code`, SPEC 14).
+pub const EXIT_PENDING: u8 = 3;
+/// Exit code for entries that need a decision (SPEC 14).
+pub const EXIT_UNRESOLVED: u8 = 4;
 /// Exit code for a lock timeout (SPEC 14).
 const EXIT_LOCKED: u8 = 6;
 
 static REAL_FS: RealFs = RealFs;
+/// The CLI has no Windows registry probe yet (M4 note); detection uses
+/// paths and `PATH` only.
+static NO_REGISTRY: NoRegistry = NoRegistry;
 
 /// What a store command runs against.
 #[derive(Debug)]
@@ -26,11 +47,23 @@ pub struct Context {
     pub env: Env,
     pub home: LoadoutHome,
     pub json: bool,
+    /// `--yes`: confirmations are answered yes.
+    pub yes: bool,
 }
 
 impl Context {
     fn fs(&self) -> &'static dyn Fs {
         &REAL_FS
+    }
+
+    /// What an apply runs against.
+    pub fn apply_env(&self) -> ApplyEnv<'_> {
+        ApplyEnv {
+            env: &self.env,
+            fs: self.fs(),
+            home: &self.home,
+            registry: &NO_REGISTRY,
+        }
     }
 
     /// The store, or `None` when it does not exist yet. Creates nothing.
@@ -53,12 +86,159 @@ pub fn client_name() -> String {
     format!("{}/{}", brand::CLI_CLIENT_NAME, env!("CARGO_PKG_VERSION"))
 }
 
-/// Process exit code for a failed command: 6 for `locked`, else 1.
+/// Process exit code for a failed command: 4 for a needed confirmation,
+/// 6 for `locked`, else 1.
 pub fn exit_code(err: &CoreError) -> u8 {
     match err.code() {
         ErrorCode::Locked => EXIT_LOCKED,
+        ErrorCode::ConfirmationRequired => EXIT_UNRESOLVED,
         _ => 1,
     }
+}
+
+/// In instant mode (`apply_mode`, the default), applies a staged store edit
+/// inside its transaction, so the edit and its apply are one commit
+/// (SPEC 8.7). `None` in review mode.
+pub fn instant_apply(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+) -> Result<Option<ApplyReport>, CoreError> {
+    let machine = tx.machine().id.clone();
+    if DesiredState::load(tx, Some(&machine))?.apply_mode() != ApplyMode::Instant {
+        return Ok(None);
+    }
+    let request = ApplyRequest {
+        options: PlanOptions::default(),
+        trigger: ApplyTrigger::Instant,
+    };
+    apply_in(tx, ax, &request).map(Some)
+}
+
+/// The exit code of an apply run: 1 when a file failed, 4 when entries
+/// need a decision, else 0.
+pub fn apply_exit_code(report: &ApplyReport) -> u8 {
+    if report
+        .targets
+        .iter()
+        .any(|target| target.outcome == ApplyOutcome::Failed)
+    {
+        1
+    } else if report.unresolved() > 0 {
+        EXIT_UNRESOLVED
+    } else {
+        0
+    }
+}
+
+pub fn outcome_str(outcome: ApplyOutcome) -> &'static str {
+    match outcome {
+        ApplyOutcome::Ok => "ok",
+        ApplyOutcome::Partial => "partial",
+        ApplyOutcome::Blocked => "blocked",
+        ApplyOutcome::Failed => "failed",
+    }
+}
+
+pub fn entry_json(entry: &EntryPlan) -> Value {
+    json!({
+        "name": entry.name,
+        "client": entry.client,
+        "server": entry.server_id,
+        "state": entry.state.as_str(),
+        "action": entry.action.as_str(),
+        "unresolved": entry.unresolved,
+        "delivery": entry.delivery,
+        "problem": entry.problem.as_ref().map(error_json),
+    })
+}
+
+fn target_result_json(target: &TargetResult) -> Value {
+    json!({
+        "clients": target.clients,
+        "file": path_json(&target.file),
+        "outcome": outcome_str(target.outcome),
+        "written": target.written,
+        "create": target.counts.create,
+        "update": target.counts.update,
+        "remove": target.counts.remove,
+        "disable": target.counts.disable,
+        "error": target.error.as_ref().map(error_json),
+        "backup": target.backup.as_deref().map(path_json),
+        "entries": target.entries.iter().map(entry_json).collect::<Vec<_>>(),
+    })
+}
+
+/// An apply run as JSON (`apply`, `rollback`, `adopt`, `import`, `server`).
+pub fn report_json(report: &ApplyReport, commit: Option<&CommitId>) -> Value {
+    json!({
+        "apply_id": report.apply_id,
+        "trigger": report.trigger,
+        "outcome": outcome_str(report.outcome),
+        "recorded": report.recorded,
+        "commit": commit.map(CommitId::to_string),
+        "written": report.writes(),
+        "unresolved": report.unresolved(),
+        "imported": report.imported,
+        "targets": report.targets.iter().map(target_result_json).collect::<Vec<_>>(),
+        "warnings": report.warnings.iter().map(error_json).collect::<Vec<_>>(),
+    })
+}
+
+/// An apply run for people: one line per file that changed or needs
+/// attention, then entries that need a decision, then warnings (stderr).
+pub fn print_report(report: &ApplyReport, commit: Option<&CommitId>) {
+    for target in &report.targets {
+        let counts = target.counts;
+        let attention = target.outcome != ApplyOutcome::Ok;
+        if !target.written && !attention {
+            continue;
+        }
+        println!(
+            "{:<8} {}  ({}; +{} ~{} -{} !{})",
+            outcome_str(target.outcome),
+            target.file.display(),
+            target.clients.join(", "),
+            counts.create,
+            counts.update,
+            counts.remove,
+            counts.disable
+        );
+        if let Some(err) = &target.error {
+            println!("         error[{}]: {err}", err.code());
+        }
+        for entry in &target.entries {
+            if entry.unresolved || entry.problem.is_some() {
+                let problem = entry
+                    .problem
+                    .as_ref()
+                    .map(|err| format!(": {}[{}]", err.message(), err.code()))
+                    .unwrap_or_default();
+                let hint = if entry.unresolved {
+                    " (needs a decision: --on-conflict or adopt)"
+                } else {
+                    ""
+                };
+                println!(
+                    "         {} {}{problem}{hint}",
+                    entry.state.as_str(),
+                    entry.name
+                );
+            }
+        }
+    }
+    for warning in &report.warnings {
+        eprintln!("warning[{}]: {warning}", warning.code());
+    }
+    let commit = commit.map_or_else(
+        || "no commit".to_owned(),
+        |c| format!("commit {}", c.short()),
+    );
+    println!(
+        "Apply {}: {}, {} file(s) written ({commit}).",
+        report.apply_id,
+        outcome_str(report.outcome),
+        report.writes()
+    );
 }
 
 pub fn report_error(err: &CoreError, json: bool) {

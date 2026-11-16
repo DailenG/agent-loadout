@@ -114,6 +114,17 @@ impl DesiredState {
         })
     }
 
+    /// No servers and default preferences: a machine without a store.
+    pub fn empty() -> Self {
+        Self {
+            servers: BTreeMap::new(),
+            invalid: BTreeMap::new(),
+            clients: ClientPrefsFile::new(),
+            overlay: None,
+            settings: Settings::new(),
+        }
+    }
+
     /// `apply_mode` from `settings.toml`; instant by default (SPEC 5.7).
     pub fn apply_mode(&self) -> ApplyMode {
         self.settings.apply_mode.unwrap_or(ApplyMode::Instant)

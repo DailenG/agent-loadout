@@ -188,7 +188,13 @@ fn each_apply_run_is_one_commit_with_trailers_and_an_apply_record() {
     assert_eq!(head.summary, "apply: 2 files (claude-code, omp)");
     let machine = fx.machine_id();
     assert_eq!(head.trailers.op.as_deref(), Some("apply"));
-    assert_eq!(head.trailers.entities, vec![format!("machine/{machine}")]);
+    // The record's path finds it under `machine/<id>`; the trailers name
+    // only what the user changed.
+    assert!(
+        head.trailers.entities.is_empty(),
+        "{:?}",
+        head.trailers.entities
+    );
     let apply = head.trailers.apply.as_ref().unwrap();
     assert_eq!(
         (apply.id.as_str(), apply.outcome),

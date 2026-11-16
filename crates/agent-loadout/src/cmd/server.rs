@@ -1,5 +1,6 @@
 //! `loadout server ls|show|add|rm` (SPEC 14). Every change is one store
-//! commit; `rm` with several ids is one commit too.
+//! commit; `rm` with several ids is one commit too. In instant mode (the
+//! default, SPEC 8.7) the change is applied in that same commit.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +12,10 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 
-use super::{Context, JSON_SCHEMA, error_json, print_json, report_warnings};
+use super::{
+    Context, JSON_SCHEMA, error_json, instant_apply, print_json, print_report, report_json,
+    report_warnings,
+};
 
 #[derive(Debug, Args)]
 pub struct ServerArgs {
@@ -248,15 +252,28 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<(), CoreError> {
     let id = args.id.clone();
     let operation =
         Operation::new("server.add", format!("server: add {id}")).entity(format!("server/{id}"));
-    let committed = store.transaction(operation, |tx| tx.add_server(server))?;
+    let ax = ctx.apply_env();
+    let committed = store.transaction(operation, |tx| {
+        tx.add_server(server)?;
+        instant_apply(tx, &ax)
+    })?;
+    let report = committed.value;
     let commit = committed.commit.as_ref().map(|commit| commit.to_string());
     if ctx.json {
-        print_json(&json!({ "schema": JSON_SCHEMA, "server": id, "commit": commit }));
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "server": id,
+            "commit": commit,
+            "apply": report.as_ref().map(|r| report_json(r, committed.commit.as_ref())),
+        }));
     } else {
         println!(
             "Added server {id} (commit {}).",
             committed.commit.as_ref().map_or("none", |c| c.short())
         );
+        if let Some(report) = &report {
+            print_report(report, committed.commit.as_ref());
+        }
     }
     Ok(())
 }
@@ -320,14 +337,18 @@ fn remove(ctx: &Context, ids: &[String]) -> Result<(), CoreError> {
         .fold(Operation::new("server.remove", summary), |operation, id| {
             operation.entity(format!("server/{id}"))
         });
+    let ax = ctx.apply_env();
     let committed = store.transaction(operation, |tx| {
-        unique.iter().try_for_each(|id| tx.remove_server(id))
+        unique.iter().try_for_each(|id| tx.remove_server(id))?;
+        instant_apply(tx, &ax)
     })?;
+    let report = committed.value;
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
             "servers": unique,
             "commit": committed.commit.as_ref().map(|commit| commit.to_string()),
+            "apply": report.as_ref().map(|r| report_json(r, committed.commit.as_ref())),
         }));
     } else {
         println!(
@@ -335,6 +356,9 @@ fn remove(ctx: &Context, ids: &[String]) -> Result<(), CoreError> {
             unique.join(", "),
             committed.commit.as_ref().map_or("none", |c| c.short())
         );
+        if let Some(report) = &report {
+            print_report(report, committed.commit.as_ref());
+        }
     }
     Ok(())
 }

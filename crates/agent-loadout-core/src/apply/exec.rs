@@ -104,7 +104,7 @@ pub fn preview(
     let machine = Machine::load(ax.fs, &state_dir)?;
     let desired = match store {
         Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
-        None => DesiredState::load(&EmptyStore, None)?,
+        None => DesiredState::empty(),
     };
     let ledger = Ledger::load(ax.fs, &state_dir)?;
     // Without a key file nothing was ever hashed: any key plans the same.
@@ -113,17 +113,6 @@ pub fn preview(
         None => LedgerKey::from_bytes([0; 32]),
     };
     plan::plan(&ax.render_cx(), &desired, &ledger, &key, options)
-}
-
-struct EmptyStore;
-
-impl crate::store::StoreRead for EmptyStore {
-    fn read_file(&self, _: &str) -> Result<Option<String>, CoreError> {
-        Ok(None)
-    }
-    fn list_files(&self, _: &str) -> Result<Vec<String>, CoreError> {
-        Ok(Vec::new())
-    }
 }
 
 /// A standalone apply run in its own transaction: one commit when a file
@@ -251,7 +240,6 @@ pub fn apply_in(
         };
         let relative = format!("machines/{}.applied.toml", machine.id);
         tx.write(&relative, TomlDocument::new(record).to_text()?)?;
-        tx.add_entity(format!("machine/{}", machine.id));
         tx.set_apply(ApplyRef {
             id: apply_id.clone(),
             outcome,

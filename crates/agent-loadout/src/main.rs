@@ -26,6 +26,9 @@ struct Cli {
     /// Print machine-readable JSON to stdout.
     #[arg(long, global = true)]
     json: bool,
+    /// Answer yes to confirmations (rolling back an older apply run).
+    #[arg(long, global = true)]
+    yes: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -38,6 +41,18 @@ enum Command {
     Server(cmd::server::ServerArgs),
     /// List store commits.
     History(cmd::history::HistoryArgs),
+    /// Show the state of every owned and desired entry.
+    Status(cmd::status::StatusArgs),
+    /// Show the apply plan as file diffs.
+    Diff(cmd::diff::DiffArgs),
+    /// Reconcile client files with the store (one commit per run).
+    Apply(cmd::apply::ApplyArgs),
+    /// Roll back an apply run.
+    Rollback(cmd::rollback::RollbackArgs),
+    /// Import foreign client entries into the store.
+    Import(cmd::import::ImportArgs),
+    /// Take ownership of foreign or changed client entries.
+    Adopt(cmd::adopt::AdoptArgs),
 }
 
 #[derive(Debug, Args)]
@@ -50,7 +65,7 @@ struct DoctorArgs {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(&cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code),
         Err(err) => {
             cmd::report_error(&err, cli.json);
             ExitCode::from(cmd::exit_code(&err))
@@ -58,7 +73,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli) -> Result<(), CoreError> {
+/// Runs the command; the result is the exit code (SPEC 14).
+fn run(cli: &Cli) -> Result<u8, CoreError> {
     let env = process_env()?;
     let flag = cli.home.as_deref().map(absolute).transpose()?;
     let context = || -> Result<Context, CoreError> {
@@ -66,12 +82,20 @@ fn run(cli: &Cli) -> Result<(), CoreError> {
             home: paths::loadout_home(&env, &RealFs, flag.as_deref())?,
             env: env.clone(),
             json: cli.json,
+            yes: cli.yes,
         })
     };
+    let done = |result: Result<(), CoreError>| result.map(|()| 0);
     match &cli.command {
-        Command::Doctor(args) => doctor(&env, flag.as_deref(), args, cli.json),
-        Command::Server(args) => cmd::server::run(&context()?, args),
-        Command::History(args) => cmd::history::run(&context()?, args),
+        Command::Doctor(args) => done(doctor(&env, flag.as_deref(), args, cli.json)),
+        Command::Server(args) => done(cmd::server::run(&context()?, args)),
+        Command::History(args) => done(cmd::history::run(&context()?, args)),
+        Command::Status(args) => cmd::status::run(&context()?, args),
+        Command::Diff(args) => cmd::diff::run(&context()?, args),
+        Command::Apply(args) => cmd::apply::run(&context()?, args),
+        Command::Rollback(args) => cmd::rollback::run(&context()?, args),
+        Command::Import(args) => cmd::import::run(&context()?, args),
+        Command::Adopt(args) => cmd::adopt::run(&context()?, args),
     }
 }
 
