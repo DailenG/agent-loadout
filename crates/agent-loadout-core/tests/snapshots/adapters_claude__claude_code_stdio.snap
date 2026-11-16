@@ -1,0 +1,24 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "golden(CODE, Os::Windows, &server)"
+---
+{
+  "mcpServers": {
+    "notes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "example-notes-mcp", "${NOTES_DIR:-.}"],
+      "env": {
+        "NOTES_TOKEN": "${NOTES_TOKEN}"
+      }
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-notes-mcp", "${NOTES_DIR:-.}"]
+
+[env]
+NOTES_TOKEN = "${NOTES_TOKEN}"

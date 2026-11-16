@@ -1,0 +1,16 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "golden(CODE, Os::Linux, &sse)"
+---
+{
+  "mcpServers": {
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    }
+  }
+}
+
+# read back
+transport = "sse"
+url = "https://events.example.com/sse"

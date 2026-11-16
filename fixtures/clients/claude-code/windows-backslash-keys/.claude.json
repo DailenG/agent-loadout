@@ -1,0 +1,20 @@
+{
+  "numStartups": 3,
+  "mcpServers": {},
+  "projects": {
+    "C:\\Work\\Sample-App": {
+      "allowedTools": [],
+      "mcpServers": {
+        "notes": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "example-notes-mcp"]
+        }
+      },
+      "hasTrustDialogAccepted": true
+    },
+    "D:\\src\\tools": {
+      "allowedTools": []
+    }
+  }
+}

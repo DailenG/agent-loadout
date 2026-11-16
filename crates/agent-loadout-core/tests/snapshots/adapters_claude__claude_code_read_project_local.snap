@@ -1,0 +1,8 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "read_all(CODE, &doc, &[\"projects\", \"C:/work/other-app\", \"mcpServers\"])"
+---
+## local-db
+transport = "stdio"
+command = "uvx"
+args = ["example-db-mcp", "--readonly"]

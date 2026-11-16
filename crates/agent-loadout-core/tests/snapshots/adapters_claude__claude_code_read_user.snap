@@ -1,0 +1,40 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "read_all(CODE, &doc, SERVERS)"
+---
+## notes
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-notes-mcp", "--root", "${NOTES_DIR:-.}"]
+
+[env]
+NOTES_TOKEN = "${NOTES_TOKEN}"
+## search
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+X-Workspace = "demo"
+# headers_helper: /opt/example/bin/search-headers
+## events
+transport = "sse"
+url = "https://events.example.com/sse"
+## relay
+error[unsupported_transport]: the client cannot run "ws" servers
+## bare-local
+transport = "stdio"
+command = "example-local-mcp"
+args = []
+## bare-remote
+transport = "http"
+url = "https://bare.example.com/mcp"
+## tuned
+transport = "stdio"
+command = "uvx"
+args = ["example-tuned-mcp"]
+
+[env]
+# unmapped cwd: String("/srv/example")
+# unmapped x-note: String("added by hand")
+## broken
+error[unexpected_shape]: `args` must be an array of strings

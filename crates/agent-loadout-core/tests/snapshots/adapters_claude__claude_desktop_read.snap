@@ -1,0 +1,19 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "read_all(DESKTOP, &doc, SERVERS)"
+---
+## notes
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-notes-mcp"]
+## launcher
+transport = "stdio"
+command = "cmd"
+args = ["/c", "start", "example-launcher"]
+## native-tool
+transport = "stdio"
+command = 'C:\tools\example-mcp.exe'
+args = ["--stdio"]
+
+[env]
+EXAMPLE_MODE = "readonly"

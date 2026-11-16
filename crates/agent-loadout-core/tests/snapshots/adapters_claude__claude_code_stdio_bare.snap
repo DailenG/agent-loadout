@@ -1,0 +1,18 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "golden(CODE, Os::Linux, &bare)"
+---
+{
+  "mcpServers": {
+    "bare": {
+      "type": "stdio",
+      "command": "example-local-mcp",
+      "args": []
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "example-local-mcp"
+args = []

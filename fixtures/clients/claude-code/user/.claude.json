@@ -1,0 +1,86 @@
+{
+  "numStartups": 41,
+  "installMethod": "native",
+  "autoUpdates": true,
+  "theme": "dark",
+  "tipsHistory": {
+    "new-user-warmup": 7,
+    "memory-command": 3
+  },
+  "userID": "0000000000000000000000000000000000000000000000000000000000000000",
+  "firstStartTime": "2026-01-01T00:00:00.000Z",
+  "mcpServers": {
+    "notes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "example-notes-mcp", "--root", "${NOTES_DIR:-.}"],
+      "env": {
+        "NOTES_TOKEN": "${NOTES_TOKEN}"
+      }
+    },
+    "search": {
+      "type": "http",
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "X-Workspace": "demo"
+      },
+      "headersHelper": "/opt/example/bin/search-headers"
+    },
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    },
+    "relay": {
+      "type": "ws",
+      "url": "wss://relay.example.com/mcp"
+    },
+    "bare-local": {
+      "command": "example-local-mcp",
+      "args": []
+    },
+    "bare-remote": {
+      "url": "https://bare.example.com/mcp"
+    },
+    "tuned": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["example-tuned-mcp"],
+      "env": {},
+      "cwd": "/srv/example",
+      "x-note": "added by hand"
+    },
+    "broken": {
+      "type": "stdio",
+      "command": "example-broken-mcp",
+      "args": "--not-a-list"
+    }
+  },
+  "projects": {
+    "C:/work/sample-app": {
+      "allowedTools": [],
+      "mcpServers": {},
+      "disabledMcpServers": ["events"],
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true,
+      "lastCost": 0.42
+    },
+    "C:/work/other-app": {
+      "allowedTools": ["Bash(npm test)"],
+      "mcpServers": {
+        "local-db": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["example-db-mcp", "--readonly"]
+        }
+      },
+      "hasTrustDialogAccepted": false
+    },
+    "/home/demo/work/linux-app": {
+      "allowedTools": [],
+      "mcpServers": {}
+    }
+  },
+  "hasCompletedOnboarding": true,
+  "lastReleaseNotesSeen": "0.0.0"
+}

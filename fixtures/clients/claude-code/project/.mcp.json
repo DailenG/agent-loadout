@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "repo-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_TOKEN}"
+      }
+    },
+    "linter": {
+      "command": "npx",
+      "args": ["-y", "example-lint-mcp", "${CLAUDE_PROJECT_DIR:-.}"],
+      "env": {}
+    }
+  }
+}

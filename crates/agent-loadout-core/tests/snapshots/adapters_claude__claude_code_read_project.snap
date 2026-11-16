@@ -1,0 +1,16 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "read_all(CODE, &project, SERVERS)"
+---
+## repo-docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${DOCS_TOKEN}"
+## linter
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-lint-mcp", "${CLAUDE_PROJECT_DIR:-.}"]
+
+[env]

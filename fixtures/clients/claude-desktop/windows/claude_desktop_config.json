@@ -1,0 +1,23 @@
+{
+  "globalShortcut": "Ctrl+Space",
+  "mcpServers": {
+    "notes": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "example-notes-mcp"]
+    },
+    "launcher": {
+      "command": "cmd",
+      "args": ["/c", "start", "example-launcher"]
+    },
+    "native-tool": {
+      "command": "C:\\tools\\example-mcp.exe",
+      "args": ["--stdio"],
+      "env": {
+        "EXAMPLE_MODE": "readonly"
+      }
+    }
+  },
+  "preferences": {
+    "menuBarEnabled": false
+  }
+}

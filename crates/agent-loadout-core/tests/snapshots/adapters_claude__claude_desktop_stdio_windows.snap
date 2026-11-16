@@ -1,0 +1,23 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "golden(DESKTOP, Os::Windows, &server)"
+---
+{
+  "mcpServers": {
+    "notes": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "example-notes-mcp"],
+      "env": {
+        "EXAMPLE_MODE": "readonly"
+      }
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-notes-mcp"]
+
+[env]
+EXAMPLE_MODE = "readonly"

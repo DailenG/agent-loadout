@@ -1,0 +1,24 @@
+---
+source: crates/agent-loadout-core/tests/adapters_claude.rs
+expression: "golden(CODE, Os::Linux, &http)"
+---
+{
+  "mcpServers": {
+    "search": {
+      "type": "http",
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "X-Workspace": "demo"
+      },
+      "headersHelper": "/opt/example/bin/loadout secret-header Authorization=example"
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+X-Workspace = "demo"
+# headers_helper: /opt/example/bin/loadout secret-header Authorization=example
