@@ -397,6 +397,7 @@ fn racy_apply(fx: &Fx, trigger: Trigger) -> apply::ApplyReport {
         fs: &racy,
         home: &fx.home,
         registry: &NO_REGISTRY,
+        delivery: &fx.delivery,
     };
     let request = ApplyRequest {
         options: PlanOptions::default(),

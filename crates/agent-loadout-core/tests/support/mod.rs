@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use agent_loadout_core::adapters::detect::NoRegistry;
 use agent_loadout_core::apply::ledger::Ledger;
@@ -20,7 +21,7 @@ use agent_loadout_core::store::{
     CommitId, LogEntry, LogFilter, Operation, Store, Transaction, server_path,
 };
 use agent_loadout_core::{CoreError, Env, Os};
-use agent_loadout_testkit::{RootedFs, TempHome};
+use agent_loadout_testkit::{MemKeyring, RootedFs, TempHome};
 
 pub const CLIENT: &str = "loadout-test/0.0.0";
 
@@ -34,6 +35,12 @@ pub fn host_os() -> Os {
     } else {
         Os::Linux
     }
+}
+
+/// The fake `loadout` binary path of a temp home.
+pub fn launcher(th: &TempHome) -> PathBuf {
+    th.bin()
+        .join(format!("loadout{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// A stdio server enabled for `clients`.
@@ -58,6 +65,10 @@ pub struct Fx {
     pub env: Env,
     pub fs: RootedFs,
     pub home: LoadoutHome,
+    /// The in-memory keyring every apply uses.
+    pub keyring: Arc<MemKeyring>,
+    /// No `op` on `PATH` (the env has no `PATH`): 1Password is not found.
+    pub delivery: DeliveryEnv,
 }
 
 impl Fx {
@@ -66,7 +77,16 @@ impl Fx {
         let env = th.env_builder(host_os()).hostname("test-desk").build();
         let fs = th.fs();
         let home = loadout_home(&env, &fs, Some(&th.root().join("lh"))).unwrap();
-        Self { th, env, fs, home }
+        let keyring = Arc::new(MemKeyring::new());
+        let delivery = DeliveryEnv::new(Some(launcher(&th)), keyring.clone());
+        Self {
+            th,
+            env,
+            fs,
+            home,
+            keyring,
+            delivery,
+        }
     }
 
     pub fn store(&self) -> Store<'_> {
@@ -79,7 +99,13 @@ impl Fx {
             fs: &self.fs,
             home: &self.home,
             registry: &NO_REGISTRY,
+            delivery: &self.delivery,
         }
+    }
+
+    /// The launcher path entries start (`<root>/bin/loadout`, never run).
+    pub fn launcher(&self) -> String {
+        launcher(&self.th).to_string_lossy().into_owned()
     }
 
     /// `~/.claude.json`.

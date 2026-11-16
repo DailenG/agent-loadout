@@ -339,8 +339,10 @@ fn invalid_server_files_never_remove_owned_entries() {
 #[test]
 fn unwritable_entries_are_blocked_never_dropped() {
     let fx = Fx::new();
-    // SSE on Codex, a secret reference, an env reference in a field Codex
-    // only forwards, and `launch` delivery that this build cannot render.
+    // SSE on Codex, an alias no catalog defines, an env reference in a
+    // field Codex neither expands nor forwards whose variable Loadout does
+    // not have either (the inline fallback has no value), and `launch`
+    // delivery asked for a value `loadout exec` cannot set (an argument).
     let mut events = stdio("events", &["codex", "claude-code"], &[]);
     events.body.transport = Some(Transport::Sse);
     events.body.command = None;
@@ -381,11 +383,8 @@ fn unwritable_entries_are_blocked_never_dropped() {
         entry(&plan, &fx.claude(), "events").state,
         EntryState::PendingCreate
     );
-    assert_eq!(
-        blocked(&fx.claude(), "vault"),
-        ErrorCode::DeliveryUnavailable
-    );
-    assert_eq!(blocked(&codex, "forwarded"), ErrorCode::DeliveryUnavailable);
+    assert_eq!(blocked(&fx.claude(), "vault"), ErrorCode::MissingSecret);
+    assert_eq!(blocked(&codex, "forwarded"), ErrorCode::MissingSecret);
     assert_eq!(
         blocked(&fx.claude(), "launched"),
         ErrorCode::DeliveryUnavailable
