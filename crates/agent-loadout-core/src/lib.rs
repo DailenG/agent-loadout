@@ -6,6 +6,7 @@
 //! from a temp root.
 
 pub mod adapters;
+pub mod apply;
 pub mod brand;
 pub mod env;
 pub mod error;

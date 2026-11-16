@@ -1,0 +1,608 @@
+//! Adopt and import (SPEC 8.6): native entries into the store.
+//!
+//! - [`scan`] lists foreign entries of every client's user file, grouped by
+//!   name; identical definitions collapse into one candidate.
+//! - [`stage_import`] turns candidates into store servers; the apply that
+//!   follows adopts the native entries silently when they render
+//!   identically.
+//! - [`stage_adopt_identical`] enables existing store servers for clients
+//!   that already hold an identical entry.
+//! - [`stage_resolutions`] carries out `import` decisions of a plan ("import
+//!   their change", "respect the deletion").
+//!
+//! Secret extraction (SPEC 11.7) arrives with the secrets milestones. Until
+//! then an entry is imported only when its `env` and `headers` values are
+//! references and no argument or URL looks like it carries a credential;
+//! anything else is `needs_secret_extraction`, so no literal value that may
+//! be a secret reaches the store.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use crate::adapters::caps::FieldSet;
+use crate::adapters::mapper::WriteCx;
+use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
+use crate::apply::ApplyEnv;
+use crate::apply::ledger::Ledger;
+use crate::apply::plan::{Action, EntryState, Plan, read_target};
+use crate::apply::render::{DesiredState, native_name, native_to_template, render};
+use crate::error::{CoreError, ErrorCode};
+use crate::formats::{Document, NativeValue};
+use crate::model::TomlDocument;
+use crate::model::applied::Scope;
+use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
+use crate::model::ids::{self, IdKind};
+use crate::model::secrets::{TemplatePart, parse_template};
+use crate::model::server::{Enable, Meta, Server, ServerFields, ToolFilter};
+use crate::store::{Transaction, server_path};
+
+/// A native entry as store fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedDef {
+    pub fields: ServerFields,
+    pub tools: Option<ToolFilter>,
+    /// The client's allowlisted native fields, for `[client.<id>]`.
+    pub passthrough: toml::Table,
+}
+
+/// Reads a native entry of `spec`'s client as store fields: client
+/// variable syntax becomes `${env:NAME}`, other `${` becomes `$${`.
+pub fn server_from_native(
+    spec: &AdapterSpec,
+    key: &str,
+    value: &NativeValue,
+) -> Result<ImportedDef, CoreError> {
+    let mcp = spec.mcp.as_ref().ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::ScopeNotSupported,
+            format!("{} has no MCP config", spec.display_name),
+        )
+    })?;
+    let def = mcp.mapper.from_native(key, value)?;
+    if def.headers_helper.is_some() {
+        return Err(CoreError::new(
+            ErrorCode::UnsupportedField,
+            "`headersHelper` has no store field yet",
+        ));
+    }
+    let caps = &mcp.caps;
+    let convert = |text: &str, field: FieldSet| {
+        native_to_template(text, caps, field).ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::UnsupportedField,
+                format!(
+                    "{text:?} uses a {} variable form the store cannot express",
+                    spec.display_name
+                ),
+            )
+        })
+    };
+    let native = def.fields;
+    let mut fields = ServerFields {
+        transport: native.transport,
+        ..ServerFields::default()
+    };
+    if let Some(command) = &native.command {
+        fields.command = Some(convert(command, FieldSet::COMMAND)?);
+    }
+    if let Some(args) = &native.args {
+        let args = args
+            .iter()
+            .map(|arg| convert(arg, FieldSet::ARGS))
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(arg) = args.iter().find(|arg| looks_sensitive(arg)) {
+            return Err(needs_extraction(format!("argument {arg:?}")));
+        }
+        fields.args = (!args.is_empty()).then_some(args);
+    }
+    if let Some(cwd) = &native.cwd {
+        fields.cwd = Some(convert(cwd, FieldSet::CWD)?);
+    }
+    if let Some(url) = &native.url {
+        let url = convert(url, FieldSet::URL)?;
+        if url_has_credentials(&url) {
+            return Err(needs_extraction("the URL".to_owned()));
+        }
+        fields.url = Some(url);
+    }
+    for (field, source, target) in [
+        (FieldSet::ENV, &native.env, &mut fields.env),
+        (FieldSet::HEADERS, &native.headers, &mut fields.headers),
+    ] {
+        let mut map = BTreeMap::new();
+        for (name, value) in source.iter().flatten() {
+            let value = convert(value, field)?;
+            if !value.is_empty() && !holds_reference(&value) {
+                return Err(needs_extraction(format!("the literal value of {name:?}")));
+            }
+            map.insert(name.clone(), value);
+        }
+        *target = (!map.is_empty()).then_some(map);
+    }
+    let tools = (!def.tools.is_empty()).then(|| ToolFilter {
+        allow: def.tools.allow.clone(),
+        deny: def.tools.deny.clone(),
+        extra: toml::Table::new(),
+    });
+    let mut passthrough = toml::Table::new();
+    for (name, value) in def.passthrough.iter() {
+        passthrough.insert(name.to_owned(), to_toml(value)?);
+    }
+    Ok(ImportedDef {
+        fields,
+        tools,
+        passthrough,
+    })
+}
+
+fn needs_extraction(what: String) -> CoreError {
+    CoreError::new(
+        ErrorCode::NeedsSecretExtraction,
+        format!("{what} may be a secret; it needs secret extraction before import"),
+    )
+}
+
+fn holds_reference(value: &str) -> bool {
+    parse_template(value).is_ok_and(|parts| {
+        parts
+            .iter()
+            .any(|part| matches!(part, TemplatePart::Env(_)))
+    })
+}
+
+/// Words that mark a credential in an argument or URL (a subset of the
+/// SPEC 11.7 classifier, until the classifier lands).
+const SENSITIVE_WORDS: [&str; 10] = [
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "apikey",
+    "api_key",
+    "api-key",
+    "credential",
+    "bearer",
+    "private_key",
+];
+
+fn looks_sensitive(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    SENSITIVE_WORDS.iter().any(|word| lower.contains(word)) && !holds_reference(text)
+}
+
+fn url_has_credentials(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    authority.contains('@')
+        || url
+            .split_once('?')
+            .is_some_and(|(_, query)| looks_sensitive(query))
+}
+
+fn to_toml(value: &NativeValue) -> Result<toml::Value, CoreError> {
+    Ok(match value {
+        NativeValue::Null => {
+            return Err(CoreError::new(
+                ErrorCode::InvalidValue,
+                "`null` has no TOML form",
+            ));
+        }
+        NativeValue::Bool(b) => toml::Value::Boolean(*b),
+        NativeValue::Integer(n) => toml::Value::Integer(*n),
+        NativeValue::Float(n) => toml::Value::Float(*n),
+        NativeValue::String(s) => toml::Value::String(s.clone()),
+        NativeValue::Datetime(d) => d
+            .parse()
+            .map(toml::Value::Datetime)
+            .unwrap_or_else(|_| toml::Value::String(d.clone())),
+        NativeValue::Array(items) => {
+            toml::Value::Array(items.iter().map(to_toml).collect::<Result<_, _>>()?)
+        }
+        NativeValue::Object(map) => toml::Value::Table(
+            map.iter()
+                .map(|(key, item)| Ok((key.to_owned(), to_toml(item)?)))
+                .collect::<Result<_, CoreError>>()?,
+        ),
+    })
+}
+
+/// Where a foreign entry was found.
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub client: &'static str,
+    pub file: PathBuf,
+    /// The native entry.
+    pub value: NativeValue,
+    /// The entry as store fields, or why it cannot be imported.
+    pub def: Result<ImportedDef, CoreError>,
+}
+
+/// Foreign entries sharing one name.
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    pub name: String,
+    pub sources: Vec<Source>,
+    /// Every source reads as the same store definition.
+    pub identical: bool,
+    /// The store already has a server with this id.
+    pub in_store: bool,
+}
+
+/// Foreign entries of the selected clients' user files (no ledger record),
+/// grouped by name in first-seen order. Read-only.
+pub fn scan(
+    ax: &ApplyEnv<'_>,
+    desired: &DesiredState,
+    ledger: &Ledger,
+    clients: Option<&[String]>,
+) -> Result<(Vec<Candidate>, Vec<CoreError>), CoreError> {
+    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut warnings = Vec::new();
+    for spec in ADAPTERS {
+        if clients.is_some_and(|ids| !ids.iter().any(|id| id == spec.id)) {
+            continue;
+        }
+        let targets =
+            match spec.mcp_targets(ax.env, ax.fs, Scope::User, None, &desired.prefs(spec.id)) {
+                Ok(targets) => targets,
+                Err(_) => continue,
+            };
+        for target in targets {
+            let Some(bytes) = read_target(ax.fs, &target.file)? else {
+                continue;
+            };
+            let doc = match Document::parse(&bytes, target.format) {
+                Ok(doc) => doc,
+                Err(err) => {
+                    warnings.push(err.with_path(&target.file));
+                    continue;
+                }
+            };
+            let keys = target.container_keys(&doc)?;
+            let container: Vec<&str> = keys.iter().map(String::as_str).collect();
+            let pointer = crate::apply::ledger::container_pointer(&keys);
+            let file = target.file.to_string_lossy().into_owned();
+            let names = match doc.list(&container) {
+                Ok(names) => names,
+                Err(err) => {
+                    warnings.push(err.with_path(&target.file));
+                    continue;
+                }
+            };
+            for name in names {
+                if ledger.get(&file, &pointer, &name).is_some() {
+                    continue;
+                }
+                let Some(value) = doc.get(&container, &name)? else {
+                    continue;
+                };
+                let def = server_from_native(spec, &name, &value);
+                let source = Source {
+                    client: spec.id,
+                    file: target.file.clone(),
+                    value,
+                    def,
+                };
+                match candidates.iter_mut().find(|c| c.name == name) {
+                    Some(candidate) => {
+                        if !candidate.sources.iter().any(|s| s.client == spec.id) {
+                            candidate.sources.push(source);
+                        }
+                    }
+                    None => candidates.push(Candidate {
+                        in_store: desired.servers.contains_key(&name.to_ascii_lowercase()),
+                        name,
+                        sources: vec![source],
+                        identical: true,
+                    }),
+                }
+            }
+        }
+    }
+    for candidate in &mut candidates {
+        let first = candidate.sources[0].def.as_ref().ok();
+        candidate.identical = candidate
+            .sources
+            .iter()
+            .all(|source| match (&source.def, first) {
+                (Ok(def), Some(first)) => def.fields == first.fields && def.tools == first.tools,
+                _ => false,
+            });
+    }
+    Ok((candidates, warnings))
+}
+
+/// Result of [`stage_import`].
+#[derive(Debug, Clone, Default)]
+pub struct ImportResult {
+    /// New server ids.
+    pub imported: Vec<String>,
+    /// Candidates left out, with the reason.
+    pub skipped: Vec<(String, CoreError)>,
+}
+
+/// Stages one store server per candidate (all, or those in `names`).
+/// Each server is enabled for the clients it was found in, unless `only`
+/// (import the definition without taking ownership).
+pub fn stage_import(
+    tx: &mut Transaction<'_>,
+    candidates: &[Candidate],
+    names: Option<&[String]>,
+    only: bool,
+) -> Result<ImportResult, CoreError> {
+    let mut result = ImportResult::default();
+    for candidate in candidates {
+        if names.is_some_and(|names| !names.contains(&candidate.name)) {
+            continue;
+        }
+        match candidate_server(candidate, only) {
+            Ok(server) => {
+                let id = server.id.clone();
+                let relative = server_path(&id)?;
+                if tx.exists(&relative)? {
+                    result.skipped.push((
+                        candidate.name.clone(),
+                        CoreError::new(
+                            ErrorCode::AlreadyExists,
+                            format!("server {id:?} already exists"),
+                        ),
+                    ));
+                    continue;
+                }
+                tx.add_server(server)?;
+                tx.add_entity(format!("server/{id}"));
+                result.imported.push(id);
+            }
+            Err(err) => result.skipped.push((candidate.name.clone(), err)),
+        }
+    }
+    Ok(result)
+}
+
+fn candidate_server(candidate: &Candidate, only: bool) -> Result<Server, CoreError> {
+    let id = candidate.name.to_ascii_lowercase();
+    ids::check(IdKind::Server, &id)?;
+    let mut defs = Vec::new();
+    for source in &candidate.sources {
+        defs.push((source.client, source.def.clone()?));
+    }
+    if !candidate.identical {
+        return Err(CoreError::new(
+            ErrorCode::Collision,
+            format!(
+                "{:?} differs between {}; import it from one client with --client",
+                candidate.name,
+                candidate
+                    .sources
+                    .iter()
+                    .map(|s| s.client)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
+    let (first_client, first) = &defs[0];
+    let mut server = Server::new(id.clone());
+    set_fields(&mut server, &first.fields, first.tools.clone());
+    let mut clients = BTreeMap::new();
+    for (client, def) in &defs {
+        let mut table = def.passthrough.clone();
+        if candidate.name != id {
+            table.insert(
+                NATIVE_NAME_KEY.to_owned(),
+                toml::Value::String(candidate.name.clone()),
+            );
+        }
+        if !table.is_empty() {
+            clients.insert((*client).to_owned(), table);
+        }
+    }
+    server.body.client = (!clients.is_empty()).then_some(clients);
+    server.body.meta = Some(Meta {
+        origin: Some(format!("imported:{first_client}")),
+        ..Meta::default()
+    });
+    if !only {
+        server.enable = Some(Enable {
+            clients: Some(ClientSelection::List(
+                defs.iter()
+                    .map(|(client, _)| (*client).to_owned())
+                    .collect(),
+            )),
+            ..Enable::default()
+        });
+    }
+    if let Some(err) = server.validate(Some(&id)).first_error(None) {
+        return Err(err);
+    }
+    Ok(server)
+}
+
+fn set_fields(server: &mut Server, fields: &ServerFields, tools: Option<ToolFilter>) {
+    let body = &mut server.body;
+    body.transport = fields.transport;
+    body.command = fields.command.clone();
+    body.args = fields.args.clone();
+    body.cwd = fields.cwd.clone();
+    body.url = fields.url.clone();
+    body.headers = fields.headers.clone();
+    body.env = fields.env.clone();
+    body.tools = tools;
+}
+
+/// Enables store servers for clients whose user file already holds an
+/// identical foreign entry under the server's native name, so the apply
+/// that follows adopts them without a write. Returns `client/name` pairs.
+pub fn stage_adopt_identical(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+    desired: &DesiredState,
+    candidates: &[Candidate],
+) -> Result<Vec<String>, CoreError> {
+    let cx = ax.render_cx();
+    let mut adopted = Vec::new();
+    for candidate in candidates {
+        for source in &candidate.sources {
+            let Some(spec) = adapter(source.client) else {
+                continue;
+            };
+            let Some(server) = desired
+                .servers
+                .values()
+                .find(|server| native_name(server, spec.id) == candidate.name)
+            else {
+                continue;
+            };
+            let enabled = match server.enable.as_ref().and_then(|e| e.clients.as_ref()) {
+                Some(ClientSelection::List(ids)) => ids.iter().any(|id| id == spec.id),
+                Some(ClientSelection::AllDetected) => true,
+                None => false,
+            };
+            if enabled {
+                continue;
+            }
+            let Ok((rendered, _)) = render(&cx, desired, server, spec) else {
+                continue;
+            };
+            let mcp = spec.mcp.as_ref().expect("rendered clients have MCP");
+            let cx_write = WriteCx {
+                os: ax.env.os(),
+                existing: Some(&source.value),
+            };
+            let Ok(native) = mcp.mapper.to_native(&rendered, &cx_write) else {
+                continue;
+            };
+            if mcp.mapper.canonical(&native) != mcp.mapper.canonical(&source.value) {
+                continue;
+            }
+            update_server(tx, &server.id, |server| enable_client(server, spec.id))?;
+            adopted.push(format!("{}/{}", spec.id, candidate.name));
+        }
+    }
+    Ok(adopted)
+}
+
+/// Carries out the `import` actions of a plan as store edits: a changed
+/// native entry becomes the server definition; a deleted one stops the
+/// server from being enabled for that client. Returns the changed server
+/// ids; entries that cannot be imported are left for the re-plan to report.
+pub fn stage_resolutions(
+    tx: &mut Transaction<'_>,
+    plan: &Plan,
+    desired: &DesiredState,
+) -> Result<ImportResolutions, CoreError> {
+    let mut result = ImportResolutions::default();
+    for target in &plan.targets {
+        for entry in target.entries.iter().filter(|e| e.action == Action::Import) {
+            let (Some(client), Some(id)) = (entry.client, entry.server_id.as_ref()) else {
+                continue;
+            };
+            let Some(spec) = adapter(client) else {
+                continue;
+            };
+            if !desired.servers.contains_key(id) {
+                continue;
+            }
+            let edit = match (&entry.state, &entry.observed) {
+                (EntryState::Missing, _) => {
+                    update_server(tx, id, |server| disable_client(server, client))
+                }
+                (_, Some(observed)) => {
+                    server_from_native(spec, &entry.name, observed).and_then(|def| {
+                        update_server(tx, id, |server| {
+                            set_fields(server, &def.fields, def.tools.clone());
+                            set_passthrough(server, client, &def.passthrough);
+                            Ok(())
+                        })
+                    })
+                }
+                _ => continue,
+            };
+            match edit {
+                Ok(()) if !result.changed.contains(id) => {
+                    tx.add_entity(format!("server/{id}"));
+                    result.changed.push(id.clone());
+                }
+                Ok(()) => {}
+                Err(err) => result
+                    .failed
+                    .push((client.to_owned(), entry.name.clone(), err)),
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Result of [`stage_resolutions`].
+#[derive(Debug, Clone, Default)]
+pub struct ImportResolutions {
+    /// Store servers changed.
+    pub changed: Vec<String>,
+    /// `(client, entry name, reason)` of entries that could not be imported.
+    pub failed: Vec<(String, String, CoreError)>,
+}
+
+/// Reads server `id` from the transaction, edits it and stages it back
+/// (comments and unknown keys survive).
+fn update_server(
+    tx: &mut Transaction<'_>,
+    id: &str,
+    edit: impl FnOnce(&mut Server) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    let relative = server_path(id)?;
+    let text = tx.read_to_string(&relative)?.ok_or_else(|| {
+        CoreError::new(ErrorCode::NotFound, format!("server {id:?} does not exist"))
+    })?;
+    let mut doc = TomlDocument::<Server>::parse(&text)
+        .map_err(|diagnostic| diagnostic.to_core_error(Some(std::path::Path::new(&relative))))?;
+    edit(doc.value_mut())?;
+    tx.write(&relative, doc.to_text()?)
+}
+
+fn enable_client(server: &mut Server, client: &str) -> Result<(), CoreError> {
+    let enable = server.enable.get_or_insert_with(Enable::default);
+    match enable
+        .clients
+        .get_or_insert_with(|| ClientSelection::List(Vec::new()))
+    {
+        ClientSelection::List(ids) => {
+            if !ids.iter().any(|id| id == client) {
+                ids.push(client.to_owned());
+            }
+        }
+        ClientSelection::AllDetected => {}
+    }
+    Ok(())
+}
+
+fn disable_client(server: &mut Server, client: &str) -> Result<(), CoreError> {
+    match server.enable.as_mut().and_then(|e| e.clients.as_mut()) {
+        Some(ClientSelection::List(ids)) => {
+            ids.retain(|id| id != client);
+            Ok(())
+        }
+        Some(ClientSelection::AllDetected) => Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!(
+                "{:?} is enabled for all detected clients; list clients to leave {client} out",
+                server.id
+            ),
+        )),
+        None => Ok(()),
+    }
+}
+
+fn set_passthrough(server: &mut Server, client: &str, passthrough: &toml::Table) {
+    let clients = server.body.client.get_or_insert_with(BTreeMap::new);
+    let table = clients.entry(client.to_owned()).or_default();
+    table.retain(|key, _| key == NATIVE_NAME_KEY);
+    for (key, value) in passthrough {
+        table.insert(key.clone(), value.clone());
+    }
+    if table.is_empty() {
+        clients.remove(client);
+    }
+    if clients.is_empty() {
+        server.body.client = None;
+    }
+}
