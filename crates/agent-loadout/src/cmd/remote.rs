@@ -1,17 +1,21 @@
-//! `loadout remote add folder|ls|rm|push|pull|machines` (SPEC 9.6 to 9.9,
-//! 14). Remotes are machine-local (`state/remotes.toml`); none exists until
-//! one is added. Git remotes arrive with M13.
+//! `loadout remote add folder|git`, `ls`, `rm`, `push`, `pull`, `machines`,
+//! `token` and `create-github` (SPEC 9.6 to 9.9, 14). Remotes are
+//! machine-local (`state/remotes.toml`); none exists until one is added.
 //!
 //! Exit codes: a remote that cannot be reached is an error for `push` and
 //! `pull` themselves (1), never for local work; `pull` exits 4 when fields
 //! conflict (`state/merge/MERGE_STATE.json` lists them).
 
+use std::io::IsTerminal;
 use std::path::Path;
 
-use agent_loadout_core::remote::config::{FolderMode, RemoteConfig, RemotesFile};
+use agent_loadout_core::remote::config::{FolderMode, RemoteConfig, RemoteKind, RemotesFile};
+use agent_loadout_core::remote::credential::token_account;
 use agent_loadout_core::remote::folder::{
     self, MachineEntry, PullReport, PushOutcome, SiblingPull,
 };
+use agent_loadout_core::remote::gh;
+use agent_loadout_core::remote::git::{self, GitAuth, GitCli, GitPush, SystemRunner};
 use agent_loadout_core::remote::sync_artifacts::Artifact;
 use agent_loadout_core::remote::unc::SystemUnc;
 use agent_loadout_core::store::Store;
@@ -26,6 +30,9 @@ use super::{
 };
 
 static UNC: SystemUnc = SystemUnc;
+static RUNNER: SystemRunner = SystemRunner {
+    idle_timeout: git::IDLE_TIMEOUT,
+};
 
 #[derive(Debug, Args)]
 pub struct RemoteArgs {
@@ -42,7 +49,8 @@ enum RemoteCommand {
     },
     /// List this machine's remotes.
     Ls,
-    /// Remove a remote (its files stay where they are).
+    /// Remove a remote (its files stay where they are; a stored token is
+    /// deleted).
     Rm { name: String },
     /// Push the store to one remote [default: every remote].
     Push { name: Option<String> },
@@ -50,6 +58,22 @@ enum RemoteCommand {
     Pull { name: Option<String> },
     /// List the machines a folder remote holds.
     Machines { name: String },
+    /// Store the token piped on stdin for a git remote with `auth = token`.
+    Token {
+        name: String,
+        /// Delete the stored token instead.
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Create a private GitHub repository with the GitHub CLI and add it as
+    /// a git remote (`auth = gh`).
+    CreateGithub {
+        /// Repository name: NAME or OWNER/NAME.
+        repo: String,
+        /// Name of the remote to add.
+        #[arg(long, default_value = "github")]
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -65,6 +89,19 @@ enum AddKind {
         #[arg(long)]
         keep: Option<u32>,
     },
+    /// Any git URL (https, ssh or scp-style), through the system git.
+    Git {
+        name: String,
+        url: String,
+        /// system (default: your git's own credentials), gh (GitHub CLI)
+        /// or token (a token stored with `remote token`).
+        #[arg(long, default_value = "system")]
+        auth: String,
+        /// With --auth token: the username sent with the token
+        /// [default: x-access-token].
+        #[arg(long)]
+        username: Option<String>,
+    },
 }
 
 pub fn run(ctx: &Context, args: &RemoteArgs) -> Result<u8, CoreError> {
@@ -78,11 +115,22 @@ pub fn run(ctx: &Context, args: &RemoteArgs) -> Result<u8, CoreError> {
                     keep,
                 },
         } => add_folder(ctx, name, path, mode, *keep).map(|()| 0),
+        RemoteCommand::Add {
+            kind:
+                AddKind::Git {
+                    name,
+                    url,
+                    auth,
+                    username,
+                },
+        } => add_git(ctx, name, url, auth, username.as_deref()).map(|()| 0),
         RemoteCommand::Ls => list(ctx).map(|()| 0),
         RemoteCommand::Rm { name } => remove(ctx, name).map(|()| 0),
         RemoteCommand::Push { name } => push(ctx, name.as_deref()),
         RemoteCommand::Pull { name } => pull(ctx, name.as_deref()),
         RemoteCommand::Machines { name } => machines(ctx, name).map(|()| 0),
+        RemoteCommand::Token { name, clear } => token(ctx, name, *clear).map(|()| 0),
+        RemoteCommand::CreateGithub { repo, name } => create_github(ctx, repo, name).map(|()| 0),
     }
 }
 
@@ -138,6 +186,57 @@ fn add_folder(
     Ok(())
 }
 
+fn add_git(
+    ctx: &Context,
+    name: &str,
+    url: &str,
+    auth: &str,
+    username: Option<&str>,
+) -> Result<(), CoreError> {
+    let auth = GitAuth::parse(Some(auth))?;
+    if url.trim().is_empty() || url.starts_with('-') {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("invalid git URL {url:?}"),
+        ));
+    }
+    if auth == GitAuth::Gh && !git::is_github_url(url) {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            "auth gh is for github.com URLs; use system or token for other hosts",
+        ));
+    }
+    let mut remote = RemoteConfig::git(name, url, auth);
+    remote.username = username.map(str::to_owned);
+    let mut file = remotes(ctx)?;
+    file.add(remote)?;
+    file.save(ctx.fs(), &ctx.home.state_dir())?;
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "added": name,
+            "url": url,
+            "auth": auth.as_str(),
+        }));
+        return Ok(());
+    }
+    println!("Added git remote {name} at {url} (auth {}).", auth.as_str());
+    if git::locate(&ctx.env, ctx.fs()).is_none() {
+        eprintln!("warning[tool_not_found]: git is not on PATH; pushes to {name} need it");
+    }
+    match auth {
+        GitAuth::Gh if gh::locate(&ctx.env, ctx.fs()).is_none() => {
+            eprintln!("warning[tool_not_found]: the GitHub CLI (gh) is not on PATH");
+        }
+        GitAuth::Token => println!(
+            "Next: pipe the token into `{} remote token {name}`.",
+            brand::BIN_NAME
+        ),
+        _ => {}
+    }
+    Ok(())
+}
+
 fn list(ctx: &Context) -> Result<(), CoreError> {
     let file = remotes(ctx)?;
     if ctx.json {
@@ -151,11 +250,15 @@ fn list(ctx: &Context) -> Result<(), CoreError> {
         println!("No backup remote.");
     }
     for remote in &file.remotes {
+        let detail = match remote.kind {
+            RemoteKind::Folder => remote.folder_mode().as_str().to_owned(),
+            RemoteKind::Git => format!("auth {}", remote.auth.as_deref().unwrap_or("system")),
+        };
         println!(
             "{:<20} {:<7} {:<17} {}",
             remote.name,
             remote.kind.as_str(),
-            remote.folder_mode().as_str(),
+            detail,
             remote
                 .path
                 .as_deref()
@@ -173,6 +276,8 @@ fn remote_json(remote: &RemoteConfig) -> Value {
         "path": remote.path,
         "url": remote.url,
         "mode": remote.mode.map(FolderMode::as_str),
+        "auth": remote.auth,
+        "username": remote.username,
         "push": remote.push,
         "pull": remote.pull,
     })
@@ -180,18 +285,156 @@ fn remote_json(remote: &RemoteConfig) -> Value {
 
 fn remove(ctx: &Context, name: &str) -> Result<(), CoreError> {
     let mut file = remotes(ctx)?;
-    file.remove(name)?;
+    let removed = file.remove(name)?;
     file.save(ctx.fs(), &ctx.home.state_dir())?;
+    let token_deleted = removed.kind == RemoteKind::Git
+        && ctx
+            .keyring()
+            .delete(brand::KEYRING_SERVICE, &token_account(name))
+            .unwrap_or(false);
     if ctx.json {
-        print_json(&json!({ "schema": JSON_SCHEMA, "removed": name }));
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "removed": name,
+            "token_deleted": token_deleted,
+        }));
     } else {
         println!("Removed remote {name}; its files were left in place.");
+        if token_deleted {
+            println!("Deleted its token from the keyring.");
+        }
     }
     Ok(())
 }
 
+fn git_remote<'a>(file: &'a RemotesFile, name: &str) -> Result<&'a RemoteConfig, CoreError> {
+    let remote = file
+        .get(name)
+        .ok_or_else(|| CoreError::new(ErrorCode::NotFound, format!("no remote named {name:?}")))?;
+    if remote.kind != RemoteKind::Git {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("{name} is not a git remote"),
+        ));
+    }
+    Ok(remote)
+}
+
+fn token(ctx: &Context, name: &str, clear: bool) -> Result<(), CoreError> {
+    let file = remotes(ctx)?;
+    let remote = git_remote(&file, name)?;
+    let account = token_account(name);
+    if clear {
+        let deleted = ctx
+            .keyring()
+            .delete(brand::KEYRING_SERVICE, &account)
+            .map_err(|resolution| resolution.into_error(&account))?;
+        if ctx.json {
+            print_json(&json!({ "schema": JSON_SCHEMA, "remote": name, "deleted": deleted }));
+        } else if deleted {
+            println!("Deleted the token of {name}.");
+        } else {
+            println!("{name} had no token stored.");
+        }
+        return Ok(());
+    }
+    if GitAuth::parse(remote.auth.as_deref())? != GitAuth::Token {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("{name} does not use auth token"),
+        ));
+    }
+    let value = super::secrets::read_value()?;
+    ctx.keyring()
+        .set(brand::KEYRING_SERVICE, &account, &value)
+        .map_err(|resolution| resolution.into_error(&account))?;
+    if ctx.json {
+        print_json(&json!({ "schema": JSON_SCHEMA, "remote": name, "stored": true }));
+    } else {
+        println!("Stored the token of {name} in {}.", ctx.keyring().name());
+    }
+    Ok(())
+}
+
+fn create_github(ctx: &Context, repo: &str, name: &str) -> Result<(), CoreError> {
+    let mut file = remotes(ctx)?;
+    if file.get(name).is_some() {
+        return Err(CoreError::new(
+            ErrorCode::AlreadyExists,
+            format!("a remote named {name:?} exists already"),
+        ));
+    }
+    let gh_path = gh::locate(&ctx.env, ctx.fs()).ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::ToolNotFound,
+            "the GitHub CLI (gh) is not on PATH; create the repository on any host and add it \
+             with `remote add git`",
+        )
+    })?;
+    let url = gh::create_private_repo(&ctx.env, &gh_path, &RUNNER, repo)?;
+    file.add(RemoteConfig::git(name, &url, GitAuth::Gh))?;
+    file.save(ctx.fs(), &ctx.home.state_dir())?;
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "created": url,
+            "added": name,
+            "auth": GitAuth::Gh.as_str(),
+        }));
+    } else {
+        println!("Created private repository {url} and added it as git remote {name} (auth gh).");
+    }
+    Ok(())
+}
+
+/// What one push did.
+pub enum Pushed {
+    Folder(PushOutcome),
+    Git(GitPush),
+}
+
 /// One push: the remote's name and how it went.
-pub type PushResult = (String, Result<PushOutcome, CoreError>);
+pub type PushResult = (String, Result<Pushed, CoreError>);
+
+/// Git's progress, shown on a terminal only, on one line that ends when
+/// the guard drops.
+struct Progress {
+    show: bool,
+    shown: bool,
+}
+
+impl Progress {
+    fn new() -> Self {
+        Self {
+            show: std::io::stderr().is_terminal(),
+            shown: false,
+        }
+    }
+
+    fn line(&mut self, line: &str) {
+        if self.show {
+            eprint!("\r{line}\x1b[K");
+            self.shown = true;
+        }
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        if self.shown {
+            eprintln!();
+        }
+    }
+}
+
+fn git_cli(store: &Store<'_>) -> Result<GitCli<'static>, CoreError> {
+    GitCli::from_env(
+        store.env(),
+        store.fs(),
+        &RUNNER,
+        std::env::current_exe().ok(),
+    )
+}
 
 /// Pushes to the selected remotes; one result per remote.
 pub fn push_to(
@@ -203,24 +446,40 @@ pub fn push_to(
         .select(name)?
         .into_iter()
         .map(|remote| {
-            let result = folder::push(store, remote, &UNC, env!("CARGO_PKG_VERSION"));
+            let result = match remote.kind {
+                RemoteKind::Folder => {
+                    folder::push(store, remote, &UNC, env!("CARGO_PKG_VERSION")).map(Pushed::Folder)
+                }
+                RemoteKind::Git => git_cli(store).and_then(|cli| {
+                    let mut progress = Progress::new();
+                    git::push(store, &cli, remote, &mut |line| progress.line(line)).map(Pushed::Git)
+                }),
+            };
             (remote.name.clone(), result)
         })
         .collect())
 }
 
-pub fn push_json(results: &[PushResult]) -> Value {
+pub fn push_json(store: &Store<'_>, results: &[PushResult]) -> Value {
     Value::Array(
         results
             .iter()
             .map(|(name, result)| match result {
-                Ok(outcome) => json!({
+                Ok(Pushed::Folder(outcome)) => json!({
                     "remote": name,
                     "ok": true,
+                    "kind": "folder",
                     "dir": path_json(&outcome.dir),
                     "mode": outcome.mode.as_str(),
                     "head": outcome.head.as_str(),
                     "archive": outcome.archive,
+                }),
+                Ok(Pushed::Git(outcome)) => json!({
+                    "remote": name,
+                    "ok": true,
+                    "kind": "git",
+                    "head": outcome.head.as_str(),
+                    "pulled": outcome.pulled.as_ref().map(|report| pull_json(store, report)),
                 }),
                 Err(err) => json!({ "remote": name, "ok": false, "error": error_json(err) }),
             })
@@ -228,15 +487,22 @@ pub fn push_json(results: &[PushResult]) -> Value {
     )
 }
 
-pub fn print_pushes(results: &[PushResult]) {
+pub fn print_pushes(store: &Store<'_>, results: &[PushResult]) {
     for (name, result) in results {
         match result {
-            Ok(outcome) => println!(
+            Ok(Pushed::Folder(outcome)) => println!(
                 "Pushed {} to {name} ({}, {}).",
                 outcome.head.short(),
                 outcome.mode.as_str(),
                 outcome.dir.display()
             ),
+            Ok(Pushed::Git(outcome)) => {
+                if let Some(report) = &outcome.pulled {
+                    println!("{name} had changes this machine lacked; pulled them first:");
+                    print_pull(store, report);
+                }
+                println!("Pushed {} to {name}.", outcome.head.short());
+            }
             Err(err) => eprintln!("warning[{}]: {name}: {err}", err.code()),
         }
     }
@@ -250,9 +516,9 @@ fn push(ctx: &Context, name: Option<&str>) -> Result<u8, CoreError> {
     }
     let results = push_to(&store, &file, name)?;
     if ctx.json {
-        print_json(&json!({ "schema": JSON_SCHEMA, "pushes": push_json(&results) }));
+        print_json(&json!({ "schema": JSON_SCHEMA, "pushes": push_json(&store, &results) }));
     } else {
-        print_pushes(&results);
+        print_pushes(&store, &results);
     }
     Ok(if results.iter().any(|(_, r)| r.is_err()) {
         1
@@ -265,8 +531,9 @@ fn no_remote() -> CoreError {
     CoreError::new(
         ErrorCode::NotFound,
         format!(
-            "no backup remote; add one with `{} remote add folder <NAME> <PATH>`",
-            brand::BIN_NAME
+            "no backup remote; add one with `{bin} remote add folder <NAME> <PATH>` or `{bin} \
+             remote add git <NAME> <URL>`",
+            bin = brand::BIN_NAME
         ),
     )
 }
@@ -279,7 +546,14 @@ fn pull(ctx: &Context, name: Option<&str>) -> Result<u8, CoreError> {
     }
     let mut reports = Vec::new();
     for remote in file.select(name)? {
-        reports.push((remote.name.clone(), folder::pull(&store, remote, &UNC)));
+        let report = match remote.kind {
+            RemoteKind::Folder => folder::pull(&store, remote, &UNC),
+            RemoteKind::Git => git_cli(&store).and_then(|cli| {
+                let mut progress = Progress::new();
+                git::pull(&store, &cli, remote, &mut |line| progress.line(line))
+            }),
+        };
+        reports.push((remote.name.clone(), report));
     }
     let conflicts = reports
         .iter()
@@ -390,6 +664,7 @@ fn pull_json(store: &Store<'_>, report: &PullReport) -> Value {
         "head_after": report.head_after.as_str(),
         "machines": report.siblings.iter().map(outcome_json).collect::<Vec<_>>(),
         "tags_imported": report.tags_imported,
+        "tags_moved": report.tags_moved,
         "changed_servers": servers,
         "changed_skills": skills,
         "conflicts": report.conflicts(),
@@ -409,10 +684,10 @@ fn print_pull(store: &Store<'_>, report: &PullReport) {
             ),
             Err(err) => format!("error[{}]: {err}", err.code()),
         };
-        println!(
-            "{}/{} ({}): {line}",
-            report.remote, sibling.label, sibling.machine_id
-        );
+        match &sibling.machine_id {
+            Some(id) => println!("{}/{} ({id}): {line}", report.remote, sibling.label),
+            None => println!("{}: {line}", report.remote),
+        }
     }
     for artifact in &report.artifacts {
         eprintln!(
@@ -462,6 +737,12 @@ fn machines(ctx: &Context, name: &str) -> Result<(), CoreError> {
     let remote = file
         .get(name)
         .ok_or_else(|| CoreError::new(ErrorCode::NotFound, format!("no remote named {name:?}")))?;
+    if remote.kind != RemoteKind::Folder {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("{name} is a git remote; only folder remotes hold machine subfolders"),
+        ));
+    }
     let root = folder::reachable_root(ctx.fs(), ctx.env.os(), &UNC, remote)?;
     let listing = folder::list(ctx.fs(), &root, None)?;
     if ctx.json {

@@ -7,6 +7,7 @@ pub mod backup;
 pub mod diff;
 pub mod env;
 pub mod exec;
+pub mod git_credential;
 pub mod history;
 pub mod import;
 pub mod remote;

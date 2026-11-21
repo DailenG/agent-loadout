@@ -63,6 +63,9 @@ enum Command {
     Backup(cmd::backup::BackupArgs),
     /// Backup and sync remotes (none by default).
     Remote(cmd::remote::RemoteArgs),
+    /// Git credential helper for remotes with `auth = token` (run by git).
+    #[command(hide = true)]
+    GitCredential(cmd::git_credential::GitCredentialArgs),
     /// Import foreign client entries into the store.
     Import(cmd::import::ImportArgs),
     /// Take ownership of foreign or changed client entries.
@@ -134,6 +137,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Restore(args) => cmd::restore::run(&context()?, args),
         Command::Backup(args) => done(cmd::backup::run(&context()?, args)),
         Command::Remote(args) => cmd::remote::run(&context()?, args),
+        Command::GitCredential(args) => done(cmd::git_credential::run(&context()?, args)),
         Command::Import(args) => cmd::import::run(&context()?, args),
         Command::Adopt(args) => cmd::adopt::run(&context()?, args),
         Command::Secrets(args) => cmd::secrets::run(&context()?, args),

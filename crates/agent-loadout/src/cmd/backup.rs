@@ -59,7 +59,7 @@ pub fn run(ctx: &Context, args: &BackupArgs) -> Result<(), CoreError> {
             "files": pending,
             "head": head.as_str(),
             "tag": tag.as_ref().map(tag_json),
-            "pushes": push_json(&pushes),
+            "pushes": push_json(&store, &pushes),
         }));
         return Ok(());
     }
@@ -74,6 +74,6 @@ pub fn run(ctx: &Context, args: &BackupArgs) -> Result<(), CoreError> {
     if let Some(tag) = &tag {
         println!("Tagged {} as {}.", tag.target.short(), tag.name);
     }
-    print_pushes(&pushes);
+    print_pushes(&store, &pushes);
     Ok(())
 }

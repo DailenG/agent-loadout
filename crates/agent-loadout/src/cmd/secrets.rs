@@ -478,7 +478,7 @@ fn store_in_keyring(
 
 /// The value piped on stdin, without its final line break. A terminal is
 /// refused, so a value is never echoed on screen.
-fn read_value() -> Result<SecretValue, CoreError> {
+pub(crate) fn read_value() -> Result<SecretValue, CoreError> {
     let mut stdin = std::io::stdin();
     if stdin.is_terminal() {
         return Err(CoreError::new(
