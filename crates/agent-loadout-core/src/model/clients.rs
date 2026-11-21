@@ -37,7 +37,7 @@ const fn client(id: &'static str, passthrough: &'static [&'static str]) -> Known
 /// clients have no adapter yet; adapters (`crate::adapters`) take their
 /// allowlist from here through [`passthrough_of`], so there is one list.
 pub const KNOWN_CLIENTS: &[KnownClient] = &[
-    // Tier A
+    // Tier A (Pi is Tier B since 2026-11-21; built with Tier A in M5)
     client("claude-code", &[]),
     client("omp", &["timeout", "instructions", "auth", "oauth"]),
     client("pi", &["exposure", "timeout", "oauth"]),

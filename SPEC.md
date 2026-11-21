@@ -48,7 +48,7 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 3. **Versioned store:** every change and every apply is a commit in a local git repo under the app data dir (fully offline). History, semantic diff, restore any version, one-click rollback of any apply, named tags. Backup remotes are optional push targets: any git URL, or any local, network or synced folder. None is configured by default.
 4. **Vendor independence:** nothing breaks if any vendor, upstream repo or service disappears. No baked-in OAuth client ids. Remote auth uses the user's own git credentials or a user-supplied OAuth app id. Plain folders (USB drive, NAS share, a folder synced by any sync tool) are first-class remotes.
 5. **Secrets by reference only:** `${env:NAME}`, `op://vault/item/field`, 1Password Environments, OS keyring. 1Password values are fetched by the launcher (`loadout exec`) at server start and never written to disk. No secret value ever enters the store, a snapshot or a remote. Restore on a new machine shows "missing secret" state; a machine without the 1Password CLI degrades to env and keyring refs.
-6. **Clients by tier** (Decision 15). Tier A, daily, built and verified first: Claude Code, omp, Pi, Codex, Claude Desktop (Windows only). Tier B, daily: VS Code Stable with GitHub Copilot, Cursor. Tier C: Gemini CLI, Antigravity, OpenCode, Grok Build. Tier D, best effort: Windsurf and Devin Desktop (not installed), the legacy VS Code editor format (read/import only), and all other SkillDock clients at user scope. Format-preserving edits; never touch entries the app did not create; drift detection with adopt/import.
+6. **Clients by tier** (Decision 15). Tier A, daily, built and verified first: Claude Code, omp, Codex, Claude Desktop (Windows only). Tier B, daily: VS Code Stable with GitHub Copilot, Cursor, Pi (moved from Tier A on 2026-11-21; its adapter was built with Tier A in M5). Tier C: Gemini CLI, Antigravity, OpenCode, Grok Build. Tier D, best effort: Windsurf and Devin Desktop (not installed), the legacy VS Code editor format (read/import only), and all other SkillDock clients at user scope. Format-preserving edits; never touch entries the app did not create; drift detection with adopt/import.
 7. **Skills:** keep SkillDock's store, link/copy distribution, `~/.agents/skills` scan; add project scope.
 8. **Platforms:** Windows 11 (primary) and Arch Linux on Hyprland/Wayland as first-class builds; macOS best effort.
 9. **Migration** from `~/.skilldock` and from existing client configs.
@@ -1343,7 +1343,7 @@ Opus review checklist (every milestone): the brief's acceptance tests exist and 
 
 ### 20.2 Order and client tiers
 
-Daily clients land first. Tier A (Claude Code, omp, Pi, Codex, Claude Desktop on Windows) gets adapters in M4 and M5, end-to-end apply and secrets in M6 to M8, and real-client verification at gate V1 before any other client is added. Tier B (VS Code Stable with Copilot, Cursor) follows in M10 and gate V2. Tier C and D come after the GUI.
+Daily clients land first. Tier A (Claude Code, omp, Codex, Claude Desktop on Windows) gets adapters in M4 and M5, end-to-end apply and secrets in M6 to M8, and real-client verification at gate V1 before any other client is added. Tier B (VS Code Stable with Copilot, Cursor, and Pi, whose adapter already exists from M5) follows in M10 and gate V2. Tier C and D come after the GUI.
 
 ```mermaid
 flowchart LR
@@ -1435,7 +1435,7 @@ Paths are relative to the repo root; `core/` abbreviates `crates/agent-loadout-c
 
 #### V1 Gate: Tier A real-client verification (maintainer, not the implementer)
 
-Run the Tier A sections of `scripts/verify-clients.md` on a Windows 11 machine and an Arch Linux machine without the 1Password CLI, with a throwaway `LOADOUT_HOME` and, where supported, override dirs (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`). Checks: each client's own lister shows the applied server; `loadout exec` starts a stdio server from each client; 1Password prompt behavior on Windows with and without a service account; "1Password CLI not found" path on the machine without `op`, with keyring overrides; Claude Code `CLAUDE_CONFIG_DIR` and Windows project-key format; Codex project `enabled = false` merge semantics; Claude Desktop MSIX path. Results go to `docs/verify/<client>.md`; failures become fix briefs before M9; cleared items lose their `[verify]` marker in this spec.
+Run the Tier A sections of `scripts/verify-clients.md` on a Windows 11 machine and an Arch Linux machine without the 1Password CLI, with a throwaway `LOADOUT_HOME` and, where supported, override dirs (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR` for omp). Checks: each client's own lister shows the applied server; `loadout exec` starts a stdio server from each client; 1Password prompt behavior on Windows with and without a service account; "1Password CLI not found" path on the machine without `op`, with keyring overrides; Claude Code `CLAUDE_CONFIG_DIR` and Windows project-key format; Codex project `enabled = false` merge semantics; Claude Desktop MSIX path. Pi's checks run at V2. Results go to `docs/verify/<client>.md`; failures become fix briefs before M9; cleared items lose their `[verify]` marker in this spec.
 
 #### M9 Project scope
 
@@ -1443,7 +1443,9 @@ Run the Tier A sections of `scripts/verify-clients.md` on a Windows 11 machine a
 - Create: `core/src/layering/{mod,manifest,merge,effective,trust}.rs`; `cli/src/cmd/{project,effective}.rs`; `fixtures/projects/**`; `core/tests/{layering,effective_golden}.rs`; `cli/tests/cli_project.rs`.
 - Tests: `loadout project init` defaults to private (writes `.loadout/project.local.toml` with `id`, appends `.loadout/` to `.git/info/exclude` of a git2-created fixture repo, `git status` stays clean); `--shared` writes `project.toml` and `.loadout/.gitignore`; effective-config golden for Tier A; untrusted or changed manifest blocks apply; a private entry never lands in a git-tracked `.mcp.json` (§6.5); `cannot_suppress_in_project` and `unset_not_expressible` warnings.
 
-#### M10 Tier B: VS Code with Copilot, Cursor
+#### M10 Tier B: VS Code with Copilot, Cursor (and Pi)
+
+Pi's adapter, goldens and delivery row exist from M5 and M8; M10 adds nothing for it beyond fixes from V2.
 
 - Spec: §7.3 and §7.4 rows `copilot`, `cursor`, `vscode-legacy`.
 - Create: `core/src/adapters/{copilot,cursor,vscode_legacy}.rs`; `fixtures/clients/{copilot,cursor,vscode-legacy}/**`; `core/tests/adapters_tier_b.rs`; extend `scripts/verify-clients.md`.
@@ -1451,7 +1453,7 @@ Run the Tier A sections of `scripts/verify-clients.md` on a Windows 11 machine a
 
 #### V2 Gate: Tier B verification (maintainer)
 
-VS Code Stable with Copilot and Cursor on Windows, plus project scope for all Tier A and B clients on both machines. Same recording rules as V1.
+VS Code Stable with Copilot and Cursor on Windows, the Pi sections of `scripts/verify-clients.md` (including the Pi parts of the omp, apply and delivery checks) on both machines, plus project scope for all Tier A and B clients on both machines. Same recording rules as V1.
 
 #### M11 History, tags, restore
 
@@ -1556,7 +1558,7 @@ Plugins and marketplaces, optional catalog sources (official MCP Registry, skill
 | 12 | Claude Desktop | Windows only | §7.3 |
 | 13 | Language | English only | §4.3 |
 | 14 | Windows signing | Azure Trusted Signing through the existing code-signing kit; unsigned local dev builds | §16.1 |
-| 15 | Client priority | Tier A: Claude Code, omp, Pi, Codex, Claude Desktop; Tier B: VS Code (Copilot), Cursor; rest later | §7, §20.2 |
+| 15 | Client priority | Tier A: Claude Code, omp, Codex, Claude Desktop; Tier B: VS Code (Copilot), Cursor, Pi (moved from Tier A 2026-11-21); rest later | §7, §20.2 |
 
 ---
 

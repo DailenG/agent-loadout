@@ -25,6 +25,9 @@ M9.
   paste tokens into a client file for these checks.
 - PowerShell helpers below are saved as `.ps1` files and run with
   `pwsh -File <name>.ps1`.
+- Pi moved to Tier B on 2026-11-21. Its section, and the Pi parts of
+  OMP-10, AP-3, AP-4, AP-5, DX-1 and DX-6, run at gate V2; at V1 skip them
+  and record them as deferred.
 
 ## Claude Code (`claude-code`), gate V1
 
@@ -115,7 +118,7 @@ profile) or a throwaway `PI_CONFIG_DIR` name for every check.
 | OMP-10 | With both omp and Pi installed, set `PI_CODING_AGENT_DIR` and start each. | Record whether both really read `$PI_CODING_AGENT_DIR/mcp.json`. If so, the two clients share one file whose `timeout` units differ (omp ms, Pi s); the planner must treat it as a shared file (SPEC 6.5). | `omp::USER_FILE`, `pi` agent dir |
 | OMP-11 | Detection: `omp` installed with Bun (`omp.exe` or `omp.cmd` on `PATH`), and a `~/.omp` dir alone. | Either detects omp. | SPEC 7.7, `Probe::Executable("omp")`, `Probe::Path(~/.omp)` |
 
-## Pi (`pi`), gate V1
+## Pi (`pi`), gate V2
 
 Machines: Windows 11 and Arch Linux. Use `PI_CODING_AGENT_DIR` for every
 check.
