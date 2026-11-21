@@ -14,10 +14,12 @@ framework with Claude Code and Claude Desktop adapters), M5 (Codex, omp
 and Pi adapters), M6 (system-scope apply engine with an ownership ledger,
 `loadout status|diff|apply|rollback|import|adopt`, one store commit per apply
 run), M7 (secret references, env/keyring/1Password providers, the leak
-scanner on every store commit, `loadout secrets ls|check|providers|set|clear`)
-and M8 (secret delivery per client: `env`, `launch` through `loadout exec`,
+scanner on every store commit, `loadout secrets ls|check|providers|set|clear`),
+M8 (secret delivery per client: `env`, `launch` through `loadout exec`,
 `command` hooks and opt-in `inline`; `loadout env --export`,
-`loadout secrets map-op-env|service-account`) are in place.
+`loadout secrets map-op-env|service-account`) and M11 (store history views,
+tags and restore: `loadout show|tag|restore|backup`, `loadout diff --rev`)
+are in place.
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
