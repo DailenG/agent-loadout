@@ -18,10 +18,11 @@ scanner on every store commit, `loadout secrets ls|check|providers|set|clear`),
 M8 (secret delivery per client: `env`, `launch` through `loadout exec`,
 `command` hooks and opt-in `inline`; `loadout env --export`,
 `loadout secrets map-op-env|service-account`), M11 (store history views,
-tags and restore: `loadout show|tag|restore|backup`, `loadout diff --rev`)
-and M12 (folder remotes with per-entity pull merge: `loadout remote
-add|ls|rm|push|pull|machines`, `backup` pushes, `restore --from`) are in
-place.
+tags and restore: `loadout show|tag|restore|backup`, `loadout diff --rev`),
+M12 (folder remotes with per-entity pull merge: `loadout remote
+add|ls|rm|push|pull|machines`, `backup` pushes, `restore --from`) and M13
+(git remotes through the system git with `system`, `gh` or `token` auth;
+`loadout remote token|create-github`) are in place.
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
