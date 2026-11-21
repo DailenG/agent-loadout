@@ -10,10 +10,17 @@
 //!
 //! The working tree is the source of truth for reads, so hand edits are
 //! seen before they are committed. git types stay private to this module.
+//!
+//! History views live in [`diff`] (semantic and raw diffs) and [`tags`];
+//! [`restore`] restores a past revision as a new commit and client files
+//! from apply backups (SPEC 9.3 to 9.5).
 
+pub mod diff;
 mod lock;
 mod log;
+pub mod restore;
 mod revision;
+pub mod tags;
 mod trailers;
 mod transaction;
 

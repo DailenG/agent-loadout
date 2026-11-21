@@ -147,7 +147,7 @@ pub fn prune(fs: &dyn Fs, home: &LoadoutHome, now: SystemTime) -> Result<(), Cor
 }
 
 /// Reads a [`timestamp`].
-fn parse_timestamp(text: &str) -> Option<SystemTime> {
+pub fn parse_timestamp(text: &str) -> Option<SystemTime> {
     let bytes = text.as_bytes();
     if bytes.len() != 16 || bytes[8] != b'T' || bytes[15] != b'Z' {
         return None;

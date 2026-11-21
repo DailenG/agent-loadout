@@ -261,6 +261,50 @@ impl Store<'_> {
         Ok(Committed { value, commit })
     }
 
+    /// Store files edited, added or removed in the working tree since HEAD
+    /// (hand edits), store-relative and sorted.
+    pub fn worktree_changes(&self) -> Result<Vec<String>, CoreError> {
+        let mut options = git2::StatusOptions::new();
+        options
+            .include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_ignored(false)
+            .exclude_submodules(true);
+        let statuses = self.repo.statuses(Some(&mut options)).map_err(git_error)?;
+        let mut files: Vec<String> = statuses
+            .iter()
+            .filter(|entry| !entry.status().is_ignored())
+            .filter_map(|entry| entry.path().ok().map(|path| path.replace('\\', "/")))
+            .collect();
+        files.sort();
+        files.dedup();
+        Ok(files)
+    }
+
+    /// Commits the working tree's hand edits ([`Store::worktree_changes`])
+    /// as one commit, after the same validation and leak scan as every
+    /// transaction. `None` when the working tree is clean.
+    pub fn commit_worktree(&self, operation: Operation) -> Result<Option<CommitId>, CoreError> {
+        operation.check()?;
+        let _lock = StoreLock::acquire(self.fs, &self.state_dir, LOCK_TIMEOUT)?;
+        let machine = Machine::load_or_create(&self.env, self.fs, &self.state_dir)?;
+        let mut changes = Changes::new();
+        for relative in self.worktree_changes()? {
+            let path = self.path(&relative)?;
+            let bytes = if self.fs.exists(&path) {
+                Some(
+                    self.fs
+                        .read(&path)
+                        .map_err(|err| io_error("cannot read file", &path, &err))?,
+                )
+            } else {
+                None
+            };
+            changes.insert(relative, bytes);
+        }
+        self.commit_changes(&machine, &operation, changes)
+    }
+
     /// Validates, scans, writes and commits `changes`. The caller holds the
     /// lock. The scanner runs before the first blob reaches the object
     /// database.

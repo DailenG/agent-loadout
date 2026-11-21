@@ -111,17 +111,18 @@ impl Store<'_> {
             {
                 continue;
             }
-            let author = commit.author();
-            entries.push(LogEntry {
-                id: CommitId::from_oid(commit.id()),
-                time: commit_time(&commit),
-                author_name: String::from_utf8_lossy(author.name_bytes()).into_owned(),
-                author_email: String::from_utf8_lossy(author.email_bytes()).into_owned(),
-                summary: message_summary(&message).to_owned(),
-                trailers,
-            });
+            entries.push(log_entry(&commit, trailers));
         }
         Ok(entries)
+    }
+
+    /// The commit `id` as a log entry, with its full message.
+    pub fn entry(&self, id: &CommitId) -> Result<(LogEntry, String), CoreError> {
+        let oid = Oid::from_str(id.as_str()).map_err(git_error)?;
+        let commit = self.repo.find_commit(oid).map_err(git_error)?;
+        let message = String::from_utf8_lossy(commit.message_bytes()).into_owned();
+        let trailers = Trailers::parse(&message);
+        Ok((log_entry(&commit, trailers), message))
     }
 
     /// The leak scanner over every commit message and every file version
@@ -205,5 +206,18 @@ fn commit_time(commit: &Commit<'_>) -> SystemTime {
     match u64::try_from(seconds) {
         Ok(seconds) => UNIX_EPOCH + Duration::from_secs(seconds),
         Err(_) => UNIX_EPOCH,
+    }
+}
+
+fn log_entry(commit: &Commit<'_>, trailers: Trailers) -> LogEntry {
+    let message = String::from_utf8_lossy(commit.message_bytes());
+    let author = commit.author();
+    LogEntry {
+        id: CommitId::from_oid(commit.id()),
+        time: commit_time(commit),
+        author_name: String::from_utf8_lossy(author.name_bytes()).into_owned(),
+        author_email: String::from_utf8_lossy(author.email_bytes()).into_owned(),
+        summary: message_summary(&message).to_owned(),
+        trailers,
     }
 }

@@ -15,11 +15,12 @@
 //! Other machines' files and every `*.applied.toml` are left alone. Rolling
 //! back a rollback restores the original.
 
+use crate::apply::ApplyEnv;
 use crate::apply::exec::{ApplyReport, ApplyRequest, apply_in};
 use crate::apply::plan::PlanOptions;
-use crate::apply::{ApplyEnv, backup};
 use crate::error::{CoreError, ErrorCode};
 use crate::model::applied::ApplyTrigger;
+use crate::store::diff::trailer_entities;
 use crate::store::{CommitId, LogEntry, LogFilter, Machine, Operation, Store};
 
 /// Which apply run to roll back.
@@ -173,20 +174,14 @@ pub fn rollback(
             ),
         ));
     }
-    let tag = free_tag(
-        store,
-        &format!("auto/pre-rollback/{}", backup::timestamp(ax.env.now())),
-    );
-    store.create_tag(&tag, &store.head()?)?;
+    let tag = store.create_auto_tag("pre-rollback")?;
 
     let mut operation = Operation::new(
         "apply.rollback",
         format!("rollback: apply {}", plan.apply_id),
     );
-    for file in &plan.files {
-        if let Some(entity) = entity_of(file) {
-            operation = operation.entity(entity);
-        }
+    for entity in trailer_entities(&plan.files) {
+        operation = operation.entity(entity);
     }
     let request = ApplyRequest {
         options: PlanOptions::default(),
@@ -231,32 +226,4 @@ fn desired_state_file(file: &str, machine_id: &str) -> bool {
         Some(name) => name == format!("{machine_id}.toml"),
         None => true,
     }
-}
-
-/// The `Loadout-Entity` of a store file.
-fn entity_of(file: &str) -> Option<String> {
-    let mut parts = file.split('/');
-    let first = parts.next()?;
-    let second = parts.next();
-    let stem = |name: &str| name.strip_suffix(".toml").map(str::to_owned);
-    match (first, second) {
-        ("servers", Some(name)) => stem(name).map(|id| format!("server/{id}")),
-        ("skill-meta", Some(name)) => stem(name).map(|id| format!("skill/{id}")),
-        ("skills", Some(id)) => Some(format!("skill/{id}")),
-        ("projects", Some(id)) => Some(format!("project/{id}")),
-        ("machines", Some(name)) => stem(name).map(|id| format!("machine/{id}")),
-        (name, None) => stem(name),
-        _ => None,
-    }
-}
-
-/// `name`, or `name-2`, `name-3`, ... when taken.
-fn free_tag(store: &Store<'_>, name: &str) -> String {
-    if !store.tag_exists(name) {
-        return name.to_owned();
-    }
-    (2..)
-        .map(|n| format!("{name}-{n}"))
-        .find(|candidate| !store.tag_exists(candidate))
-        .expect("an unused suffix exists")
 }
