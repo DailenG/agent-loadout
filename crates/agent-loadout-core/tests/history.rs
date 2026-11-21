@@ -541,7 +541,11 @@ fn client_files_restore_from_apply_backups_through_cas() {
 #[test]
 fn file_restore_keeps_drift_visible() {
     let fx = Fx::new();
-    fx.put_server(stdio("notes", &["claude-code"], &["-y", "@example/notes-mcp"]));
+    fx.put_server(stdio(
+        "notes",
+        &["claude-code"],
+        &["-y", "@example/notes-mcp"],
+    ));
     fx.apply();
     // A hand edit of the owned entry: drift.
     let edited = fx
@@ -550,7 +554,11 @@ fn file_restore_keeps_drift_visible() {
     fx.write(&fx.claude(), &edited);
     // The next run writes another entry and skips the drifted one; its
     // backup holds the hand edit.
-    fx.put_server(stdio("search", &["claude-code"], &["-y", "@example/search-mcp"]));
+    fx.put_server(stdio(
+        "search",
+        &["claude-code"],
+        &["-y", "@example/search-mcp"],
+    ));
     let (report, _) = fx.apply();
     assert_eq!(report.unresolved(), 1, "the drifted entry needs a decision");
     let owned_before = fx.ledger().entries.len();
