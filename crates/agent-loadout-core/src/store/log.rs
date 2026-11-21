@@ -183,7 +183,7 @@ impl Store<'_> {
 }
 
 /// Whether `commit` changed any of `paths` relative to its first parent.
-fn touches(commit: &Commit<'_>, paths: &[String]) -> Result<bool, CoreError> {
+pub(crate) fn touches(commit: &Commit<'_>, paths: &[String]) -> Result<bool, CoreError> {
     if paths.is_empty() {
         return Ok(false);
     }
@@ -201,7 +201,7 @@ fn entry_id(tree: Option<&Tree<'_>>, path: &str) -> Option<Oid> {
     tree?.get_path(Path::new(path)).ok().map(|entry| entry.id())
 }
 
-fn commit_time(commit: &Commit<'_>) -> SystemTime {
+pub(crate) fn commit_time(commit: &Commit<'_>) -> SystemTime {
     let seconds = commit.time().seconds();
     match u64::try_from(seconds) {
         Ok(seconds) => UNIX_EPOCH + Duration::from_secs(seconds),

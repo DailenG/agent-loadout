@@ -134,6 +134,18 @@ pub enum ErrorCode {
     /// Loadout's own environment, because the client cannot expand it
     /// there and `launch` cannot carry it (SPEC 11.4 rule 1).
     InlineEnvFallback,
+    /// A remote cannot be reached (drive unplugged, share unmounted, host
+    /// offline, SPEC 9.6). Retried later; never blocks local work.
+    RemoteUnreachable,
+    /// A machine subfolder of a folder remote lists objects that have not
+    /// arrived yet (a sync tool still copying, SPEC 9.6). Retried later.
+    RemoteIncomplete,
+    /// Info: a file under a folder remote matches a sync tool's conflict or
+    /// temp pattern; it is never read and never deleted (SPEC 9.6).
+    SyncArtifactIgnored,
+    /// A pull found fields both sides changed differently (SPEC 9.9). HEAD
+    /// is unchanged; `state/merge/MERGE_STATE.json` lists the conflicts.
+    MergeConflict,
 }
 
 impl ErrorCode {
@@ -183,6 +195,10 @@ impl ErrorCode {
             ErrorCode::NoSecretFreeDelivery => "no_secret_free_delivery",
             ErrorCode::SecretInSharedFile => "secret_in_shared_file",
             ErrorCode::InlineEnvFallback => "inline_env_fallback",
+            ErrorCode::RemoteUnreachable => "remote_unreachable",
+            ErrorCode::RemoteIncomplete => "remote_incomplete",
+            ErrorCode::SyncArtifactIgnored => "sync_artifact_ignored",
+            ErrorCode::MergeConflict => "merge_conflict",
         }
     }
 }

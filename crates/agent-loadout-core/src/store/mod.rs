@@ -15,9 +15,11 @@
 //! [`restore`] restores a past revision as a new commit and client files
 //! from apply backups (SPEC 9.3 to 9.5).
 
+mod bootstrap;
 pub mod diff;
 mod lock;
 mod log;
+pub mod merge;
 pub mod restore;
 mod revision;
 pub mod tags;
@@ -44,6 +46,7 @@ use crate::model::{SCHEMA_VERSION, StoreModel, TomlDocument};
 use crate::paths::LoadoutHome;
 use crate::secrets::scanner::SecretMemory;
 
+pub use bootstrap::{bare_commit_subject, bare_refs, bare_store_id, export_store_id};
 pub use lock::{LOCK_FILE, LOCK_TIMEOUT, StoreLock};
 pub use log::{HistoryFinding, LogEntry, LogFilter, entity_paths};
 pub use revision::Revision;
@@ -222,6 +225,20 @@ impl CommitId {
         Self(oid.to_string())
     }
 
+    /// A full commit id from text (40 hex digits, any case).
+    pub fn from_text(text: &str) -> Result<Self, CoreError> {
+        git2::Oid::from_str(text)
+            .ok()
+            .filter(|_| text.len() == 40)
+            .map(Self::from_oid)
+            .ok_or_else(|| {
+                CoreError::new(
+                    ErrorCode::InvalidValue,
+                    format!("{text:?} is not a commit id"),
+                )
+            })
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -271,6 +288,27 @@ impl fmt::Debug for Store<'_> {
 }
 
 impl<'a> Store<'a> {
+    /// A store over an open repository (bootstrap paths).
+    fn from_parts(
+        env: &Env,
+        fs: &'a dyn Fs,
+        home: &LoadoutHome,
+        client: &str,
+        repo: Repository,
+        identity: StoreIdentity,
+    ) -> Result<Self, CoreError> {
+        Ok(Self {
+            env: env.clone(),
+            fs,
+            root: home.store_dir(),
+            state_dir: home.state_dir(),
+            repo,
+            identity,
+            client: client.to_owned(),
+            secrets: Arc::new(SecretMemory::new()?),
+        })
+    }
+
     /// Opens the store in `home`, or `None` when it has not been created
     /// yet. Creates nothing. `client` names the calling program and version
     /// for the `Loadout-Client` trailer (`loadout-cli/0.1.0`).
@@ -384,6 +422,27 @@ impl<'a> Store<'a> {
     /// The store working tree.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The file system the store was opened with.
+    pub fn fs(&self) -> &'a dyn Fs {
+        self.fs
+    }
+
+    /// `<LOADOUT_HOME>/state`.
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
+
+    /// Whether commit `id` is HEAD or in HEAD's history.
+    pub fn contains(&self, id: &CommitId) -> bool {
+        let (Ok(head), Ok(oid)) = (self.head(), git2::Oid::from_str(id.as_str())) else {
+            return false;
+        };
+        let Ok(head) = git2::Oid::from_str(head.as_str()) else {
+            return false;
+        };
+        head == oid || self.repo.graph_descendant_of(head, oid).unwrap_or(false)
     }
 
     /// The environment the store was opened with.

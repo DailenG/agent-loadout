@@ -28,6 +28,7 @@ use crate::model::applied::ApplyTrigger;
 use crate::model::machine::MachineOverlay;
 use crate::secrets::catalog::overlay_path;
 use crate::store::diff::trailer_entities;
+use crate::store::merge::Files;
 use crate::store::{
     CommitId, LOCK_TIMEOUT, Machine, Operation, Store, StoreLock, StoreRead, entity_paths,
 };
@@ -127,9 +128,7 @@ pub fn prepare(
         {
             return Err(CoreError::new(
                 ErrorCode::InvalidValue,
-                format!(
-                    "{entity} belongs to another machine; only that machine writes its files"
-                ),
+                format!("{entity} belongs to another machine; only that machine writes its files"),
             ));
         }
         selected.extend(paths);
@@ -296,6 +295,83 @@ pub fn restore(
         tag: Some(tag),
         commit: committed.commit,
         written,
+        apply: committed.value,
+    })
+}
+
+/// Restores an exported tree (a mirror or a zip of this store) as one new
+/// commit, like [`restore`] does a revision: files the export holds are
+/// written, files it lacks are removed, never another machine's
+/// `machines/*` files or this machine's apply record. The `auto/pre-restore`
+/// tag marks the replaced HEAD. Manifests are not written back.
+pub fn restore_tree(
+    store: &Store<'_>,
+    ax: &ApplyEnv<'_>,
+    files: &Files,
+    label: &str,
+    apply: bool,
+) -> Result<RestoreReport, CoreError> {
+    let machine = Machine::load_or_create(ax.env, ax.fs, &ax.home.state_dir())?;
+    let head = store.head()?;
+    let current = store.files_at(&head)?;
+    let changed: Vec<String> = current
+        .keys()
+        .chain(files.keys())
+        .filter(|file| restorable(file, &machine.id))
+        .filter(|file| current.get(*file) != files.get(*file))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let plan = RestorePlan {
+        target: head.clone(),
+        head: head.clone(),
+        files: changed,
+        manifests: Vec::new(),
+        unplaced: Vec::new(),
+    };
+    if plan.files.is_empty() {
+        return Ok(RestoreReport {
+            plan,
+            tag: None,
+            commit: None,
+            written: Vec::new(),
+            apply: None,
+        });
+    }
+    let mut operation = Operation::new("store.restore", format!("restore: from {label}"));
+    for entity in trailer_entities(&plan.files) {
+        operation = operation.entity(entity);
+    }
+    let committed = store.transaction(operation, |tx| {
+        if tx.store().head()? != plan.head {
+            return Err(CoreError::new(
+                ErrorCode::FileChangedDuringApply,
+                "the store changed while the restore was being prepared; run it again",
+            ));
+        }
+        for file in &plan.files {
+            match files.get(file) {
+                Some(bytes) => tx.write(file, bytes.clone())?,
+                None => tx.remove(file)?,
+            }
+        }
+        if apply {
+            let request = ApplyRequest {
+                options: PlanOptions::default(),
+                trigger: ApplyTrigger::Restore,
+            };
+            apply_in(tx, ax, &request).map(Some)
+        } else {
+            Ok(None)
+        }
+    })?;
+    let tag = store.create_auto_tag_at("pre-restore", &plan.head)?;
+    Ok(RestoreReport {
+        plan,
+        tag: Some(tag),
+        commit: committed.commit,
+        written: Vec::new(),
         apply: committed.value,
     })
 }

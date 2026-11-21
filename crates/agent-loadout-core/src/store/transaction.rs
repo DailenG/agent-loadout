@@ -330,6 +330,32 @@ impl Store<'_> {
         if changes.is_empty() {
             return Ok(None);
         }
+        self.commit_with(machine, operation, changes, None)
+    }
+
+    /// A merge commit of HEAD and `merged` with `changes` over HEAD's tree
+    /// (SPEC 9.9 step 4): validated, scanned, and made even when the tree
+    /// equals HEAD's, so the incoming history is recorded. The caller
+    /// holds the lock.
+    pub(crate) fn commit_merge(
+        &self,
+        machine: &Machine,
+        operation: &Operation,
+        changes: Changes,
+        merged: Oid,
+    ) -> Result<CommitId, CoreError> {
+        let merged = self.repo.find_commit(merged).map_err(git_error)?;
+        self.commit_with(machine, operation, changes, Some(&merged))?
+            .ok_or_else(|| CoreError::new(ErrorCode::GitError, "the merge commit was not made"))
+    }
+
+    fn commit_with(
+        &self,
+        machine: &Machine,
+        operation: &Operation,
+        changes: Changes,
+        merged: Option<&Commit<'_>>,
+    ) -> Result<Option<CommitId>, CoreError> {
         self.validate_changes(&changes)?;
         let message = compose_message(
             &operation.summary,
@@ -362,15 +388,16 @@ impl Store<'_> {
         let tree_id = index.write_tree().map_err(git_error)?;
 
         self.write_worktree(&changes)?;
-        if parent
-            .as_ref()
-            .is_some_and(|parent| parent.tree_id() == tree_id)
+        if merged.is_none()
+            && parent
+                .as_ref()
+                .is_some_and(|parent| parent.tree_id() == tree_id)
         {
             return Ok(None);
         }
 
         let tree = self.repo.find_tree(tree_id).map_err(git_error)?;
-        let oid = self.commit(machine, &message, &tree, parent.as_ref())?;
+        let oid = self.commit(machine, &message, &tree, parent.as_ref(), merged)?;
         index.write().map_err(git_error)?;
         Ok(Some(CommitId::from_oid(oid)))
     }
@@ -456,7 +483,7 @@ impl Store<'_> {
             }))
     }
 
-    fn write_worktree(&self, changes: &Changes) -> Result<(), CoreError> {
+    pub(crate) fn write_worktree(&self, changes: &Changes) -> Result<(), CoreError> {
         for (relative, change) in changes {
             let path = self.path(relative)?;
             match change {
@@ -480,18 +507,20 @@ impl Store<'_> {
         Ok(())
     }
 
-    /// Commits `tree` on HEAD with the machine's signature. libgit2 signs
-    /// the reflog entries of a commit with its committer, so no identity
-    /// from git configuration reaches `.git/logs` either.
+    /// Commits `tree` on HEAD (plus `merged`, for a merge commit) with the
+    /// machine's signature. libgit2 signs the reflog entries of a commit
+    /// with its committer, so no identity from git configuration reaches
+    /// `.git/logs` either.
     fn commit(
         &self,
         machine: &Machine,
         message: &str,
         tree: &Tree<'_>,
         parent: Option<&Commit<'_>>,
+        merged: Option<&Commit<'_>>,
     ) -> Result<Oid, CoreError> {
         let signature = machine.signature(self.env.now())?;
-        let parents: Vec<&Commit<'_>> = parent.into_iter().collect();
+        let parents: Vec<&Commit<'_>> = parent.into_iter().chain(merged).collect();
         self.repo
             .commit(
                 Some("HEAD"),
