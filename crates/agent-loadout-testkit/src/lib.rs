@@ -1,8 +1,12 @@
 //! Hermetic test helpers (SPEC 19 items 1 and 7). Nothing here touches the
-//! real profile, the real OS keyring or a real 1Password CLI: every path
-//! lives under a fresh temp root, the keyring is [`MemKeyring`] and `op` is
-//! the `op-stub` binary ([`op_stub::OpStub`]).
+//! real profile, the real OS keyring, a real 1Password or GitHub CLI, or
+//! the user's git configuration: every path lives under a fresh temp root,
+//! the keyring is [`MemKeyring`], `op` is the `op-stub` binary
+//! ([`op_stub::OpStub`]), `gh` is `gh-stub` ([`gh_stub::GhStub`]), and a
+//! system git runs with [`git_env`]'s isolated configuration.
 
+pub mod gh_stub;
+pub mod git_env;
 mod keyring_mem;
 pub mod op_stub;
 mod rooted_fs;
