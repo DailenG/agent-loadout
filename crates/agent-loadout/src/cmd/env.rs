@@ -16,14 +16,14 @@
 use std::sync::Arc;
 
 use agent_loadout_core::secrets::SecretValue;
-use agent_loadout_core::secrets::catalog::Catalog;
+use agent_loadout_core::secrets::catalog::{CATALOG_FILE, Catalog};
 use agent_loadout_core::secrets::delivery::op_env;
 use agent_loadout_core::secrets::grammar::SecretRef;
 use agent_loadout_core::secrets::providers::Resolver;
 use agent_loadout_core::secrets::render::{fill_template, parse_binding};
 use agent_loadout_core::secrets::scanner::SecretMemory;
 use agent_loadout_core::store::Machine;
-use agent_loadout_core::{CoreError, Env, ErrorCode, Os};
+use agent_loadout_core::{CoreError, Env, ErrorCode, Os, brand};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Map, Value};
 
@@ -180,7 +180,7 @@ pub fn run_env(ctx: &Context, args: &EnvArgs) -> Result<u8, CoreError> {
     let mut failed = false;
     for name in &selected {
         let Some(alias) = catalog.get(name) else {
-            eprintln!("warning[missing_secret]: {name} is not defined in secrets.toml");
+            eprintln!("warning[missing_secret]: {name} is not defined in {CATALOG_FILE}");
             failed = true;
             continue;
         };
@@ -191,7 +191,8 @@ pub fn run_env(ctx: &Context, args: &EnvArgs) -> Result<u8, CoreError> {
             SecretRef::OnePasswordEnvironment { .. } => {
                 eprintln!(
                     "note: {name} is a 1Password Environment variable; it reaches servers through \
-                     `loadout exec` or 1Password's own .env mount, not exports"
+                     `{} exec` or 1Password's own .env mount, not exports",
+                    brand::BIN_NAME
                 );
                 continue;
             }
@@ -209,6 +210,8 @@ pub fn run_env(ctx: &Context, args: &EnvArgs) -> Result<u8, CoreError> {
 }
 
 /// One export statement in `shell` syntax, the value quoted literally.
+/// PowerShell also ends a single-quoted string at the typographic single
+/// quotes U+2018 to U+201B, so each of them is doubled like `'`.
 fn statement(shell: Shell, name: &str, value: &str) -> String {
     match shell {
         Shell::Bash | Shell::Zsh => format!("export {name}='{}'", value.replace('\'', r"'\''")),
@@ -216,6 +219,15 @@ fn statement(shell: Shell, name: &str, value: &str) -> String {
             "set -gx {name} '{}'",
             value.replace('\\', r"\\").replace('\'', r"\'")
         ),
-        Shell::Pwsh => format!("$env:{name} = '{}'", value.replace('\'', "''")),
+        Shell::Pwsh => {
+            let mut quoted = String::with_capacity(value.len());
+            for c in value.chars() {
+                if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+                    quoted.push(c);
+                }
+                quoted.push(c);
+            }
+            format!("$env:{name} = '{quoted}'")
+        }
     }
 }

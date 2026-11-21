@@ -20,6 +20,14 @@ pub const DATA_DIR_LINUX: &str = "loadout";
 pub const DATA_DIR_MACOS: &str = "Loadout";
 /// Environment variable that overrides the data directory.
 pub const HOME_ENV_VAR: &str = "LOADOUT_HOME";
+/// Debug builds of the CLI read a test keyring file from this variable
+/// instead of the OS keyring; release builds refuse keyring calls while it
+/// is set.
+pub const TEST_KEYRING_ENV_VAR: &str = "LOADOUT_TEST_KEYRING";
+/// Variable names `loadout exec` stage 1 hands to stage 2 under `op run`.
+pub const EXEC_ENV_VAR: &str = "LOADOUT_EXEC_ENV";
+/// Prefix of every message `loadout exec` writes (stderr only).
+pub const EXEC_PREFIX: &str = "loadout-exec:";
 
 /// Per-project manifest directory (`<P>/.loadout/`).
 pub const PROJECT_DIR: &str = ".loadout";

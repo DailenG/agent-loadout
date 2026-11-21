@@ -2,26 +2,64 @@
 //!
 //! Debug builds also read `LOADOUT_TEST_KEYRING`: when set to an absolute
 //! path, a JSON file there (`{"<service>/<account>": "<value>"}`) stands in
-//! for the keyring, so CLI tests, which run the debug binary, never touch
-//! the real one (SPEC 19 item 1). Release builds ignore the variable.
+//! for the keyring, so CLI tests never touch the real one (SPEC 19 item
+//! 1). A release build with the variable set refuses every keyring call
+//! instead, so `cargo test --release` cannot reach the real keyring
+//! either.
 
 use std::sync::Arc;
 
-use agent_loadout_core::Env;
+use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::secrets::providers::keyring::{KeyringBackend, OsKeyring};
+use agent_loadout_core::secrets::status::Resolution;
+use agent_loadout_core::{Env, brand};
 
 /// The keyring for this process.
 pub fn keyring(env: &Env) -> Arc<dyn KeyringBackend> {
+    let Some(value) = env.var(brand::TEST_KEYRING_ENV_VAR) else {
+        return Arc::new(OsKeyring);
+    };
     #[cfg(debug_assertions)]
-    if let Some(path) = env
-        .var(test_file::VAR)
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.is_absolute())
     {
-        return Arc::new(test_file::FileKeyring { path });
+        let path = std::path::PathBuf::from(value);
+        if path.is_absolute() {
+            return Arc::new(test_file::FileKeyring { path });
+        }
     }
-    let _ = env;
-    Arc::new(OsKeyring)
+    let _ = value;
+    Arc::new(Refused)
+}
+
+/// Every call fails: the test keyring variable is set where it cannot be
+/// honored (a release build, or a relative path).
+struct Refused;
+
+impl Refused {
+    fn refuse<T>(&self) -> Result<T, Resolution> {
+        Err(Resolution::error(format!(
+            "{} is set; only debug builds read it, with an absolute path, and the OS keyring \
+             is not used while it is set",
+            brand::TEST_KEYRING_ENV_VAR
+        )))
+    }
+}
+
+impl KeyringBackend for Refused {
+    fn name(&self) -> &str {
+        "refused keyring"
+    }
+
+    fn get(&self, _: &str, _: &str) -> Result<Option<SecretValue>, Resolution> {
+        self.refuse()
+    }
+
+    fn set(&self, _: &str, _: &str, _: &SecretValue) -> Result<(), Resolution> {
+        self.refuse()
+    }
+
+    fn delete(&self, _: &str, _: &str) -> Result<bool, Resolution> {
+        self.refuse()
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -32,8 +70,6 @@ mod test_file {
     use agent_loadout_core::secrets::SecretValue;
     use agent_loadout_core::secrets::providers::keyring::KeyringBackend;
     use agent_loadout_core::secrets::status::Resolution;
-
-    pub const VAR: &str = "LOADOUT_TEST_KEYRING";
 
     /// A keyring kept in a JSON file (debug builds, tests only).
     pub struct FileKeyring {

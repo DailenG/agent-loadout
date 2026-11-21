@@ -16,6 +16,7 @@ use crate::apply::render::{DesiredEntry, DesiredState, RenderCx, system_entries}
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
 use crate::model::applied::Scope;
+use crate::secrets::SecretValue;
 
 /// What an entry is, compared with what is desired and what was written
 /// (SPEC 8.2).
@@ -230,6 +231,9 @@ pub struct TargetPlan {
     /// The whole target is blocked (`parse_error`, `unexpected_shape`).
     pub problem: Option<CoreError>,
     pub warnings: Vec<CoreError>,
+    /// Values the file holds now in entries written inline, masked in
+    /// [`TargetPlan::diff`].
+    pub(crate) masked: Vec<SecretValue>,
     pub(crate) input: TargetInput,
 }
 
@@ -318,13 +322,20 @@ impl TargetPlan {
             .to_string()
     }
 
-    /// `text` with every inline value of this target, as written and as a
-    /// JSON or TOML string escape, replaced by `********`. Values shorter
-    /// than four characters are left alone: masking them would garble the
-    /// diff without hiding anything.
+    /// `text` with every value to hide replaced, as written and as a JSON
+    /// or TOML string escape: the inline values this plan writes become
+    /// `********`; the values an inline entry holds now that this plan does
+    /// not write again (a rotation, a mode change, a removal) become
+    /// `******** (before)`, so a changed value still shows as a change.
+    /// Values shorter than four characters are left alone: masking them
+    /// would garble the diff without hiding anything.
     fn mask(&self, text: &str) -> String {
         let mut text = text.to_owned();
-        for value in self.input.desired.iter().flat_map(|entry| &entry.inline) {
+        let writes = self.input.desired.iter().flat_map(|entry| &entry.inline);
+        let values = writes
+            .map(|value| (value, "********"))
+            .chain(self.masked.iter().map(|value| (value, "******** (before)")));
+        for (value, placeholder) in values {
             let raw = value.expose();
             if raw.chars().count() < 4 {
                 continue;
@@ -332,10 +343,52 @@ impl TargetPlan {
             let escaped = serde_json::to_string(raw).expect("a string serializes");
             let escaped = &escaped[1..escaped.len() - 1];
             for form in [escaped, raw] {
-                text = text.replace(form, "********");
+                text = text.replace(form, placeholder);
             }
         }
         text
+    }
+}
+
+/// Of an entry that is or was written inline, the values its current
+/// native form may hold in plain text: every string under an environment
+/// or header map, and every other string the desired entry does not hold
+/// as it is.
+fn old_inline_values(entry: &EntryPlan) -> Vec<SecretValue> {
+    let Some(observed) = &entry.observed else {
+        return Vec::new();
+    };
+    let mut kept = Vec::new();
+    if let Some(desired) = &entry.desired {
+        leaves(desired, false, &mut |text, _| kept.push(text.to_owned()));
+    }
+    let mut out = Vec::new();
+    leaves(observed, false, &mut |text, secret_map| {
+        if secret_map || !kept.iter().any(|k| k == text) {
+            out.push(SecretValue::new(text));
+        }
+    });
+    out
+}
+
+/// Calls `f` with every string leaf of `value` and whether it sits in an
+/// environment or header map.
+fn leaves(value: &NativeValue, secret_map: bool, f: &mut dyn FnMut(&str, bool)) {
+    match value {
+        NativeValue::String(text) => f(text, secret_map),
+        NativeValue::Array(items) => {
+            for item in items {
+                leaves(item, secret_map, f);
+            }
+        }
+        NativeValue::Object(map) => {
+            for (key, item) in map.iter() {
+                let secret =
+                    secret_map || matches!(key, "env" | "headers" | "http_headers" | "environment");
+                leaves(item, secret, f);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -508,6 +561,7 @@ pub(crate) fn plan_target(
             .chain(input.desired.iter().flat_map(|entry| &entry.warnings))
             .cloned()
             .collect(),
+        masked: Vec::new(),
         input: input.clone(),
     };
     let parsed = match &bytes {
@@ -581,6 +635,10 @@ pub(crate) fn plan_target(
             options,
         );
         if let Some(entry) = entry {
+            let was_inline = owned.and_then(|l| l.delivery.as_deref()) == Some("inline");
+            if was_inline || entry.delivery == Some("inline") {
+                plan.masked.extend(old_inline_values(&entry));
+            }
             plan.entries.push(entry);
         }
     }

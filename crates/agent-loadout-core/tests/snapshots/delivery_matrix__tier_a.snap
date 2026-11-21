@@ -61,6 +61,7 @@ renamed: env
 linear: command
 tracker: blocked no_secret_free_delivery: Claude Code cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 stored: inline
+envheader: blocked no_secret_free_delivery: Claude Code cannot get MCP_TOKEN in `headers` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 
 ## claude-code (windows)
 {
@@ -121,6 +122,7 @@ renamed: env
 linear: command
 tracker: blocked no_secret_free_delivery: Claude Code cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 stored: inline
+envheader: blocked no_secret_free_delivery: Claude Code cannot get MCP_TOKEN in `headers` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 
 ## omp (linux)
 {
@@ -182,6 +184,7 @@ renamed: env
 linear: command
 tracker: blocked no_secret_free_delivery: oh-my-pi cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 stored: inline
+envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `headers` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 
 ## omp (windows)
 {
@@ -243,6 +246,7 @@ renamed: env
 linear: command
 tracker: blocked no_secret_free_delivery: oh-my-pi cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 stored: inline
+envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `headers` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 
 ## pi (linux)
 {
@@ -297,6 +301,7 @@ renamed: env
 linear: command
 tracker: blocked no_secret_free_delivery: Pi cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 stored: inline
+envheader: blocked no_secret_free_delivery: Pi cannot get MCP_TOKEN in `headers` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 
 ## codex (linux)
 [mcp_servers.github]
@@ -327,6 +332,10 @@ command = "stored-mcp"
 args = []
 env = { STORED_TOKEN = "fake-linear-token-0001" }
 
+[mcp_servers.envheader]
+url = "https://env.example.test/mcp"
+bearer_token_env_var = "MCP_TOKEN"
+
 # delivery
 github: launch
 envtoken: launch
@@ -335,6 +344,7 @@ renamed: launch
 linear: env
 tracker: blocked no_secret_free_delivery: Codex cannot get GITHUB_PAT in `url` without the value in its config file; fixes: export it to the environment (`loadout env --export`, then `[delivery] export_provider_secrets = true` in this machine's overlay), or allow inline for this server (`[delivery] mode = "inline"`)
 stored: inline
+envheader: env
 
 ## claude-desktop (windows)
 {
@@ -376,3 +386,4 @@ renamed: launch
 linear: blocked unsupported_transport: the client cannot run "http" servers
 tracker: blocked unsupported_transport: the client cannot run "http" servers
 stored: inline
+envheader: blocked unsupported_transport: the client cannot run "http" servers

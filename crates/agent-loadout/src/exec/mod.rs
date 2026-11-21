@@ -32,7 +32,6 @@ mod windows;
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 
-use agent_loadout_core::RealFs;
 use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::secrets::delivery::{SERVICE_ACCOUNT_VAR, op_env};
 use agent_loadout_core::secrets::grammar::{SecretRef, is_op_environment_id};
@@ -40,9 +39,10 @@ use agent_loadout_core::secrets::providers::onepassword::{OP_NOT_FOUND, OpCli, O
 use agent_loadout_core::secrets::providers::{env as env_provider, keyring as keyring_provider};
 use agent_loadout_core::secrets::render::parse_binding;
 use agent_loadout_core::secrets::status::{Resolution, SecretStatus};
+use agent_loadout_core::{RealFs, brand};
 
 /// Prefix of every message `exec` writes (stderr only).
-pub const PREFIX: &str = "loadout-exec:";
+pub const PREFIX: &str = brand::EXEC_PREFIX;
 /// A secret could not be had: missing, locked, or the provider failed.
 pub const EXIT_MISSING: i32 = 77;
 /// The invocation or this machine's setup is wrong (bad arguments, a
@@ -50,11 +50,16 @@ pub const EXIT_MISSING: i32 = 77;
 pub const EXIT_CONFIG: i32 = 78;
 
 const STAGE2: &str = "--stage2";
-const USAGE: &str = "usage: loadout exec [--ref NAME=REF]... [--op-env ID --map KEY=NAME...] \
-     -- <cmd> [args]";
 /// Names of the variables stage 1 hands to the server, for stage 2 (names
 /// only, separated by line breaks).
-const KEEP_VAR: &str = "LOADOUT_EXEC_ENV";
+const KEEP_VAR: &str = brand::EXEC_ENV_VAR;
+
+fn usage() -> String {
+    format!(
+        "usage: {} exec [--ref NAME=REF]... [--op-env ID --map KEY=NAME...] -- <cmd> [args]",
+        brand::BIN_NAME
+    )
+}
 
 /// Why `exec` stops before the server starts.
 #[derive(Debug)]
@@ -160,7 +165,7 @@ fn parse(args: &[OsString]) -> Result<Invocation, Failure> {
             "-h" | "--help" => {
                 return Err(Failure {
                     code: 0,
-                    message: USAGE.to_owned(),
+                    message: usage(),
                 });
             }
             STAGE2 => invocation.stage2 = true,
@@ -267,10 +272,18 @@ fn stage1(invocation: Invocation) -> Result<i32, Failure> {
     }
 
     // The server's environment: inherited, without the service account
-    // token, plus the resolved values.
+    // token, plus the resolved values. Variables named like a `--map` key
+    // or Environment name are dropped too, so whatever stage 2 finds under
+    // those names came from `op run`, never from the client's environment.
     let mut child: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| !same_name(name, SERVICE_ACCOUNT_VAR))
         .filter(|(name, _)| !values.iter().any(|(key, _)| same_name(name, key)))
+        .filter(|(name, _)| {
+            !invocation
+                .maps
+                .iter()
+                .any(|(key, var)| same_name(name, key) || same_name(name, var))
+        })
         .collect();
     child.extend(
         values

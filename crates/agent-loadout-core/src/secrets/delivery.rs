@@ -180,8 +180,22 @@ impl Policy<'_> {
         self.caps.env_ref == Some(EnvRefSyntax::CodexForward)
     }
 
-    /// Whether the client can get this value by running a command.
+    /// Whether the client can get this value by running a command. Never
+    /// for 1Password Environment variables: only `op run` hands them to a
+    /// process, so `loadout secret get` cannot print them.
     fn command_ok(&self, slot: &Slot<'_>) -> bool {
+        let environment = slot.sources.iter().any(|source| {
+            matches!(
+                source,
+                Source::Provider {
+                    reference: SecretRef::OnePasswordEnvironment { .. },
+                    ..
+                }
+            )
+        });
+        if environment {
+            return false;
+        }
         match self.caps.command_ref {
             Some(CommandRef::Bang) => matches!(slot.field, FieldSet::ENV | FieldSet::HEADERS),
             Some(CommandRef::HeadersHelper) => {

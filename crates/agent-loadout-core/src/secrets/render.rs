@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use crate::adapters::caps::{CommandRef, EnvRefSyntax, FieldSet};
 use crate::adapters::mapper::{RemoteLaunch, StdioLaunch};
+use crate::brand;
 use crate::env::{Env, Os};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
@@ -286,11 +287,12 @@ impl<'a> Renderer<'a> {
             self.warnings.push(CoreError::new(
                 ErrorCode::InlineEnvFallback,
                 format!(
-                    "{} cannot get `${{env:{}}}` in `{}` otherwise; the value from Loadout's \
+                    "{} cannot get `${{env:{}}}` in `{}` otherwise; the value from {}'s \
                      environment is written into its config file",
                     self.policy.client,
                     names.join("}`, `${env:"),
-                    field_name(field)
+                    field_name(field),
+                    brand::PRODUCT_NAME
                 ),
             ));
         }
@@ -537,18 +539,21 @@ fn is_whole(pieces: &[Piece]) -> bool {
 }
 
 /// One argument of a command line run through the client's shell: single
-/// quotes on Unix; double quotes on Windows, where `"`, `%` and line breaks
-/// have no safe spelling and are refused.
+/// quotes on Unix; double quotes on Windows. Which shell a Windows client
+/// uses (`cmd.exe`, or a POSIX shell such as Git Bash) is not settled
+/// (`scripts/verify-clients.md` DX-6, DX-7), so only text both read the
+/// same inside double quotes passes: `"`, `%`, `$`, a backtick, a line
+/// break and a trailing backslash are refused.
 pub fn shell_quote(os: Os, text: &str) -> Result<String, CoreError> {
     match os {
         Os::Linux | Os::MacOs => Ok(format!("'{}'", text.replace('\'', r"'\''"))),
         Os::Windows => {
-            if text.contains(['"', '%', '\n', '\r']) || text.ends_with('\\') {
+            if text.contains(['"', '%', '$', '`', '\n', '\r']) || text.ends_with('\\') {
                 return Err(CoreError::new(
                     ErrorCode::DeliveryUnavailable,
                     format!(
-                        "{text:?} cannot be quoted for a Windows command line (`\"`, `%`, a line \
-                         break or a trailing backslash)"
+                        "{text:?} cannot be quoted for a Windows command line (`\"`, `%`, `$`, a \
+                         backtick, a line break or a trailing backslash)"
                     ),
                 ));
             }

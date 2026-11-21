@@ -408,6 +408,32 @@ fn environment_refs_run_through_op_run_with_name_remapping() {
             .contains("loadout-exec: KEY: the 1Password Environment has no variable NOPE")
     );
     assert!(output.stdout.is_empty());
+
+    // The client's environment has that name: still 77, its value never
+    // stands in for the Environment's.
+    let output = cli.exec(
+        &args(&["--op-env", ENVIRONMENT, "--map", "KEY=NOPE"], &["env"]),
+        b"",
+        &[
+            ("NOPE", "fake-client-value-0001"),
+            ("KEY", "fake-client-value-0002"),
+        ],
+    );
+    assert_eq!(output.status.code(), Some(77), "{}", stderr(&output));
+    assert!(output.stdout.is_empty());
+    // And when the Environment has it, the client's value under the same
+    // name loses.
+    let output = cli.exec(
+        &args(
+            &["--op-env", ENVIRONMENT, "--map", "SERVER_TOKEN=MCP_TOKEN"],
+            &["env"],
+        ),
+        b"",
+        &[("MCP_TOKEN", "fake-client-value-0003")],
+    );
+    let env = server_env(&output);
+    assert_eq!(env["SERVER_TOKEN"], ENV_VALUE);
+    assert!(!env.contains_key("MCP_TOKEN"));
 }
 
 #[test]
@@ -644,6 +670,25 @@ fn hook_commands_print_resolved_values() {
     assert_eq!(output.status.code(), Some(5));
     assert!(output.stdout.is_empty());
     assert!(stderr(&output).contains("error[missing_secret]"));
+
+    // A test keyring variable that cannot be honored refuses every call
+    // instead of falling back to the OS keyring.
+    let output = cli
+        .command()
+        .env("LOADOUT_TEST_KEYRING", "relative-keyring.json")
+        .args(["--home"])
+        .arg(&cli.home)
+        .args(["secret", "get", "--ref", "keyring://loadout/LINEAR_TOKEN"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(output.stdout.is_empty());
+    assert!(
+        stderr(&output).contains("LOADOUT_TEST_KEYRING is set"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -699,6 +744,23 @@ fn env_export_prints_statements_per_shell() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "set -gx LINEAR_API_KEY 'fake-it\\'s-0001'\n"
+    );
+    // PowerShell ends a single-quoted string at typographic quotes too.
+    cli.keyring(&[(
+        "loadout/LINEAR_TOKEN",
+        "fake-\u{2019}; Remove-Item x; '-0001",
+    )]);
+    let output = cli.run(&[
+        "env",
+        "--export",
+        "--shell",
+        "pwsh",
+        "--aliases",
+        "LINEAR_TOKEN",
+    ]);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "$env:LINEAR_API_KEY = 'fake-\u{2019}\u{2019}; Remove-Item x; ''-0001'\n"
     );
     let output = cli.run(&["env", "--export", "--aliases", "UNDEFINED"]);
     assert_eq!(output.status.code(), Some(5));

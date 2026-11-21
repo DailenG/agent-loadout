@@ -1,6 +1,6 @@
 //! `loadout diff [--client C]... [--exit-code]` (SPEC 8.3, 14): the apply
-//! plan as unified diffs of each client file. This build writes no secret
-//! values (no `inline` delivery), so there is nothing to mask.
+//! plan as unified diffs of each client file, with values of `inline`
+//! delivery masked (`TargetPlan::diff`).
 
 use agent_loadout_core::CoreError;
 use agent_loadout_core::apply::{self, PlanOptions};

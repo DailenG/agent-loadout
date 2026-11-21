@@ -47,7 +47,7 @@ ref = "env:HASS_TOKEN"
 "#;
 
 /// Server files, enabled for every Tier A client.
-const SERVERS: [(&str, &str); 7] = [
+const SERVERS: [(&str, &str); 8] = [
     (
         "github",
         r#"transport = "stdio"
@@ -106,6 +106,14 @@ command = "stored-mcp"
 STORED_TOKEN = "${secret:LINEAR_TOKEN}"
 [delivery]
 mode = "inline"
+"#,
+    ),
+    (
+        "envheader",
+        r#"transport = "http"
+url = "https://env.example.test/mcp"
+[headers]
+Authorization = "Bearer ${secret:MCP_TOKEN}"
 "#,
     ),
 ];
@@ -632,6 +640,29 @@ fn inline_values_are_written_masked_in_diffs_and_never_stored() {
             );
         }
     }
+
+    // A rotated value: neither the old nor the new one shows in the diff,
+    // and the change still does.
+    const ROTATED: &str = "fake-linear-token-0002";
+    fx.keyring.insert("loadout", "LINEAR_TOKEN", ROTATED);
+    let plan = fx.plan();
+    let diff = plan.targets[0].diff();
+    assert!(
+        diff.contains("-        \"STORED_TOKEN\": \"******** (before)\"")
+            && diff.contains("+        \"STORED_TOKEN\": \"********\""),
+        "{diff}"
+    );
+    for value in [LINEAR_VALUE, ROTATED] {
+        assert!(!diff.contains(value), "{value} in\n{diff}");
+    }
+    fx.apply();
+
+    // Removing the server: the value it held stays masked.
+    fx.remove_server("stored");
+    let plan = fx.plan();
+    let diff = plan.targets[0].diff();
+    assert!(diff.contains("-    \"stored\""), "{diff}");
+    assert!(!diff.contains(ROTATED), "{diff}");
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
