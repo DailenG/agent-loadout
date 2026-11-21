@@ -17,9 +17,11 @@ run), M7 (secret references, env/keyring/1Password providers, the leak
 scanner on every store commit, `loadout secrets ls|check|providers|set|clear`),
 M8 (secret delivery per client: `env`, `launch` through `loadout exec`,
 `command` hooks and opt-in `inline`; `loadout env --export`,
-`loadout secrets map-op-env|service-account`) and M11 (store history views,
+`loadout secrets map-op-env|service-account`), M11 (store history views,
 tags and restore: `loadout show|tag|restore|backup`, `loadout diff --rev`)
-are in place.
+and M12 (folder remotes with per-entity pull merge: `loadout remote
+add|ls|rm|push|pull|machines`, `backup` pushes, `restore --from`) are in
+place.
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
