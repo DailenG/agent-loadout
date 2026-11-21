@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use agent_loadout_core::store::restore::{
     self, FileOutcome, FileRestore, RestoreReport, RestoreRequest,
 };
-use agent_loadout_core::{CoreError, ErrorCode};
+use agent_loadout_core::{CoreError, ErrorCode, brand};
 use clap::Args;
 use serde_json::{Value, json};
 
@@ -106,7 +106,10 @@ fn print(ctx: &Context, report: &RestoreReport) {
     }
     match &report.apply {
         Some(apply) => print_report(apply, report.commit.as_ref()),
-        None => println!("Run `loadout apply` (or `loadout diff` first) to update client files."),
+        None => println!(
+            "Run `{bin} apply` (or `{bin} diff` first) to update client files.",
+            bin = brand::BIN_NAME
+        ),
     }
 }
 

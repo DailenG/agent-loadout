@@ -2,9 +2,10 @@
 //!
 //! - **Semantic**: per entity, the fields added, removed or changed
 //!   (`env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`). TOML files are
-//!   compared field by field (tables flattened to dotted paths, arrays as
-//!   one value); references are shown as written, since the store holds
-//!   references only. Other text (skill content) is a unified diff.
+//!   compared field by field (tables, inline ones included, flattened to
+//!   dotted paths; arrays as one value); references are shown as written,
+//!   since the store holds references only. Other text (skill content) is
+//!   a unified diff.
 //! - **Raw**: the unified git diff.
 
 use std::collections::BTreeMap;
@@ -194,6 +195,9 @@ fn file_change(file: &str, before: Option<&[u8]>, after: Option<&[u8]>) -> Entit
         };
         if let (Some(old_fields), Some(new_fields)) = (parse(&old), parse(&new)) {
             change.fields = field_changes(&old_fields, &new_fields);
+            if change.fields.is_empty() {
+                change.text = Some("only comments or formatting changed".to_owned());
+            }
             return change;
         }
     }

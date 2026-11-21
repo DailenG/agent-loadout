@@ -23,16 +23,11 @@ pub struct BackupArgs {
 
 pub fn run(ctx: &Context, args: &BackupArgs) -> Result<(), CoreError> {
     let store = ctx.open_store_for_change()?;
-    let pending = store.worktree_changes()?;
     let summary = args
         .message
         .clone()
-        .unwrap_or_else(|| format!("backup: {} file(s)", pending.len()));
-    let commit = if pending.is_empty() {
-        None
-    } else {
-        store.commit_worktree(Operation::new("store.backup", summary))?
-    };
+        .unwrap_or_else(|| "backup: hand edits".to_owned());
+    let (commit, pending) = store.commit_worktree(Operation::new("store.backup", summary))?;
     let head = store.head()?;
     let tag = match &args.tag {
         Some(name) => Some(store.create_user_tag(name, &head, args.message.as_deref())?),

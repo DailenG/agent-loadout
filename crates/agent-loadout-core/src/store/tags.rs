@@ -59,18 +59,23 @@ pub struct TagInfo {
     pub time: Option<SystemTime>,
 }
 
-/// Whether `name` is a valid user tag name.
+/// Whether `name` is a valid user tag name: SPEC 9.4's characters, git's
+/// ref rules (no leading `.`, no `..`, no trailing `.` or `.lock`), no
+/// leading `-` (it reads as an option), and nothing that reads as a
+/// revision instead (`HEAD`, `main`, 4 or more hex digits).
 pub fn is_user_tag_name(name: &str) -> bool {
+    let hex = name.len() >= 4 && name.bytes().all(|b| b.is_ascii_hexdigit());
     !name.is_empty()
         && name.len() <= MAX_NAME
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-        // git refuses these ref names.
-        && !name.starts_with('.')
+        && !name.starts_with(['.', '-'])
         && !name.ends_with('.')
         && !name.ends_with(".lock")
         && !name.contains("..")
+        && !hex
+        && !matches!(name, "HEAD" | crate::store::BRANCH)
 }
 
 impl Store<'_> {
@@ -96,9 +101,10 @@ impl Store<'_> {
             .filter(|message| !message.is_empty())
             .map_or_else(|| format!("tag {name}"), str::to_owned);
         let allow = Allowlist::parse(&self.read_to_string(ALLOWLIST_FILE)?.unwrap_or_default());
+        // Tag names and messages are pushed to remotes: both are scanned.
         let findings = scan_text(
-            "tag message",
-            message.as_bytes(),
+            "tag",
+            format!("{name}\n{message}").as_bytes(),
             false,
             &self.secrets,
             &allow,
@@ -122,10 +128,16 @@ impl Store<'_> {
         })
     }
 
-    /// Creates `auto/<kind>/<timestamp>` (with a `-N` suffix when taken)
-    /// on HEAD and prunes automatic tags older than [`AUTO_TAG_RETENTION`].
-    /// Returns the new tag's name.
+    /// Creates `auto/<kind>/<timestamp>` on HEAD; see
+    /// [`Store::create_auto_tag_at`].
     pub fn create_auto_tag(&self, kind: &str) -> Result<String, CoreError> {
+        self.create_auto_tag_at(kind, &self.head()?)
+    }
+
+    /// Creates `auto/<kind>/<timestamp>` (with a `-N` suffix when taken)
+    /// on `target` and prunes automatic tags older than
+    /// [`AUTO_TAG_RETENTION`] (best effort). Returns the new tag's name.
+    pub fn create_auto_tag_at(&self, kind: &str, target: &CommitId) -> Result<String, CoreError> {
         let now = self.env.now();
         let base = format!("{AUTO_PREFIX}{kind}/{}", backup::timestamp(now));
         let name = if self.tag_exists(&base) {
@@ -136,7 +148,7 @@ impl Store<'_> {
         } else {
             base
         };
-        self.create_tag(&name, &self.head()?)?;
+        self.create_tag(&name, target)?;
         self.prune_auto_tags(now, AUTO_TAG_RETENTION)?;
         Ok(name)
     }
@@ -155,20 +167,21 @@ impl Store<'_> {
                 && tag
                     .time
                     .is_some_and(|time| now.duration_since(time).is_ok_and(|age| age > retention));
-            if old {
-                self.repo.tag_delete(&tag.name).map_err(git_error)?;
+            if old && self.repo.tag_delete(&tag.name).is_ok() {
                 pruned.push(tag.name);
             }
         }
         Ok(pruned)
     }
 
-    /// Every tag, user tags first, then automatic ones, each sorted by name.
+    /// Every tag that points at a commit, user tags first, then automatic
+    /// ones, each sorted by name. Tags that do not resolve to a commit are
+    /// left out.
     pub fn tags(&self) -> Result<Vec<TagInfo>, CoreError> {
         let names = self.repo.tag_names(None).map_err(git_error)?;
         let mut tags = Vec::new();
         for name in names.iter().filter_map(|name| name.ok().flatten()) {
-            if let Some(tag) = self.tag(name)? {
+            if let Ok(Some(tag)) = self.tag(name) {
                 tags.push(tag);
             }
         }

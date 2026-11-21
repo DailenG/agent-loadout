@@ -262,7 +262,8 @@ impl Store<'_> {
     }
 
     /// Store files edited, added or removed in the working tree since HEAD
-    /// (hand edits), store-relative and sorted.
+    /// (hand edits), store-relative and sorted. A nested repository (shown
+    /// by git as a directory) is not a store file and is left out.
     pub fn worktree_changes(&self) -> Result<Vec<String>, CoreError> {
         let mut options = git2::StatusOptions::new();
         options
@@ -275,22 +276,33 @@ impl Store<'_> {
             .iter()
             .filter(|entry| !entry.status().is_ignored())
             .filter_map(|entry| entry.path().ok().map(|path| path.replace('\\', "/")))
+            .filter(|path| !path.ends_with('/'))
             .collect();
         files.sort();
         files.dedup();
         Ok(files)
     }
 
-    /// Commits the working tree's hand edits ([`Store::worktree_changes`])
-    /// as one commit, after the same validation and leak scan as every
-    /// transaction. `None` when the working tree is clean.
-    pub fn commit_worktree(&self, operation: Operation) -> Result<Option<CommitId>, CoreError> {
+    /// Commits the working tree's hand edits ([`Store::worktree_changes`],
+    /// read under the lock) as one commit with their entities as trailers,
+    /// after the same validation and leak scan as every transaction.
+    /// Returns the commit (`None` when the working tree is clean) and the
+    /// files it holds.
+    pub fn commit_worktree(
+        &self,
+        operation: Operation,
+    ) -> Result<(Option<CommitId>, Vec<String>), CoreError> {
         operation.check()?;
         let _lock = StoreLock::acquire(self.fs, &self.state_dir, LOCK_TIMEOUT)?;
         let machine = Machine::load_or_create(&self.env, self.fs, &self.state_dir)?;
+        let files = self.worktree_changes()?;
+        let mut operation = operation;
+        for entity in crate::store::diff::trailer_entities(&files) {
+            operation = operation.entity(entity);
+        }
         let mut changes = Changes::new();
-        for relative in self.worktree_changes()? {
-            let path = self.path(&relative)?;
+        for relative in &files {
+            let path = self.path(relative)?;
             let bytes = if self.fs.exists(&path) {
                 Some(
                     self.fs
@@ -300,9 +312,10 @@ impl Store<'_> {
             } else {
                 None
             };
-            changes.insert(relative, bytes);
+            changes.insert(relative.clone(), bytes);
         }
-        self.commit_changes(&machine, &operation, changes)
+        let commit = self.commit_changes(&machine, &operation, changes)?;
+        Ok((commit, files))
     }
 
     /// Validates, scans, writes and commits `changes`. The caller holds the

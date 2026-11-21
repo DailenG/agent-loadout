@@ -16,10 +16,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::adapters::adapter;
-use crate::apply::exec::{ApplyReport, ApplyRequest, apply_in};
-use crate::apply::ledger::{EntryKind, Ledger, LedgerKey};
-use crate::apply::plan::{PlanOptions, canonical, read_target};
-use crate::apply::{ApplyEnv, backup, temp_path};
+use crate::apply::exec::{ApplyReport, ApplyRequest, apply_in, swap_file};
+use crate::apply::ledger::{EntryKind, Ledger};
+use crate::apply::plan::{PlanOptions, read_target};
+use crate::apply::{ApplyEnv, backup};
 use crate::brand;
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::Document;
@@ -65,6 +65,8 @@ pub struct ManifestWrite {
 #[derive(Debug, Clone)]
 pub struct RestorePlan {
     pub target: CommitId,
+    /// HEAD the plan was made against.
+    pub head: CommitId,
     /// Store files restored (store-relative).
     pub files: Vec<String>,
     /// Manifests written back to project folders.
@@ -119,6 +121,17 @@ pub fn prepare(
                 ),
             ));
         }
+        if entity
+            .strip_prefix("machine/")
+            .is_some_and(|id| id != machine_id)
+        {
+            return Err(CoreError::new(
+                ErrorCode::InvalidValue,
+                format!(
+                    "{entity} belongs to another machine; only that machine writes its files"
+                ),
+            ));
+        }
         selected.extend(paths);
     }
     let head = store.head()?;
@@ -155,11 +168,14 @@ pub fn prepare(
             // A manifest removed by the restore stays in the project folder.
             continue;
         };
+        // Only an existing, absolute project folder: a relative or stale
+        // path never makes the restore write elsewhere or create folders.
         let folder = overlay
             .as_ref()
             .and_then(|overlay| overlay.projects.as_ref())
             .and_then(|projects| projects.get(project))
-            .map(|project| PathBuf::from(&project.path));
+            .map(|project| PathBuf::from(&project.path))
+            .filter(|folder| folder.is_absolute() && store.fs.is_dir(folder));
         let Some(folder) = folder else {
             unplaced.push(file.clone());
             continue;
@@ -177,6 +193,7 @@ pub fn prepare(
     }
     Ok(RestorePlan {
         target: request.target.clone(),
+        head,
         files,
         manifests,
         unplaced,
@@ -226,16 +243,20 @@ pub fn restore(
             apply: None,
         });
     }
-    let tag = store.create_auto_tag("pre-restore")?;
-
-    let mut operation = Operation::new(
-        "store.restore",
-        format!("restore: {}", request.target.short()),
-    );
+    let operation_summary = format!("restore: {}", request.target.short());
+    let mut operation = Operation::new("store.restore", operation_summary);
     for entity in trailer_entities(&plan.files) {
         operation = operation.entity(entity);
     }
     let committed = store.transaction(operation, |tx| {
+        // The plan was made without the lock: another process may have
+        // committed since, and then the files to restore differ.
+        if tx.store().head()? != plan.head {
+            return Err(CoreError::new(
+                ErrorCode::FileChangedDuringApply,
+                "the store changed while the restore was being prepared; run it again",
+            ));
+        }
         let source = tx.store().revision(&plan.target)?;
         let mut contents = Vec::with_capacity(plan.files.len());
         for file in &plan.files {
@@ -258,6 +279,8 @@ pub fn restore(
             Ok(None)
         }
     })?;
+    // Tagged once the restore is in, on the commit it replaced.
+    let tag = store.create_auto_tag_at("pre-restore", &plan.head)?;
 
     let target = store.revision(&plan.target)?;
     let mut written = Vec::new();
@@ -333,21 +356,20 @@ pub fn restore_files(
 
     let undo_dir = backup::run_dir(ax.home, ax.env.now(), &format!("restore-{apply_id}"));
     let mut ledger = Ledger::load(fs, &state_dir)?;
-    let key = LedgerKey::load_or_create(fs, &state_dir)?;
     let mut results = Vec::new();
     for (file, saved) in files {
-        let outcome = match restore_one(ax, &undo_dir, &file, &saved) {
-            Ok(outcome) => {
-                if matches!(outcome, FileOutcome::Restored { .. }) {
-                    refresh_ledger(ax, &mut ledger, &key, &file)?;
-                }
-                outcome
+        // A failed file never prevents the others; the ledger is saved
+        // after each restored file (SPEC 8.4 step 5).
+        let outcome = restore_one(ax, &undo_dir, &file, &saved).and_then(|outcome| {
+            if matches!(outcome, FileOutcome::Restored { .. }) {
+                refresh_ledger(ax, &mut ledger, &file)?;
+                ledger.save(fs, &state_dir)?;
             }
-            Err(err) => FileOutcome::Failed(err.with_path(&file)),
-        };
+            Ok(outcome)
+        });
+        let outcome = outcome.unwrap_or_else(|err| FileOutcome::Failed(err.with_path(&file)));
         results.push(FileRestore { file, outcome });
     }
-    ledger.save(fs, &state_dir)?;
     Ok(results)
 }
 
@@ -396,12 +418,9 @@ fn restore_one(
     saved: &Path,
 ) -> Result<FileOutcome, CoreError> {
     let fs = ax.fs;
-    let io = |what: &str, at: &Path, err: std::io::Error| {
-        CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(at)
-    };
-    let bytes = fs
-        .read(saved)
-        .map_err(|err| io("cannot read backup", saved, err))?;
+    let bytes = fs.read(saved).map_err(|err| {
+        CoreError::new(ErrorCode::IoError, format!("cannot read backup: {err}")).with_path(saved)
+    })?;
     let current = read_target(fs, file)?;
     if current.as_deref() == Some(bytes.as_slice()) {
         return Ok(FileOutcome::Unchanged);
@@ -410,36 +429,22 @@ fn restore_one(
         Some(current) => Some(backup::save(fs, ax.home, undo_dir, file, current)?),
         None => None,
     };
-    if let Some(dir) = file.parent() {
-        fs.create_dir_all(dir)
-            .map_err(|err| io("cannot create directory", dir, err))?;
-    }
-    let temp = temp_path(file)?;
-    fs.write_new(&temp, &bytes, current.is_some().then_some(file))
-        .map_err(|err| io("cannot write temp file", &temp, err))?;
-    if read_target(fs, file)? != current {
-        let _ = fs.remove_file(&temp);
+    if !swap_file(fs, file, current.as_deref(), &bytes)? {
         return Err(CoreError::new(
             ErrorCode::FileChangedDuringApply,
             "the file changed while it was being restored; nothing was written",
         ));
     }
-    fs.replace(&temp, file).map_err(|err| {
-        let _ = fs.remove_file(&temp);
-        io("cannot replace file", file, err)
-    })?;
     Ok(FileOutcome::Restored { previous })
 }
 
-/// After a restore, the ledger records what `file` holds: owned entries
-/// that are gone are dropped, the others get the hash of their restored
-/// form (the restore is a write by this machine).
-fn refresh_ledger(
-    ax: &ApplyEnv<'_>,
-    ledger: &mut Ledger,
-    key: &LedgerKey,
-    file: &Path,
-) -> Result<(), CoreError> {
+/// After a restore, owned entries that are no longer in `file` are no
+/// longer owned. Every other entry keeps its ledger record as it is, hash
+/// included: what the file holds now is compared with what Loadout wrote,
+/// so a restored hand edit plans as drift and a restored foreign entry as
+/// a collision, never as Loadout's own. A file that does not parse keeps
+/// every record. Only MCP entries are checked (see the M11 note).
+fn refresh_ledger(ax: &ApplyEnv<'_>, ledger: &mut Ledger, file: &Path) -> Result<(), CoreError> {
     let name = file.to_string_lossy().into_owned();
     let bytes = read_target(ax.fs, file)?;
     let owned: Vec<_> = ledger
@@ -448,28 +453,26 @@ fn refresh_ledger(
         .filter(|entry| entry.file == name && entry.kind == EntryKind::McpEntry)
         .cloned()
         .collect();
-    for mut entry in owned {
-        let format = adapter(&entry.client)
-            .and_then(|spec| spec.mcp.as_ref())
-            .map(|mcp| mcp.format);
-        let value = match (&bytes, format) {
-            (Some(bytes), Some(format)) => {
+    for entry in owned {
+        let present = match &bytes {
+            None => false,
+            Some(bytes) => {
+                let Some(format) = adapter(&entry.client)
+                    .and_then(|spec| spec.mcp.as_ref())
+                    .map(|mcp| mcp.format)
+                else {
+                    continue;
+                };
+                let Ok(doc) = Document::parse(bytes, format) else {
+                    continue;
+                };
                 let keys = pointer_keys(&entry.container);
                 let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-                Document::parse(bytes, format)
-                    .ok()
-                    .and_then(|doc| doc.get(&keys, &entry.key).ok().flatten())
+                !matches!(doc.get(&keys, &entry.key), Ok(None))
             }
-            _ => None,
         };
-        match value.and_then(|value| canonical(&entry.client, &value)) {
-            Some(canonical) => {
-                entry.written_hash = Some(key.hash(&canonical));
-                ledger.upsert(entry);
-            }
-            None => {
-                ledger.remove(&entry.file, &entry.container, &entry.key);
-            }
+        if !present {
+            ledger.remove(&entry.file, &entry.container, &entry.key);
         }
     }
     Ok(())

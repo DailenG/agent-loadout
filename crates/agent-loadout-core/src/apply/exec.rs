@@ -408,61 +408,75 @@ impl Executor<'_> {
     /// Temp file, compare-and-swap, replace. `Ok(false)` when the file no
     /// longer holds the planned bytes; the temp file is removed then.
     fn write(&self, plan: &TargetPlan, after: &[u8]) -> Result<bool, CoreError> {
-        let fs = self.ax.fs;
-        let file = &plan.file;
-        let io = |what: &str, at: &Path, err: std::io::Error| {
-            CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(at)
-        };
-        if let Some(dir) = file.parent() {
-            fs.create_dir_all(dir)
-                .map_err(|err| io("cannot create directory", dir, err))?;
+        swap_file(self.ax.fs, &plan.file, plan.before.as_deref(), after)
+    }
+}
+
+/// SPEC 8.4 step 4: writes `after` to a temp file next to `file` (with the
+/// file's permissions when it exists), checks that `file` still holds
+/// `expected` (compare-and-swap), then replaces it, retrying a Windows
+/// sharing violation for [`LOCK_RETRY`] before `file_locked`. `Ok(false)`
+/// when the file changed; the temp file is removed then.
+pub(crate) fn swap_file(
+    fs: &dyn crate::fs::Fs,
+    file: &Path,
+    expected: Option<&[u8]>,
+    after: &[u8],
+) -> Result<bool, CoreError> {
+    let io = |what: &str, at: &Path, err: std::io::Error| {
+        CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(at)
+    };
+    if let Some(dir) = file.parent() {
+        fs.create_dir_all(dir)
+            .map_err(|err| io("cannot create directory", dir, err))?;
+    }
+    let temp = temp_path(file)?;
+    let like = expected.is_some().then_some(file);
+    fs.write_new(&temp, after, like)
+        .map_err(|err| io("cannot write temp file", &temp, err))?;
+    let discard = || {
+        let _ = fs.remove_file(&temp);
+    };
+    match read_target(fs, file) {
+        Ok(now) if now.as_deref() == expected => {}
+        Ok(_) => {
+            discard();
+            return Ok(false);
         }
-        let temp = temp_path(file)?;
-        let like = plan.before.is_some().then_some(file.as_path());
-        fs.write_new(&temp, after, like)
-            .map_err(|err| io("cannot write temp file", &temp, err))?;
-        let discard = || {
-            let _ = fs.remove_file(&temp);
-        };
-        match read_target(fs, file) {
-            Ok(now) if now == plan.before => {}
-            Ok(_) => {
+        Err(err) => {
+            discard();
+            return Err(err);
+        }
+    }
+    let deadline = Instant::now() + LOCK_RETRY;
+    let mut pause = Duration::from_millis(25);
+    loop {
+        match fs.replace(&temp, file) {
+            Ok(()) => return Ok(true),
+            Err(err) if is_sharing_violation(&err) && Instant::now() < deadline => {
+                thread::sleep(pause.min(deadline.saturating_duration_since(Instant::now())));
+                pause = (pause * 2).min(Duration::from_millis(200));
+            }
+            Err(err) if is_sharing_violation(&err) => {
                 discard();
-                return Ok(false);
+                return Err(CoreError::new(
+                    ErrorCode::FileLocked,
+                    format!(
+                        "another process kept the file open for {} s: {err}",
+                        LOCK_RETRY.as_secs()
+                    ),
+                )
+                .with_path(file));
             }
             Err(err) => {
                 discard();
-                return Err(err);
-            }
-        }
-        let deadline = Instant::now() + LOCK_RETRY;
-        let mut pause = Duration::from_millis(25);
-        loop {
-            match fs.replace(&temp, file) {
-                Ok(()) => return Ok(true),
-                Err(err) if is_sharing_violation(&err) && Instant::now() < deadline => {
-                    thread::sleep(pause.min(deadline.saturating_duration_since(Instant::now())));
-                    pause = (pause * 2).min(Duration::from_millis(200));
-                }
-                Err(err) if is_sharing_violation(&err) => {
-                    discard();
-                    return Err(CoreError::new(
-                        ErrorCode::FileLocked,
-                        format!(
-                            "another process kept the file open for {} s: {err}",
-                            LOCK_RETRY.as_secs()
-                        ),
-                    )
-                    .with_path(file));
-                }
-                Err(err) => {
-                    discard();
-                    return Err(io("cannot replace file", file, err));
-                }
+                return Err(io("cannot replace file", file, err));
             }
         }
     }
+}
 
+impl Executor<'_> {
     /// Records every entry's new ownership state and saves the ledger.
     fn update_ledger(&self, plan: &TargetPlan, ledger: &mut Ledger) -> Result<(), CoreError> {
         let file = plan.file.to_string_lossy().into_owned();

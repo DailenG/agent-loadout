@@ -170,6 +170,11 @@ fn user_tags_are_annotated_and_never_move() {
         "..",
         ".hidden",
         "x.lock",
+        "-x",
+        "HEAD",
+        "main",
+        "abcd",
+        "0123456789abcdef",
         &"a".repeat(65),
     ] {
         let err = store.create_user_tag(bad, &b, None).unwrap_err();
@@ -295,13 +300,16 @@ fn partial_restore_by_entity_leaves_the_rest() {
     }
     assert!(at_head.read_bytes("servers/old.toml").unwrap().is_none());
 
-    partial.entities = vec!["nonsense".to_owned()];
-    assert_eq!(
-        prepare(&store, &fx.machine_id(), &partial)
-            .unwrap_err()
-            .code(),
-        ErrorCode::InvalidValue
-    );
+    for entity in ["nonsense", "machine/01JCX5B7K3M9N1P5Q7R3S9T1V5"] {
+        partial.entities = vec![entity.to_owned()];
+        assert_eq!(
+            prepare(&store, &fx.machine_id(), &partial)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidValue,
+            "{entity}"
+        );
+    }
 }
 
 #[test]
@@ -527,5 +535,42 @@ fn client_files_restore_from_apply_backups_through_cas() {
             .unwrap_err()
             .code(),
         ErrorCode::NotFound
+    );
+}
+
+#[test]
+fn file_restore_keeps_drift_visible() {
+    let fx = Fx::new();
+    fx.put_server(stdio("notes", &["claude-code"], &["-y", "@example/notes-mcp"]));
+    fx.apply();
+    // A hand edit of the owned entry: drift.
+    let edited = fx
+        .read(&fx.claude())
+        .replace("@example/notes-mcp", "@example/notes-mcp@hand");
+    fx.write(&fx.claude(), &edited);
+    // The next run writes another entry and skips the drifted one; its
+    // backup holds the hand edit.
+    fx.put_server(stdio("search", &["claude-code"], &["-y", "@example/search-mcp"]));
+    let (report, _) = fx.apply();
+    assert_eq!(report.unresolved(), 1, "the drifted entry needs a decision");
+    let owned_before = fx.ledger().entries.len();
+    assert_eq!(owned_before, 2);
+
+    let results = restore_files(&fx.ax(), &report.apply_id, None).unwrap();
+    assert!(matches!(results[0].outcome, FileOutcome::Restored { .. }));
+    assert_eq!(fx.read(&fx.claude()), edited);
+    // `search` is gone from the file, so it is no longer owned; `notes`
+    // keeps what Loadout wrote, so the hand edit is still drift and the
+    // next apply asks instead of overwriting it.
+    let names: Vec<String> = fx.ledger().entries.into_iter().map(|e| e.key).collect();
+    assert_eq!(names, ["notes"]);
+    let plan = fx.plan();
+    assert_eq!(
+        support::entry(&plan, &fx.claude(), "notes").state,
+        agent_loadout_core::apply::EntryState::Drifted
+    );
+    assert_eq!(
+        support::entry(&plan, &fx.claude(), "search").state,
+        agent_loadout_core::apply::EntryState::PendingCreate
     );
 }
