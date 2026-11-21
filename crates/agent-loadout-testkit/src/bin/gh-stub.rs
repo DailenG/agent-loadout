@@ -1,15 +1,39 @@
 //! Fake GitHub CLI for tests. Installed as `gh` by
 //! `agent_loadout_testkit::gh_stub::GhStub`, which writes the
 //! `gh-stub.json` next to it. See that module for what it answers.
+//!
+//! For process tests it also has `--silent <secs>` (prints nothing, then
+//! exits) and `--silent-child <secs>` (starts `--silent <secs>` with the
+//! same stdout and stderr, like git starting `ssh`, then also stays
+//! silent): a runner's idle timeout must stop both without waiting.
 
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
+use std::time::Duration;
 
 use agent_loadout_testkit::gh_stub::{CONFIG_FILE, GhStubConfig, LOG_FILE, REPOS_FILE};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let silent = |secs: &str| {
+        std::thread::sleep(Duration::from_secs(secs.parse().unwrap_or(30)));
+        ExitCode::SUCCESS
+    };
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["--silent", secs] => return silent(secs),
+        ["--silent-child", secs] => {
+            let exe = std::env::current_exe().expect("gh-stub path");
+            let _child = Command::new(exe).args(["--silent", secs]).spawn();
+            return silent(secs);
+        }
+        _ => {}
+    }
     let dir = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(ToOwned::to_owned))

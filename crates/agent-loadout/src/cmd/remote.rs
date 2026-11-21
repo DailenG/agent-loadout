@@ -9,7 +9,9 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
-use agent_loadout_core::remote::config::{FolderMode, RemoteConfig, RemoteKind, RemotesFile};
+use agent_loadout_core::remote::config::{
+    FolderMode, RemoteConfig, RemoteKind, RemotesFile, check_name,
+};
 use agent_loadout_core::remote::credential::token_account;
 use agent_loadout_core::remote::folder::{
     self, MachineEntry, PullReport, PushOutcome, SiblingPull,
@@ -211,28 +213,35 @@ fn add_git(
     let mut file = remotes(ctx)?;
     file.add(remote)?;
     file.save(ctx.fs(), &ctx.home.state_dir())?;
+    let mut warnings = Vec::new();
+    if git::locate(&ctx.env, ctx.fs()).is_none() {
+        warnings.push(format!("git is not on PATH; pushes to {name} need it"));
+    }
+    if auth == GitAuth::Gh && gh::locate(&ctx.env, ctx.fs()).is_none() {
+        warnings.push("the GitHub CLI (gh) is not on PATH".to_owned());
+    }
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
             "added": name,
             "url": url,
             "auth": auth.as_str(),
+            "warnings": warnings
+                .iter()
+                .map(|message| json!({ "code": "tool_not_found", "message": message }))
+                .collect::<Vec<_>>(),
         }));
         return Ok(());
     }
     println!("Added git remote {name} at {url} (auth {}).", auth.as_str());
-    if git::locate(&ctx.env, ctx.fs()).is_none() {
-        eprintln!("warning[tool_not_found]: git is not on PATH; pushes to {name} need it");
+    for message in &warnings {
+        eprintln!("warning[tool_not_found]: {message}");
     }
-    match auth {
-        GitAuth::Gh if gh::locate(&ctx.env, ctx.fs()).is_none() => {
-            eprintln!("warning[tool_not_found]: the GitHub CLI (gh) is not on PATH");
-        }
-        GitAuth::Token => println!(
+    if auth == GitAuth::Token {
+        println!(
             "Next: pipe the token into `{} remote token {name}`.",
             brand::BIN_NAME
-        ),
-        _ => {}
+        );
     }
     Ok(())
 }
@@ -357,6 +366,9 @@ fn token(ctx: &Context, name: &str, clear: bool) -> Result<(), CoreError> {
 }
 
 fn create_github(ctx: &Context, repo: &str, name: &str) -> Result<(), CoreError> {
+    // Checked before gh creates anything, so a bad name leaves no
+    // repository behind.
+    check_name(name)?;
     let mut file = remotes(ctx)?;
     if file.get(name).is_some() {
         return Err(CoreError::new(
@@ -520,11 +532,21 @@ fn push(ctx: &Context, name: Option<&str>) -> Result<u8, CoreError> {
     } else {
         print_pushes(&store, &results);
     }
-    Ok(if results.iter().any(|(_, r)| r.is_err()) {
-        1
-    } else {
-        0
-    })
+    // A push stopped by conflicting changes on the remote is unresolved
+    // (4, SPEC 14); any other failure is 1.
+    let failed = results.iter().filter_map(|(_, r)| r.as_ref().err());
+    Ok(
+        if failed
+            .clone()
+            .any(|err| err.code() == ErrorCode::MergeConflict)
+        {
+            EXIT_UNRESOLVED
+        } else if failed.count() > 0 {
+            1
+        } else {
+            0
+        },
+    )
 }
 
 fn no_remote() -> CoreError {
@@ -673,6 +695,12 @@ fn pull_json(store: &Store<'_>, report: &PullReport) -> Value {
 }
 
 fn print_pull(store: &Store<'_>, report: &PullReport) {
+    for tag in &report.tags_moved {
+        eprintln!(
+            "warning[tag_moved]: {}: tag {tag} now points where the remote's tag of that name does",
+            report.remote
+        );
+    }
     for sibling in &report.siblings {
         let line = match &sibling.outcome {
             Ok(MergeOutcome::UpToDate) => "up to date".to_owned(),

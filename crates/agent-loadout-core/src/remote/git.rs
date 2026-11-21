@@ -24,13 +24,14 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+use crate::brand;
 use crate::env::{Env, Os};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
-use crate::remote::config::{RemoteConfig, RemoteKind};
+use crate::remote::config::{RemoteConfig, RemoteKind, check_name};
 use crate::remote::folder::{PullReport, SiblingPull};
 use crate::store::merge::{MergeOutcome, PendingMerge, RecordedConflict, write_merge_state};
 use crate::store::{CommitId, LOCK_TIMEOUT, Store, StoreLock};
@@ -147,7 +148,7 @@ pub struct RunOutput {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
-    /// Stopped after [`IDLE_TIMEOUT`] without output.
+    /// Stopped after printing nothing for the runner's idle timeout.
     pub timed_out: bool,
 }
 
@@ -193,20 +194,26 @@ impl Runner for SystemRunner {
         let mut stderr = child.stderr.take().expect("piped");
         let (sender, receiver) = mpsc::channel::<String>();
         let out_sender = sender.clone();
+        let stdout_bytes = Arc::new(Mutex::new(Vec::new()));
+        let out_bytes = Arc::clone(&stdout_bytes);
+        // The readers end when every holder of the pipes has exited. A
+        // helper git started (ssh, git-remote-https) can outlive git, so
+        // after a timeout they are left to finish on their own, never
+        // joined.
         let out_thread = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
             let mut buf = [0u8; 4096];
             loop {
                 match stdout.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        bytes.extend_from_slice(&buf[..n]);
+                        if let Ok(mut bytes) = out_bytes.lock() {
+                            bytes.extend_from_slice(&buf[..n]);
+                        }
                         // Output on stdout counts as activity too.
                         let _ = out_sender.send(String::new());
                     }
                 }
             }
-            bytes
         });
         let err_thread = std::thread::spawn(move || {
             let mut line = Vec::new();
@@ -246,22 +253,25 @@ impl Runner for SystemRunner {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     timed_out = true;
-                    let _ = child.kill();
+                    kill_tree(invocation, &mut child);
                     break;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
         let status = child.wait()?;
-        let stdout = out_thread.join().unwrap_or_default();
-        let _ = err_thread.join();
-        // Lines that arrived after a timeout are not needed.
+        if !timed_out {
+            // Both pipes closed: the readers are done.
+            let _ = out_thread.join();
+            let _ = err_thread.join();
+        }
         while let Ok(line) = receiver.try_recv() {
             if !line.is_empty() {
                 stderr_text.push_str(&line);
                 stderr_text.push('\n');
             }
         }
+        let stdout = stdout_bytes.lock().map(|b| b.clone()).unwrap_or_default();
         Ok(RunOutput {
             success: status.success() && !timed_out,
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
@@ -269,6 +279,30 @@ impl Runner for SystemRunner {
             timed_out,
         })
     }
+}
+
+/// Stops `child` and, on Windows, every process it started (Git for
+/// Windows' `git.exe` on `PATH` is a launcher for the real git, which
+/// starts `ssh` or `git-remote-https`): `taskkill /T /F`. Elsewhere the
+/// direct child is killed; its helpers end when their pipes close.
+fn kill_tree(invocation: &Invocation, child: &mut std::process::Child) {
+    if cfg!(windows) {
+        let root = invocation
+            .env
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("SYSTEMROOT"))
+            .map_or_else(
+                || PathBuf::from(r"C:\Windows"),
+                |(_, value)| PathBuf::from(value),
+            );
+        let _ = Command::new(root.join("System32").join("taskkill.exe"))
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
 }
 
 /// How to reach git and, for `auth = token`, this binary.
@@ -308,6 +342,9 @@ pub fn auth_args(
     helper: Option<&Path>,
     os: Os,
 ) -> Result<Vec<OsString>, CoreError> {
+    // The name goes into a shell command line below; `remotes.toml` may
+    // have been edited by hand.
+    check_name(&remote.name)?;
     let helper_flag = |value: String| -> Vec<OsString> {
         vec![
             "-c".into(),
@@ -348,38 +385,89 @@ pub fn auth_args(
 }
 
 fn url(remote: &RemoteConfig) -> Result<&str, CoreError> {
+    check_name(&remote.name)?;
     if remote.kind != RemoteKind::Git {
         return Err(CoreError::new(
             ErrorCode::InvalidValue,
             format!("{} is not a git remote", remote.name),
         ));
     }
-    remote
+    let url = remote
         .url
         .as_deref()
-        .filter(|u| !u.is_empty())
+        .filter(|u| !u.trim().is_empty())
         .ok_or_else(|| {
             CoreError::new(
                 ErrorCode::MissingField,
                 format!("git remote {} has no url", remote.name),
             )
-        })
+        })?;
+    if url.starts_with('-') {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("git remote {} has an invalid url {url:?}", remote.name),
+        ));
+    }
+    Ok(url)
 }
 
+/// Git's repository-local variables (`git rev-parse --local-env-vars`): an
+/// inherited `GIT_DIR` (Loadout run from a git hook) would point the push
+/// at another repository.
+const REPOSITORY_VARS: [&str; 16] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_INTERNAL_SUPER_PREFIX",
+    "GIT_NAMESPACE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+];
+
 fn invocation(store: &Store<'_>, git: &GitCli<'_>, args: Vec<OsString>) -> Invocation {
+    let overridden = |name: &OsStr| {
+        let name = name.to_string_lossy();
+        name.eq_ignore_ascii_case("GIT_TERMINAL_PROMPT")
+            || name.eq_ignore_ascii_case("GIT_WORK_TREE")
+            || name.eq_ignore_ascii_case(brand::HOME_ENV_VAR)
+            || REPOSITORY_VARS
+                .iter()
+                .any(|var| name.eq_ignore_ascii_case(var))
+    };
     let mut env: Vec<(OsString, OsString)> = store
         .env()
         .vars()
         .map(|(name, value)| (OsString::from(name), value.to_owned()))
+        .filter(|(name, _)| !overridden(name))
         .collect();
-    env.retain(|(name, _)| name != OsStr::new("GIT_TERMINAL_PROMPT"));
     env.push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+    // A `loadout git-credential` helper reads this data directory's
+    // remotes, also when it was chosen with `--home`.
+    if let Some(home) = store.root().parent() {
+        env.push((brand::HOME_ENV_VAR.into(), home.as_os_str().to_owned()));
+    }
     Invocation {
         program: git.git.clone(),
         args,
         env,
         cwd: store.root().to_path_buf(),
     }
+}
+
+/// A push refused because the remote has commits this machine lacks.
+fn is_non_fast_forward(output: &RunOutput) -> bool {
+    let lower = output.stderr.to_lowercase();
+    lower.contains("[rejected]")
+        && (lower.contains("non-fast-forward") || lower.contains("fetch first"))
 }
 
 /// Maps a failed git run to an error code by its message
@@ -391,7 +479,7 @@ fn failure(remote: &RemoteConfig, action: &str, output: &RunOutput) -> CoreError
         .lines()
         .map(str::trim)
         .rfind(|line| {
-            line.starts_with("fatal:") || line.starts_with("error:") || line.contains("[rejected]")
+            line.starts_with("fatal:") || line.starts_with("error:") || line.contains("rejected]")
         })
         .or_else(|| {
             output
@@ -405,18 +493,17 @@ fn failure(remote: &RemoteConfig, action: &str, output: &RunOutput) -> CoreError
     let code = if output.timed_out {
         ErrorCode::RemoteUnreachable
     } else if lower.contains("[rejected]")
-        || lower.contains("non-fast-forward")
-        || lower.contains("fetch first")
+        || lower.contains("[remote rejected]")
         || lower.contains("failed to push some refs")
     {
         ErrorCode::RemoteRejected
     } else if lower.contains("authentication failed")
-        || lower.contains("permission denied")
+        || lower.contains("permission denied (publickey")
         || lower.contains("could not read username")
         || lower.contains("could not read password")
         || lower.contains("terminal prompts disabled")
-        || lower.contains("403")
-        || lower.contains("401")
+        || lower.contains("returned error: 401")
+        || lower.contains("returned error: 403")
     {
         ErrorCode::RemoteAuthFailed
     } else {
@@ -424,14 +511,27 @@ fn failure(remote: &RemoteConfig, action: &str, output: &RunOutput) -> CoreError
     };
     let message = if output.timed_out {
         format!(
-            "git {action} to {} printed nothing for {} s and was stopped",
-            remote.name,
-            IDLE_TIMEOUT.as_secs()
+            "git {action} with {} printed nothing for too long and was stopped",
+            remote.name
         )
     } else {
         format!("git {action} with {} failed: {first}", remote.name)
     };
     CoreError::new(code, message)
+}
+
+/// Runs git; only a failure to start it is an error here.
+fn run_raw(
+    store: &Store<'_>,
+    git: &GitCli<'_>,
+    args: Vec<OsString>,
+    progress: &mut dyn FnMut(&str),
+) -> Result<RunOutput, CoreError> {
+    let invocation = invocation(store, git, args);
+    git.runner.run(&invocation, progress).map_err(|err| {
+        CoreError::new(ErrorCode::ToolNotFound, format!("cannot run git: {err}"))
+            .with_path(&git.git)
+    })
 }
 
 fn run(
@@ -442,11 +542,7 @@ fn run(
     args: Vec<OsString>,
     progress: &mut dyn FnMut(&str),
 ) -> Result<RunOutput, CoreError> {
-    let invocation = invocation(store, git, args);
-    let output = git.runner.run(&invocation, progress).map_err(|err| {
-        CoreError::new(ErrorCode::ToolNotFound, format!("cannot run git: {err}"))
-            .with_path(&git.git)
-    })?;
+    let output = run_raw(store, git, args, progress)?;
     if output.success {
         Ok(output)
     } else {
@@ -464,17 +560,25 @@ pub struct GitPush {
 
 /// `git push` of `main` and every tag. A non-fast-forward rejection pulls
 /// (merges) and retries once (SPEC 9.8); a pull with conflicts stops there
-/// with `merge_conflict`.
+/// with `merge_conflict`, and a pull that failed with its own error. Other
+/// rejections (a protected branch, a hook) are `remote_rejected` at once.
 pub fn push(
     store: &Store<'_>,
     git: &GitCli<'_>,
     remote: &RemoteConfig,
     progress: &mut dyn FnMut(&str),
 ) -> Result<GitPush, CoreError> {
-    match push_once(store, git, remote, progress) {
+    match push_once(store, git, remote, progress)? {
         Ok(head) => Ok(GitPush { head, pulled: None }),
-        Err(err) if err.code() == ErrorCode::RemoteRejected => {
+        Err(output) if is_non_fast_forward(&output) => {
             let report = pull(store, git, remote, progress)?;
+            if let Some(err) = report
+                .siblings
+                .iter()
+                .find_map(|s| s.outcome.as_ref().err())
+            {
+                return Err(err.clone());
+            }
             if report.conflicts() > 0 {
                 return Err(CoreError::new(
                     ErrorCode::MergeConflict,
@@ -484,22 +588,25 @@ pub fn push(
                     ),
                 ));
             }
-            let head = push_once(store, git, remote, progress)?;
-            Ok(GitPush {
-                head,
-                pulled: Some(report),
-            })
+            match push_once(store, git, remote, progress)? {
+                Ok(head) => Ok(GitPush {
+                    head,
+                    pulled: Some(report),
+                }),
+                Err(output) => Err(failure(remote, "push", &output)),
+            }
         }
-        Err(err) => Err(err),
+        Err(output) => Err(failure(remote, "push", &output)),
     }
 }
 
+/// One `git push`: the head pushed, or the failed run.
 fn push_once(
     store: &Store<'_>,
     git: &GitCli<'_>,
     remote: &RemoteConfig,
     progress: &mut dyn FnMut(&str),
-) -> Result<CommitId, CoreError> {
+) -> Result<Result<CommitId, RunOutput>, CoreError> {
     let url = url(remote)?;
     let head = store.head()?;
     let mut args = auth_args(remote, git.helper.as_deref(), store.env().os())?;
@@ -507,14 +614,19 @@ fn push_once(
         [
             "push",
             "--progress",
+            "--",
             url,
             "refs/heads/main:refs/heads/main",
             "refs/tags/*:refs/tags/*",
         ]
         .map(OsString::from),
     );
-    run(store, git, remote, "push", args, progress)?;
-    Ok(head)
+    let output = run_raw(store, git, args, progress)?;
+    Ok(if output.success {
+        Ok(head)
+    } else {
+        Err(output)
+    })
 }
 
 /// `git fetch` of `main` into `refs/remotes/<name>/main` and of every tag.
@@ -533,6 +645,7 @@ pub fn fetch(
             "fetch".to_owned(),
             "--progress".to_owned(),
             "--no-write-fetch-head".to_owned(),
+            "--".to_owned(),
             url.to_owned(),
             format!("+refs/heads/main:{tracking}"),
             "+refs/tags/*:refs/tags/*".to_owned(),

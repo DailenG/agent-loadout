@@ -330,6 +330,13 @@ fn create_github_makes_a_private_repository_through_gh() {
         (1, Some("already_exists"))
     );
     assert_eq!(stub.calls().len(), calls);
+    // An invalid remote name is refused before gh creates anything.
+    let (code, doc) = run(&["remote", "create-github", "fresh", "--name", "my remote"]);
+    assert_eq!(
+        (code, doc["error"]["code"].as_str()),
+        (1, Some("invalid_value"))
+    );
+    assert_eq!(stub.calls().len(), calls);
     // auth gh is for GitHub URLs only.
     let (code, doc) = run(&[
         "remote",

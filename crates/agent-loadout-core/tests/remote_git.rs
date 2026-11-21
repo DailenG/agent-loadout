@@ -5,7 +5,7 @@
 
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
 
@@ -323,6 +323,7 @@ fn scp_style_urls_reach_git_unchanged() {
         [
             "push",
             "--progress",
+            "--",
             url,
             "refs/heads/main:refs/heads/main",
             "refs/tags/*:refs/tags/*"
@@ -336,7 +337,8 @@ fn scp_style_urls_reach_git_unchanged() {
     assert!(git::is_github_url("https://github.com/me/store.git"));
     assert!(git::is_github_url("git@github.com:me/store.git"));
 
-    // Failures by message.
+    // Failures by message; only a non-fast-forward rejection pulls and
+    // retries (a protected branch or a hook decline does not).
     for (stderr, code) in [
         (
             "fatal: Could not read from remote repository.",
@@ -349,6 +351,14 @@ fn scp_style_urls_reach_git_unchanged() {
         (
             "fatal: could not read Username for 'https://git.example.com': terminal prompts disabled",
             ErrorCode::RemoteAuthFailed,
+        ),
+        (
+            " ! [remote rejected] main -> main (protected branch hook declined)\nerror: failed to push some refs to 'x'",
+            ErrorCode::RemoteRejected,
+        ),
+        (
+            "fatal: '/srv/403/store.git' does not appear to be a git repository",
+            ErrorCode::RemoteUnreachable,
         ),
     ] {
         let failing = Scripted {
@@ -366,6 +376,103 @@ fn scp_style_urls_reach_git_unchanged() {
         };
         let err = git::push(&store, &cli, &remote, &mut |_| {}).unwrap_err();
         assert_eq!(err.code(), code, "{stderr}");
+        assert_eq!(failing.calls.lock().unwrap().len(), 1, "no retry: {stderr}");
+    }
+}
+
+#[test]
+fn hand_edited_names_and_urls_never_reach_git() {
+    let th = TempHome::new();
+    let fs = th.fs();
+    let env = th.env(host_os());
+    let home = loadout_home(&env, &fs, Some(&th.root().join("lh"))).unwrap();
+    let store = Store::open_or_init(&env, &fs, &home, CLIENT).unwrap();
+    let scripted = Scripted {
+        output: RunOutput {
+            success: true,
+            ..RunOutput::default()
+        },
+        calls: Mutex::new(Vec::new()),
+    };
+    let cli = GitCli {
+        git: PathBuf::from("git"),
+        runner: &scripted,
+        helper: Some(th.root().join("loadout")),
+    };
+    // As `remotes.toml` could hold them after a hand edit.
+    let mut bad_name = RemoteConfig::git("o", "https://git.example.com/s.git", GitAuth::Token);
+    bad_name.name = "o;touch pwned".to_owned();
+    let mut bad_url = RemoteConfig::git("o", "x", GitAuth::System);
+    bad_url.url = Some("--upload-pack=touch pwned".to_owned());
+    for remote in [&bad_name, &bad_url] {
+        let err = git::push(&store, &cli, remote, &mut |_| {}).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::InvalidValue, "{remote:?}");
+        let err = git::pull(&store, &cli, remote, &mut |_| {}).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::InvalidValue, "{remote:?}");
+    }
+    assert!(scripted.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_idle_timeout_stops_git_and_its_helpers() {
+    let th = TempHome::new();
+    let mut env = Vec::new();
+    if let Some(root) = std::env::var_os("SYSTEMROOT") {
+        env.push((OsString::from("SYSTEMROOT"), root));
+    }
+    let invocation = Invocation {
+        program: agent_loadout_testkit::gh_stub::binary(),
+        args: ["--silent-child", "60"].map(OsString::from).to_vec(),
+        env,
+        cwd: th.root().to_path_buf(),
+    };
+    let runner = SystemRunner {
+        idle_timeout: std::time::Duration::from_secs(1),
+    };
+    let started = std::time::Instant::now();
+    let output = runner.run(&invocation, &mut |_| {}).unwrap();
+    assert!(output.timed_out);
+    assert!(!output.success);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "returned after {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn an_inherited_git_dir_never_redirects_a_push() {
+    let Some(world) = World::new("an_inherited_git_dir_never_redirects_a_push") else {
+        return;
+    };
+    // Loadout run from a git hook of another repository.
+    let decoy = world.th.root().join("decoy.git");
+    init_bare(&world.th, &world.git, &decoy);
+    let env = with_git_vars(&world.th, &world.git, world.th.env_builder(host_os()))
+        .hostname("desk-a")
+        .var("GIT_DIR", &decoy)
+        .var("GIT_WORK_TREE", world.th.root())
+        .var("GIT_INDEX_FILE", world.th.root().join("index"))
+        .build();
+    let home = loadout_home(&env, &world.fs, Some(&world.th.root().join("desk-a"))).unwrap();
+    let store = Store::open_or_init(&env, &world.fs, &home, CLIENT).unwrap();
+    edit(&store, "x", "servers/x.toml", server("x", "x-mcp"));
+    let runner = Recording::new();
+    let cli = GitCli {
+        git: world.git.clone(),
+        runner: &runner,
+        helper: None,
+    };
+    git::push(&store, &cli, &world.remote(GitAuth::System), &mut |_| {}).unwrap();
+    let (remote_head, _) = bare_refs(&world.bare).unwrap();
+    assert_eq!(remote_head, store.head().unwrap().to_string());
+    for call in runner.calls() {
+        assert!(
+            !call.env.iter().any(|(name, _)| name == "GIT_DIR"
+                || name == "GIT_WORK_TREE"
+                || name == "GIT_INDEX_FILE"),
+            "{call:?}"
+        );
     }
 }
 
@@ -409,6 +516,15 @@ fn token_auth_uses_the_helper_and_never_passes_the_token() {
         );
     }
     assert_nowhere(&calls, &fake_token());
+    // The helper git starts reads this data directory's remotes, also when
+    // it was chosen with `--home` rather than `LOADOUT_HOME`.
+    for call in &calls {
+        assert!(
+            call.env.iter().any(|(name, value)| name == brand::HOME_ENV_VAR
+                && Path::new(value) == a.home.path),
+            "{call:?}"
+        );
+    }
 
     // The helper's answer: the remote's username (default x-access-token)
     // and the token, for the remote's own protocol and host only.

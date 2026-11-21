@@ -242,14 +242,18 @@ fn not_found(name: &str) -> CoreError {
 }
 
 /// Remote names: 1 to 64 letters, digits, `.`, `_` or `-`, not starting
-/// with `.` or `-`.
+/// with `.` or `-`, and valid in a git ref (`refs/remotes/<name>/main`):
+/// no `..`, no trailing `.`, no `.lock` ending.
 pub fn check_name(name: &str) -> Result<(), CoreError> {
     let valid = !name.is_empty()
         && name.len() <= 64
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-        && !name.starts_with(['.', '-']);
+        && !name.starts_with(['.', '-'])
+        && !name.ends_with('.')
+        && !name.contains("..")
+        && !name.ends_with(".lock");
     if valid {
         Ok(())
     } else {
