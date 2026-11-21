@@ -61,6 +61,8 @@ enum Command {
     Restore(cmd::restore::RestoreArgs),
     /// Commit hand edits of the store and optionally tag the result.
     Backup(cmd::backup::BackupArgs),
+    /// Backup and sync remotes (none by default).
+    Remote(cmd::remote::RemoteArgs),
     /// Import foreign client entries into the store.
     Import(cmd::import::ImportArgs),
     /// Take ownership of foreign or changed client entries.
@@ -131,6 +133,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Tag(args) => done(cmd::tag::run(&context()?, args)),
         Command::Restore(args) => cmd::restore::run(&context()?, args),
         Command::Backup(args) => done(cmd::backup::run(&context()?, args)),
+        Command::Remote(args) => cmd::remote::run(&context()?, args),
         Command::Import(args) => cmd::import::run(&context()?, args),
         Command::Adopt(args) => cmd::adopt::run(&context()?, args),
         Command::Secrets(args) => cmd::secrets::run(&context()?, args),

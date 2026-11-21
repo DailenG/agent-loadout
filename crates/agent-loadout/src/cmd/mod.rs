@@ -9,6 +9,7 @@ pub mod env;
 pub mod exec;
 pub mod history;
 pub mod import;
+pub mod remote;
 pub mod restore;
 pub mod rollback;
 pub mod secrets;
