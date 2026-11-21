@@ -1,0 +1,29 @@
+---
+source: crates/agent-loadout-core/tests/history.rs
+expression: render(&changes)
+---
+secrets: changed (secrets.toml)
+  secrets.GITHUB_PAT.ref: "op://Example Vault/Fake PAT/credential" -> "keyring://loadout/GITHUB_PAT"
+server/github: changed (servers/github.toml)
+  args: ["-y", "@modelcontextprotocol/server-github"] -> ["-y", "@modelcontextprotocol/server-github@2"]
+  env.GITHUB_TOOLSETS: "repos" -> "repos,issues"
+  + tags = ["dev"]
+server/linear: added (servers/linear.toml)
+  + headers.Authorization = "Bearer ${secret:LINEAR_TOKEN}"
+  + id = "linear"
+  + schema = 1
+  + transport = "http"
+  + url = "https://mcp.example.test/mcp"
+server/old: removed (servers/old.toml)
+  - command = "old-mcp"
+  - id = "old"
+  - schema = 1
+  - transport = "stdio"
+skill/review: changed (skills/review/SKILL.md)
+  --- a/skills/review/SKILL.md
+  +++ b/skills/review/SKILL.md
+  @@ -1,3 +1,3 @@
+   # Review
+   
+  -Read the diff.
+  +Read the whole diff.
