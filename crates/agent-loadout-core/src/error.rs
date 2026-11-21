@@ -146,6 +146,14 @@ pub enum ErrorCode {
     /// A pull found fields both sides changed differently (SPEC 9.9). HEAD
     /// is unchanged; `state/merge/MERGE_STATE.json` lists the conflicts.
     MergeConflict,
+    /// A git remote refused the push (not a fast-forward even after the
+    /// pull and one retry, or a protected ref; SPEC 9.8).
+    RemoteRejected,
+    /// A git remote refused the credentials, or none were available.
+    RemoteAuthFailed,
+    /// An external program Loadout needs for this (git, gh) is not
+    /// installed or not on `PATH`.
+    ToolNotFound,
 }
 
 impl ErrorCode {
@@ -199,6 +207,9 @@ impl ErrorCode {
             ErrorCode::RemoteIncomplete => "remote_incomplete",
             ErrorCode::SyncArtifactIgnored => "sync_artifact_ignored",
             ErrorCode::MergeConflict => "merge_conflict",
+            ErrorCode::RemoteRejected => "remote_rejected",
+            ErrorCode::RemoteAuthFailed => "remote_auth_failed",
+            ErrorCode::ToolNotFound => "tool_not_found",
         }
     }
 }

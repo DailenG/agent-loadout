@@ -469,10 +469,11 @@ fn scan_machine_dir(
     Ok(())
 }
 
-/// What pulling one sibling machine did.
+/// What merging one incoming head did: a sibling machine of a folder
+/// remote, or a git remote's `main` (no machine).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SiblingPull {
-    pub machine_id: String,
+    pub machine_id: Option<String>,
     pub label: String,
     /// The merge, or why there was none (`remote_incomplete`).
     pub outcome: Result<MergeOutcome, CoreError>,
@@ -490,6 +491,9 @@ pub struct PullReport {
     pub artifacts: Vec<Artifact>,
     /// Tags created from siblings.
     pub tags_imported: Vec<String>,
+    /// Existing tags a git fetch moved (SPEC 9.6's `+refs/tags/*`); folder
+    /// pulls never move a tag.
+    pub tags_moved: Vec<String>,
 }
 
 impl PullReport {
@@ -525,6 +529,7 @@ pub fn pull(
         siblings: Vec::new(),
         artifacts: listing.artifacts,
         tags_imported: Vec::new(),
+        tags_moved: Vec::new(),
     };
     let mut pending = Vec::new();
     let mut attempted = Vec::new();
@@ -562,7 +567,7 @@ pub fn pull(
             });
         }
         report.siblings.push(SiblingPull {
-            machine_id: sibling.machine_id,
+            machine_id: Some(sibling.machine_id),
             label: sibling.manifest.label,
             outcome,
         });

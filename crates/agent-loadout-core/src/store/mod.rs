@@ -445,6 +445,19 @@ impl<'a> Store<'a> {
         head == oid || self.repo.graph_descendant_of(head, oid).unwrap_or(false)
     }
 
+    /// The commit reference `name` (`refs/remotes/<name>/main`) points at;
+    /// `None` when there is no such reference.
+    pub fn reference_target(&self, name: &str) -> Result<Option<CommitId>, CoreError> {
+        match self.repo.find_reference(name) {
+            Ok(reference) => {
+                let commit = reference.peel_to_commit().map_err(git_error)?;
+                Ok(Some(CommitId::from_oid(commit.id())))
+            }
+            Err(err) if err.code() == git2::ErrorCode::NotFound => Ok(None),
+            Err(err) => Err(git_error(err)),
+        }
+    }
+
     /// The environment the store was opened with.
     pub fn env(&self) -> &Env {
         &self.env

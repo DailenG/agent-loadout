@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::model::SCHEMA_VERSION;
+use crate::remote::git::GitAuth;
 
 /// The file in `state/`.
 pub const REMOTES_FILE: &str = "remotes.toml";
@@ -117,6 +118,24 @@ impl RemoteConfig {
             username: None,
             push: Some("on-commit".to_owned()),
             pull: Some("manual".to_owned()),
+            extra: toml::Table::new(),
+        }
+    }
+
+    /// A git remote at `url` (SPEC 9.6 example: push on commit, pull on
+    /// start).
+    pub fn git(name: &str, url: &str, auth: GitAuth) -> Self {
+        Self {
+            name: name.to_owned(),
+            kind: RemoteKind::Git,
+            path: None,
+            mode: None,
+            keep: None,
+            url: Some(url.to_owned()),
+            auth: Some(auth.as_str().to_owned()),
+            username: None,
+            push: Some("on-commit".to_owned()),
+            pull: Some("on-start".to_owned()),
             extra: toml::Table::new(),
         }
     }
