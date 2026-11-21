@@ -54,7 +54,7 @@ pub fn run(ctx: &Context, args: &HistoryArgs) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn entry_json(entry: &LogEntry) -> Value {
+pub fn entry_json(entry: &LogEntry) -> Value {
     let trailers = &entry.trailers;
     json!({
         "id": entry.id.as_str(),

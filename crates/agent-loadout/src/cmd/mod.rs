@@ -3,15 +3,19 @@
 
 pub mod adopt;
 pub mod apply;
+pub mod backup;
 pub mod diff;
 pub mod env;
 pub mod exec;
 pub mod history;
 pub mod import;
+pub mod restore;
 pub mod rollback;
 pub mod secrets;
 pub mod server;
+pub mod show;
 pub mod status;
+pub mod tag;
 
 use std::path::Path;
 
@@ -106,6 +110,16 @@ impl Context {
         }
         Store::open_or_init(&self.env, self.fs(), &self.home, &client_name())
     }
+}
+
+/// The store, or `not_found` (`there is no store yet, so <what>`).
+pub fn require_store(ctx: &Context, what: &str) -> Result<Store<'static>, CoreError> {
+    ctx.open_store()?.ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::NotFound,
+            format!("there is no store yet, so {what}"),
+        )
+    })
 }
 
 /// `Loadout-Client` trailer value: `loadout-cli/<version>`.

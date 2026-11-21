@@ -53,6 +53,14 @@ enum Command {
     Apply(cmd::apply::ApplyArgs),
     /// Roll back an apply run.
     Rollback(cmd::rollback::RollbackArgs),
+    /// Show one store commit and what it changed.
+    Show(cmd::show::ShowArgs),
+    /// Create, list or delete store tags.
+    Tag(cmd::tag::TagArgs),
+    /// Restore the store (or client files) from an earlier state.
+    Restore(cmd::restore::RestoreArgs),
+    /// Commit hand edits of the store and optionally tag the result.
+    Backup(cmd::backup::BackupArgs),
     /// Import foreign client entries into the store.
     Import(cmd::import::ImportArgs),
     /// Take ownership of foreign or changed client entries.
@@ -119,6 +127,10 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Diff(args) => cmd::diff::run(&context()?, args),
         Command::Apply(args) => cmd::apply::run(&context()?, args),
         Command::Rollback(args) => cmd::rollback::run(&context()?, args),
+        Command::Show(args) => done(cmd::show::run(&context()?, args)),
+        Command::Tag(args) => done(cmd::tag::run(&context()?, args)),
+        Command::Restore(args) => cmd::restore::run(&context()?, args),
+        Command::Backup(args) => done(cmd::backup::run(&context()?, args)),
         Command::Import(args) => cmd::import::run(&context()?, args),
         Command::Adopt(args) => cmd::adopt::run(&context()?, args),
         Command::Secrets(args) => cmd::secrets::run(&context()?, args),
