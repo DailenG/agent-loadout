@@ -14,6 +14,7 @@ pub mod formats;
 pub mod fs;
 pub mod model;
 pub mod paths;
+pub mod remote;
 pub mod secrets;
 pub mod store;
 

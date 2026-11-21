@@ -40,6 +40,11 @@ windows-permissions = "0.2"
 # Job Objects for `loadout exec` on Windows (SPEC 11.5): a safe wrapper, so
 # the workspace keeps `unsafe_code = "forbid"`.
 win32job = "2"
+# Archive folder remotes and `restore --from <zip>` (SPEC 9.6). Deflate
+# only, through flate2's pure Rust miniz_oxide backend (MIT/Apache); the
+# other zip codecs are left out.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
