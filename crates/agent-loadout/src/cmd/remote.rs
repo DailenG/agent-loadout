@@ -284,7 +284,16 @@ fn pull(ctx: &Context, name: Option<&str>) -> Result<u8, CoreError> {
     let conflicts = reports
         .iter()
         .any(|(_, r)| r.as_ref().is_ok_and(|r| r.conflicts() > 0));
-    let failed = reports.iter().any(|(_, r)| r.is_err());
+    // A remote that failed, or a machine whose merge failed for another
+    // reason than objects still on their way (`remote_incomplete`).
+    let failed = reports.iter().any(|(_, r)| match r {
+        Err(_) => true,
+        Ok(report) => report.siblings.iter().any(|s| {
+            s.outcome
+                .as_ref()
+                .is_err_and(|err| err.code() != ErrorCode::RemoteIncomplete)
+        }),
+    });
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,

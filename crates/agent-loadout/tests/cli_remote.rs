@@ -232,12 +232,40 @@ fn pull_conflicts_exit_4_and_leave_head_alone() {
         "command"
     );
     assert_eq!(cli.head("a"), head);
+    let state = cli
+        .home("a")
+        .join("state")
+        .join("merge")
+        .join("MERGE_STATE.json");
+    assert!(state.exists());
+
+    // The same conflict through `restore --from` B's subfolder is recorded
+    // too, next to the pull's.
+    let listed = cli.ok("a", &["remote", "machines", "share"]);
+    let b_dir = listed["machines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["head"] == cli.head("b"))
+        .unwrap()["dir"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (code, doc) = cli.json("a", &["restore", "--from", &b_dir]);
+    assert_eq!(code, 4, "{doc:#}");
+    assert_eq!(doc["outcome"], "conflicts");
+    assert_eq!(cli.head("a"), head);
+    let recorded: Value = serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
+    let sources: Vec<&str> = recorded["merges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources.len(), 2, "{sources:?}");
     assert!(
-        cli.home("a")
-            .join("state")
-            .join("merge")
-            .join("MERGE_STATE.json")
-            .exists()
+        sources.iter().any(|s| s.starts_with("restore/")),
+        "{sources:?}"
     );
 }
 

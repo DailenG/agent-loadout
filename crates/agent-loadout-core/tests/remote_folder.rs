@@ -258,12 +258,138 @@ fn conflicts_leave_head_alone_and_are_recorded_outside_the_store() {
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
     assert_eq!(recorded["merges"][0]["conflicts"][0]["field"], "command");
     assert!(!a.home.store_dir().join("merge").exists());
+
+    // Another remote without conflicts keeps them; so does the same remote
+    // while the sibling's objects are on their way.
+    let other = world.th.root().join("usb");
+    std::fs::create_dir_all(&other).unwrap();
+    let usb = RemoteConfig::folder("usb", &other.to_string_lossy(), FolderMode::RepoPerMachine);
+    folder::pull(&store_a, &usb, &NoUnc).unwrap();
+    assert!(state.exists(), "another remote's pull keeps the conflicts");
+    let newer = edit(&store_b, "b2", &[("servers/y.toml", server("y", "y-mcp"))]);
+    let dir_b = world.machine_dir(&store_b);
+    let mut manifest = MachineManifest::load(&world.fs, &dir_b).unwrap();
+    manifest.head = Some(newer.to_string());
+    manifest.write(&world.fs, &dir_b).unwrap();
+    let pulled = folder::pull(&store_a, &config, &NoUnc).unwrap();
+    assert_eq!(
+        pulled.siblings[0].outcome.as_ref().unwrap_err().code(),
+        ErrorCode::RemoteIncomplete
+    );
+    assert!(state.exists(), "an incomplete sibling keeps its conflicts");
     // Local work goes on.
     edit(
         &store_a,
         "more",
         &[("servers/w.toml", server("w", "w-mcp"))],
     );
+}
+
+#[test]
+fn a_failed_bootstrap_leaves_nothing_and_a_retry_works() {
+    let world = World::new();
+    let config = world.config(FolderMode::RepoPerMachine);
+    let a = world.machine("desk-a", 0);
+    let store_a = world.store(&a);
+    edit(&store_a, "x", &[("servers/x.toml", server("x", "x-mcp"))]);
+    folder::push(&store_a, &config, &NoUnc, "0.0.0").unwrap();
+    let dir_a = world.machine_dir(&store_a);
+    // The manifest names a commit whose objects have not arrived.
+    let newer = edit(&store_a, "y", &[("servers/y.toml", server("y", "y-mcp"))]);
+    let pushed = MachineManifest::load(&world.fs, &dir_a).unwrap();
+    let mut early = pushed.clone();
+    early.head = Some(newer.to_string());
+    early.write(&world.fs, &dir_a).unwrap();
+
+    let b = world.machine("desk-b", 0);
+    let SourceChoice::One {
+        source: Source::Repo { bare, head, tags },
+        ..
+    } = folder::open_source(&world.fs, &dir_a, None).unwrap()
+    else {
+        panic!("a repository source");
+    };
+    let err =
+        Store::init_from_bare(&b.env, &world.fs, &b.home, CLIENT, &bare, &head, &tags).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::RemoteIncomplete);
+    assert!(!b.home.store_dir().exists(), "nothing left behind");
+    assert!(
+        Store::open(&b.env, &world.fs, &b.home, CLIENT)
+            .unwrap()
+            .is_none()
+    );
+
+    // The objects arrive: the retry works.
+    folder::push(&store_a, &config, &NoUnc, "0.0.0").unwrap();
+    let store_b = bootstrap(&world, &b, &dir_a);
+    assert_eq!(store_b.head().unwrap(), newer);
+
+    // A store folder holding other files is never bootstrapped into.
+    let c = world.machine("desk-c", 0);
+    std::fs::create_dir_all(c.home.store_dir()).unwrap();
+    std::fs::write(c.home.store_dir().join("notes.txt"), "mine").unwrap();
+    let SourceChoice::One {
+        source: Source::Repo { bare, head, tags },
+        ..
+    } = folder::open_source(&world.fs, &dir_a, None).unwrap()
+    else {
+        panic!("a repository source");
+    };
+    let err =
+        Store::init_from_bare(&c.env, &world.fs, &c.home, CLIENT, &bare, &head, &tags).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::AlreadyExists);
+    assert_eq!(
+        std::fs::read_to_string(c.home.store_dir().join("notes.txt")).unwrap(),
+        "mine"
+    );
+}
+
+#[test]
+fn a_switch_to_mirror_leaves_the_old_repository_unused() {
+    let world = World::new();
+    let a = world.machine("desk-a", 0);
+    let store_a = world.store(&a);
+    edit(&store_a, "x", &[("servers/x.toml", server("x", "x-mcp"))]);
+    folder::push(
+        &store_a,
+        &world.config(FolderMode::RepoPerMachine),
+        &NoUnc,
+        "0.0.0",
+    )
+    .unwrap();
+    let dir_a = world.machine_dir(&store_a);
+    let b = world.machine("desk-b", 0);
+    let store_b = bootstrap(&world, &b, &dir_a);
+    let b_config = world.config(FolderMode::RepoPerMachine);
+    folder::push(&store_b, &b_config, &NoUnc, "0.0.0").unwrap();
+
+    // A now pushes a mirror to the same folder; its store.git stays, stale.
+    edit(&store_a, "y", &[("servers/y.toml", server("y", "y-mcp"))]);
+    folder::push(&store_a, &world.config(FolderMode::Mirror), &NoUnc, "0.0.0").unwrap();
+    assert!(dir_a.join("store.git").is_dir());
+    let pulled = folder::pull(&store_b, &b_config, &NoUnc).unwrap();
+    assert!(pulled.siblings.is_empty(), "{:?}", pulled.siblings);
+    let SourceChoice::One { source, .. } = folder::open_source(&world.fs, &dir_a, None).unwrap()
+    else {
+        panic!();
+    };
+    assert!(matches!(source, Source::Mirror { .. }), "{source:?}");
+}
+
+#[test]
+fn a_store_folder_lists_its_machines() {
+    let world = World::new();
+    let config = world.config(FolderMode::RepoPerMachine);
+    let a = world.machine("desk-a", 0);
+    let store_a = world.store(&a);
+    folder::push(&store_a, &config, &NoUnc, "0.0.0").unwrap();
+    let store_folder = world.remote.join(store_a.store_id());
+    let SourceChoice::One { machine, .. } =
+        folder::open_source(&world.fs, &store_folder, None).unwrap()
+    else {
+        panic!("one machine");
+    };
+    assert_eq!(machine.unwrap().manifest.label, "desk-a");
 }
 
 #[test]
@@ -534,8 +660,27 @@ fn mirror_and_archive_exports_restore_new_machines() {
         panic!();
     };
     assert!(matches!(source, Source::Mirror { .. }));
-    let files = folder::export_files(&world.fs, &source).unwrap();
+    // A sync tool's files inside `latest/` are not store files.
+    let latest = pushed.dir.join("latest");
+    std::fs::write(latest.join("desktop.ini"), "[.ShellClassInfo]\n").unwrap();
+    std::fs::write(
+        latest
+            .join("servers")
+            .join("x (conflicted copy 2026-01-01).toml"),
+        server("x", "stale"),
+    )
+    .unwrap();
+    let export = folder::export_files(&world.fs, &source).unwrap();
+    let files = export.files;
     assert!(!files.contains_key("EXPORT.json"));
+    assert!(
+        !files
+            .keys()
+            .any(|f| f.contains("desktop.ini") || f.contains("conflicted"))
+    );
+    let mut tools: Vec<&str> = export.artifacts.iter().map(|a| a.tool).collect();
+    tools.sort_unstable();
+    assert_eq!(tools, ["Dropbox", "OS"]);
     let c = world.machine("desk-c", 0);
     let store_c =
         Store::init_from_files(&c.env, &world.fs, &c.home, CLIENT, files, "restore: mirror")
@@ -568,7 +713,7 @@ fn mirror_and_archive_exports_restore_new_machines() {
     let source = Source::Zip {
         file: dir.join("archives").join(&names[2]),
     };
-    let files = folder::export_files(&world.fs, &source).unwrap();
+    let files = folder::export_files(&world.fs, &source).unwrap().files;
     assert_eq!(
         String::from_utf8(files["servers/x.toml"].clone()).unwrap(),
         server("x", "x-mcp-3")

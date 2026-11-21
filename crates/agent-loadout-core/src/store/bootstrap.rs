@@ -267,7 +267,9 @@ impl Store<'_> {
 
     /// A new store in `home` holding the history of `head` from the bare
     /// repository `bare` (another machine's `store.git`). The working tree
-    /// is checked out; this machine gets its own identity.
+    /// is checked out; this machine gets its own identity. On failure
+    /// nothing is left behind, so a retry (after `remote_incomplete`)
+    /// starts over.
     pub fn init_from_bare<'a>(
         env: &Env,
         fs: &'a dyn Fs,
@@ -279,34 +281,43 @@ impl Store<'_> {
     ) -> Result<Store<'a>, CoreError> {
         let source = open_bare(bare)?;
         let head_oid = parse_oid(head)?;
-        let (repo, state_dir, _lock) = create_repo(fs, home)?;
-        let mut starts = vec![head_oid];
-        starts.extend(tags.values().filter_map(|oid| Oid::from_str(oid).ok()));
-        copy_reachable(&source, &repo, &starts).map_err(|missing| incomplete(bare, missing))?;
-        repo.reference(&format!("refs/heads/{BRANCH}"), head_oid, true, "restore")
-            .map_err(git_error)?;
-        let identity = identity_at(&repo, head_oid)?;
-        Machine::load_or_create(env, fs, &state_dir)?;
-        let store = Store::from_parts(env, fs, home, client, repo, identity)?;
-        store.import_tags(tags)?;
-        let files = store.files_at(&CommitId::from_oid(head_oid))?;
-        let changes: Changes = files.into_iter().map(|(k, v)| (k, Some(v))).collect();
-        store.write_worktree(&changes)?;
-        {
-            let tree = store
-                .repo
-                .find_commit(head_oid)
-                .and_then(|commit| commit.tree())
+        let (repo, state_dir, lock) = create_repo(fs, home)?;
+        let built = (|| {
+            let mut starts = vec![head_oid];
+            starts.extend(tags.values().filter_map(|oid| Oid::from_str(oid).ok()));
+            copy_reachable(&source, &repo, &starts).map_err(|missing| incomplete(bare, missing))?;
+            // Not a Loadout store: refused before any ref points at it.
+            let identity = identity_at(&repo, head_oid)?;
+            repo.reference(&format!("refs/heads/{BRANCH}"), head_oid, true, "restore")
                 .map_err(git_error)?;
-            let mut index = store.repo.index().map_err(git_error)?;
-            index.read_tree(&tree).map_err(git_error)?;
-            index.write().map_err(git_error)?;
+            Machine::load_or_create(env, fs, &state_dir)?;
+            let store = Store::from_parts(env, fs, home, client, repo, identity)?;
+            store.import_tags(tags)?;
+            let files = store.files_at(&CommitId::from_oid(head_oid))?;
+            let changes: Changes = files.into_iter().map(|(k, v)| (k, Some(v))).collect();
+            store.write_worktree(&changes)?;
+            {
+                let tree = store
+                    .repo
+                    .find_commit(head_oid)
+                    .and_then(|commit| commit.tree())
+                    .map_err(git_error)?;
+                let mut index = store.repo.index().map_err(git_error)?;
+                index.read_tree(&tree).map_err(git_error)?;
+                index.write().map_err(git_error)?;
+            }
+            Ok(store)
+        })();
+        if built.is_err() {
+            discard_repo(fs, home);
         }
-        Ok(store)
+        drop(lock);
+        built
     }
 
     /// A new store in `home` whose first commit holds `files` (an exported
     /// tree: a mirror or a zip). The store identity is the one in `files`.
+    /// On failure (validation, the leak scan) nothing is left behind.
     pub fn init_from_files<'a>(
         env: &Env,
         fs: &'a dyn Fs,
@@ -329,17 +340,25 @@ impl Store<'_> {
             .into_value();
         ids::check(IdKind::Store, &identity.store_id)?;
         let (repo, state_dir, lock) = create_repo(fs, home)?;
-        let machine = Machine::load_or_create(env, fs, &state_dir)?;
-        let store = Store::from_parts(env, fs, home, client, repo, identity)?;
-        let changes: Changes = files.into_iter().map(|(k, v)| (k, Some(v))).collect();
-        store.commit_changes(&machine, &Operation::new("store.restore", summary), changes)?;
+        let built = (|| {
+            let machine = Machine::load_or_create(env, fs, &state_dir)?;
+            let store = Store::from_parts(env, fs, home, client, repo, identity)?;
+            let changes: Changes = files.into_iter().map(|(k, v)| (k, Some(v))).collect();
+            store.commit_changes(&machine, &Operation::new("store.restore", summary), changes)?;
+            Ok(store)
+        })();
+        if built.is_err() {
+            discard_repo(fs, home);
+        }
         drop(lock);
-        Ok(store)
+        built
     }
 }
 
 /// An empty, non-bare repository on `main` in `home`'s store folder,
-/// with the lock held. Fails with `already_exists` when a store is there.
+/// with the lock held. Fails with `already_exists` when a store is there,
+/// or when the folder holds other files. A repository without any ref (a
+/// bootstrap that was cut off) is started over.
 fn create_repo(
     fs: &dyn Fs,
     home: &LoadoutHome,
@@ -347,11 +366,29 @@ fn create_repo(
     let state_dir = home.state_dir();
     let lock = StoreLock::acquire(fs, &state_dir, LOCK_TIMEOUT)?;
     let root = home.store_dir();
-    if fs.exists(&root.join(".git")) {
-        return Err(
-            CoreError::new(ErrorCode::AlreadyExists, "a store exists here already")
-                .with_path(&root),
-        );
+    let dot_git = root.join(".git");
+    if fs.exists(&dot_git) {
+        let unborn = Repository::open(&root).is_ok_and(|repo| {
+            repo.head().is_err()
+                && repo
+                    .references()
+                    .is_ok_and(|mut refs| refs.next().is_none())
+        });
+        if !unborn {
+            return Err(
+                CoreError::new(ErrorCode::AlreadyExists, "a store exists here already")
+                    .with_path(&root),
+            );
+        }
+        fs.remove_dir_all(&dot_git)
+            .map_err(|err| io_error("cannot remove directory", &dot_git, &err))?;
+    }
+    if fs.read_dir(&root).is_ok_and(|entries| !entries.is_empty()) {
+        return Err(CoreError::new(
+            ErrorCode::AlreadyExists,
+            "the store folder holds files but no store; move them away first",
+        )
+        .with_path(&root));
     }
     fs.create_dir_all(&root)
         .map_err(|err| io_error("cannot create directory", &root, &err))?;
@@ -364,6 +401,12 @@ fn create_repo(
         .initial_head(BRANCH);
     let repo = Repository::init_opts(&root, &options).map_err(git_error)?;
     Ok((repo, state_dir, lock))
+}
+
+/// Removes the store folder a failed bootstrap filled. `create_repo` only
+/// proceeds into an absent or empty folder, so nothing else is in it.
+fn discard_repo(fs: &dyn Fs, home: &LoadoutHome) {
+    let _ = fs.remove_dir_all(&home.store_dir());
 }
 
 /// The store identity in `loadout.toml` of commit `oid`.

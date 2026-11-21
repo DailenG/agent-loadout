@@ -186,7 +186,7 @@ fn write_mirror(
         EXPORT_FILE.to_owned(),
         export_info(store, head, machine_id)?,
     );
-    for (relative, bytes) in &files {
+    let written = files.iter().try_for_each(|(relative, bytes)| {
         let path = relative
             .split('/')
             .fold(temp.clone(), |path, part| path.join(part));
@@ -195,16 +195,31 @@ fn write_mirror(
                 .map_err(|err| io("cannot create directory", parent, &err))?;
         }
         fs.write(&path, bytes)
-            .map_err(|err| io("cannot write file", &path, &err))?;
+            .map_err(|err| io("cannot write file", &path, &err))
+    });
+    // Nothing of a failed push stays behind in the synced folder.
+    let discard = || {
+        let _ = fs.remove_dir_all(&temp);
+    };
+    if let Err(err) = written {
+        discard();
+        return Err(err);
     }
     let latest = dir.join(LATEST);
     let old = dir.join(format!(".{LATEST}.loadout-{tag}.old"));
-    if fs.exists(&latest) {
-        fs.replace(&latest, &old)
-            .map_err(|err| io("cannot move the old mirror", &latest, &err))?;
+    if fs.exists(&latest)
+        && let Err(err) = fs.replace(&latest, &old)
+    {
+        discard();
+        return Err(io("cannot move the old mirror", &latest, &err));
     }
-    fs.replace(&temp, &latest)
-        .map_err(|err| io("cannot move the mirror in place", &latest, &err))?;
+    if let Err(err) = fs.replace(&temp, &latest) {
+        if fs.exists(&old) {
+            let _ = fs.replace(&old, &latest);
+        }
+        discard();
+        return Err(io("cannot move the mirror in place", &latest, &err));
+    }
     if fs.exists(&old) {
         let _ = fs.remove_dir_all(&old);
     }
@@ -308,8 +323,14 @@ pub struct MachineEntry {
 }
 
 impl MachineEntry {
+    /// Whether the machine's latest push was `repo-per-machine`: a
+    /// `store.git` left from before a switch to `mirror` or `archive` does
+    /// not hold the head the manifest names.
     pub fn has_repo(&self, fs: &dyn Fs) -> bool {
-        self.manifest.head.is_some() && fs.is_dir(&self.dir.join(STORE_GIT))
+        self.manifest.head.is_some()
+            && self.manifest.mirror.is_none()
+            && self.manifest.archives.is_empty()
+            && fs.is_dir(&self.dir.join(STORE_GIT))
     }
 }
 
@@ -334,7 +355,11 @@ pub fn list(fs: &dyn Fs, root: &Path, store_id: Option<&str>) -> Result<Listing,
         if store_id.is_some_and(|id| id != name) {
             continue;
         }
-        for machine_dir in read_dir(fs, &store_dir)? {
+        // A folder a sync tool or its owner removes meanwhile is skipped.
+        let Ok(machine_dirs) = fs.read_dir(&store_dir) else {
+            continue;
+        };
+        for machine_dir in machine_dirs {
             let machine = file_name(&machine_dir);
             if !fs.is_dir(&machine_dir) || !ids::is_valid(IdKind::Machine, &machine) {
                 report(&mut listing, &machine_dir, &machine);
@@ -394,7 +419,10 @@ fn scan_machine_dir(
 ) -> Result<(), CoreError> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
-        for path in read_dir(fs, &current)? {
+        let Ok(entries) = fs.read_dir(&current) else {
+            continue;
+        };
+        for path in entries {
             let name = file_name(&path);
             report(listing, &path, &name);
             if fs.is_dir(&path) {
@@ -408,7 +436,10 @@ fn scan_machine_dir(
     }
     let mut stack = vec![refs.clone()];
     while let Some(current) = stack.pop() {
-        for path in read_dir(fs, &current)? {
+        let Ok(entries) = fs.read_dir(&current) else {
+            continue;
+        };
+        for path in entries {
             if fs.is_dir(&path) {
                 stack.push(path);
                 continue;
@@ -496,10 +527,12 @@ pub fn pull(
         tags_imported: Vec::new(),
     };
     let mut pending = Vec::new();
+    let mut attempted = Vec::new();
     for sibling in listing.machines {
         if sibling.machine_id == machine.id || !sibling.has_repo(fs) {
             continue;
         }
+        let source = format!("{}/{}", remote.name, sibling.machine_id);
         let head = sibling.manifest.head.clone().expect("has_repo checks it");
         let bare = sibling.dir.join(STORE_GIT);
         let mut ids: Vec<String> = vec![head.clone()];
@@ -515,9 +548,14 @@ pub fn pull(
             let label = format!("{}/{}", remote.name, sibling.manifest.label);
             store.merge_incoming(&incoming, &label)
         });
+        // A sibling that did not merge this time (incomplete, or an
+        // error) keeps the conflicts recorded for it before.
+        if outcome.is_ok() {
+            attempted.push(source.clone());
+        }
         if let Ok(MergeOutcome::Conflicts { base, conflicts }) = &outcome {
             pending.push(PendingMerge {
-                source: format!("{}/{}", remote.name, sibling.machine_id),
+                source,
                 incoming: head.clone(),
                 base: base.as_ref().map(ToString::to_string),
                 conflicts: conflicts.iter().map(RecordedConflict::from).collect(),
@@ -529,7 +567,7 @@ pub fn pull(
             outcome,
         });
     }
-    write_merge_state(fs, store.state_dir(), &pending)?;
+    write_merge_state(fs, store.state_dir(), &attempted, &pending)?;
     report.head_after = store.head()?;
     Ok(report)
 }
@@ -631,7 +669,12 @@ pub fn open_source(
             machine: Some(Box::new(entry)),
         });
     }
-    let listing = list(fs, path, None)?;
+    // A store folder (`<root>/<store_id>`): its machines.
+    let name = file_name(path);
+    let listing = match path.parent() {
+        Some(parent) if ids::is_valid(IdKind::Store, &name) => list(fs, parent, Some(&name))?,
+        _ => list(fs, path, None)?,
+    };
     let mut candidates = listing.machines;
     if let Some(wanted) = machine {
         let by_id: Vec<MachineEntry> = candidates
@@ -707,13 +750,25 @@ fn machine_source(fs: &dyn Fs, entry: &MachineEntry) -> Option<Source> {
 }
 
 /// The store files of an exported tree (mirror or zip), without
-/// `EXPORT.json`. Paths that are not plain store-relative paths (absolute,
-/// `..`, `.git`) are refused (zip-slip).
-pub fn export_files(fs: &dyn Fs, source: &Source) -> Result<Files, CoreError> {
-    let mut files = Files::new();
-    let mut add = |name: String, bytes: Vec<u8>| -> Result<(), CoreError> {
+/// `EXPORT.json`, and the sync tool artifacts skipped on the way (a
+/// `desktop.ini` or a conflicted copy in `latest/` is not a store file).
+/// Paths that are not plain store-relative paths (absolute, `..`, `.git`)
+/// are refused (zip-slip).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Export {
+    pub files: Files,
+    pub artifacts: Vec<Artifact>,
+}
+
+pub fn export_files(fs: &dyn Fs, source: &Source) -> Result<Export, CoreError> {
+    let mut export = Export::default();
+    let mut add = |name: String, bytes: Vec<u8>, origin: PathBuf| -> Result<(), CoreError> {
         let name = name.replace('\\', "/");
         if name == EXPORT_FILE || name.ends_with('/') {
+            return Ok(());
+        }
+        if let Some(tool) = name.split('/').find_map(artifact_tool) {
+            export.artifacts.push(Artifact { path: origin, tool });
             return Ok(());
         }
         let plain = !name.is_empty()
@@ -728,7 +783,7 @@ pub fn export_files(fs: &dyn Fs, source: &Source) -> Result<Files, CoreError> {
                 format!("the export holds a path outside the store: {name:?}"),
             ));
         }
-        files.insert(name, bytes);
+        export.files.insert(name, bytes);
         Ok(())
     };
     match source {
@@ -750,7 +805,7 @@ pub fn export_files(fs: &dyn Fs, source: &Source) -> Result<Files, CoreError> {
                     let bytes = fs
                         .read(&path)
                         .map_err(|err| io("cannot read file", &path, &err))?;
-                    add(relative, bytes)?;
+                    add(relative, bytes, path)?;
                 }
             }
         }
@@ -774,7 +829,8 @@ pub fn export_files(fs: &dyn Fs, source: &Source) -> Result<Files, CoreError> {
                 entry
                     .read_to_end(&mut content)
                     .map_err(|err| io("cannot read the zip", file, &err))?;
-                add(name, content)?;
+                let origin = file.join(&name);
+                add(name, content, origin)?;
             }
         }
         Source::Repo { .. } => {
@@ -784,5 +840,5 @@ pub fn export_files(fs: &dyn Fs, source: &Source) -> Result<Files, CoreError> {
             ));
         }
     }
-    Ok(files)
+    Ok(export)
 }

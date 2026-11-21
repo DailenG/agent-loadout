@@ -503,14 +503,16 @@ impl Store<'_> {
     }
 }
 
-/// `state/merge/MERGE_STATE.json`: the conflicts of the last pull, local
-/// only (never in the store), so a sync tool never loops on them.
+/// `state/merge/MERGE_STATE.json`: the conflicts of the latest merge of
+/// each source, local only (never in the store), so a sync tool never
+/// loops on them.
 pub const MERGE_STATE: &str = "MERGE_STATE.json";
 
 /// One incoming head that did not merge.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PendingMerge {
-    /// `<remote>/<machine-id>`.
+    /// `<remote>/<machine-id>` (folder), `<remote>` (git) or
+    /// `restore/<source>`.
     pub source: String,
     pub incoming: String,
     pub base: Option<String>,
@@ -538,16 +540,35 @@ impl From<&Conflict> for RecordedConflict {
     }
 }
 
-/// Writes the pending merges of a pull to `state/merge/`, or removes the
-/// file when there are none.
+/// The merges recorded in `state/merge/`; none when the file is absent or
+/// unreadable.
+pub fn read_merge_state(fs: &dyn Fs, state_dir: &Path) -> Vec<PendingMerge> {
+    #[derive(serde::Deserialize)]
+    struct State {
+        merges: Vec<PendingMerge>,
+    }
+    fs.read_to_string(&state_dir.join("merge").join(MERGE_STATE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<State>(&text).ok())
+        .map(|state| state.merges)
+        .unwrap_or_default()
+}
+
+/// Records the outcome of merging from the sources in `attempted`: their
+/// earlier entries are replaced by `pending` (the ones that conflicted
+/// this time); entries of other sources stay. The file is removed when no
+/// entry is left.
 pub fn write_merge_state(
     fs: &dyn Fs,
     state_dir: &Path,
+    attempted: &[String],
     pending: &[PendingMerge],
 ) -> Result<(), CoreError> {
-    let dir = state_dir.join("merge");
-    let path = dir.join(MERGE_STATE);
-    if pending.is_empty() {
+    let path = state_dir.join("merge").join(MERGE_STATE);
+    let mut merges = read_merge_state(fs, state_dir);
+    merges.retain(|merge| !attempted.contains(&merge.source));
+    merges.extend(pending.iter().cloned());
+    if merges.is_empty() {
         if fs.exists(&path) {
             fs.remove_file(&path)
                 .map_err(|err| io_error("cannot remove file", &path, &err))?;
@@ -556,7 +577,7 @@ pub fn write_merge_state(
     }
     let text = serde_json::to_string_pretty(&serde_json::json!({
         "schema": 1,
-        "merges": pending,
+        "merges": merges,
     }))
     .expect("merge state serializes");
     crate::apply::write_atomic(fs, &path, text.as_bytes())

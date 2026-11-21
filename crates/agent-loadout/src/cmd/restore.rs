@@ -16,7 +16,9 @@ use std::path::{Path, PathBuf};
 use agent_loadout_core::apply::{self, ApplyRequest, PlanOptions};
 use agent_loadout_core::model::applied::ApplyTrigger;
 use agent_loadout_core::remote::folder::{self, Source, SourceChoice};
-use agent_loadout_core::store::merge::MergeOutcome;
+use agent_loadout_core::store::merge::{
+    MergeOutcome, PendingMerge, RecordedConflict, write_merge_state,
+};
 use agent_loadout_core::store::restore::{
     self, FileOutcome, FileRestore, RestoreReport, RestoreRequest,
 };
@@ -122,8 +124,15 @@ fn from(ctx: &Context, path: &Path, machine: Option<&str>, apply: bool) -> Resul
     let (source_store_id, files) = match &source {
         Source::Repo { bare, head, .. } => (bare_store_id(bare, head), None),
         export => {
-            let files = folder::export_files(fs, export)?;
-            (export_store_id(&files), Some(files))
+            let export = folder::export_files(fs, export)?;
+            for artifact in &export.artifacts {
+                eprintln!(
+                    "info[sync_artifact_ignored]: {} ({}); not restored",
+                    artifact.path.display(),
+                    artifact.tool
+                );
+            }
+            (export_store_id(&export.files), Some(export.files))
         }
     };
     let Some(store) = existing else {
@@ -187,6 +196,23 @@ fn from(ctx: &Context, path: &Path, machine: Option<&str>, apply: bool) -> Resul
                 .then(|| store.create_auto_tag("pre-restore"))
                 .transpose()?;
             let outcome = store.merge_incoming(&incoming, &format!("restore from {label}"))?;
+            // Recorded like a pull's (SPEC 9.9), so the conflicts survive.
+            let source_name = format!(
+                "restore/{}",
+                entry
+                    .as_ref()
+                    .map_or(label.as_str(), |e| e.machine_id.as_str())
+            );
+            let pending: Vec<PendingMerge> = match &outcome {
+                MergeOutcome::Conflicts { base, conflicts } => vec![PendingMerge {
+                    source: source_name.clone(),
+                    incoming: head.clone(),
+                    base: base.as_ref().map(ToString::to_string),
+                    conflicts: conflicts.iter().map(RecordedConflict::from).collect(),
+                }],
+                _ => Vec::new(),
+            };
+            write_merge_state(fs, store.state_dir(), &[source_name], &pending)?;
             let report = (apply && !matches!(outcome, MergeOutcome::Conflicts { .. }))
                 .then(|| run_apply(ctx, &store))
                 .transpose()?;
