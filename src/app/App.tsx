@@ -413,7 +413,7 @@ function BrandIcon() {
     <svg viewBox="0 0 228 228" role="img">
       <defs>
         <linearGradient
-          id="loadout-brand-gradient"
+          id="brand-gradient"
           x1="24"
           y1="24"
           x2="204"
@@ -425,7 +425,7 @@ function BrandIcon() {
           <stop offset="1" stopColor="#ee8a3a" />
         </linearGradient>
       </defs>
-      <rect x="18" y="18" width="192" height="192" rx="50" fill="url(#loadout-brand-gradient)" stroke="none" />
+      <rect x="18" y="18" width="192" height="192" rx="50" fill="url(#brand-gradient)" stroke="none" />
       <rect x="60" y="60" width="108" height="26" rx="13" fill="#ffffff" stroke="none" />
       <rect x="60" y="101" width="108" height="26" rx="13" fill="#ffffff" fillOpacity="0.78" stroke="none" />
       <rect x="60" y="142" width="66" height="26" rx="13" fill="#ffffff" fillOpacity="0.56" stroke="none" />
@@ -706,7 +706,6 @@ function useQueryErrorToasts() {
 
 function AppContent(props: { features: FeatureFlags }) {
   const appInfo = useAppInfo();
-  const { window: appWindow } = useTransport();
   const [theme, setTheme] = useThemePreference();
   const platform = appInfo.data?.platform;
   const isMacOS = platform === "macos";
@@ -827,12 +826,9 @@ function AppContent(props: { features: FeatureFlags }) {
           <div className="window-topbar window-topbar--main" data-tauri-drag-region aria-hidden="true" />
         ) : isWindows ? (
           <div className="window-topbar window-topbar--main window-topbar--windows">
-            <div
-              className="window-topbar__drag-region"
-              data-tauri-drag-region
-              aria-hidden="true"
-              onDoubleClick={() => void appWindow.toggleMaximize()}
-            />
+            {/* Tauri's drag-region script maximizes on double-click
+                (`core:window:allow-internal-toggle-maximize`). */}
+            <div className="window-topbar__drag-region" data-tauri-drag-region aria-hidden="true" />
             <WindowsWindowControls />
           </div>
         ) : null}

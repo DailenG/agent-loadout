@@ -6,7 +6,14 @@
 // message key, IPC enum and error code. Nothing localized crosses IPC; brand
 // strings come from the generated bindings (`brand.rs`), never from here.
 
-import type { DataHomeSource, ErrorCode, Platform, Scope } from "@/ipc/bindings";
+import {
+  BIN_NAME,
+  PRODUCT_NAME,
+  type DataHomeSource,
+  type ErrorCode,
+  type Platform,
+  type Scope,
+} from "@/ipc/bindings";
 
 const messages = {
   "app.nav.primary": "Primary",
@@ -106,7 +113,7 @@ const errorMessages: Record<ErrorCode, string> = {
   invalid_ref: "A template or secret reference is not valid.",
   unknown_client: "This client is not known; the entry is kept as written.",
   unknown_os: "This operating system name is not known; the entry is kept as written.",
-  locked: "Another Loadout window or command is busy. Try again in a moment.",
+  locked: `Another ${PRODUCT_NAME} window or command is busy. Try again in a moment.`,
   git_error: "The store repository could not be read or written.",
   already_exists: "An entry with this name already exists.",
   not_found: "The entry was not found.",
@@ -133,7 +140,7 @@ const errorMessages: Record<ErrorCode, string> = {
   provider_unavailable: "A secret provider is not available on this machine.",
   provider_too_old: "A secret provider is too old for this feature.",
   secret_error: "A secret could not be read.",
-  launcher_not_found: "The loadout launcher could not be found.",
+  launcher_not_found: `The ${BIN_NAME} launcher could not be found.`,
   no_secret_free_delivery: "This client cannot receive the secret without writing it to its config.",
   secret_in_shared_file: "A secret would be written into a shared project file.",
   inline_env_fallback: "An environment reference is written as its current value.",

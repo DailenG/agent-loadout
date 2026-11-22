@@ -16,6 +16,8 @@ export const commands = {
 /* Constants */
 export const APP_ID = "dev.dailen.loadout" as const;
 
+export const BIN_NAME = "loadout" as const;
+
 export const HOME_ENV_VAR = "LOADOUT_HOME" as const;
 
 export const PRODUCT_NAME = "Loadout" as const;

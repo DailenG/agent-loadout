@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: app commands, custom window controls, dialog and process plugins (SPEC 4.3, 13.1)",
+  "description": "Main window: app commands and the custom window controls (SPEC 4.3, 13.1). The dialog and process plugins join when M15 first calls them.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
@@ -9,9 +9,8 @@
     "core:window:allow-is-maximized",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-start-dragging",
-    "dialog:default",
-    "process:default"
+    "core:window:allow-start-dragging"
   ]
 }

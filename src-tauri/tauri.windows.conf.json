@@ -19,7 +19,8 @@
     "targets": ["nsis"],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "template": "windows/installer.nsi"
       }
     }
   }

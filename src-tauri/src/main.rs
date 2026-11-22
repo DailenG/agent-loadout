@@ -24,13 +24,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .constant("APP_ID", brand::APP_ID)
         .constant("REPO", brand::REPO)
         .constant("HOME_ENV_VAR", brand::HOME_ENV_VAR)
+        .constant("BIN_NAME", brand::BIN_NAME)
 }
 
 fn main() {
     let builder = specta_builder();
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
         .manage(commands::AppState::from_process())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
@@ -103,14 +102,17 @@ mod tests {
         std::fs::write(committed_bindings_path(), generated_bindings()).expect("write bindings");
     }
 
+    fn read_config(name: &str) -> serde_json::Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+        serde_json::from_str(&std::fs::read_to_string(path).expect("read config"))
+            .expect("parse config")
+    }
+
     /// `tauri.conf.json` repeats brand strings Tauri reads before any Rust
     /// runs; they must equal `brand.rs`.
     #[test]
     fn tauri_config_uses_the_brand_strings() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
-        let config: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(path).expect("read config"))
-                .expect("parse config");
+        let config = read_config("tauri.conf.json");
         assert_eq!(config["productName"], brand::PRODUCT_NAME);
         assert_eq!(config["identifier"], brand::APP_ID);
         assert_eq!(config["mainBinaryName"], "agent-loadout-app");
@@ -120,5 +122,33 @@ mod tests {
             .expect("CSP is set (SPEC 4.3)");
         assert!(csp.contains("default-src 'self'"), "{csp}");
         assert!(!csp.contains("unsafe-eval"), "{csp}");
+    }
+
+    /// The platform files replace `app.windows` whole (JSON Merge Patch), so
+    /// each window must equal the base one apart from its chrome keys
+    /// (SPEC 13.1), title included.
+    #[test]
+    fn platform_configs_only_change_the_window_chrome() {
+        let base = read_config("tauri.conf.json")["app"]["windows"].clone();
+        for (name, chrome) in [
+            ("tauri.windows.conf.json", &["decorations", "shadow"][..]),
+            (
+                "tauri.macos.conf.json",
+                &["hiddenTitle", "titleBarStyle"][..],
+            ),
+        ] {
+            let mut windows = read_config(name)["app"]["windows"].clone();
+            let entries = windows.as_array_mut().expect("windows array");
+            assert_eq!(entries.len(), 1, "{name}");
+            assert_eq!(entries[0]["title"], brand::PRODUCT_NAME, "{name}");
+            let window = entries[0].as_object_mut().expect("window object");
+            for key in chrome {
+                assert!(window.remove(*key).is_some(), "{name} sets {key}");
+            }
+            assert_eq!(
+                windows, base,
+                "{name} differs from tauri.conf.json beyond {chrome:?}"
+            );
+        }
     }
 }

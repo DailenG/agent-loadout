@@ -3,10 +3,11 @@
 // token set in tokens.css.
 
 import { useCallback, useEffect, useState } from "react";
+import { BIN_NAME } from "@/ipc/bindings";
 
 export type ThemePreference = "light" | "dark" | "system";
 
-export const THEME_STORAGE_KEY = "loadout.settings.theme";
+export const THEME_STORAGE_KEY = `${BIN_NAME}.settings.theme`;
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

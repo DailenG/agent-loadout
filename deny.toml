@@ -16,10 +16,15 @@ allow = [
     # Permissive; Inflector, through core's optional `specta` feature
     # (specta-macros, M14).
     "BSD-2-Clause",
+    # Permissive; the app crate's Tauri tree (`src-tauri`, M14): brotli's
+    # alloc crates, libloading and foldhash/zlib-rs.
+    "BSD-3-Clause",
+    "ISC",
     "MIT",
     # File-level copyleft; reached through dirs -> dirs-sys -> option-ext.
     "MPL-2.0",
     "Unicode-3.0",
+    "Zlib",
 ]
 
 [licenses.private]
