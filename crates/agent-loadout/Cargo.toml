@@ -25,6 +25,9 @@ toml_edit.workspace = true
 [target.'cfg(windows)'.dependencies]
 win32job.workspace = true
 
+[build-dependencies]
+static_vcruntime.workspace = true
+
 [dev-dependencies]
 agent-loadout-testkit.workspace = true
 # Project repositories in `cli_project.rs`.

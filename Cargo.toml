@@ -7,14 +7,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
 repository = "https://github.com/DailenG/agent-loadout"
 
 [workspace.dependencies]
-agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.1.2" }
+agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.1.3" }
 agent-loadout-testkit = { path = "crates/agent-loadout-testkit" }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
@@ -47,6 +47,10 @@ serde_json = "1"
 sha2 = "0.11"
 # 2.x, the version insta already pulls in.
 similar = "2"
+# loadout.exe links the VC runtime statically and the UCRT (part of
+# Windows) dynamically, as Tauri does for the app, so the CLI runs on a
+# machine without the Visual C++ Redistributable (0.1.2 did not: STATUS_DLL_NOT_FOUND).
+static_vcruntime = "3"
 # TypeScript types for the app's typed IPC (SPEC 4.3); pinned to the
 # release tauri-specta 2.0.0-rc.29 is built against. Core enables it only
 # behind its optional `specta` feature.

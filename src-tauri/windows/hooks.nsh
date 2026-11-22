@@ -28,6 +28,20 @@
 
 !define LOADOUT_PATH_TOO_LONG "Your user PATH is too long for the installer to edit safely, so it was left unchanged."
 
+; Tells running programs (Explorer, terminals) that the environment changed.
+; NSIS's `SendMessage ... /TIMEOUT=` uses SMTO_NORMAL, so a broadcast waits
+; the full timeout on every window whose thread does not answer, one after
+; the other: with a few such windows open, setup sat on "Create shortcut"
+; for minutes (0.1.2). SMTO_ABORTIFHUNG skips windows Windows already
+; considers hung, and the per-window wait is 1 second. The registry value is
+; written before this, so a program that misses the message still sees the
+; new PATH in its next session.
+!macro LOADOUT_BROADCAST_ENVIRONMENT
+  ; SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, L"Environment",
+  ;                     SMTO_ABORTIFHUNG, 1000, NULL); no register is touched.
+  System::Call 'user32::SendMessageTimeoutW(p 0xffff, i 0x001A, p 0, w "Environment", i 0x0002, i 1000, p 0)'
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   Call LoadoutAddToUserPath
 !macroend
@@ -97,7 +111,7 @@ Function LoadoutAddToUserPath
     ${EndIf}
   ${EndIf}
   WriteRegExpandStr HKCU "Environment" "Path" $0
-  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  !insertmacro LOADOUT_BROADCAST_ENVIRONMENT
   DetailPrint "Added $INSTDIR to your user PATH."
   Goto done
 
@@ -136,7 +150,7 @@ Function un.LoadoutRemoveFromUserPath
   StrCpy $1 $1 "" 1
   StrCpy $1 $1 -1
   WriteRegExpandStr HKCU "Environment" "Path" $1
-  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  !insertmacro LOADOUT_BROADCAST_ENVIRONMENT
   Goto done
 
   too_long:
