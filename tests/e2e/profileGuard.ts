@@ -39,18 +39,27 @@ export type ProfileDirs = {
   home: string;
   appdata: string;
   localappdata: string;
+  localLow: string;
   xdgConfig: string;
   xdgData: string;
   loadout: string;
   webview: string;
 };
 
-/** The throwaway profile folders under `root`. */
+/**
+ * The throwaway profile folders under `root`. The app data folders sit
+ * where Windows keeps them under the home: the shell expands the known
+ * folders (`%USERPROFILE%\AppData\Local`, ...) from USERPROFILE, and with
+ * those folders missing WebView2 never opens the DevTools port the driver
+ * waits for ("DevToolsActivePort file doesn't exist").
+ */
 export function profileDirs(root: string): ProfileDirs {
+  const home = join(root, "home");
   return {
-    home: join(root, "home"),
-    appdata: join(root, "appdata"),
-    localappdata: join(root, "localappdata"),
+    home,
+    appdata: join(home, "AppData", "Roaming"),
+    localappdata: join(home, "AppData", "Local"),
+    localLow: join(home, "AppData", "LocalLow"),
     xdgConfig: join(root, "xdg", "config"),
     xdgData: join(root, "xdg", "data"),
     loadout: join(root, "loadout"),

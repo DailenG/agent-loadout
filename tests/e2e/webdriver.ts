@@ -81,9 +81,25 @@ export class Session {
     throw new Error(`no element for ${xpath}: ${String(lastError)}`);
   }
 
-  async click(xpath: string) {
-    const element = await this.find(xpath);
-    await call(`${this.base}/element/${element}/click`, "POST", {});
+  /**
+   * Clicks the first match, retrying for up to `timeoutMs` while another
+   * element covers it (a notification that dismisses itself, a dialog
+   * still fading in or out).
+   */
+  async click(xpath: string, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const element = await this.find(xpath, Math.max(deadline - Date.now(), 1_000));
+      try {
+        await call(`${this.base}/element/${element}/click`, "POST", {});
+        return;
+      } catch (error) {
+        if (!String(error).includes("element click intercepted") || Date.now() >= deadline) {
+          throw error;
+        }
+        await sleep(250);
+      }
+    }
   }
 
   async type(xpath: string, text: string) {
@@ -92,9 +108,21 @@ export class Session {
     await call(`${this.base}/element/${element}/value`, "POST", { text });
   }
 
-  async text(xpath: string): Promise<string> {
-    const element = await this.find(xpath);
-    return (await call(`${this.base}/element/${element}/text`, "GET")) as string;
+  /**
+   * The rendered text of the first match, waiting up to `timeoutMs` for it
+   * to be non-empty: dialogs fade in from opacity 0, and WebDriver reports
+   * no text for an element that is not displayed yet.
+   */
+  async text(xpath: string, timeoutMs = 15_000): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const element = await this.find(xpath, Math.max(deadline - Date.now(), 1_000));
+      const text = (await call(`${this.base}/element/${element}/text`, "GET")) as string;
+      if (text !== "" || Date.now() >= deadline) {
+        return text;
+      }
+      await sleep(250);
+    }
   }
 
   /** Whether each checkbox, radio or option matching `xpath` is selected (none: empty). */
@@ -115,6 +143,11 @@ export class Session {
     );
   }
 
+  /** How many elements match `xpath`, without waiting. */
+  async count(xpath: string): Promise<number> {
+    return (await this.elements(xpath)).length;
+  }
+
   private async elements(xpath: string): Promise<string[]> {
     const found = (await call(`${this.base}/elements`, "POST", {
       using: "xpath",
@@ -122,6 +155,16 @@ export class Session {
     })) as Record<string, string>[];
     return found.map((value) => value[ELEMENT_KEY] ?? value.ELEMENT);
   }
+}
+
+/**
+ * Answers the first run's "Add a backup remote" step with "Not now": a
+ * fresh profile has no remote, so the app opens the step over every page.
+ */
+export async function dismissBackupRemoteOffer(app: Session) {
+  const step = "//div[@role='dialog' and .//h3[normalize-space(.)='Add a backup remote']]";
+  await app.click(`${step}//button[normalize-space(.)='Not now']`);
+  await waitFor(async () => (await app.count(step)) === 0, "the backup remote step to close");
 }
 
 /** Polls `check` until it returns true or `timeoutMs` passes. */

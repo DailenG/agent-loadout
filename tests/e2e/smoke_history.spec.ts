@@ -29,7 +29,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appEnv, assertProfileInTemp, profileDirs } from "./profileGuard";
-import { Session, waitFor } from "./webdriver";
+import { dismissBackupRemoteOffer, Session, waitFor } from "./webdriver";
 
 const REPO = resolve(import.meta.dirname, "../..");
 const EXE = process.platform === "win32" ? ".exe" : "";
@@ -111,6 +111,7 @@ describe.skipIf(missing !== null)("History smoke", () => {
       "tauri-driver to listen",
     );
     session = await Session.start(SERVER, APP);
+    await dismissBackupRemoteOffer(session);
   });
 
   afterAll(async () => {
