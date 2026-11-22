@@ -36,12 +36,12 @@ FB-6); the AUR 1Password CLI 2.41 case (SE-4) was not set up.
 | AP-4 | Pass | Claude Code, omp: `${VERIFY_VALUE}` in `env` and `args`, both expanded. Codex: `env_vars` and the inline argument fallback. |
 | AP-5 | Pass | `native_disable`: entries kept with `enabled = false`, shown disabled by `codex mcp list` and inactive by omp. |
 | SE-5 | Pass | Without `op`: `secrets providers` says "1Password CLI not found"; `secrets check` exits 5 with `provider_unavailable` and the per-machine fix; after `secrets set VERIFY_OP --this-machine --keyring` (Secret Service) it is `resolved`. |
-| SE-6 | Pass, one finding (FB-6) | With the Secret Service running: set, `resolved`, clear, `missing`. Without a Secret Service: `provider_unavailable`. With the collection locked: `secrets check` hangs (see FB-6) instead of reporting `locked`. |
+| SE-6 | Pass (after FB-6) | With the Secret Service running: set, `resolved`, clear, `missing`. Without a Secret Service: `provider_unavailable`. With the collection locked: first `secrets check` hung (FB-6); after the fix it exits 5 with `locked`. |
 | DX-1 (keyring) | Pass | Launch entry with `--ref VERIFY_TOKEN=keyring://loadout/VERIFY_OP`; the server saw the value; the client file does not hold it. |
 | DX-6 | Pass | omp header command `!'<loadout>' secret get --ref '...' --template '...'` (single quotes on Linux); requests carried the bearer token. |
 | DX-7 | Pass | Claude Code `headersHelper` with the single-quoted form; requests carried the token. |
 | DX-8 | Pass | `loadout env --export --aliases VERIFY_KR` prints `export VERIFY_KR=...`; Codex sent `Bearer <value>`. |
 | DX-9 | Pass, one finding (FB-5) | Without `op`: the entry is `blocked: provider_unavailable`, nothing is written, `loadout apply` exits 5. After the keyring override the entry launches with `keyring://` and the server gets the value. `server add`, whose instant apply blocked the entry, exited 0 (FB-5). |
-| DX-12 | Finding (FB-6) | With the collection locked, `secrets check`, `status`, `apply` and `loadout exec` each hung for more than 25 s: the keyring lookup waits for an unlock prompt. On a desktop the prompt would appear during planning; without one, the command never returns. |
+| DX-12 | Finding, fixed (FB-6) | With the collection locked, `secrets check`, `status`, `apply` and `loadout exec` each hung for more than 25 s: the keyring lookup waited for an unlock prompt. After FB-6 none prompts: `status` and `apply` return at once, `exec` exits 77 `locked`. |
 | OMP-5, 6, 8, 9; CX-5, 8 to 10; CC-9; AP-1 to AP-3, AP-7; DX-5, DX-10 | Not repeated | OS-independent client behavior or Windows-only items, covered on Windows; tool calls need a model. |
 | SE-4 | Not run | Needs the AUR 1Password CLI 2.41. |

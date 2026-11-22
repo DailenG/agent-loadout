@@ -45,6 +45,7 @@ dependencies = [
  "keyring",
  "proptest",
  "schemars",
+ "secret-service",
  "serde",
  "serde_json",
  "sha2",

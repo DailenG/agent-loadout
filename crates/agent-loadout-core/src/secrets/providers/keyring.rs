@@ -3,6 +3,12 @@
 //! Linux). [`KeyringBackend`] is the seam: the CLI and the app use
 //! [`OsKeyring`]; tests use the in-memory backend of the testkit and never
 //! touch the real keyring.
+//!
+//! Linux: the `keyring` crate unlocks locked Secret Service items, which
+//! shows an unlock prompt and waits for it; where no prompt can appear
+//! (SSH, WSL, a service) the wait never ends (gate V1 FB-6). So a locked
+//! entry, or a locked collection to write into, is reported as `locked`
+//! first, and Loadout never asks for an unlock.
 
 use crate::secrets::SecretValue;
 use crate::secrets::status::{Resolution, SecretStatus};
@@ -44,6 +50,28 @@ impl OsKeyring {
         ::keyring::Entry::new(service, account).map_err(|err| self.map_error(&err))
     }
 
+    #[cfg(target_os = "linux")]
+    fn locked(&self) -> Resolution {
+        Resolution::new(
+            SecretStatus::Locked,
+            format!(
+                "{} is locked; unlock the keyring (for example by logging in to the desktop \
+                 session) and try again",
+                self.name()
+            ),
+        )
+    }
+
+    /// `locked` when reading the entry would need an unlock.
+    fn refuse_locked(&self, service: &str, account: &str) -> Result<(), Resolution> {
+        #[cfg(target_os = "linux")]
+        if secret_service_lock::entry_locked(service, account) {
+            return Err(self.locked());
+        }
+        let _ = (service, account);
+        Ok(())
+    }
+
     fn map_error(&self, err: &::keyring::Error) -> Resolution {
         use ::keyring::Error;
         match err {
@@ -61,6 +89,38 @@ impl OsKeyring {
     }
 }
 
+/// Lock state from the Secret Service itself, without unlocking anything.
+/// When the service cannot be asked, the `keyring` crate's own error
+/// (`provider_unavailable`) follows.
+#[cfg(target_os = "linux")]
+mod secret_service_lock {
+    use std::collections::HashMap;
+
+    use secret_service::EncryptionType;
+    use secret_service::blocking::SecretService;
+
+    /// Whether an item of this service and account (the attributes the
+    /// `keyring` crate stores) is locked.
+    pub(super) fn entry_locked(service: &str, account: &str) -> bool {
+        let Ok(ss) = SecretService::connect(EncryptionType::Plain) else {
+            return false;
+        };
+        let attributes = HashMap::from([("service", service), ("username", account)]);
+        ss.search_items(attributes)
+            .is_ok_and(|found| !found.locked.is_empty())
+    }
+
+    /// Whether the default collection, where new entries go, is locked.
+    pub(super) fn default_collection_locked() -> bool {
+        let Ok(ss) = SecretService::connect(EncryptionType::Plain) else {
+            return false;
+        };
+        ss.get_default_collection()
+            .and_then(|collection| collection.is_locked())
+            .unwrap_or(false)
+    }
+}
+
 impl KeyringBackend for OsKeyring {
     fn name(&self) -> &str {
         if cfg!(windows) {
@@ -73,6 +133,7 @@ impl KeyringBackend for OsKeyring {
     }
 
     fn get(&self, service: &str, account: &str) -> Result<Option<SecretValue>, Resolution> {
+        self.refuse_locked(service, account)?;
         match self.entry(service, account)?.get_password() {
             Ok(value) => Ok(Some(SecretValue::new(value))),
             Err(::keyring::Error::NoEntry) => Ok(None),
@@ -81,12 +142,18 @@ impl KeyringBackend for OsKeyring {
     }
 
     fn set(&self, service: &str, account: &str, value: &SecretValue) -> Result<(), Resolution> {
+        self.refuse_locked(service, account)?;
+        #[cfg(target_os = "linux")]
+        if secret_service_lock::default_collection_locked() {
+            return Err(self.locked());
+        }
         self.entry(service, account)?
             .set_password(value.expose())
             .map_err(|err| self.map_error(&err))
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<bool, Resolution> {
+        self.refuse_locked(service, account)?;
         match self.entry(service, account)?.delete_credential() {
             Ok(()) => Ok(true),
             Err(::keyring::Error::NoEntry) => Ok(false),

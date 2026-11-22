@@ -26,6 +26,10 @@ jsonc-parser = { version = "0.34", features = ["cst"] }
 # OS keyring (SPEC 11.2): Windows Credential Manager, macOS Keychain,
 # Secret Service on Linux (pure Rust zbus client, no libdbus).
 keyring = "4"
+# Linux only: asks the Secret Service whether an entry is locked before the
+# keyring crate reads it (that crate unlocks, and an unlock prompt that
+# cannot appear hangs forever). The version keyring already uses.
+secret-service = { version = "5", features = ["crypto-rust"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

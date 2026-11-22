@@ -79,16 +79,20 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
   apply` exits 5, 4 or 1 for the same plan. Change: return
   `apply_exit_code` of the instant apply report; existing CLI tests that add
   servers needing absent secrets expect 0 and must be adjusted.
-- **FB-6 Locked Secret Service hangs (SE-6, DX-12). Must fix.** On Linux with
+- **FB-6 Locked Secret Service hangs (SE-6, DX-12). Done.** On Linux with
   the keyring collection locked and no prompt able to appear (WSL, SSH, a
-  service), every command that touches a `keyring://` alias hangs:
+  service), every command that touched a `keyring://` alias hung:
   `secrets check`, `status`, `apply`, `loadout exec` (so a client's server
-  never starts and the client waits). SPEC 11.3 expects `locked`. Change:
-  look items up without unlocking (report `locked` from planning and
-  `secrets check`), and give `loadout exec` a bounded wait that ends in
-  exit 77 with `locked`. On a desktop the same lookups would presumably pop
-  an unlock prompt during planning (not observed: WSL has no desktop);
-  DX-12 asked whether they should, and they should not.
+  never started and the client waited). The `keyring` crate unlocks locked
+  items and waits for the prompt. `OsKeyring` now asks the Secret Service
+  first whether the entry (or, to write, the default collection) is locked,
+  without unlocking, and reports `locked`; Loadout never asks for an
+  unlock (DX-12: planning should not prompt). Re-run in WSL with the
+  collection locked: `secrets check` exits 5 with `locked`, `status` and
+  `apply` return at once, `loadout exec` exits 77 with
+  `loadout-exec: T: locked: ...`; unlocked, SE-5, SE-6 and DX-9 still pass.
+  New direct dependency on Linux: `secret-service` 5 (MIT OR Apache-2.0),
+  already in the tree through `keyring`.
 
 ## Not run, and what it needs
 
