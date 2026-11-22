@@ -33,8 +33,8 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
 use super::{
-    Context, EXIT_MISSING_SECRETS, JSON_SCHEMA, instant_apply, print_json, print_report,
-    report_json,
+    Context, EXIT_MISSING_SECRETS, JSON_SCHEMA, apply_exit_code, instant_apply, print_json,
+    print_report, report_json,
 };
 
 #[derive(Debug, Args)]
@@ -131,9 +131,9 @@ pub fn run(ctx: &Context, args: &SecretsArgs) -> Result<u8, CoreError> {
         SecretsCommand::Ls => list(ctx).map(|()| 0),
         SecretsCommand::Check { aliases } => check(ctx, aliases),
         SecretsCommand::Providers => providers(ctx).map(|()| 0),
-        SecretsCommand::Set(args) => set(ctx, args).map(|()| 0),
+        SecretsCommand::Set(args) => set(ctx, args),
         SecretsCommand::Clear { alias } => clear(ctx, alias).map(|()| 0),
-        SecretsCommand::MapOpEnv(args) => map_op_env(ctx, args).map(|()| 0),
+        SecretsCommand::MapOpEnv(args) => map_op_env(ctx, args),
         SecretsCommand::ServiceAccount { command } => service_account(ctx, command).map(|()| 0),
     }
 }
@@ -375,7 +375,7 @@ fn provider_json(info: &ProviderInfo) -> Value {
     })
 }
 
-fn set(ctx: &Context, args: &SetArgs) -> Result<(), CoreError> {
+fn set(ctx: &Context, args: &SetArgs) -> Result<u8, CoreError> {
     let reference = match (&args.reference, args.keyring) {
         (Some(text), false) => SecretRef::parse(text)?,
         (None, true) => SecretRef::Keyring {
@@ -453,7 +453,7 @@ fn set(ctx: &Context, args: &SetArgs) -> Result<(), CoreError> {
             print_report(report, committed.commit.as_ref());
         }
     }
-    Ok(())
+    Ok(report.as_ref().map_or(0, apply_exit_code))
 }
 
 /// Stores `value` in the keyring and remembers it, so the store refuses
@@ -535,7 +535,7 @@ fn clear(ctx: &Context, alias: &str) -> Result<(), CoreError> {
 /// variable names (CLI 2.42.0+; values are dropped while parsing) and maps
 /// the selected ones to aliases named like the variables. Aliases that
 /// already point elsewhere are kept and reported.
-fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<(), CoreError> {
+fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<u8, CoreError> {
     let id = &args.environment;
     if !is_op_environment_id(id) {
         return Err(CoreError::new(
@@ -588,7 +588,7 @@ fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<(), CoreError> {
             }
             eprintln!("Pick names with --name NAME (repeatable) or map them all with --all.");
         }
-        return Ok(());
+        return Ok(0);
     }
     for name in &selected {
         ids::check(IdKind::SecretAlias, name)?;
@@ -654,7 +654,7 @@ fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<(), CoreError> {
             print_report(report, committed.commit.as_ref());
         }
     }
-    Ok(())
+    Ok(report.as_ref().map_or(0, apply_exit_code))
 }
 
 /// `secrets service-account set|clear` (SPEC 11.5): the token lives only

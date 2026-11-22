@@ -72,13 +72,13 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
   `http_headers_helper` field for http servers. It could give Codex
   secret-free header delivery without `loadout env --export` (SPEC 11.4
   Codex row). Needs the field's semantics checked first.
-- **FB-5 Instant apply exit codes (DX-9).** `loadout server add` (and the
-  other store edits that apply instantly: `server rm`, `secrets set`,
-  `secrets clear`, `secrets map-op-env`) exit 0 even when their instant
-  apply blocked an entry, left one unresolved or failed a file. `loadout
-  apply` exits 5, 4 or 1 for the same plan. Change: return
-  `apply_exit_code` of the instant apply report; existing CLI tests that add
-  servers needing absent secrets expect 0 and must be adjusted.
+- **FB-5 Instant apply exit codes (DX-9). Done.** `loadout server add`,
+  `server rm`, `secrets set` and `secrets map-op-env` exited 0 even when
+  their instant apply blocked an entry, left one unresolved or failed a
+  file, while `loadout apply` exits 5, 4 or 1 for the same plan. They now
+  exit like `apply` (the store edit is still committed). Three CLI tests
+  that expected 0 from such an add now expect 4 or 5. (`secrets clear` does
+  not apply, so it is unchanged.)
 - **FB-6 Locked Secret Service hangs (SE-6, DX-12). Done.** On Linux with
   the keyring collection locked and no prompt able to appear (WSL, SSH, a
   service), every command that touched a `keyring://` alias hung:

@@ -1213,7 +1213,7 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 | `loadout --identify` | Prints `dev.dailen.loadout <version>` (used by `doctor` and adapters to detect a foreign `loadout` binary) |
 | `loadout completions <shell>` | Shell completions |
 
-Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout. `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
+Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout. A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
 
 ---
 

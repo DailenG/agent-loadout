@@ -13,8 +13,8 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 
 use super::{
-    Context, JSON_SCHEMA, error_json, instant_apply, print_json, print_report, report_json,
-    report_warnings,
+    Context, JSON_SCHEMA, apply_exit_code, error_json, instant_apply, print_json, print_report,
+    report_json, report_warnings,
 };
 
 #[derive(Debug, Args)]
@@ -98,10 +98,13 @@ fn parse_pair(text: &str) -> Result<(String, String), String> {
     }
 }
 
-pub fn run(ctx: &Context, args: &ServerArgs) -> Result<(), CoreError> {
+/// `add` and `rm` exit like `loadout apply` when their instant apply left
+/// entries blocked (5), unresolved (4) or a file failed (1); the store
+/// edit itself is committed either way.
+pub fn run(ctx: &Context, args: &ServerArgs) -> Result<u8, CoreError> {
     match &args.command {
-        ServerCommand::Ls => list(ctx),
-        ServerCommand::Show { id } => show(ctx, id),
+        ServerCommand::Ls => list(ctx).map(|()| 0),
+        ServerCommand::Show { id } => show(ctx, id).map(|()| 0),
         ServerCommand::Add(args) => add(ctx, args),
         ServerCommand::Rm { ids } => remove(ctx, ids),
     }
@@ -239,7 +242,7 @@ fn show(ctx: &Context, id: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn add(ctx: &Context, args: &AddArgs) -> Result<(), CoreError> {
+fn add(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
     let server = build_server(args);
     // Checked before the store is opened, so a bad definition creates nothing.
     let diagnostics = server.validate(Some(&args.id));
@@ -275,7 +278,7 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<(), CoreError> {
             print_report(report, committed.commit.as_ref());
         }
     }
-    Ok(())
+    Ok(report.as_ref().map_or(0, apply_exit_code))
 }
 
 fn build_server(args: &AddArgs) -> Server {
@@ -315,7 +318,7 @@ fn build_server(args: &AddArgs) -> Server {
     server
 }
 
-fn remove(ctx: &Context, ids: &[String]) -> Result<(), CoreError> {
+fn remove(ctx: &Context, ids: &[String]) -> Result<u8, CoreError> {
     let mut unique: Vec<String> = Vec::new();
     for id in ids {
         ids::check(IdKind::Server, id)?;
@@ -360,7 +363,7 @@ fn remove(ctx: &Context, ids: &[String]) -> Result<(), CoreError> {
             print_report(report, committed.commit.as_ref());
         }
     }
-    Ok(())
+    Ok(report.as_ref().map_or(0, apply_exit_code))
 }
 
 fn not_found(id: &str) -> CoreError {

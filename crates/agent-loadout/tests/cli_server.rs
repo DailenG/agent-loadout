@@ -95,7 +95,10 @@ fn server_add_ls_show_rm_and_history() {
     assert_eq!(stdout_json(&output)["error"]["code"], "missing_field");
     assert!(!cli.home.exists());
 
-    let added = cli.json(&[
+    // `GITHUB_PAT` is not defined yet: the store edit commits, the entry is
+    // blocked, and the add exits 5 like `apply`.
+    let output = cli.run(&[
+        "--json",
         "server",
         "add",
         "github",
@@ -110,6 +113,8 @@ fn server_add_ls_show_rm_and_history() {
         "-y",
         "@modelcontextprotocol/server-github",
     ]);
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    let added = stdout_json(&output);
     assert_eq!(added["server"], "github");
     let commit = added["commit"].as_str().unwrap().to_owned();
 
@@ -125,7 +130,8 @@ fn server_add_ls_show_rm_and_history() {
         "--client",
         "future-client",
     ]);
-    assert!(output.status.success(), "{output:?}");
+    // The instant apply covers every server, and github is still blocked.
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("warning[unknown_client]"));
 
     let output = cli.run(&["server", "add", "github", "--json", "--", "npx"]);

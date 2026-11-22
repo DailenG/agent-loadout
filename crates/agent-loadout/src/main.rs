@@ -126,7 +126,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
     let done = |result: Result<(), CoreError>| result.map(|()| 0);
     match &cli.command {
         Command::Doctor(args) => done(doctor(&env, flag.as_deref(), args, cli.json)),
-        Command::Server(args) => done(cmd::server::run(&context()?, args)),
+        Command::Server(args) => cmd::server::run(&context()?, args),
         Command::History(args) => done(cmd::history::run(&context()?, args)),
         Command::Status(args) => cmd::status::run(&context()?, args),
         Command::Diff(args) => cmd::diff::run(&context()?, args),

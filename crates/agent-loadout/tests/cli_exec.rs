@@ -575,8 +575,9 @@ fn applied_launch_entries_start_the_server_with_its_secret() {
         "env",
     ]);
     // No 1Password CLI here: the store edit commits, the entry is blocked
-    // on this machine, and `apply` exits 5.
-    assert_eq!(code, 0, "{added:#}");
+    // on this machine, and the add exits 5 like `apply`.
+    assert_eq!(code, 5, "{added:#}");
+    assert!(added["commit"].is_string());
     let entry = &added["apply"]["targets"][0]["entries"][0];
     assert_eq!(entry["state"], "blocked");
     assert_eq!(entry["problem"]["code"], "provider_unavailable");
@@ -844,7 +845,7 @@ fn check_lists_servers_clients_and_fixes() {
         "-y",
         "@modelcontextprotocol/server-github",
     ]);
-    assert_eq!(code, 0);
+    assert_eq!(code, 5, "the entry is blocked on this machine");
     let (code, doc) = cli.json(&["secrets", "check"]);
     assert_eq!(code, 5);
     let alias = &doc["aliases"][0];

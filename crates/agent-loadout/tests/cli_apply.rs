@@ -165,7 +165,20 @@ fn collisions_exit_4_until_adopted() {
         "{\n  \"mcpServers\": {\n    \"notes\": {\"command\": \"notes-fork\"}\n  }\n}\n",
     )
     .unwrap();
-    let added = cli.add_notes(&["-y", "@example/notes-mcp"]);
+    // The store edit is committed, and the add exits like `apply` would (4).
+    let (code, added) = cli.json(&[
+        "server",
+        "add",
+        "notes",
+        "--client",
+        "claude-code",
+        "--",
+        "npx",
+        "-y",
+        "@example/notes-mcp",
+    ]);
+    assert_eq!(code, 4, "{added:#}");
+    assert!(added["commit"].is_string());
     assert_eq!(added["apply"]["unresolved"], 1);
     assert_eq!(added["apply"]["written"], 0);
     assert_eq!(
