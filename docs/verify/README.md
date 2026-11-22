@@ -1,10 +1,11 @@
-# Gate V1 results (Tier A), Windows half
+# Gate V1 results (Tier A)
 
 Run 2026-11-21 by the implementer at the maintainer's request (SPEC 20.1
-item 7 note), on Windows 11 Pro with Claude Code 2.1.318, Codex 0.168.0,
-omp 19.1.0 and git 2.56. Loadout is the m13 debug build. The Linux half is
-not run: `wsl --install archlinux` needed elevation and a reboot, which has
-not happened yet.
+item 7 note). Windows half: Windows 11 Pro with Claude Code 2.1.318, Codex
+0.168.0, omp 19.1.0 and git 2.56, Loadout the m13 debug build (this page and
+the per-client pages). Linux half: Arch Linux in a throwaway WSL 2
+distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
+1Password CLI ([linux.md](linux.md)).
 
 ## Method
 
@@ -40,8 +41,9 @@ not happened yet.
 | [omp](omp.md) | OMP-1 to OMP-5, 7 to 9, 11 | 8 | 1 (OMP-9 unclear) | OMP-6 (needs a model), OMP-10 (Pi, V2) |
 | [Claude Desktop](claude-desktop.md) | CD-3 | 1 | 1 note | CD-1, 2, 4 to 7 (need Windows Sandbox or the maintainer's OK) |
 | [Apply engine](apply.md) | AP-1 to AP-5, AP-7 | 6 | none | AP-6 (Claude Desktop) |
-| [Secrets](secrets.md) | SE-7 | 1 | none | SE-1 to SE-6 (real 1Password, OS keyring, Linux) |
-| [Delivery](delivery.md) | DX-1, 5 to 8, 10 | 6 | 1 note (Codex environment) | DX-2 (covered by the automated Job Object test), DX-3, DX-4, DX-9, DX-11, DX-12 |
+| [Secrets](secrets.md) | SE-7 (Windows); SE-5, SE-6 ([Linux](linux.md)) | 3 | FB-6 | SE-1 to SE-3 (real 1Password), SE-4 (AUR CLI 2.41), SE-6 on Windows |
+| [Delivery](delivery.md) | DX-1, 5 to 8, 10 (Windows); DX-1, 6 to 9, 12 ([Linux](linux.md)) | 11 | 1 note (Codex environment), FB-5, FB-6 | DX-2 (covered by the automated Job Object test), DX-3, DX-4, DX-11 |
+| [Linux](linux.md) | 29 rows | 24 | FB-2, FB-3, FB-5, FB-6 | SE-4 |
 | Pi | none | | | moved to V2 |
 
 ## Fix briefs (before M9)
@@ -70,11 +72,28 @@ not happened yet.
   `http_headers_helper` field for http servers. It could give Codex
   secret-free header delivery without `loadout env --export` (SPEC 11.4
   Codex row). Needs the field's semantics checked first.
+- **FB-5 Instant apply exit codes (DX-9).** `loadout server add` (and the
+  other store edits that apply instantly: `server rm`, `secrets set`,
+  `secrets clear`, `secrets map-op-env`) exit 0 even when their instant
+  apply blocked an entry, left one unresolved or failed a file. `loadout
+  apply` exits 5, 4 or 1 for the same plan. Change: return
+  `apply_exit_code` of the instant apply report; existing CLI tests that add
+  servers needing absent secrets expect 0 and must be adjusted.
+- **FB-6 Locked Secret Service hangs (SE-6, DX-12). Must fix.** On Linux with
+  the keyring collection locked and no prompt able to appear (WSL, SSH, a
+  service), every command that touches a `keyring://` alias hangs:
+  `secrets check`, `status`, `apply`, `loadout exec` (so a client's server
+  never starts and the client waits). SPEC 11.3 expects `locked`. Change:
+  look items up without unlocking (report `locked` from planning and
+  `secrets check`), and give `loadout exec` a bounded wait that ends in
+  exit 77 with `locked`. On a desktop the same lookups would presumably pop
+  an unlock prompt during planning (not observed: WSL has no desktop);
+  DX-12 asked whether they should, and they should not.
 
 ## Not run, and what it needs
 
-- **Linux half (all Tier A rows on Arch):** a reboot to finish the WSL
-  install, then `wsl --install archlinux`.
+- **Linux, desktop session:** WSL has none, so the unlock prompt itself
+  (DX-12 on a real Arch desktop) and SE-4 (AUR CLI 2.41) are open.
 - **Claude Desktop (CD-1, 2, 4 to 7, AP-6, DX-11):** Windows Sandbox
   (Windows Features, needs admin and a reboot), or the maintainer's OK to
   back up and restore the real `%APPDATA%\Claude` and MSIX configs.
