@@ -17,12 +17,20 @@ run), M7 (secret references, env/keyring/1Password providers, the leak
 scanner on every store commit, `loadout secrets ls|check|providers|set|clear`),
 M8 (secret delivery per client: `env`, `launch` through `loadout exec`,
 `command` hooks and opt-in `inline`; `loadout env --export`,
-`loadout secrets map-op-env|service-account`), M11 (store history views,
-tags and restore: `loadout show|tag|restore|backup`, `loadout diff --rev`),
-M12 (folder remotes with per-entity pull merge: `loadout remote
-add|ls|rm|push|pull|machines`, `backup` pushes, `restore --from`) and M13
-(git remotes through the system git with `system`, `gh` or `token` auth;
-`loadout remote token|create-github`) are in place.
+`loadout secrets map-op-env|service-account`), M9 (project scope: project
+manifests and trust, project-scope apply, `loadout project` and
+`loadout effective`), M10 (Tier B adapters: VS Code with GitHub Copilot,
+Cursor, and the legacy VS Code `mcp.json` read-only), M11 (store history
+views, tags and restore: `loadout show|tag|restore|backup`,
+`loadout diff --rev`), M12 (folder remotes with per-entity pull merge:
+`loadout remote add|ls|rm|push|pull|machines`, `backup` pushes,
+`restore --from`), M13 (git remotes through the system git with `system`,
+`gh` or `token` auth; `loadout remote token|create-github`), M21 (Tier C
+adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and M22 (Tier D:
+Windsurf, Devin Desktop, format-preserving YAML and JSON5 editors, and the
+ported user-scope clients) are in place. Gates V1 (Tier A) and V2 (Tier B),
+the real-client checks, are partly run; see
+[docs/verify/README.md](docs/verify/README.md).
 Nothing is released yet. JSON Schemas for store files, for editor completion,
 are in [docs/schema](docs/schema).
 
