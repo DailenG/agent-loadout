@@ -160,6 +160,14 @@ pub enum OnConflict {
     /// Take the native entry into the store; release a drifted orphan;
     /// for a deleted entry, respect the deletion.
     Import,
+    /// Release ownership of a drifted or conflicting entry: the entry
+    /// stays in the file as the user left it, Loadout forgets it, and a
+    /// store server stops being enabled for that client (so the entry is
+    /// foreign from then on); a drifted orphan is released. Not offered by
+    /// `--on-conflict`; a per-entry decision (the drift resolver, SPEC
+    /// 13.4). Collisions and deleted entries have nothing to release and
+    /// are skipped.
+    Release,
 }
 
 impl OnConflict {
@@ -169,6 +177,7 @@ impl OnConflict {
             OnConflict::Skip => "skip",
             OnConflict::Overwrite => "overwrite",
             OnConflict::Import => "import",
+            OnConflict::Release => "release",
         }
     }
 }
@@ -525,7 +534,7 @@ impl TargetPlan {
     /// `******** (before)`, so a changed value still shows as a change.
     /// Values shorter than four characters are left alone: masking them
     /// would garble the diff without hiding anything.
-    fn mask(&self, text: &str) -> String {
+    pub fn mask(&self, text: &str) -> String {
         let mut text = text.to_owned();
         let writes = self.input.desired.iter().flat_map(|entry| &entry.inline);
         let values = writes
@@ -543,6 +552,25 @@ impl TargetPlan {
             }
         }
         text
+    }
+
+    /// Entry `name` with native value `value`, alone under the innermost
+    /// key of this target's container, as the file format writes it
+    /// (`{"mcpServers": {...}}`, `[mcp_servers.x]`), with
+    /// [`TargetPlan::mask`] applied: the snippet the effective view and the
+    /// drift resolver show. Outer container keys are left out (Claude
+    /// Code's per-project map is keyed by the folder path). `None` when the
+    /// format cannot hold it.
+    pub fn snippet(&self, name: &str, value: &NativeValue) -> Option<String> {
+        let keys: Vec<&str> = self
+            .container
+            .last()
+            .map(String::as_str)
+            .into_iter()
+            .collect();
+        let mut doc = Document::empty(self.input.target.format);
+        doc.upsert(&keys, name, value).ok()?;
+        Some(self.mask(&String::from_utf8_lossy(&doc.to_bytes())))
     }
 }
 
@@ -1439,7 +1467,10 @@ fn client_enable_hints(plan: &TargetPlan) -> Vec<CoreError> {
                     entry.client == Some(client)
                         && entry.desired.is_some()
                         && entry.state != EntryState::Blocked
-                        && !matches!(entry.action, Action::Skip | Action::Import)
+                        && !matches!(
+                            entry.action,
+                            Action::Skip | Action::Import | Action::Release
+                        )
                 })
                 .map(|entry| entry.name.as_str())
                 .collect();
@@ -1805,7 +1836,7 @@ fn plan_entry(
         (Some((_, d)), None, Some(_)) => {
             entry.state = EntryState::Missing;
             match resolution(&entry) {
-                OnConflict::Skip => entry.action = Action::Skip,
+                OnConflict::Skip | OnConflict::Release => entry.action = Action::Skip,
                 OnConflict::Import => entry.action = Action::Import,
                 OnConflict::Ask | OnConflict::Overwrite => {
                     entry.action = Action::Create;
@@ -1822,7 +1853,7 @@ fn plan_entry(
             } else {
                 entry.state = EntryState::Collision;
                 let resolved = resolution(&entry);
-                decide(&mut entry, resolved, Action::AdoptOverwrite, d);
+                decide(&mut entry, resolved, Action::AdoptOverwrite, d, false);
             }
         }
         (Some((client, d)), Some(o), Some(l)) => {
@@ -1848,7 +1879,7 @@ fn plan_entry(
                     EntryState::Conflict
                 };
                 let resolved = resolution(&entry);
-                decide(&mut entry, resolved, Action::Update, d);
+                decide(&mut entry, resolved, Action::Update, d, true);
             }
         }
         (None, Some(o), Some(l)) => {
@@ -1894,7 +1925,7 @@ fn plan_entry(
                 entry.state = EntryState::Drifted;
                 match resolution(&entry) {
                     OnConflict::Overwrite => entry.action = Action::Remove,
-                    OnConflict::Import => entry.action = Action::Release,
+                    OnConflict::Import | OnConflict::Release => entry.action = Action::Release,
                     OnConflict::Skip => entry.action = Action::Skip,
                     OnConflict::Ask => {
                         entry.action = Action::Skip;
@@ -1923,15 +1954,23 @@ fn plan_entry(
     Some(entry)
 }
 
-/// Sets the action of an entry that needs a decision.
-fn decide(entry: &mut EntryPlan, resolution: OnConflict, overwrite: Action, desired: NativeValue) {
+/// Sets the action of an entry that needs a decision; `owned` when
+/// Loadout owns it (drifted, conflict), so it can be released.
+fn decide(
+    entry: &mut EntryPlan,
+    resolution: OnConflict,
+    overwrite: Action,
+    desired: NativeValue,
+    owned: bool,
+) {
     match resolution {
         OnConflict::Overwrite => {
             entry.action = overwrite;
             entry.written = Some(desired);
         }
         OnConflict::Import => entry.action = Action::Import,
-        OnConflict::Skip => entry.action = Action::Skip,
+        OnConflict::Release if owned => entry.action = Action::Release,
+        OnConflict::Skip | OnConflict::Release => entry.action = Action::Skip,
         OnConflict::Ask => {
             entry.action = Action::Skip;
             entry.unresolved = true;

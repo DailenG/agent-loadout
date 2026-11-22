@@ -125,6 +125,13 @@ pub struct EffectiveEntry {
     /// problems the plan has with this name's entries.
     #[serde(serialize_with = "warnings_json")]
     pub warnings: Vec<CoreError>,
+    /// The winner's native entry as its file writes it, under the
+    /// innermost container key, with the values the plan writes or held
+    /// inline masked ([`TargetPlan::snippet`]); `None` when it cannot be
+    /// rendered. Other literals are the caller's to mask before showing
+    /// it. Not part of the JSON view.
+    #[serde(skip)]
+    pub snippet: Option<String>,
 }
 
 /// The project of the folder.
@@ -344,6 +351,7 @@ struct Candidate {
     source: String,
     status: Option<EntryState>,
     problem: Option<CoreError>,
+    snippet: Option<String>,
 }
 
 /// What a client's rows share, by entry name.
@@ -565,6 +573,7 @@ impl<'a> View<'a> {
             also_visible_to,
             status: winner.status,
             warnings,
+            snippet: winner.snippet.clone(),
         }
     }
 
@@ -719,6 +728,14 @@ impl<'a> View<'a> {
                 (None, None) => Some(EntryState::Foreign),
                 (None, Some(_)) => None,
             };
+            // Masked by the file's plan when Loadout plans this file.
+            let snippet = match planned
+                .map(|(target, _)| target)
+                .or(targets.first().copied())
+            {
+                Some(target) => target.snippet(name, value),
+                None => unplanned_snippet(source, name, value),
+            };
             rows.entry(name.clone()).or_default().push(Candidate {
                 layer: layer(source, ours.is_some(), &display),
                 file: source.file.clone(),
@@ -733,6 +750,7 @@ impl<'a> View<'a> {
                 ),
                 status,
                 problem: planned.and_then(|(_, entry)| entry.problem.clone()),
+                snippet,
             });
         }
         for target in &targets {
@@ -748,6 +766,10 @@ impl<'a> View<'a> {
                     continue;
                 };
                 let id = entry.server_id.as_deref().unwrap_or(&entry.name);
+                let snippet = entry
+                    .written
+                    .as_ref()
+                    .and_then(|value| target.snippet(&entry.name, value));
                 rows.entry(entry.name.clone()).or_default().push(Candidate {
                     layer: layer(source, true, &display),
                     file: source.file.clone(),
@@ -759,6 +781,7 @@ impl<'a> View<'a> {
                     source: self.source_name(target.scope, id),
                     status: Some(entry.state),
                     problem: entry.problem.clone(),
+                    snippet,
                 });
             }
         }
@@ -1010,6 +1033,15 @@ fn layer(source: &SourceFile, ours: bool, display: &str) -> Layer {
         Scope::Project => Layer::Project,
         Scope::ProjectLocal => Layer::ProjectLocal,
     }
+}
+
+/// The snippet of an entry in a file Loadout does not plan: rendered as
+/// the file writes it under the innermost container key, unmasked.
+fn unplanned_snippet(source: &SourceFile, name: &str, value: &NativeValue) -> Option<String> {
+    let keys: Vec<&str> = source.keys.last().map(String::as_str).into_iter().collect();
+    let mut doc = Document::empty(source.format);
+    doc.upsert(&keys, name, value).ok()?;
+    Some(String::from_utf8_lossy(&doc.to_bytes()).into_owned())
 }
 
 /// The `enabled` key of a native entry, when it holds a boolean.

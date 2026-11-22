@@ -1,14 +1,18 @@
 // Pending changes drawer (SPEC 13.4): the pending apply plan grouped by
 // scope, each file expandable to its masked unified diff, Apply all / Apply
-// selected, and the recent apply runs with "Undo this apply".
+// selected, the drift resolver for entries that need a decision, and the
+// recent apply runs with "Undo this apply".
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { storeQueryKeys, useChangeNotice, useUndoApply } from "@/app/apply/changeNotice";
+import { STATE_KEYS, diffLineClass } from "@/app/apply/labels";
 import { useNotifications } from "@/app/components/notifications";
+import { ResolverDialog } from "@/app/resolver/ResolverDialog";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import type {
   AppliedRun,
+  EntryRef,
   EntryStateKind,
   FileRef,
   FileScope,
@@ -28,35 +32,6 @@ const SCOPE_KEYS = {
   project: "apply.scope.project",
   project_local: "apply.scope.projectLocal",
 } as const satisfies Record<FileScope, MessageKey>;
-
-const STATE_KEYS = {
-  synced: "apply.state.synced",
-  pending_create: "apply.state.pendingCreate",
-  pending_update: "apply.state.pendingUpdate",
-  pending_remove: "apply.state.pendingRemove",
-  drifted: "apply.state.drifted",
-  missing: "apply.state.missing",
-  conflict: "apply.state.conflict",
-  foreign: "apply.state.foreign",
-  collision: "apply.state.collision",
-  blocked: "apply.state.blocked",
-} as const satisfies Record<EntryStateKind, MessageKey>;
-
-function diffLineClass(line: string) {
-  if (line.startsWith("+++") || line.startsWith("---")) {
-    return "apply-diff__line apply-diff__line--meta";
-  }
-  if (line.startsWith("@@")) {
-    return "apply-diff__line apply-diff__line--hunk";
-  }
-  if (line.startsWith("+")) {
-    return "apply-diff__line apply-diff__line--added";
-  }
-  if (line.startsWith("-")) {
-    return "apply-diff__line apply-diff__line--removed";
-  }
-  return "apply-diff__line";
-}
 
 function formatTime(time: string) {
   const date = new Date(time);
@@ -90,14 +65,23 @@ type FileItemProps = {
   selected: boolean;
   onSelect: (selected: boolean) => void;
   clientName: (id: string) => string;
+  onResolve: (entry: EntryRef) => void;
 };
 
-function PlannedFileItem({ file, selected, onSelect, clientName }: FileItemProps) {
+/** States the drift resolver handles (SPEC 8.2). */
+const RESOLVABLE: EntryStateKind[] = ["drifted", "conflict", "missing", "collision"];
+
+function PlannedFileItem({ file, selected, onSelect, clientName, onResolve }: FileItemProps) {
   const [expanded, setExpanded] = useState(false);
   const detailId = useId();
-  // Entries the user has to look at: a decision, a block or a problem.
+  // Entries the user has to look at: a decision, a block, a problem, or a
+  // state the resolver handles.
   const attention = file.entries.filter(
-    (entry) => entry.unresolved || entry.state === "blocked" || entry.problem !== null,
+    (entry) =>
+      entry.unresolved ||
+      entry.state === "blocked" ||
+      entry.problem !== null ||
+      RESOLVABLE.includes(entry.state),
   );
   const { counts } = file;
   const diffLines = file.diff ? file.diff.replace(/\n$/, "").split("\n") : [];
@@ -176,6 +160,22 @@ function PlannedFileItem({ file, selected, onSelect, clientName }: FileItemProps
                   </span>
                   {entry.problem ? (
                     <span className="apply-entry__problem">{errorMessage(entry.problem.code)}</span>
+                  ) : null}
+                  {entry.client && RESOLVABLE.includes(entry.state) ? (
+                    <button
+                      className="ghost-button apply-entry__resolve"
+                      type="button"
+                      aria-label={t("apply.entries.resolveAria", { name: entry.name })}
+                      onClick={() =>
+                        onResolve({
+                          file: { projectId: file.projectId, scope: file.scope, file: file.file },
+                          client: entry.client ?? "",
+                          name: entry.name,
+                        })
+                      }
+                    >
+                      {t("apply.entries.resolve")}
+                    </button>
                   ) : null}
                 </li>
               ))}
@@ -284,6 +284,7 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
     queryFn: async () => unwrap(await commands.pendingPlan()),
   });
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [resolving, setResolving] = useState<EntryRef | null>(null);
 
   const apply = useMutation({
     mutationFn: async (selected: FileRef[] | null) => unwrap(await commands.runApply(selected)),
@@ -306,13 +307,13 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !resolving) {
         onClose();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, resolving]);
 
   function setSelected(key: string, selected: boolean) {
     setSelectedFiles((current) => {
@@ -392,6 +393,7 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
                     selected={selectedFiles.has(fileKey(file))}
                     onSelect={(selected) => setSelected(fileKey(file), selected)}
                     clientName={clientName}
+                    onResolve={setResolving}
                   />
                 ))}
               </ul>
@@ -424,6 +426,11 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </aside>
+      {resolving ? (
+        <div onClick={(event) => event.stopPropagation()} role="presentation">
+          <ResolverDialog entry={resolving} clientName={clientName} onClose={() => setResolving(null)} />
+        </div>
+      ) : null}
     </div>
   );
 }

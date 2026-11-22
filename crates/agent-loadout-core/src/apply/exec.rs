@@ -256,19 +256,20 @@ pub fn apply_in(
         .targets
         .iter()
         .flat_map(|target| &target.entries)
-        .any(|entry| entry.action == Action::Import)
+        .any(import::is_store_resolution)
     {
         let resolutions = import::stage_resolutions(tx, &plan, &desired)?;
         imported = resolutions.changed;
         desired = DesiredState::load(tx, Some(&machine.id))?;
         plan = plan::plan(&cx, &desired, &ledger, &key, &request.options)?;
-        // Whatever still asks for an import could not be imported.
+        // Whatever still asks for an import or a release of a desired
+        // entry could not be staged.
         for entry in plan
             .targets
             .iter_mut()
             .flat_map(|target| &mut target.entries)
         {
-            if entry.action != Action::Import {
+            if !import::is_store_resolution(entry) {
                 continue;
             }
             let reason = resolutions
@@ -278,14 +279,15 @@ pub fn apply_in(
                     Some(client.as_str()) == entry.client && *name == entry.name
                 })
                 .map(|(_, _, err)| err.clone());
+            let fallback = if entry.action == Action::Release {
+                "the entry is still desired for this client after the release"
+            } else {
+                "the store definition still renders differently after the import"
+            };
             entry.action = Action::Skip;
             entry.unresolved = true;
-            entry.problem = Some(reason.unwrap_or_else(|| {
-                CoreError::new(
-                    ErrorCode::InvalidValue,
-                    "the store definition still renders differently after the import",
-                )
-            }));
+            entry.problem =
+                Some(reason.unwrap_or_else(|| CoreError::new(ErrorCode::InvalidValue, fallback)));
         }
     }
 

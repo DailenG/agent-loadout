@@ -31,6 +31,27 @@ export const commands = {
 	listTools: (options?: InvokeOptions) => typedError<ToolInfo[], IpcError>(__TAURI_INVOKE("list_tools", undefined, options)),
 	/**  Opens the folder of `client`'s user MCP file. */
 	revealToolFolder: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_tool_folder", { client }, options)),
+	listProjects: (options?: InvokeOptions) => typedError<ProjectRow[], IpcError>(__TAURI_INVOKE("list_projects", undefined, options)),
+	/**
+	 *  Opens the OS folder picker; `None` when the user cancels. The folder is
+	 *  validated and kept here; the frontend gets a token and the placeholder
+	 *  path.
+	 */
+	pickProjectFolder: (options?: InvokeOptions) => typedError<PickedFolder | null, IpcError>(__TAURI_INVOKE("pick_project_folder", undefined, options)),
+	addProject: (token: string, options?: InvokeOptions) => typedError<ProjectChange, IpcError>(__TAURI_INVOKE("add_project", { token }, options)),
+	initProject: (token: string, shared: boolean, name: string | null, options?: InvokeOptions) => typedError<ProjectChange, IpcError>(__TAURI_INVOKE("init_project", { token, shared, name }, options)),
+	reviewProject: (id: string, options?: InvokeOptions) => typedError<TrustReview, IpcError>(__TAURI_INVOKE("review_project", { id }, options)),
+	trustProject: (id: string, hash: string, options?: InvokeOptions) => typedError<ProjectChange, IpcError>(__TAURI_INVOKE("trust_project", { id, hash }, options)),
+	removeProject: (id: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("remove_project", { id }, options)),
+	applyProjectFiles: (id: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("apply_project_files", { id }, options)),
+	/**
+	 *  Open: the known project's folder in the file manager. The folder comes
+	 *  from this machine's overlay, never from the frontend.
+	 */
+	revealProjectFolder: (id: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_project_folder", { id }, options)),
+	effectiveMatrix: (projectId: string, options?: InvokeOptions) => typedError<EffectiveMatrix, IpcError>(__TAURI_INVOKE("effective_matrix", { projectId }, options)),
+	resolverDetail: (entry: EntryRef, options?: InvokeOptions) => typedError<ResolverDetail, IpcError>(__TAURI_INVOKE("resolver_detail", { entry }, options)),
+	resolveEntry: (entry: EntryRef, action: ResolveAction, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("resolve_entry", { entry, action }, options)),
 };
 
 /* Constants */
@@ -191,6 +212,21 @@ export type DataHomeSource =
 /**  How secret references reach the server (SPEC 11.4). */
 export type DeliveryKind = "auto" | "env" | "launch" | "command" | "inline";
 
+export type EffectiveMatrix = {
+	projectId: string,
+	projectName: string,
+	/**  The project folder under its placeholder root. */
+	path: string,
+	/**
+	 *  Columns: clients with an entry here, then other detected clients,
+	 *  in table order.
+	 */
+	clients: MatrixClient[],
+	rows: MatrixRow[],
+	/**  Files that could not be read and other problems outside any entry. */
+	warnings: IpcError[],
+};
+
 /**  One entry of a client file that needs attention or changed. */
 export type EntryNote = {
 	/**  The native entry key. */
@@ -201,6 +237,16 @@ export type EntryNote = {
 	/**  The entry needs a decision (Overwrite, Import theirs, Skip). */
 	unresolved: boolean,
 	problem: IpcError | null,
+};
+
+/**
+ *  One entry of a drawer file: the file as the drawer names it, the client
+ *  and the native entry name.
+ */
+export type EntryRef = {
+	file: FileRef,
+	client: string,
+	name: string,
 };
 
 /**  An entry compared with what is desired and what was written (SPEC 8.2). */
@@ -529,6 +575,15 @@ export type FileRef = {
 /**  Which layer a client file belongs to (SPEC 6.1). */
 export type FileScope = "user" | "project" | "project_local";
 
+/**  A manifest the folder holds already (Add binds it). */
+export type FoundManifest = {
+	id: string,
+	name: string,
+	layout: ManifestLayout,
+	/**  This machine knows the project already. */
+	known: boolean,
+};
+
 /**
  *  A failed command: the stable code the frontend localizes from, plus
  *  English diagnostic detail (never shown as state).
@@ -545,6 +600,67 @@ export type IpcError = {
 export type KeyValue = {
 	key: string,
 	value: string,
+};
+
+/**  The layer an entry comes from (SPEC 6.4); the legend's S, P, L, F, C. */
+export type LayerKind = "system" | "project" | "project_local" | 
+/**  An entry Loadout does not own in one of the client's files. */
+"foreign" | 
+/**  An entry the client reads from another tool's file. */
+"client_compat";
+
+/**  A layer and the file (under its placeholder root) of one entry. */
+export type LayerRef = {
+	layer: LayerKind,
+	file: string,
+};
+
+/**  How a manifest file compares with the content last trusted. */
+export type ManifestChangeKind = "new" | "changed" | "unchanged" | "removed";
+
+/**  The manifest files of a project folder (SPEC 5.5). */
+export type ManifestLayout = 
+/**  Only `.loadout/project.local.toml`. */
+"private" | 
+/**  Only `.loadout/project.toml`. */
+"shared" | 
+/**  Both files. */
+"shared_and_local";
+
+/**
+ *  One client's entry of a server name: the matrix cell and its
+ *  provenance chain.
+ */
+export type MatrixCell = {
+	client: string,
+	/**  The entry the client uses. */
+	winner: LayerRef,
+	/**  `store:<id>`, `store:<id>+project`, `project:<name>` or `foreign`. */
+	source: string,
+	/**  The client starts it (not suppressed, disabled or blocked). */
+	loaded: boolean,
+	shadowed: LayerRef[],
+	/**  Other clients that read the winner's file and container. */
+	alsoVisibleTo: string[],
+	status: EntryStateKind | null,
+	warnings: IpcError[],
+	/**  The winner's native entry as its file writes it, masked. */
+	snippet: string | null,
+};
+
+export type MatrixClient = {
+	id: string,
+	name: string,
+	detected: boolean,
+};
+
+export type MatrixRow = {
+	name: string,
+	/**
+	 *  One cell per client that loads (or would load) the name; a client
+	 *  whose own layers coexist (Cursor) can have several.
+	 */
+	cells: MatrixCell[],
 };
 
 /**  Planned or done create, update, remove and disable operations. */
@@ -570,6 +686,18 @@ export type PendingPlan = {
 	writes: number,
 	unresolved: number,
 	warnings: IpcError[],
+};
+
+/**  A folder picked in the OS dialog, as the frontend sees it. */
+export type PickedFolder = {
+	/**  Names the folder in `add_project` and `init_project`. */
+	token: string,
+	/**  The folder under its placeholder root. */
+	path: string,
+	/**  The folder's own name (the default project name). */
+	name: string,
+	/**  `None`: no manifest; the page offers Init (Private preselected). */
+	manifest: FoundManifest | null,
 };
 
 /**  A pill's state (SPEC 13.2). */
@@ -626,6 +754,100 @@ export type PlannedFile = {
  *  bar on macOS).
  */
 export type Platform = "windows" | "linux" | "macos";
+
+/**  What a project change did. */
+export type ProjectChange = {
+	id: string,
+	trust: ProjectTrust,
+} & ChangeResult;
+
+/**  One project of the Projects page. */
+export type ProjectRow = {
+	id: string,
+	name: string,
+	/**  The folder under its placeholder root (`~/Code/app`). */
+	path: string,
+	layout: ManifestLayout | null,
+	trust: ProjectTrust,
+	error: IpcError | null,
+	/**  Server names the manifests define. */
+	servers: number,
+	/**  Clients with an entry of this project. */
+	clients: number,
+	/**  Entries waiting for an apply, a decision, or blocked. */
+	pending: number,
+};
+
+/**  Trust of a known project's manifests (SPEC 17). */
+export type ProjectTrust = "trusted" | 
+/**  Never trusted on this machine. */
+"untrusted" | 
+/**  Changed since trusted (for example after `git pull`). */
+"changed" | 
+/**  The folder is gone. */
+"missing" | 
+/**  No usable manifest (see the row's error). */
+"invalid";
+
+/**  A resolver action (SPEC 8.2 default actions, 13.4 buttons). */
+export type ResolveAction = 
+/**  Write the desired entry over the file's (adopting a collision). */
+"overwrite" | 
+/**
+ *  Turn the file's entry into the store server ("Import their
+ *  change", "Import theirs").
+ */
+"import_theirs" | 
+/**
+ *  Stop managing the entry: it stays as it is, and the server is no
+ *  longer enabled for this client.
+ */
+"release" | 
+/**  Leave it for now. */
+"skip" | 
+/**  A deleted entry: write it again. */
+"recreate" | 
+/**  A deleted entry: remove the client from the server's enable list. */
+"respect_deletion" | 
+/**  A drifted entry no longer desired: remove it anyway. */
+"remove_anyway";
+
+/**  What the resolver shows for one entry. */
+export type ResolverDetail = {
+	/**  The file under its placeholder root. */
+	file: string,
+	/**  The project folder under its placeholder root, for a project file. */
+	project: string | null,
+	client: string,
+	name: string,
+	server: string | null,
+	state: EntryStateKind,
+	/**
+	 *  The entry as Loadout last wrote it; `None` when it was never
+	 *  written (a collision) or cannot be recovered.
+	 */
+	lastWritten: string | null,
+	/**  The entry in the file now; `None` when it was deleted. */
+	current: string | null,
+	/**  The entry the store wants; `None` when it is no longer desired. */
+	desired: string | null,
+	/**  The actions this state allows, the default first. */
+	actions: ResolveAction[],
+	problem: IpcError | null,
+};
+
+/**  One manifest file of the trust review. */
+export type ReviewedFile = {
+	/**  `project.toml` or `project.local.toml`. */
+	file: string,
+	/**  `<P>/.loadout/<file>`. */
+	path: string,
+	change: ManifestChangeKind,
+	/**  The file now (masked); for a new file the whole review. */
+	content: string | null,
+	/**  Unified diff from the trusted content (masked), for a changed file. */
+	diff: string | null,
+};
 
 /**
  *  A configuration scope the sidebar switcher offers (SPEC 13.1). Projects
@@ -738,6 +960,22 @@ export type Transports = {
 	stdio: boolean,
 	http: boolean,
 	sse: boolean,
+};
+
+/**  The trust review of a project: what trusting it would accept. */
+export type TrustReview = {
+	id: string,
+	name: string,
+	path: string,
+	trust: ProjectTrust,
+	/**
+	 *  The manifests' content hash; `trust_project` trusts only this
+	 *  content.
+	 */
+	hash: string,
+	files: ReviewedFile[],
+	/**  Manifest validation warnings. */
+	warnings: IpcError[],
 };
 
 export type UndoResult = {

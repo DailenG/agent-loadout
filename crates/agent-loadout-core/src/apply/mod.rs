@@ -20,6 +20,7 @@ pub mod journal;
 pub mod ledger;
 pub mod plan;
 pub mod render;
+pub mod resolve;
 pub mod rollback;
 
 use std::path::{Path, PathBuf};

@@ -28,7 +28,7 @@ use crate::adapters::mapper::WriteCx;
 use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
 use crate::apply::ApplyEnv;
 use crate::apply::ledger::Ledger;
-use crate::apply::plan::{Action, EntryState, Plan, read_target};
+use crate::apply::plan::{Action, EntryPlan, EntryState, Plan, read_target};
 use crate::apply::render::{DesiredState, native_name, native_to_template, render};
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
@@ -539,10 +539,18 @@ pub fn stage_adopt_identical(
     Ok(adopted)
 }
 
-/// Carries out the `import` actions of a plan as store edits: a changed
-/// native entry becomes the server definition; a deleted one stops the
-/// server from being enabled for that client. Returns the changed server
-/// ids; entries that cannot be imported are left for the re-plan to report.
+/// Whether `entry` is resolved by a store edit: an `import`, or the
+/// release of an entry that is still desired (its server stops being
+/// enabled for the client).
+pub fn is_store_resolution(entry: &EntryPlan) -> bool {
+    entry.action == Action::Import || (entry.action == Action::Release && entry.desired.is_some())
+}
+
+/// Carries out the store side of a plan's decisions ([`is_store_resolution`]):
+/// a changed native entry becomes the server definition; a deleted one, or
+/// one released, stops the server from being enabled for that client.
+/// Returns the changed server ids; entries that cannot be staged are left
+/// for the re-plan to report.
 pub fn stage_resolutions(
     tx: &mut Transaction<'_>,
     plan: &Plan,
@@ -550,21 +558,24 @@ pub fn stage_resolutions(
 ) -> Result<ImportResolutions, CoreError> {
     let mut result = ImportResolutions::default();
     for target in &plan.targets {
-        for entry in target.entries.iter().filter(|e| e.action == Action::Import) {
+        for entry in target.entries.iter().filter(|e| is_store_resolution(e)) {
             let (Some(client), Some(id)) = (entry.client, entry.server_id.as_ref()) else {
                 continue;
             };
             if target.project_id.is_some() {
                 // A project entry comes from the project's manifests, never
                 // from a store server.
+                let message = if entry.action == Action::Release {
+                    "a project entry cannot be released here; remove the client from the \
+                     entry's clients in the project's manifest instead"
+                } else {
+                    "a project entry cannot be imported into the store; edit the project's \
+                     manifest instead"
+                };
                 result.failed.push((
                     client.to_owned(),
                     entry.name.clone(),
-                    CoreError::new(
-                        ErrorCode::ScopeNotSupported,
-                        "a project entry cannot be imported into the store; edit the project's \
-                         manifest instead",
-                    ),
+                    CoreError::new(ErrorCode::ScopeNotSupported, message),
                 ));
                 continue;
             }
@@ -574,11 +585,11 @@ pub fn stage_resolutions(
             if !desired.servers.contains_key(id) {
                 continue;
             }
-            let edit = match (&entry.state, &entry.observed) {
-                (EntryState::Missing, _) => {
+            let edit = match (&entry.action, &entry.state, &entry.observed) {
+                (Action::Release, _, _) | (_, EntryState::Missing, _) => {
                     update_server(tx, id, |server| disable_client(server, client))
                 }
-                (_, Some(observed)) => {
+                (_, _, Some(observed)) => {
                     server_from_native(spec, &entry.name, observed).and_then(|def| {
                         update_server(tx, id, |server| {
                             set_fields(server, &def.fields, def.tools.clone());

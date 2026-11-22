@@ -35,6 +35,18 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::apply::undo_apply,
             commands::tools::list_tools,
             commands::tools::reveal_tool_folder,
+            commands::projects::list_projects,
+            commands::projects::pick_project_folder,
+            commands::projects::add_project,
+            commands::projects::init_project,
+            commands::projects::review_project,
+            commands::projects::trust_project,
+            commands::projects::remove_project,
+            commands::projects::apply_project_files,
+            commands::projects::reveal_project_folder,
+            commands::effective::effective_matrix,
+            commands::resolve::resolver_detail,
+            commands::resolve::resolve_entry,
         ])
         .error_handling(ErrorHandlingMode::Result)
         // One TypeScript type per Rust type: the IPC types serialize and
@@ -52,6 +64,9 @@ fn main() {
     let builder = specta_builder();
     tauri::Builder::default()
         .manage(commands::AppState::from_process())
+        // The folder picker of Add folder runs from Rust (the path stays in
+        // the backend), so the frontend needs no dialog permission.
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

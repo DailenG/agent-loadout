@@ -189,7 +189,7 @@ pub fn folder_of(core: &Core, client: &str) -> Result<std::path::PathBuf, CoreEr
     Ok(folder)
 }
 
-fn open_folder(folder: &Path) -> Result<(), CoreError> {
+pub(super) fn open_folder(folder: &Path) -> Result<(), CoreError> {
     let program = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {

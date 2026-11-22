@@ -15,6 +15,9 @@ export const storeQueryKeys = {
   pendingPlan: ["pending_plan"],
   appliedRuns: ["list_applied_runs"],
   tools: ["list_tools"],
+  projects: ["list_projects"],
+  /** Prefix of every project's matrix (`["effective_matrix", id]`). */
+  effective: ["effective_matrix"],
 } as const;
 
 const STATUS_KEYS = {

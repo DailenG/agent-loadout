@@ -9,13 +9,17 @@
 //! a [`Core`], so the same functions run against a temp home in tests.
 
 pub mod apply;
+pub mod effective;
+pub mod projects;
+pub mod resolve;
 pub mod servers;
 #[cfg(test)]
 mod tests;
 pub mod tools;
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use agent_loadout_core::adapters::detect::NoRegistry;
 use agent_loadout_core::apply::{
@@ -107,17 +111,69 @@ fn sibling_launcher() -> Option<PathBuf> {
 /// startup; a failure is kept and reported by every command that needs it.
 pub struct AppState {
     core: Result<Arc<Core>, CoreError>,
+    /// Folders the user picked in the OS dialog, by the token the frontend
+    /// got for each: the absolute path never crosses IPC (SPEC 17).
+    picked: Mutex<HashMap<String, PathBuf>>,
 }
 
 impl AppState {
     pub fn from_process() -> Self {
         Self {
             core: Core::from_process().map(Arc::new),
+            picked: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn core(&self) -> Result<Arc<Core>, IpcError> {
         self.core.clone().map_err(IpcError::from)
+    }
+
+    /// Keeps a picked folder and returns its token.
+    fn remember_folder(&self, folder: PathBuf) -> String {
+        let mut picked = self.picked.lock().unwrap_or_else(|err| err.into_inner());
+        let token = format!("folder-{}", picked.len() + 1);
+        picked.insert(token.clone(), folder);
+        token
+    }
+
+    /// The folder picked under `token`.
+    fn picked_folder(&self, token: &str) -> Result<PathBuf, IpcError> {
+        let picked = self.picked.lock().unwrap_or_else(|err| err.into_inner());
+        picked.get(token).cloned().ok_or_else(|| IpcError {
+            code: ErrorCode::NotFound,
+            message: "the picked folder is not known any more; pick it again".to_owned(),
+        })
+    }
+}
+
+/// `text` with the folders that hold the user name replaced by their
+/// placeholder roots: the project folder (`<P>`, when given), then the home
+/// folder (`~`), each as written and with forward slashes. Core messages
+/// may name absolute paths; the app sends them through this.
+pub(crate) fn scrub(env: &Env, text: &str, project: Option<&Path>) -> String {
+    let mut out = text.to_owned();
+    let roots = [
+        project.map(|root| (root.to_path_buf(), "<P>")),
+        Some((env.home().to_path_buf(), "~")),
+    ];
+    for (root, placeholder) in roots.into_iter().flatten() {
+        let native = root.to_string_lossy().into_owned();
+        if native.is_empty() {
+            continue;
+        }
+        let forward = native.replace('\\', "/");
+        for form in [native.as_str(), forward.as_str()] {
+            out = out.replace(form, placeholder);
+        }
+    }
+    out
+}
+
+/// [`IpcError::from`] with [`scrub`] applied to the message.
+pub(crate) fn scrubbed(env: &Env, err: &CoreError, project: Option<&Path>) -> IpcError {
+    IpcError {
+        code: err.code(),
+        message: scrub(env, err.message(), project),
     }
 }
 

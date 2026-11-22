@@ -9,6 +9,8 @@
 //! - [`trust`]: `state/trust.json` (SPEC 17).
 //! - [`git`]: the project's repository, for the private-file rules of 6.5.
 //! - [`effective`]: what a client loads in a folder, and from where (6.4).
+//! - [`projects`]: init, add, remove, the trust review and trust, shared by
+//!   `loadout project` and the app.
 //!
 //! The planner ([`crate::apply::plan`]) turns known projects into project
 //! and project-local targets.
@@ -17,6 +19,7 @@ pub mod effective;
 pub mod git;
 pub mod manifest;
 pub mod merge;
+pub mod projects;
 pub mod trust;
 
 pub use effective::{

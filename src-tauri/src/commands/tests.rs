@@ -12,8 +12,14 @@ use agent_loadout_core::store::{LogFilter, Operation, Store};
 use agent_loadout_testkit::{MemKeyring, TempHome};
 
 use super::apply::FileRef;
+use super::effective::LayerKind;
+use super::projects::{ManifestChangeKind, ManifestLayout, ProjectTrust};
+use super::resolve::{EntryRef, ResolveAction};
 use super::servers::{ClientChoice, KeyValue, PillState, ServerDraft, TransportKind};
-use super::{ApplyStatusKind, Core, EntryStateKind, FileScope, apply, servers, tools};
+use super::{
+    ApplyStatusKind, Core, EntryStateKind, FileScope, apply, effective, projects, resolve, servers,
+    tools,
+};
 
 struct Fx {
     th: TempHome,
@@ -721,4 +727,536 @@ fn drawer_diffs_mask_secrets_of_other_entries() {
     assert!(masked.contains("\"requiresAuth\": true"), "{masked}");
     assert!(masked.contains("\"--api-key=********\""), "{masked}");
     assert!(masked.contains("\"LOG_LEVEL\": \"info\""), "{masked}");
+}
+
+// M16: Projects page, effective matrix, drift resolver.
+
+impl Fx {
+    fn summaries(&self) -> Vec<String> {
+        match self.core.open_store().unwrap() {
+            Some(store) => store
+                .log(&LogFilter::default())
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.summary)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    fn store_file(&self, relative: &str) -> String {
+        use agent_loadout_core::store::StoreRead;
+        self.core
+            .open_store()
+            .unwrap()
+            .unwrap()
+            .read_file(relative)
+            .unwrap()
+            .unwrap_or_default()
+    }
+
+    /// What crosses IPC must never name the temp root (it stands in for
+    /// the user's profile path).
+    fn assert_no_root(&self, json: &str) {
+        let root = self.th.root().to_string_lossy().into_owned();
+        for form in [
+            root.clone(),
+            root.replace('\\', "/"),
+            root.replace('\\', "\\\\"),
+        ] {
+            assert!(!json.contains(&form), "{json}");
+        }
+    }
+}
+
+const APP_MANIFEST: &str = "schema = 1\nid = \"app-a1b2\"\nname = \"app\"\n\n[defaults]\n\
+                            clients = [\"claude-code\"]\n\n[servers.github]\nfrom = \"github\"\n\
+                            args = [\"--project\"]\n\n[servers.docs]\ntransport = \"stdio\"\n\
+                            command = \"docs-mcp\"\n";
+
+/// A folder with a shared manifest that this machine does not know yet.
+fn unbound_project(fx: &Fx) -> PathBuf {
+    let root = fx.th.projects().join("app");
+    std::fs::create_dir_all(root.join(".loadout")).unwrap();
+    std::fs::write(root.join(".loadout/project.toml"), APP_MANIFEST).unwrap();
+    root
+}
+
+#[test]
+fn init_is_private_by_default_trusted_and_one_commit() {
+    let fx = Fx::new();
+    drop(fx.store());
+    let root = fx.th.projects().join("fresh");
+    std::fs::create_dir_all(&root).unwrap();
+    let picked = projects::inspect(&fx.core, &root, "folder-1".to_owned()).unwrap();
+    assert!(
+        picked.manifest.is_none(),
+        "no manifest: the page offers Init"
+    );
+    assert_eq!(picked.name, "fresh");
+    assert!(picked.path.starts_with('~') || picked.path.starts_with('%'));
+
+    let before = fx.commits();
+    let done = projects::init(&fx.core, &root, false, None).unwrap();
+    assert_eq!(fx.commits(), before + 1, "init is one commit");
+    assert!(root.join(".loadout/project.local.toml").exists());
+    assert!(!root.join(".loadout/project.toml").exists());
+    assert_eq!(done.trust, ProjectTrust::Trusted);
+    assert!(done.id.starts_with("fresh-"), "{}", done.id);
+    assert!(fx.summaries()[0].starts_with("project: init fresh-"));
+
+    let rows = projects::list(&fx.core).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].layout, Some(ManifestLayout::Private));
+    assert_eq!(rows[0].trust, ProjectTrust::Trusted);
+    let json = serde_json::to_string(&rows).unwrap();
+    fx.assert_no_root(&json);
+
+    // A second init of the same folder is refused, without the path.
+    let err = projects::init(&fx.core, &root, true, None).unwrap_err();
+    assert_eq!(err.code, agent_loadout_core::ErrorCode::AlreadyExists);
+    fx.assert_no_root(&err.message);
+}
+
+#[test]
+fn picked_folders_are_validated() {
+    let fx = Fx::new();
+    let home = fx.th.home();
+    let code = |path: &Path| {
+        projects::inspect(&fx.core, path, "t".to_owned())
+            .unwrap_err()
+            .code
+    };
+    use agent_loadout_core::ErrorCode;
+    assert_eq!(code(&home), ErrorCode::InvalidPath, "the home folder");
+    assert_eq!(code(Path::new("relative/app")), ErrorCode::InvalidPath);
+    assert_eq!(
+        code(&home.join("a").join("..").join("b")),
+        ErrorCode::InvalidPath
+    );
+    let data = fx.core.home.path.join("store");
+    std::fs::create_dir_all(&data).unwrap();
+    assert_eq!(code(&data), ErrorCode::InvalidPath, "the data directory");
+    assert_eq!(code(&fx.th.projects().join("gone")), ErrorCode::NotFound);
+    let err = projects::inspect(&fx.core, &home, "t".to_owned()).unwrap_err();
+    fx.assert_no_root(&err.message);
+}
+
+/// Add folder binds an existing manifest; trust shows the content (then
+/// the diff after a change) and trusts only what was reviewed.
+#[test]
+fn add_then_trust_review_shows_the_manifest_and_its_diff() {
+    let fx = Fx::new();
+    fx.stage(&[(
+        "servers/github.toml",
+        &server_file(
+            "github",
+            "transport = \"stdio\"\ncommand = \"github-mcp\"",
+            &["claude-code"],
+        ),
+    )]);
+    let root = unbound_project(&fx);
+    let picked = projects::inspect(&fx.core, &root, "folder-1".to_owned()).unwrap();
+    let found = picked.manifest.expect("the manifest is found");
+    assert_eq!(found.id, "app-a1b2");
+    assert_eq!(found.layout, ManifestLayout::Shared);
+    assert!(!found.known);
+
+    let added = projects::add(&fx.core, &root).unwrap();
+    assert_eq!(added.trust, ProjectTrust::Untrusted);
+    assert!(added.change.apply.is_none(), "untrusted: nothing applied");
+    assert!(!root.join(".mcp.json").exists());
+
+    let review = projects::review(&fx.core, "app-a1b2").unwrap();
+    assert_eq!(review.files.len(), 1);
+    assert_eq!(review.files[0].change, ManifestChangeKind::New);
+    assert_eq!(review.files[0].path, "<P>/.loadout/project.toml");
+    assert!(
+        review.files[0]
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("docs-mcp")
+    );
+
+    // The manifest changes after the review: the reviewed hash no longer
+    // trusts it.
+    let changed = APP_MANIFEST.replace("docs-mcp", "docs-mcp-v2");
+    std::fs::write(root.join(".loadout/project.toml"), &changed).unwrap();
+    let err = projects::trust(&fx.core, "app-a1b2", &review.hash).unwrap_err();
+    assert_eq!(err.code, agent_loadout_core::ErrorCode::TrustRequired);
+    assert!(!root.join(".mcp.json").exists());
+
+    let review = projects::review(&fx.core, "app-a1b2").unwrap();
+    let before = fx.commits();
+    let trusted = projects::trust(&fx.core, "app-a1b2", &review.hash).unwrap();
+    assert_eq!(
+        fx.commits(),
+        before + 1,
+        "trust and its apply are one commit"
+    );
+    assert_eq!(trusted.trust, ProjectTrust::Trusted);
+    assert!(fx.read(&root.join(".mcp.json")).contains("docs-mcp-v2"));
+
+    // A pull changes the manifest: the review shows a diff, under `<P>`.
+    std::fs::write(
+        root.join(".loadout/project.toml"),
+        changed.replace("docs-mcp-v2", "docs-mcp-v3"),
+    )
+    .unwrap();
+    let rows = projects::list(&fx.core).unwrap();
+    assert_eq!(rows[0].trust, ProjectTrust::Changed);
+    let review = projects::review(&fx.core, "app-a1b2").unwrap();
+    assert_eq!(review.files[0].change, ManifestChangeKind::Changed);
+    let diff = review.files[0].diff.as_deref().unwrap();
+    assert!(diff.contains("-command = \"docs-mcp-v2\""), "{diff}");
+    assert!(diff.contains("+command = \"docs-mcp-v3\""), "{diff}");
+    assert!(diff.contains("<P>/.loadout/project.toml") || diff.contains("<P>\\.loadout"));
+    fx.assert_no_root(&serde_json::to_string(&review).unwrap());
+
+    // Remove from list: one commit, the owned project entries go.
+    let removed = projects::remove(&fx.core, "app-a1b2").unwrap();
+    assert!(removed.commit.is_some());
+    assert!(projects::list(&fx.core).unwrap().is_empty());
+    assert!(!fx.read(&root.join(".mcp.json")).contains("docs-mcp"));
+}
+
+/// The matrix cell carries the effective view's provenance: winner,
+/// shadowed entries, other readers of the file, warnings, the snippet.
+#[test]
+fn matrix_cells_show_provenance() {
+    let fx = Fx::new();
+    fx.stage(&[(
+        "servers/github.toml",
+        &server_file(
+            "github",
+            "transport = \"stdio\"\ncommand = \"github-mcp\"",
+            &["claude-code"],
+        ),
+    )]);
+    let root = unbound_project(&fx);
+    projects::add(&fx.core, &root).unwrap();
+    let hash = projects::review(&fx.core, "app-a1b2").unwrap().hash;
+    projects::trust(&fx.core, "app-a1b2", &hash).unwrap();
+
+    let matrix = effective::matrix(&fx.core, "app-a1b2").unwrap();
+    assert!(matrix.clients.iter().any(|c| c.id == "claude-code"));
+    let cell = |name: &str, client: &str| {
+        matrix
+            .rows
+            .iter()
+            .find(|row| row.name == name)
+            .unwrap_or_else(|| panic!("row {name}: {:#?}", matrix.rows))
+            .cells
+            .iter()
+            .find(|cell| cell.client == client)
+            .cloned()
+            .unwrap_or_else(|| panic!("cell {name}/{client}"))
+    };
+    let github = cell("github", "claude-code");
+    assert_eq!(github.winner.layer, LayerKind::Project);
+    assert_eq!(github.winner.file, "<P>/.mcp.json");
+    assert_eq!(github.source, "store:github+project");
+    assert!(github.loaded);
+    assert!(
+        github
+            .shadowed
+            .iter()
+            .any(|s| s.layer == LayerKind::System && s.file == "~/.claude.json"),
+        "{github:#?}"
+    );
+    assert!(!github.also_visible_to.is_empty(), "{github:#?}");
+    assert!(!github.also_visible_to.contains(&"claude-code".to_owned()));
+    assert_eq!(github.status, Some(EntryStateKind::Synced));
+    let snippet = github.snippet.as_deref().unwrap();
+    assert!(snippet.contains("--project"), "{snippet}");
+    assert_eq!(cell("docs", "claude-code").source, "project:docs");
+    fx.assert_no_root(&serde_json::to_string(&matrix).unwrap());
+
+    // A changed manifest warns on the project's entries.
+    let text = format!("{APP_MANIFEST}# pulled\n");
+    std::fs::write(root.join(".loadout/project.toml"), text).unwrap();
+    let matrix = effective::matrix(&fx.core, "app-a1b2").unwrap();
+    let docs = matrix
+        .rows
+        .iter()
+        .find(|row| row.name == "docs")
+        .unwrap()
+        .cells
+        .iter()
+        .find(|cell| cell.client == "claude-code")
+        .unwrap();
+    assert!(
+        docs.warnings
+            .iter()
+            .any(|w| w.code == agent_loadout_core::ErrorCode::TrustRequired),
+        "{docs:#?}"
+    );
+    fx.assert_no_root(&serde_json::to_string(&matrix).unwrap());
+}
+
+fn user_entry(name: &str) -> EntryRef {
+    EntryRef {
+        file: FileRef {
+            project_id: None,
+            scope: FileScope::User,
+            file: "~/.claude.json".to_owned(),
+        },
+        client: "claude-code".to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+/// Saves `fake` for Claude Code, then edits its entry by hand: drifted.
+fn drifted(fx: &Fx) {
+    servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
+    let text = fx
+        .read(&fx.claude())
+        .replace("\"fake-mcp\"", "\"fake-mcp-edited\"");
+    std::fs::write(fx.claude(), text).unwrap();
+}
+
+#[test]
+fn resolver_overwrites_a_drifted_entry() {
+    let fx = Fx::new();
+    drifted(&fx);
+    let detail = resolve::detail(&fx.core, &user_entry("fake")).unwrap();
+    assert_eq!(detail.state, EntryStateKind::Drifted);
+    assert_eq!(
+        detail.actions,
+        [
+            ResolveAction::Overwrite,
+            ResolveAction::ImportTheirs,
+            ResolveAction::Release,
+            ResolveAction::Skip
+        ]
+    );
+    assert_eq!(detail.file, "~/.claude.json");
+    let last = detail.last_written.as_deref().unwrap();
+    assert!(last.contains("\"fake-mcp\""), "{last}");
+    assert!(
+        detail
+            .current
+            .as_deref()
+            .unwrap()
+            .contains("fake-mcp-edited")
+    );
+    assert!(detail.desired.as_deref().unwrap().contains("\"fake-mcp\""));
+
+    // Skip changes nothing.
+    let before = fx.commits();
+    let skipped = resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Skip).unwrap();
+    assert!(skipped.commit.is_none());
+    // An action the state does not allow is refused.
+    let err = resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Recreate).unwrap_err();
+    assert_eq!(err.code, agent_loadout_core::ErrorCode::InvalidValue);
+
+    let result = resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Overwrite).unwrap();
+    assert_eq!(fx.commits(), before + 1, "one commit");
+    assert!(result.apply.unwrap().files_written == 1);
+    let text = fx.read(&fx.claude());
+    assert!(
+        text.contains("\"fake-mcp\"") && !text.contains("fake-mcp-edited"),
+        "{text}"
+    );
+    assert!(fx.summaries()[0].starts_with("resolve: overwrite claude-code/fake"));
+}
+
+#[test]
+fn resolver_imports_a_drifted_change_into_the_store() {
+    let fx = Fx::new();
+    drifted(&fx);
+    let before = fx.commits();
+    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::ImportTheirs).unwrap();
+    assert_eq!(fx.commits(), before + 1);
+    assert_eq!(fx.summaries()[0], "adopt: claude-code/fake drift");
+    assert!(
+        fx.store_file("servers/fake.toml")
+            .contains("fake-mcp-edited")
+    );
+    // The file stays as the user left it, and is synced now.
+    assert!(fx.read(&fx.claude()).contains("fake-mcp-edited"));
+    let pending = apply::pending(&fx.core).unwrap();
+    assert_eq!(pending.unresolved, 0, "{:#?}", pending.files);
+}
+
+#[test]
+fn resolver_releases_ownership() {
+    let fx = Fx::new();
+    drifted(&fx);
+    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Release).unwrap();
+    assert_eq!(fx.summaries()[0], "resolve: release claude-code/fake");
+    // The entry stays; the server is no longer enabled for Claude Code;
+    // the entry is foreign now (nothing pending, nothing owned).
+    assert!(fx.read(&fx.claude()).contains("fake-mcp-edited"));
+    let server = fx.store_file("servers/fake.toml");
+    assert!(!server.contains("\"claude-code\""), "{server}");
+    let pending = apply::pending(&fx.core).unwrap();
+    assert_eq!(pending.pending, 0, "{:#?}", pending.files);
+    let ledger =
+        std::fs::read_to_string(fx.core.home.state_dir().join("ledger.json")).unwrap_or_default();
+    assert!(!ledger.contains("\"key\": \"fake\""), "{ledger}");
+}
+
+#[test]
+fn resolver_recreates_or_respects_a_deletion() {
+    let fx = Fx::new();
+    servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
+    std::fs::write(fx.claude(), "{\n  \"mcpServers\": {}\n}\n").unwrap();
+    let detail = resolve::detail(&fx.core, &user_entry("fake")).unwrap();
+    assert_eq!(detail.state, EntryStateKind::Missing);
+    assert_eq!(
+        detail.actions,
+        [
+            ResolveAction::Recreate,
+            ResolveAction::RespectDeletion,
+            ResolveAction::Skip
+        ]
+    );
+    assert!(detail.current.is_none());
+
+    resolve::run(
+        &fx.core,
+        &user_entry("fake"),
+        ResolveAction::RespectDeletion,
+    )
+    .unwrap();
+    assert_eq!(
+        fx.summaries()[0],
+        "resolve: respect deletion claude-code/fake"
+    );
+    assert!(
+        !fx.store_file("servers/fake.toml")
+            .contains("\"claude-code\"")
+    );
+    assert!(!fx.read(&fx.claude()).contains("fake"));
+
+    // Re-create: enabled again, deleted again, then written back.
+    servers::set_clients_for(
+        &fx.core,
+        "fake",
+        &ClientChoice {
+            all_detected: false,
+            clients: vec!["claude-code".to_owned()],
+        },
+    )
+    .unwrap();
+    std::fs::write(fx.claude(), "{\n  \"mcpServers\": {}\n}\n").unwrap();
+    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Recreate).unwrap();
+    assert!(fx.read(&fx.claude()).contains("\"fake-mcp\""));
+}
+
+#[test]
+fn resolver_handles_a_collision() {
+    let fx = Fx::new();
+    std::fs::write(
+        fx.claude(),
+        "{\n  \"mcpServers\": {\n    \"fake\": { \"command\": \"theirs-mcp\" }\n  }\n}\n",
+    )
+    .unwrap();
+    servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
+    let detail = resolve::detail(&fx.core, &user_entry("fake")).unwrap();
+    assert_eq!(detail.state, EntryStateKind::Collision);
+    assert_eq!(
+        detail.actions,
+        [
+            ResolveAction::Overwrite,
+            ResolveAction::ImportTheirs,
+            ResolveAction::Skip
+        ]
+    );
+    assert!(detail.last_written.is_none(), "never written");
+    assert!(detail.current.as_deref().unwrap().contains("theirs-mcp"));
+
+    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::ImportTheirs).unwrap();
+    assert!(fx.store_file("servers/fake.toml").contains("theirs-mcp"));
+    assert!(fx.read(&fx.claude()).contains("theirs-mcp"));
+    assert_eq!(apply::pending(&fx.core).unwrap().unresolved, 0);
+}
+
+#[test]
+fn resolver_adopts_and_overwrites_a_collision() {
+    let fx = Fx::new();
+    std::fs::write(
+        fx.claude(),
+        "{\n  \"mcpServers\": {\n    \"fake\": { \"command\": \"theirs-mcp\" }\n  }\n}\n",
+    )
+    .unwrap();
+    servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
+    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Overwrite).unwrap();
+    let text = fx.read(&fx.claude());
+    assert!(
+        text.contains("\"fake-mcp\"") && !text.contains("theirs-mcp"),
+        "{text}"
+    );
+    assert_eq!(apply::pending(&fx.core).unwrap().pending, 0);
+}
+
+/// A conflict (drift plus a store change) shows all three versions: what
+/// was last written is rendered again from the store commit the ledger
+/// names.
+#[test]
+fn resolver_shows_three_versions_of_a_conflict() {
+    let fx = Fx::new();
+    drifted(&fx);
+    fx.stage(&[(
+        "servers/fake.toml",
+        &server_file(
+            "fake",
+            "transport = \"stdio\"\ncommand = \"npx\"\nargs = [\"-y\", \"fake-mcp-v2\"]",
+            &["claude-code"],
+        ),
+    )]);
+    let detail = resolve::detail(&fx.core, &user_entry("fake")).unwrap();
+    assert_eq!(detail.state, EntryStateKind::Conflict);
+    let last = detail.last_written.as_deref().expect("recovered");
+    assert!(
+        last.contains("\"fake-mcp\"") && last.contains("LOG_LEVEL"),
+        "{last}"
+    );
+    assert!(
+        detail
+            .current
+            .as_deref()
+            .unwrap()
+            .contains("fake-mcp-edited")
+    );
+    assert!(detail.desired.as_deref().unwrap().contains("fake-mcp-v2"));
+    assert!(detail.actions.contains(&ResolveAction::Release));
+}
+
+/// Project entries come from manifests: no import or release into the
+/// store is offered for them.
+#[test]
+fn project_entries_offer_no_store_edits() {
+    let fx = Fx::new();
+    let root = unbound_project(&fx);
+    fx.stage(&[(
+        "servers/github.toml",
+        &server_file("github", "transport = \"stdio\"\ncommand = \"gh-mcp\"", &[]),
+    )]);
+    projects::add(&fx.core, &root).unwrap();
+    let hash = projects::review(&fx.core, "app-a1b2").unwrap().hash;
+    projects::trust(&fx.core, "app-a1b2", &hash).unwrap();
+    let mcp = root.join(".mcp.json");
+    let text = fx.read(&mcp).replace("\"docs-mcp\"", "\"docs-mcp-edited\"");
+    std::fs::write(&mcp, text).unwrap();
+    let entry = EntryRef {
+        file: FileRef {
+            project_id: Some("app-a1b2".to_owned()),
+            scope: FileScope::Project,
+            file: "<P>/.mcp.json".to_owned(),
+        },
+        client: "claude-code".to_owned(),
+        name: "docs".to_owned(),
+    };
+    let detail = resolve::detail(&fx.core, &entry).unwrap();
+    assert_eq!(detail.state, EntryStateKind::Drifted);
+    assert_eq!(
+        detail.actions,
+        [ResolveAction::Overwrite, ResolveAction::Skip]
+    );
+    assert_eq!(detail.file, "<P>/.mcp.json");
+    resolve::run(&fx.core, &entry, ResolveAction::Overwrite).unwrap();
+    assert!(!fx.read(&mcp).contains("docs-mcp-edited"));
 }

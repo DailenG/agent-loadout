@@ -349,7 +349,7 @@ fn only_references(value: &str) -> bool {
 }
 
 /// The drawer's key of a target: project, scope and placeholder path.
-fn file_ref(env: &Env, target: &TargetPlan) -> FileRef {
+pub(super) fn file_ref(env: &Env, target: &TargetPlan) -> FileRef {
     FileRef {
         project_id: target.project_id.clone(),
         scope: target.scope.into(),

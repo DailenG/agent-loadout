@@ -30,6 +30,7 @@ import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/Setti
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
 import { McpPage } from "@/app/routes/mcp/McpPage";
+import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import {
   dataHomeSourceLabels,
@@ -685,6 +686,9 @@ function RoutePage(props: {
   }
   if (route.key === "tools") {
     return <ToolsPage />;
+  }
+  if (route.key === "projects") {
+    return <ProjectsPage />;
   }
   if (route.key === "skills") {
     return (

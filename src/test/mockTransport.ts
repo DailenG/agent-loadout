@@ -133,6 +133,18 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
       ok({ applyId, restored: [], tag: "auto/pre-rollback/mock", commit: null, apply: MOCK_APPLY_RUN }),
     listTools: async () => ok(MOCK_TOOLS),
     revealToolFolder: async () => ok(null),
+    listProjects: async () => ok([]),
+    pickProjectFolder: async () => ok(null),
+    addProject: async () => ok({ id: "mock-a1b2", trust: "untrusted", commit: MOCK_CHANGE.commit, apply: null }),
+    initProject: async () => ok({ id: "mock-a1b2", trust: "trusted", ...MOCK_CHANGE }),
+    reviewProject: async (id) => mockIpcError({ code: "not_found", message: `project ${id} is not mocked` }),
+    trustProject: async (id) => ok({ id, trust: "trusted", ...MOCK_CHANGE }),
+    removeProject: async () => ok(MOCK_CHANGE),
+    applyProjectFiles: async () => ok(MOCK_CHANGE),
+    revealProjectFolder: async () => ok(null),
+    effectiveMatrix: async (id) => mockIpcError({ code: "not_found", message: `project ${id} is not mocked` }),
+    resolverDetail: async () => mockIpcError({ code: "not_found", message: "entry not mocked" }),
+    resolveEntry: async () => ok(MOCK_CHANGE),
   };
   const merged = { ...defaults, ...options.commands } as Commands;
 
