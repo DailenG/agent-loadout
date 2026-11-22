@@ -67,7 +67,7 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
     let committed = store.transaction(Operation::new("server.import", "import"), |tx| {
         let desired = DesiredState::load(tx, Some(&tx.machine().id.clone()))?;
         let ledger = Ledger::load(ax.fs, &ctx.home.state_dir())?;
-        let (candidates, _) = import::scan(&ax, &desired, &ledger, clients)?;
+        let (candidates, warnings) = import::scan(&ax, &desired, &ledger, clients)?;
         let result = import::stage_import(tx, &candidates, names, args.only)?;
         let count = result.imported.len();
         tx.set_summary(format!(
@@ -84,9 +84,9 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
         } else {
             None
         };
-        Ok((result, report))
+        Ok((result, report, warnings))
     })?;
-    let (result, report) = committed.value;
+    let (result, report, warnings) = committed.value;
     let commit = committed.commit;
     if ctx.json {
         print_json(&json!({
@@ -98,8 +98,12 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
             })).collect::<Vec<_>>(),
             "commit": commit.as_ref().map(ToString::to_string),
             "apply": report.as_ref().map(|report| report_json(report, commit.as_ref())),
+            "warnings": warnings.iter().map(error_json).collect::<Vec<_>>(),
         }));
     } else {
+        for warning in &warnings {
+            eprintln!("warning[{}]: {warning}", warning.code());
+        }
         for (name, err) in &result.skipped {
             println!("skipped {name}: {}[{}]", err.message(), err.code());
         }

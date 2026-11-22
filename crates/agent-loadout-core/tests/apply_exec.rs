@@ -606,6 +606,37 @@ fn journals_record_every_file_and_report_unfinished_runs() {
 }
 
 #[test]
+fn import_warns_about_entries_the_client_skips() {
+    // Gate V1 CC-5: Claude Code skips a `url` entry without `type`; omp
+    // reads the same entry as http.
+    let fx = Fx::new();
+    let entry = r#"{"url": "https://mcp.example.test/mcp"}"#;
+    fx.write(
+        &fx.claude(),
+        &format!("{{\n  \"mcpServers\": {{\n    \"remote\": {entry}\n  }}\n}}\n"),
+    );
+    fx.write(
+        &fx.omp(),
+        &format!("{{\n  \"mcpServers\": {{\n    \"remote\": {entry}\n  }}\n}}\n"),
+    );
+    let store = fx.store();
+    let desired = DesiredState::load(&store, None).unwrap();
+    let (candidates, warnings) = import::scan(&fx.ax(), &desired, &fx.ledger(), None).unwrap();
+    let skipped: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.code() == ErrorCode::ClientSkipsEntry)
+        .collect();
+    assert_eq!(skipped.len(), 1, "{warnings:?}");
+    assert!(
+        skipped[0].message().contains("Claude Code"),
+        "{}",
+        skipped[0]
+    );
+    // Still a candidate (import can take it, and the warning says so).
+    assert!(candidates.iter().any(|c| c.name == "remote"));
+}
+
+#[test]
 fn import_scans_collapses_identical_entries_and_adopts_them() {
     let fx = Fx::new();
     let docs = r#"{"type": "stdio", "command": "npx", "args": ["-y", "@example/docs-mcp"], "env": {"DOCS_TOKEN": "${DOCS_TOKEN}", "LOG_LEVEL": "info"}}"#;

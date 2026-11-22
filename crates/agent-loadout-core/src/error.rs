@@ -154,6 +154,9 @@ pub enum ErrorCode {
     /// An external program Loadout needs for this (git, gh) is not
     /// installed or not on `PATH`.
     ToolNotFound,
+    /// Warning: a foreign client entry that the client itself skips (gate
+    /// V1 CC-5); importing it starts a server the client never ran.
+    ClientSkipsEntry,
 }
 
 impl ErrorCode {
@@ -210,6 +213,7 @@ impl ErrorCode {
             ErrorCode::RemoteRejected => "remote_rejected",
             ErrorCode::RemoteAuthFailed => "remote_auth_failed",
             ErrorCode::ToolNotFound => "tool_not_found",
+            ErrorCode::ClientSkipsEntry => "client_skips_entry",
         }
     }
 }

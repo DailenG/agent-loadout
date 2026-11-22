@@ -246,6 +246,23 @@ pub fn scan(
                     continue;
                 };
                 let def = server_from_native(spec, &name, &value);
+                if let Some(reason) = spec
+                    .mcp
+                    .as_ref()
+                    .and_then(|mcp| mcp.mapper.skipped_by_client(&value))
+                {
+                    warnings.push(
+                        CoreError::new(
+                            ErrorCode::ClientSkipsEntry,
+                            format!(
+                                "{} entry {name:?} {reason}; importing it starts a server {} \
+                                 does not run today",
+                                spec.display_name, spec.display_name
+                            ),
+                        )
+                        .with_path(&target.file),
+                    );
+                }
                 let source = Source {
                     client: spec.id,
                     file: target.file.clone(),

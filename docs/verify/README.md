@@ -60,14 +60,18 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
   the project path's case must be the one Claude Code is started with; the
   M9 planner should warn when the file holds the same folder under another
   spelling.
-- **FB-2 Dotted server names (CC-7, CX-6).** Claude Code and Codex both load
-  `verify.dotted`. Loadout blocks such names for these clients
-  (`invalid_id`). Decide whether to allow them as native names; low impact,
-  since store ids keep their own rule.
-- **FB-3 Entries the client skips (CC-5, CX-7).** Claude Code skips a remote
-  entry without `type` (with a warning), and Codex 0.168 no longer loads the
-  legacy `[mcp.servers]` table. Import should say these are not loaded by
-  the client today instead of importing them silently.
+- **FB-2 Dotted server names (CC-7, CX-6). Done.** Claude Code and Codex
+  both load `verify.dotted` (Windows and Linux). Their name rule is now
+  `[A-Za-z0-9_.-]` (`mapper::dotted_word_name`); Pi keeps `[A-Za-z0-9_-]`
+  until V2 checks it. Store ids keep their own rule.
+- **FB-3 Entries the client skips (CC-5, CX-7). Done.** Claude Code skips a
+  remote entry without `type`; `import` (with and without `--scan`) now
+  warns `client_skips_entry` for such an entry, since importing it starts a
+  server the client never ran (`EntryMapper::skipped_by_client`,
+  `import_warns_about_entries_the_client_skips`). The legacy Codex
+  `[mcp.servers]` table, which Codex 0.168 and 0.171 no longer load, was
+  already never imported (it is only read for the effective view), so
+  nothing changed there.
 - **FB-4 Codex header helper (opportunity).** Codex 0.168 reports an
   `http_headers_helper` field for http servers. It could give Codex
   secret-free header delivery without `loadout env --export` (SPEC 11.4
