@@ -393,7 +393,7 @@ fn project_links_are_excluded_and_the_project_stays_clean() {
 
     let before = fx.commit_count();
     let (commit, report) =
-        link::set_project_enabled(&store, &sx, &root, "repo-conventions", true).unwrap();
+        link::set_project_enabled(&store, &sx, &root, "repo-conventions", true, None).unwrap();
     assert!(commit.is_some());
     assert_eq!(fx.commit_count(), before + 1);
     let claude = root.join(".claude").join("skills").join("repo-conventions");
@@ -453,7 +453,7 @@ fn project_links_are_excluded_and_the_project_stays_clean() {
 
     // Disable removes the links and keeps the exclude lines harmless.
     let (_, report) =
-        link::set_project_enabled(&store, &sx, &root, "repo-conventions", false).unwrap();
+        link::set_project_enabled(&store, &sx, &root, "repo-conventions", false, None).unwrap();
     assert_eq!(status_of(&report, &claude), LinkStatus::Removed);
     assert!(std::fs::symlink_metadata(&claude).is_err());
     assert!(
@@ -487,7 +487,8 @@ fn an_untrusted_project_is_left_alone() {
             .iter()
             .any(|warning| warning.code() == ErrorCode::TrustRequired)
     );
-    let err = link::set_project_enabled(&store, &sx, &root, "repo-conventions", false).unwrap_err();
+    let err =
+        link::set_project_enabled(&store, &sx, &root, "repo-conventions", false, None).unwrap_err();
     assert_eq!(err.code(), ErrorCode::TrustRequired);
 
     // Shared projects (`share = true`) get copies once trusted.
@@ -995,4 +996,379 @@ fn agents_cli_skills_are_scanned_read_only_and_vendored() {
     let scan = agents_cli::scan(&sx).unwrap();
     assert_eq!(scan.warnings.len(), 1);
     assert!(scan.skills[0].source.is_none());
+}
+
+// Review follow-up (M18 review of eb7c9aa).
+
+/// A git project `<root>/projects/<name>` with one tracked file, its
+/// manifests (`project.local.toml`, and `project.toml` when given), known
+/// and trusted on this machine.
+fn git_project(fx: &Fx, name: &str, id: &str, local: &str, shared: Option<&str>) -> PathBuf {
+    let root = fx.th.projects().join(name);
+    let repo = git_init(&root);
+    fx.write(&root.join("README.md"), "# app\n");
+    git_commit(&repo, "README.md");
+    fx.manifest(&root, "project.local.toml", local);
+    if let Some(shared) = shared {
+        fx.manifest(&root, "project.toml", shared);
+    }
+    exclude_manifest_dir(&fx.fs, &root).unwrap();
+    fx.know_projects(&[(id, &root)]);
+    fx.trust(&root);
+    root
+}
+
+fn exclude_lines(root: &Path) -> Vec<String> {
+    std::fs::read_to_string(root.join(".git").join("info").join("exclude"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn remove_unlinks_clients_and_never_follows_links_in_the_store() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    install_folder(&fx, &env, "repo-conventions");
+    let store = fx.store();
+    let sx = sx(&fx, &env);
+
+    // Still enabled through a link when removed: the link goes too.
+    link::set_enabled(
+        &store,
+        &sx,
+        "repo-conventions",
+        &["claude-code".to_owned()],
+        true,
+        None,
+    )
+    .unwrap();
+    let client = claude_skills(&fx).join("repo-conventions");
+    assert!(is_link(&client));
+    let (_, report) = skills::remove(&store, &sx, "repo-conventions").unwrap();
+    assert_eq!(status_of(&report, &client), LinkStatus::Removed);
+    assert!(std::fs::symlink_metadata(&client).is_err());
+    assert!(
+        !store
+            .root()
+            .join("skills")
+            .join("repo-conventions")
+            .exists()
+    );
+    let ledger = SkillLedger::load(&fx.fs, &fx.home.state_dir()).unwrap();
+    assert!(ledger.links.is_empty());
+
+    // A link inside the store folder (by hand, or from a pulled commit)
+    // pointing outside: removing the skill removes the link, never the
+    // files behind it.
+    let mut request = InstallRequest::new(Source::Local(
+        fx.th.root().join("src").join("repo-conventions"),
+    ));
+    request.naming.rename_if_taken = true;
+    install::install(&store, &sx, &request).unwrap();
+    let outside = fx.th.root().join("user-files");
+    fx.write(&outside.join("keep.txt"), "precious\n");
+    fx.write(&outside.join("nested").join("keep.md"), "precious\n");
+    let content = store::content_dir(&store, "repo-conventions").unwrap();
+    dir_link(&outside, &content.join("linked"));
+    // Unreadable now: listed with a problem, never distributed.
+    let skill = store::get(&store, "repo-conventions").unwrap().unwrap();
+    assert!(!skill.has_content);
+    assert!(
+        skill
+            .problems
+            .iter()
+            .any(|problem| problem.code() == ErrorCode::InvalidPath)
+    );
+    skills::remove(&store, &sx, "repo-conventions").unwrap();
+    assert_eq!(fx.read(&outside.join("keep.txt")), "precious\n");
+    assert_eq!(
+        fx.read(&outside.join("nested").join("keep.md")),
+        "precious\n"
+    );
+    assert!(std::fs::symlink_metadata(&content).is_err());
+    assert!(store.worktree_changes().unwrap().is_empty());
+}
+
+#[test]
+fn a_skill_folder_linked_in_a_repository_is_never_installed() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let outside = fx.th.root().join("private-skill");
+    fx.write(
+        &outside.join("SKILL.md"),
+        "---\nname: private\n---\nnot for the store\n",
+    );
+
+    // A local folder: the linked skill folder is not a candidate.
+    let repo = fx.th.root().join("src").join("linked-repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    dir_link(&outside, &repo.join("skills").join("x"));
+    let request = InstallRequest::new(Source::Local(repo));
+    let err = install::install(&fx.store(), &sx(&fx, &env), &request).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::NotFound, "{err}");
+
+    // A bare repository holding a symbolic link `skills/x` to that folder.
+    let Some(git) = system_git_or_skip("a_skill_folder_linked_in_a_repository (git)") else {
+        return;
+    };
+    let probe = fx.th.root().join("symlink-probe");
+    #[cfg(windows)]
+    let symlinks = std::os::windows::fs::symlink_dir(&outside, &probe).is_ok();
+    #[cfg(unix)]
+    let symlinks = std::os::unix::fs::symlink(&outside, &probe).is_ok();
+    if !symlinks {
+        eprintln!(
+            "notice: a_skill_folder_linked_in_a_repository (git part) skipped: this account \
+             cannot create symbolic links"
+        );
+        return;
+    }
+    let bare = fx.th.root().join("up.git");
+    init_bare(&fx.th, &git, &bare);
+    let work = fx.th.root().join("work");
+    let root = fx.th.root();
+    git_run(
+        &fx,
+        &git,
+        root,
+        &["init", "--quiet", "--initial-branch=main", "work"],
+    );
+    git_run(&fx, &git, &work, &["remote", "add", "origin", "../up.git"]);
+    fx.write(&work.join("README.md"), "# skills\n");
+    let target = outside.to_string_lossy().replace('\\', "/");
+    fx.write(&root.join("target.txt"), &target);
+    let output = fx
+        .th
+        .command(&git)
+        .envs(git_vars(&fx.th, &git))
+        .current_dir(&work)
+        .args(["hash-object", "-w", "../target.txt"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let blob = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let cacheinfo = format!("120000,{blob},skills/x");
+    git_run(
+        &fx,
+        &git,
+        &work,
+        &["update-index", "--add", "--cacheinfo", &cacheinfo],
+    );
+    push(&fx, &git, &work, "a linked skill folder");
+
+    // Clones check the link out as a link.
+    let env = with_git_vars(&fx.th, &git, fx.th.env_builder(host_os()))
+        .var("GIT_CONFIG_COUNT", "1")
+        .var("GIT_CONFIG_KEY_0", "core.symlinks")
+        .var("GIT_CONFIG_VALUE_0", "true")
+        .build();
+    let sx = sx(&fx, &env);
+    let store = fx.store();
+    let url = bare.to_string_lossy().into_owned();
+    let request = InstallRequest::new(Source::parse(&url, &fx.fs));
+    let err = install::install(&store, &sx, &request).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::NotFound, "{err}");
+    let mut request = InstallRequest::new(Source::parse(&url, &fx.fs));
+    request.path = Some("skills/x".to_owned());
+    let err = install::install(&store, &sx, &request).unwrap_err();
+    assert!(
+        matches!(err.code(), ErrorCode::NotFound | ErrorCode::InvalidPath),
+        "{err}"
+    );
+    assert!(store::ids(&store).unwrap().is_empty());
+    assert!(!fx.th.home().join(".claude").exists());
+}
+
+#[test]
+fn files_over_the_limit_are_refused_before_reading() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let src = source(&fx, "plain-notes");
+    // A sparse file: refusing it from its size reads none of it.
+    let file = std::fs::File::create(src.join("huge.bin")).unwrap();
+    file.set_len(skills::MAX_SKILL_BYTES + 1).unwrap();
+    drop(file);
+    let request = InstallRequest::new(Source::Local(src));
+    let err = install::install(&fx.store(), &sx(&fx, &env), &request).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::InvalidValue);
+    assert!(err.message().contains("100 MB"), "{err}");
+}
+
+#[test]
+fn a_copy_turned_into_a_repository_is_never_removed() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    install_folder(&fx, &env, "repo-conventions");
+    let store = fx.store();
+    let sx = sx(&fx, &env);
+    let clients = ["cursor".to_owned()];
+    link::set_enabled(
+        &store,
+        &sx,
+        "repo-conventions",
+        &clients,
+        true,
+        Some(DistributionMethod::Copy),
+    )
+    .unwrap();
+    let copy = fx
+        .th
+        .home()
+        .join(".cursor")
+        .join("skills")
+        .join("repo-conventions");
+    // `git init` in the copy; no skill file edited.
+    fx.write(&copy.join(".git").join("HEAD"), "ref: refs/heads/main\n");
+    let (_, report) =
+        link::set_enabled(&store, &sx, "repo-conventions", &clients, false, None).unwrap();
+    assert_eq!(status_of(&report, &copy), LinkStatus::Changed);
+    assert!(copy.join(".git").join("HEAD").is_file());
+    assert!(copy.join("SKILL.md").is_file());
+}
+
+#[test]
+fn disable_in_a_project_names_the_shared_file_that_keeps_a_skill_on() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    install_folder(&fx, &env, "repo-conventions");
+    let store = fx.store();
+    let sx = sx(&fx, &env);
+    let root = git_project(
+        &fx,
+        "team-app",
+        "team-app-3c4d",
+        "schema = 1\n",
+        Some(
+            "schema = 1\nid = \"team-app-3c4d\"\n\n[defaults]\nclients = [\"claude-code\"]\n\n\
+             [skills]\nenable = [\"repo-conventions\"]\n",
+        ),
+    );
+    let report = link::sync(&store, &sx).unwrap();
+    let path = root.join(".claude").join("skills").join("repo-conventions");
+    assert_eq!(status_of(&report, &path), LinkStatus::Created);
+    let local_before = fx.read(&root.join(".loadout").join("project.local.toml"));
+    let commits = fx.commit_count();
+    let err =
+        link::set_project_enabled(&store, &sx, &root, "repo-conventions", false, None).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::InvalidValue);
+    assert!(err.message().contains("project.toml"), "{err}");
+    assert!(err.path().unwrap().ends_with("project.toml"));
+    assert_eq!(fx.commit_count(), commits);
+    assert_eq!(
+        fx.read(&root.join(".loadout").join("project.local.toml")),
+        local_before
+    );
+    assert!(is_link(&path));
+}
+
+#[test]
+fn project_edits_refuse_manifests_other_than_the_trusted_ones() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    install_folder(&fx, &env, "repo-conventions");
+    let store = fx.store();
+    let sx = sx(&fx, &env);
+    let local = "schema = 1\nid = \"web-2b3c\"\n\n[defaults]\nclients = [\"claude-code\"]\n";
+    let root = git_project(&fx, "web", "web-2b3c", local, None);
+    let commits = fx.commit_count();
+    // The caller showed other content than what is on disk and trusted.
+    let stale = agent_loadout_core::layering::content_hash(None, Some(b"schema = 1\n"));
+    let err = link::set_project_enabled(&store, &sx, &root, "repo-conventions", true, Some(&stale))
+        .unwrap_err();
+    assert_eq!(err.code(), ErrorCode::TrustRequired);
+    assert_eq!(
+        fx.read(&root.join(".loadout").join("project.local.toml")),
+        local
+    );
+    assert_eq!(fx.commit_count(), commits);
+    assert!(!root.join(".claude").exists());
+
+    // The content shown is the content trusted: the edit goes through.
+    let shown = agent_loadout_core::layering::content_hash(None, Some(local.as_bytes()));
+    link::set_project_enabled(&store, &sx, &root, "repo-conventions", true, Some(&shown)).unwrap();
+    assert!(is_link(
+        &root.join(".claude").join("skills").join("repo-conventions")
+    ));
+}
+
+#[test]
+fn sharing_a_project_turns_hidden_links_into_visible_copies_and_back() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    install_folder(&fx, &env, "repo-conventions");
+    let store = fx.store();
+    let sx = sx(&fx, &env);
+    let manifest = |share: bool| {
+        format!(
+            "schema = 1\nid = \"docs-5e6f\"\n\n[defaults]\nclients = [\"claude-code\"]\n\n\
+             [skills]\nenable = [\"repo-conventions\"]\nshare = {share}\n"
+        )
+    };
+    let root = git_project(&fx, "docs", "docs-5e6f", &manifest(false), None);
+    let path = root.join(".claude").join("skills").join("repo-conventions");
+    let line = "/.claude/skills/repo-conventions".to_owned();
+    let untracked = |root: &Path| -> Vec<String> {
+        let repo = git2::Repository::open(root).unwrap();
+        let mut options = git2::StatusOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let statuses = repo.statuses(Some(&mut options)).unwrap();
+        statuses
+            .iter()
+            .filter_map(|entry| entry.path().ok().map(str::to_owned))
+            .collect()
+    };
+
+    let report = link::sync(&store, &sx).unwrap();
+    assert_eq!(status_of(&report, &path), LinkStatus::Created);
+    assert!(is_link(&path));
+    assert!(exclude_lines(&root).contains(&line));
+    assert!(untracked(&root).is_empty());
+
+    // share = true: the owned link becomes a copy, visible to git.
+    fx.manifest(&root, "project.local.toml", &manifest(true));
+    fx.trust(&root);
+    let report = link::sync(&store, &sx).unwrap();
+    assert_eq!(status_of(&report, &path), LinkStatus::Updated);
+    assert!(!is_link(&path) && path.join(skills::MARKER_FILE).is_file());
+    assert!(!exclude_lines(&root).contains(&line));
+    let shown = untracked(&root);
+    assert!(
+        shown
+            .iter()
+            .any(|path| path.starts_with(".claude/skills/repo-conventions/")),
+        "{shown:?}"
+    );
+
+    // Back to share = false: a hidden link again.
+    fx.manifest(&root, "project.local.toml", &manifest(false));
+    fx.trust(&root);
+    let report = link::sync(&store, &sx).unwrap();
+    assert_eq!(status_of(&report, &path), LinkStatus::Updated);
+    assert!(is_link(&path));
+    assert!(exclude_lines(&root).contains(&line));
+    assert!(untracked(&root).is_empty());
+}
+
+#[test]
+fn a_project_link_that_cannot_be_hidden_is_never_made() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    install_folder(&fx, &env, "repo-conventions");
+    let store = fx.store();
+    let sx = sx(&fx, &env);
+    let local = "schema = 1\nid = \"api-7a8b\"\n\n[defaults]\nclients = [\"claude-code\"]\n\n\
+                 [skills]\nenable = [\"repo-conventions\"]\n";
+    let root = git_project(&fx, "api", "api-7a8b", local, None);
+    // `info/exclude` cannot be written: a folder stands in its place.
+    let exclude = root.join(".git").join("info").join("exclude");
+    let _ = std::fs::remove_file(&exclude);
+    std::fs::create_dir_all(exclude.join("blocker")).unwrap();
+    let report = link::sync(&store, &sx).unwrap();
+    let path = root.join(".claude").join("skills").join("repo-conventions");
+    assert_eq!(status_of(&report, &path), LinkStatus::Blocked);
+    assert!(std::fs::symlink_metadata(&path).is_err());
+    let ledger = SkillLedger::load(&fx.fs, &fx.home.state_dir()).unwrap();
+    assert!(ledger.links.is_empty());
 }

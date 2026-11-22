@@ -326,7 +326,7 @@ fn enable(
     let (commit, report) = match &args.project {
         Some(project) => {
             let root = absolute(project)?;
-            link::set_project_enabled(&store, sx, &root, &args.id, enabled)?
+            link::set_project_enabled(&store, sx, &root, &args.id, enabled, None)?
         }
         None => {
             let method = if args.copy {

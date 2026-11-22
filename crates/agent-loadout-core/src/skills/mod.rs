@@ -170,6 +170,27 @@ pub fn read_folder(fs: &dyn Fs, dir: &Path) -> Result<SkillFiles, CoreError> {
     Ok(files)
 }
 
+/// Whether a `.git` folder or file is anywhere below `dir` (links are not
+/// followed). [`content_hash`] leaves `.git` out, so a copy the user turned
+/// into a repository would otherwise look unchanged.
+pub(crate) fn has_nested_git(fs: &dyn Fs, dir: &Path) -> Result<bool, CoreError> {
+    let entries = fs
+        .read_dir(dir)
+        .map_err(|err| io_error("cannot list directory", dir, &err))?;
+    for path in entries {
+        if path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".git"))
+        {
+            return Ok(true);
+        }
+        if entry(fs, &path)? == Entry::Dir && has_nested_git(fs, &path)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn walk(
     fs: &dyn Fs,
     root: &Path,
@@ -231,6 +252,13 @@ fn walk(
         if is_dir {
             walk(fs, root, &path, &relative, files, total, visited)?;
         } else {
+            // The size first: a huge file is refused before it is read.
+            let len = std::fs::metadata(&path)
+                .map_err(|err| io_error("cannot read file metadata", &path, &err))?
+                .len();
+            if *total + len > MAX_SKILL_BYTES {
+                return Err(too_large(&path));
+            }
             let bytes = fs
                 .read(&path)
                 .map_err(|err| io_error("cannot read file", &path, &err))?;

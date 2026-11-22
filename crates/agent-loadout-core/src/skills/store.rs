@@ -9,7 +9,10 @@ use crate::model::ids::{self, IdKind};
 use crate::model::settings::Settings;
 use crate::model::skill_meta::SkillMeta;
 use crate::skills::frontmatter::{self, Frontmatter};
-use crate::skills::{SKILL_FILE, SkillFiles, WARN_TOTAL_BYTES, files_size, io_error, read_folder};
+use crate::skills::link::remove_link;
+use crate::skills::{
+    Entry, SKILL_FILE, SkillFiles, WARN_TOTAL_BYTES, entry, files_size, io_error, read_folder,
+};
 use crate::store::{Store, StoreRead, Transaction};
 
 /// Skill content folder in the store.
@@ -42,7 +45,8 @@ pub struct StoreSkill {
     pub frontmatter: Option<Frontmatter>,
     /// Total size of the content.
     pub bytes: u64,
-    /// Whether the content folder exists.
+    /// Whether the content folder exists (a real folder, not a link) and
+    /// reads without error; only such skills are distributed.
     pub has_content: bool,
     /// What is wrong with the skill (no `SKILL.md`, invalid metadata or
     /// frontmatter, no content folder).
@@ -90,13 +94,28 @@ pub fn stage_meta(tx: &mut Transaction<'_>, meta: &SkillMeta) -> Result<(), Core
 }
 
 /// Stages `files` as the content of `id`: files that are not in `files`
-/// any more are removed.
+/// any more are removed. A new file below a link in the store folder (put
+/// there by hand or by a pulled commit) is `invalid_path`: writing it would
+/// write through the link.
 pub fn stage_content(
     tx: &mut Transaction<'_>,
     id: &str,
     files: &SkillFiles,
 ) -> Result<(), CoreError> {
-    for relative in worktree_files(tx.store(), id)? {
+    let tree = worktree(tx.store(), id)?;
+    if let Some(link) = tree.links.iter().find(|link| {
+        files
+            .keys()
+            .any(|path| link.is_empty() || path == *link || path.starts_with(&format!("{link}/")))
+    }) {
+        let dir = content_dir(tx.store(), id)?;
+        return Err(CoreError::new(
+            ErrorCode::InvalidPath,
+            "the skill's store folder holds a link where a skill file goes; remove the link",
+        )
+        .with_path(link.split('/').fold(dir, |path, part| path.join(part))));
+    }
+    for relative in tree.files {
         if !files.contains_key(&relative) {
             tx.remove(&format!("{SKILLS_DIR}/{id}/{relative}"))?;
         }
@@ -107,9 +126,11 @@ pub fn stage_content(
     Ok(())
 }
 
-/// Stages the removal of the content and metadata of `id`.
+/// Stages the removal of the content and metadata of `id`. Links in the
+/// store folder are not store files: [`prune_empty_dirs`] removes them
+/// (the link itself) after the commit.
 pub fn stage_remove(tx: &mut Transaction<'_>, id: &str) -> Result<(), CoreError> {
-    for relative in worktree_files(tx.store(), id)? {
+    for relative in worktree(tx.store(), id)?.files {
         tx.remove(&format!("{SKILLS_DIR}/{id}/{relative}"))?;
     }
     let meta = meta_path(id)?;
@@ -119,55 +140,71 @@ pub fn stage_remove(tx: &mut Transaction<'_>, id: &str) -> Result<(), CoreError>
     Ok(())
 }
 
-/// Removes the empty folders that removed files leave in the working tree
-/// of `id` (git does not track folders), the skill folder itself too when
-/// nothing is left in it.
+/// Removes what removed files leave in the working tree of `id`: empty
+/// folders (git does not track folders) and links (each removed as a
+/// link, never followed), the skill folder itself too when nothing is
+/// left in it.
 pub fn prune_empty_dirs(store: &Store<'_>, id: &str) -> Result<(), CoreError> {
     let dir = content_dir(store, id)?;
-    if store.fs().is_dir(&dir) && prune(store.fs(), &dir)? {
-        store
-            .fs()
+    let fs = store.fs();
+    match entry(fs, &dir)? {
+        Entry::Link(_) => remove_link(fs, &dir),
+        Entry::Dir if prune(fs, &dir)? => fs
             .remove_dir_all(&dir)
-            .map_err(|err| io_error("cannot remove folder", &dir, &err))?;
+            .map_err(|err| io_error("cannot remove folder", &dir, &err)),
+        _ => Ok(()),
     }
-    Ok(())
 }
 
-/// Removes the empty folders below `dir`; whether `dir` is empty now.
+/// Removes links and empty folders below `dir`; whether `dir` is empty
+/// now.
 fn prune(fs: &dyn crate::fs::Fs, dir: &Path) -> Result<bool, CoreError> {
     let mut empty = true;
     for path in fs
         .read_dir(dir)
         .map_err(|err| io_error("cannot list directory", dir, &err))?
     {
-        if fs.is_dir(&path) && prune(fs, &path)? {
-            fs.remove_dir_all(&path)
-                .map_err(|err| io_error("cannot remove folder", &path, &err))?;
-        } else {
-            empty = false;
+        match entry(fs, &path)? {
+            Entry::Link(_) => remove_link(fs, &path)?,
+            Entry::Dir if prune(fs, &path)? => fs
+                .remove_dir_all(&path)
+                .map_err(|err| io_error("cannot remove folder", &path, &err))?,
+            Entry::Missing => {}
+            Entry::Dir | Entry::File => empty = false,
         }
     }
     Ok(empty)
 }
 
-/// Relative paths of the files in the store folder of `id`.
-fn worktree_files(store: &Store<'_>, id: &str) -> Result<Vec<String>, CoreError> {
+/// The store folder of a skill as it is on disk: its files, and its links
+/// (relative paths; `""` when the folder itself is a link). Links are
+/// never followed.
+struct Worktree {
+    files: Vec<String>,
+    links: Vec<String>,
+}
+
+fn worktree(store: &Store<'_>, id: &str) -> Result<Worktree, CoreError> {
     let dir = content_dir(store, id)?;
-    let mut out = Vec::new();
-    collect(store, &dir, "", &mut out)?;
-    Ok(out)
+    let mut tree = Worktree {
+        files: Vec::new(),
+        links: Vec::new(),
+    };
+    match entry(store.fs(), &dir)? {
+        Entry::Link(_) => tree.links.push(String::new()),
+        Entry::Dir => collect(store, &dir, "", &mut tree)?,
+        Entry::Missing | Entry::File => {}
+    }
+    Ok(tree)
 }
 
 fn collect(
     store: &Store<'_>,
     dir: &Path,
     prefix: &str,
-    out: &mut Vec<String>,
+    tree: &mut Worktree,
 ) -> Result<(), CoreError> {
     let fs = store.fs();
-    if !fs.is_dir(dir) {
-        return Ok(());
-    }
     let entries = fs
         .read_dir(dir)
         .map_err(|err| io_error("cannot list directory", dir, &err))?;
@@ -180,22 +217,29 @@ fn collect(
         } else {
             format!("{prefix}/{name}")
         };
-        if fs.is_dir(&path) {
-            collect(store, &path, &relative, out)?;
-        } else {
-            out.push(relative);
+        match entry(fs, &path)? {
+            Entry::Link(_) => tree.links.push(relative),
+            Entry::Dir => collect(store, &path, &relative, tree)?,
+            Entry::File => tree.files.push(relative),
+            Entry::Missing => {}
         }
     }
     Ok(())
 }
 
-/// The content of `id` as stored.
+/// The content of `id` as stored. A store folder that is itself a link is
+/// `invalid_path` (its content lives elsewhere).
 pub fn read_content(store: &Store<'_>, id: &str) -> Result<SkillFiles, CoreError> {
     let dir = content_dir(store, id)?;
-    if !store.fs().is_dir(&dir) {
-        return Err(not_found(id));
+    match entry(store.fs(), &dir)? {
+        Entry::Dir => read_folder(store.fs(), &dir),
+        Entry::Link(_) => Err(CoreError::new(
+            ErrorCode::InvalidPath,
+            format!("the store folder of skill {id:?} is a link"),
+        )
+        .with_path(&dir)),
+        Entry::Missing | Entry::File => Err(not_found(id)),
     }
-    read_folder(store.fs(), &dir)
 }
 
 /// Ids of every skill: content folders and metadata files, sorted.
@@ -253,7 +297,8 @@ fn load(store: &Store<'_>, id: &str) -> Result<StoreSkill, CoreError> {
             None
         }
     };
-    let has_content = fs.is_dir(&dir);
+    let found = entry(fs, &dir)?;
+    let mut has_content = found == Entry::Dir;
     let mut bytes = 0;
     let mut frontmatter = None;
     if has_content {
@@ -268,8 +313,21 @@ fn load(store: &Store<'_>, id: &str) -> Result<StoreSkill, CoreError> {
                     None => problems.push(missing_skill_file(&dir)),
                 }
             }
-            Err(err) => problems.push(err),
+            Err(err) => {
+                // Unreadable (a link that escapes, too large): never
+                // distributed.
+                has_content = false;
+                problems.push(err);
+            }
         }
+    } else if let Entry::Link(_) = found {
+        problems.push(
+            CoreError::new(
+                ErrorCode::InvalidPath,
+                format!("the store folder of skill {id:?} is a link; it is never distributed"),
+            )
+            .with_path(&dir),
+        );
     } else {
         problems.push(
             CoreError::new(

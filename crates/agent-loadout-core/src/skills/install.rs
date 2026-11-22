@@ -23,8 +23,8 @@ use crate::remote::git::{Invocation, RunOutput, locate};
 use crate::skills::link::{SyncReport, sync};
 use crate::skills::store::{self, content_dir, missing_skill_file, not_found};
 use crate::skills::{
-    MAX_ARCHIVE_FILE_BYTES, MAX_ARCHIVE_FILES, MAX_ARCHIVE_TOTAL_BYTES, SKILL_FILE, SkillFiles,
-    SkillsEnv, check_name, confine, frontmatter, io_error, read_folder, slug,
+    Entry, MAX_ARCHIVE_FILE_BYTES, MAX_ARCHIVE_FILES, MAX_ARCHIVE_TOTAL_BYTES, SKILL_FILE,
+    SkillFiles, SkillsEnv, check_name, confine, entry, frontmatter, io_error, read_folder, slug,
 };
 use crate::store::{CommitId, Operation, Store};
 
@@ -404,7 +404,9 @@ fn search(
         let Some(name) = path.file_name().and_then(OsStr::to_str) else {
             continue;
         };
-        if name.starts_with('.') || !fs.is_dir(&path) {
+        // Linked folders are never candidates: a repository can link to
+        // any folder on this machine (SPEC 17).
+        if name.starts_with('.') || entry(fs, &path)? != Entry::Dir {
             continue;
         }
         let relative = if prefix.is_empty() {
@@ -805,13 +807,15 @@ fn fetch_git(
                         format!("the repository has no folder {path:?}"),
                     ));
                 }
-                Ok((read_folder(sx.fs, &dir)?, Some(path.clone())))
+                Ok((read_in_clone(sx.fs, &temp, &dir)?, Some(path.clone())))
             }
-            None if sx.fs.exists(&temp.join(SKILL_FILE)) => Ok((read_folder(sx.fs, &temp)?, None)),
+            None if sx.fs.exists(&temp.join(SKILL_FILE)) => {
+                Ok((read_in_clone(sx.fs, &temp, &temp)?, None))
+            }
             None => match find_skill_dirs(sx.fs, &temp)?.as_slice() {
                 [] => Err(missing_skill_file(&temp)),
                 [one] => Ok((
-                    read_folder(sx.fs, &join_rel(&temp, one))?,
+                    read_in_clone(sx.fs, &temp, &join_rel(&temp, one))?,
                     Some(one.clone()),
                 )),
                 many => Err(several(many)),
@@ -1014,7 +1018,26 @@ fn latest(
             format!("the source {url} no longer holds the skill"),
         ));
     }
-    Ok((commit, read_folder(sx.fs, &skill_dir)?))
+    Ok((commit, read_in_clone(sx.fs, &dir, &skill_dir)?))
+}
+
+/// [`read_folder`] of a skill folder inside a clone, refused with
+/// `invalid_path` when the folder (or a link on its way) resolves outside
+/// the clone: a repository can hold a link to any folder on this machine
+/// (SPEC 17).
+fn read_in_clone(fs: &dyn Fs, clone: &Path, dir: &Path) -> Result<SkillFiles, CoreError> {
+    let resolve = |path: &Path| {
+        fs.canonicalize(path)
+            .map_err(|err| io_error("cannot resolve folder", path, &err))
+    };
+    if !resolve(dir)?.starts_with(resolve(clone)?) {
+        return Err(CoreError::new(
+            ErrorCode::InvalidPath,
+            "the skill folder is a link that points outside the repository",
+        )
+        .with_path(dir));
+    }
+    read_folder(fs, dir)
 }
 
 fn changes(old: &SkillFiles, new: &SkillFiles) -> Vec<FileChange> {

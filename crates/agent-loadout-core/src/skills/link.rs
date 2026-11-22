@@ -38,8 +38,8 @@ use crate::model::project::ProjectManifest;
 use crate::model::skill_meta::{DistributionMethod, SkillEnable, SkillMeta};
 use crate::skills::store::{self, content_dir};
 use crate::skills::{
-    Entry, MARKER_FILE, SkillFiles, SkillsEnv, confine, content_hash, entry, io_error, read_folder,
-    write_files,
+    Entry, MARKER_FILE, SkillFiles, SkillsEnv, confine, content_hash, entry, has_nested_git,
+    io_error, read_folder, write_files,
 };
 use crate::store::{
     self as store_mod, CommitId, LOCK_TIMEOUT, Operation, Store, StoreLock, utc_datetime,
@@ -393,9 +393,10 @@ struct Desired {
     path: PathBuf,
     source: PathBuf,
     method: LinkMethod,
-    /// The project folder whose repository hides the link
-    /// (`share = false`, SPEC 12.3).
-    exclude_in: Option<PathBuf>,
+    /// The project folder of a project entry. Its repository hides links
+    /// (`share = false`) through `info/exclude` and shows copies
+    /// (`share = true`, SPEC 12.3).
+    project_root: Option<PathBuf>,
 }
 
 fn link_method(sx: &SkillsEnv<'_>) -> LinkMethod {
@@ -499,7 +500,7 @@ fn desired(
                     path: dir.join(&skill.id),
                     source: content_dir(store, &skill.id)?,
                     method,
-                    exclude_in: None,
+                    project_root: None,
                 },
             );
         }
@@ -548,7 +549,7 @@ fn desired(
                         path: dir.join(id),
                         source: content_dir(store, id)?,
                         method,
-                        exclude_in: (!wanted.share).then(|| known.root.clone()),
+                        project_root: Some(known.root.clone()),
                     },
                 );
             }
@@ -690,6 +691,9 @@ fn try_ensure(
     let owned = ledger.get(&desired.path).cloned();
     let status = match entry(fs, &desired.path)? {
         Entry::Missing => {
+            // The exclude line first: a link that cannot be hidden is
+            // never made.
+            git_visibility(fs, desired)?;
             let hash = create(fs, desired)?;
             ledger.upsert(record(desired, hash, now));
             LinkStatus::Created
@@ -700,6 +704,7 @@ fn try_ensure(
                 link.method.is_link() && same_folder(fs, &found, Path::new(&link.target))
             });
             if to_store && desired.method.is_link() {
+                git_visibility(fs, desired)?;
                 let status = if owned_link.is_some() {
                     LinkStatus::Unchanged
                 } else {
@@ -716,6 +721,7 @@ fn try_ensure(
             } else if owned_link.is_some() {
                 // Owned and unchanged, but another target or method is
                 // desired now.
+                git_visibility(fs, desired)?;
                 remove_link(fs, &desired.path)?;
                 let hash = create(fs, desired)?;
                 ledger.upsert(record(desired, hash, now));
@@ -731,14 +737,16 @@ fn try_ensure(
             }
         }
         Entry::Dir => match owned.filter(|link| link.method == LinkMethod::Copy) {
-            Some(link) => {
-                let current = content_hash(&read_folder(fs, &desired.path)?);
-                if link.written_hash.as_deref() != Some(current.as_str()) {
+            Some(link) => match unchanged_copy(fs, &desired.path, &link)? {
+                None => {
                     ledger.remove(&desired.path);
                     LinkStatus::Changed
-                } else if desired.method == LinkMethod::Copy {
-                    let source = read_source(fs, desired)?;
-                    if content_hash(&source) == current {
+                }
+                Some(current) => {
+                    git_visibility(fs, desired)?;
+                    if desired.method == LinkMethod::Copy
+                        && content_hash(&read_source(fs, desired)?) == current
+                    {
                         LinkStatus::Unchanged
                     } else {
                         remove_copy(fs, &desired.path)?;
@@ -746,26 +754,61 @@ fn try_ensure(
                         ledger.upsert(record(desired, hash, now));
                         LinkStatus::Updated
                     }
-                } else {
-                    remove_copy(fs, &desired.path)?;
-                    let hash = create(fs, desired)?;
-                    ledger.upsert(record(desired, hash, now));
-                    LinkStatus::Updated
                 }
-            }
+            },
             None => LinkStatus::Foreign,
         },
         Entry::File => LinkStatus::Foreign,
     };
-    if matches!(
-        status,
-        LinkStatus::Created | LinkStatus::Adopted | LinkStatus::Unchanged | LinkStatus::Updated
-    ) && let Some(root) = &desired.exclude_in
-        && let Some(repo) = ProjectRepo::discover(root)?
-    {
-        repo.exclude(fs, &desired.path)?;
-    }
     Ok(result(desired, status))
+}
+
+/// The content hash of an owned copy at `path` when it is as written:
+/// same hash and no `.git` added inside (the hash leaves `.git` out, and a
+/// repository the user made there must never be deleted). `None` when it
+/// changed.
+fn unchanged_copy(fs: &dyn Fs, path: &Path, link: &SkillLink) -> Result<Option<String>, CoreError> {
+    let current = content_hash(&read_folder(fs, path)?);
+    if link.written_hash.as_deref() != Some(current.as_str()) || has_nested_git(fs, path)? {
+        return Ok(None);
+    }
+    Ok(Some(current))
+}
+
+/// Makes a project entry's visibility to the project's repository match
+/// its method before anything is written: a link (`share = false`) is
+/// listed in `info/exclude`; a copy (`share = true`, meant to be
+/// committed) is not, so an exclude line left from a link is dropped.
+/// Nothing for user scope or a folder without a repository.
+fn git_visibility(fs: &dyn Fs, desired: &Desired) -> Result<(), CoreError> {
+    let Some(root) = &desired.project_root else {
+        return Ok(());
+    };
+    let Some(repo) = ProjectRepo::discover(root)? else {
+        return Ok(());
+    };
+    if desired.method.is_link() {
+        repo.exclude(fs, &desired.path)?;
+        return Ok(());
+    }
+    let Some(relative) = repo.relative(&desired.path) else {
+        return Ok(());
+    };
+    let pattern = format!("/{relative}");
+    let file = repo.exclude_file();
+    if let Some(text) = crate::layering::projects::read_optional(fs, &file)?
+        && text
+            .lines()
+            .any(|line| line.trim() == pattern || line.trim() == relative)
+    {
+        let kept: String = text
+            .lines()
+            .filter(|line| line.trim() != pattern && line.trim() != relative)
+            .map(|line| format!("{line}\n"))
+            .collect();
+        crate::layering::projects::write_file(fs, &file, kept.as_bytes())?;
+    }
+    Ok(())
 }
 
 fn record(desired: &Desired, written_hash: Option<String>, now: &str) -> SkillLink {
@@ -889,8 +932,7 @@ fn retire(sx: &SkillsEnv<'_>, ledger: &mut SkillLedger, link: &SkillLink) -> Lin
                 LinkStatus::Removed
             }
             Entry::Dir if link.method == LinkMethod::Copy => {
-                let current = content_hash(&read_folder(fs, &path)?);
-                if link.written_hash.as_deref() == Some(current.as_str()) {
+                if unchanged_copy(fs, &path, link)?.is_some() {
                     remove_copy(fs, &path)?;
                     LinkStatus::Removed
                 } else {
@@ -1009,13 +1051,19 @@ fn next_selection(
 /// `[skills] enable` of the project's private manifest (the shared one when
 /// there is no private one), commits the store mirror, trusts the edited
 /// content (Loadout wrote it), then [`sync`]s. The project must be known on
-/// this machine and trusted as it is.
+/// this machine and trusted as it is. `expected` is the manifests' content
+/// hash the caller showed (the app); the manifests are re-read right
+/// before the write, and content other than what was trusted (and shown)
+/// is `trust_required`, with nothing written. Disabling a skill the
+/// shared `project.toml` enables, in a project with a private file, is
+/// `invalid_value` naming that file.
 pub fn set_project_enabled(
     store: &Store<'_>,
     sx: &SkillsEnv<'_>,
     folder: &Path,
     id: &str,
     enabled: bool,
+    expected: Option<&str>,
 ) -> Result<(Option<CommitId>, SyncReport), CoreError> {
     ids::check(IdKind::Skill, id)?;
     let fs = sx.fs;
@@ -1061,6 +1109,22 @@ pub fn set_project_enabled(
         .as_ref()
         .or(project.shared.as_ref())
         .expect("a loaded project has a manifest");
+    // Disabling in the private file leaves a skill the shared file enables
+    // on: say so instead of reporting a change that did not happen.
+    if !enabled
+        && project.local.is_some()
+        && let Some(shared) = &project.shared
+        && manifest_enables(&shared.manifest, id)
+    {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!(
+                "skill {id:?} is enabled by the shared project.toml, which teammates use too; \
+                 remove it from [skills] enable there"
+            ),
+        )
+        .with_path(&shared.path));
+    }
     let before = file.bytes.clone();
     let path = file.path.clone();
     let text = String::from_utf8(before.clone()).map_err(|_| {
@@ -1070,6 +1134,22 @@ pub fn set_project_enabled(
         let report = sync(store, sx)?;
         return Ok((None, report));
     };
+    // The edit is trusted below: both files must still be what was
+    // trusted and read (a `git pull` in between needs a review first).
+    let hash = project.hash();
+    if manifests_hash(fs, &project.root)? != hash || expected.is_some_and(|shown| shown != hash) {
+        return Err(CoreError::new(
+            ErrorCode::TrustRequired,
+            format!(
+                "the manifests of project {:?} changed while being edited; review them, then \
+                 run `{} project trust {}`",
+                project.id,
+                crate::brand::BIN_NAME,
+                project.root.display()
+            ),
+        )
+        .with_path(crate::layering::manifest::manifest_dir(&project.root)));
+    }
     crate::layering::projects::write_file(fs, &path, edited.as_bytes())?;
     let verb = if enabled { "enable" } else { "disable" };
     let operation = Operation::new(
@@ -1099,6 +1179,36 @@ pub fn set_project_enabled(
     };
     let report = sync(store, sx)?;
     Ok((committed.commit, report))
+}
+
+/// Whether `[skills] enable` of `manifest` lists `id`.
+fn manifest_enables(manifest: &ProjectManifest, id: &str) -> bool {
+    manifest
+        .skills
+        .as_ref()
+        .and_then(|skills| skills.enable.as_ref())
+        .is_some_and(|enable| enable.iter().any(|known| known == id))
+}
+
+/// [`crate::layering::content_hash`] of the manifests in `root` as they are
+/// on disk now.
+fn manifests_hash(fs: &dyn Fs, root: &Path) -> Result<String, CoreError> {
+    let dir = crate::layering::manifest::manifest_dir(root);
+    let read = |name: &str| -> Result<Option<Vec<u8>>, CoreError> {
+        let path = dir.join(name);
+        if !fs.exists(&path) {
+            return Ok(None);
+        }
+        fs.read(&path)
+            .map(Some)
+            .map_err(|err| io_error("cannot read file", &path, &err))
+    };
+    let shared = read(crate::layering::SHARED_FILE)?;
+    let local = read(crate::layering::LOCAL_FILE)?;
+    Ok(crate::layering::content_hash(
+        shared.as_deref(),
+        local.as_deref(),
+    ))
 }
 
 /// `[skills] enable` with `id` added or removed, comments kept; `None`
