@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "agent-loadout"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "agent-loadout-core",
  "agent-loadout-testkit",
@@ -35,6 +35,7 @@ dependencies = [
  "git2",
  "serde_json",
  "similar",
+ "static_vcruntime",
  "toml",
  "toml_edit",
  "win32job",
@@ -42,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "agent-loadout-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "agent-loadout-testkit",
  "dirs",
@@ -72,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "agent-loadout-testkit"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "agent-loadout-core",
  "serde",
@@ -1542,6 +1543,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "static_vcruntime"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
 
 [[package]]
 name = "strsim"
