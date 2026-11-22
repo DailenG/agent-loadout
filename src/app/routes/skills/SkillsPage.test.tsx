@@ -213,7 +213,54 @@ describe("SkillsPage", () => {
     );
     expect(within(dialog).getByText("Modified")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Update" }));
-    await waitFor(() => expect(transport.invocations).toContainEqual({ command: "updateSkill", args: ["alpha"] }));
+    // The update names the commit the preview showed.
+    await waitFor(() =>
+      expect(transport.invocations).toContainEqual({ command: "updateSkill", args: ["alpha", "9b8c7d6ee"] }),
+    );
+    // The card's entry is cleared: no stale "Update available" or Update (1).
+    await waitFor(() => expect(within(alpha).queryByText("Update available")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Update (1)" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Check updates" })).toBeInTheDocument();
+  });
+
+  it("Update all keeps only the failed entries", async () => {
+    const check = (id: string, latest: string) => ({
+      id,
+      status: "available" as const,
+      current: "1111111",
+      latest,
+      changes: [{ path: "SKILL.md", kind: "modified" as const }],
+      error: null,
+    });
+    const { user, transport } = renderPage({
+      checkSkillUpdates: async () => ok([check("alpha", "aaaaaaa"), check("repo-notes", "bbbbbbb")]),
+      updateSkill: async (id, latest) =>
+        id === "alpha"
+          ? ok({ id, from: null, to: latest, commit: MOCK_SKILL_CHANGE.commit, changes: [], links: MOCK_SKILL_CHANGE.links })
+          : mockIpcError({ code: "entry_changed", message: "changed" }),
+    });
+    await screen.findByRole("article", { name: "alpha" });
+    await user.click(screen.getByRole("button", { name: "Check updates" }));
+    await user.click(await screen.findByRole("button", { name: "Update (2)" }));
+    expect(await screen.findByRole("button", { name: "Update (1)" })).toBeInTheDocument();
+    expect(transport.invocations.filter((call) => call.command === "updateSkill").map((call) => call.args)).toEqual([
+      ["alpha", "aaaaaaa"],
+      ["repo-notes", "bbbbbbb"],
+    ]);
+    expect(within(screen.getByRole("article", { name: "alpha" })).queryByText("Update available")).toBeNull();
+    expect(within(screen.getByRole("article", { name: "repo-notes" })).getByText("Update available")).toBeInTheDocument();
+  });
+
+  it("switches link or copy without touching the clients", async () => {
+    const { user, transport } = renderPage();
+    const alpha = await screen.findByRole("article", { name: "alpha" });
+    await user.click(within(alpha).getByRole("button", { name: "Expand alpha" }));
+    await user.click(within(alpha).getByRole("combobox", { name: "Distribute as" }));
+    await user.click(await screen.findByRole("option", { name: /Copy/ }));
+    await waitFor(() =>
+      expect(transport.invocations).toContainEqual({ command: "setSkillMethod", args: ["alpha", "copy"] }),
+    );
+    expect(transport.calls).not.toContain("setSkillClients");
   });
 
   it("shows a store skill's files", async () => {

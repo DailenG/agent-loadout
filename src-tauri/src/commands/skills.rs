@@ -393,6 +393,9 @@ pub enum SkillUpdateStatus {
     Available,
     NotTracked,
     SourceUnreachable,
+    /// The check itself failed for this skill (see the error); other
+    /// skills are still checked.
+    Failed,
 }
 
 impl From<UpdateStatus> for SkillUpdateStatus {
@@ -943,6 +946,16 @@ pub fn set_clients(
     Ok(change_of(env, commit.as_ref(), &report))
 }
 
+/// Switches skill `id` between links and copies (SPEC 12.2); its clients
+/// stay as they are.
+pub fn set_method(core: &Core, id: &str, method: SkillMethod) -> CmdResult<SkillChange> {
+    let env = &core.env;
+    let store = require_store(core)?;
+    let (commit, report) = link::set_method(&store, &sx(core), id, method.into())
+        .map_err(|err| scrubbed(env, &err, None))?;
+    Ok(change_of(env, commit.as_ref(), &report))
+}
+
 /// Enables (or disables) skill `skill` in project `project` (SPEC 12.3);
 /// `hash` is the manifests' content hash the page showed.
 pub fn set_project(
@@ -1001,20 +1014,28 @@ pub fn check_updates(core: &Core, ids: &[String]) -> CmdResult<Vec<SkillUpdateCh
         ids.to_vec()
     };
     let sx = sx(core);
-    ids.iter()
-        .map(|id| {
-            let checked =
-                install::check_update(&store, &sx, id).map_err(|err| scrubbed(env, &err, None))?;
-            Ok(SkillUpdateCheck {
+    // One skill's failure is that skill's entry; the others are checked.
+    Ok(ids
+        .iter()
+        .map(|id| match install::check_update(&store, &sx, id) {
+            Ok(checked) => SkillUpdateCheck {
                 id: checked.id,
                 status: checked.status.into(),
                 current: checked.current,
                 latest: checked.latest,
                 changes: changes_of(&checked.changes),
                 error: checked.error.as_ref().map(|err| scrubbed(env, err, None)),
-            })
+            },
+            Err(err) => SkillUpdateCheck {
+                id: id.clone(),
+                status: SkillUpdateStatus::Failed,
+                current: None,
+                latest: None,
+                changes: Vec::new(),
+                error: Some(scrubbed(env, &err, None)),
+            },
         })
-        .collect()
+        .collect())
 }
 
 fn text_of(bytes: Option<&Vec<u8>>) -> Result<Option<String>, ()> {
@@ -1059,12 +1080,14 @@ pub fn update_diff(core: &Core, id: &str, file: &str) -> CmdResult<SkillFileDiff
     })
 }
 
-/// Updates a git skill from its source (one commit); copies follow.
-pub fn update(core: &Core, id: &str) -> CmdResult<SkillUpdated> {
+/// Updates a git skill to `latest`, the source commit its update preview
+/// showed (one commit; copies follow). The cache clone is not fetched
+/// again; `entry_changed` when it holds another commit by now.
+pub fn update(core: &Core, id: &str, latest: &str) -> CmdResult<SkillUpdated> {
     let env = &core.env;
     let store = require_store(core)?;
-    let updated =
-        install::update(&store, &sx(core), id).map_err(|err| scrubbed(env, &err, None))?;
+    let updated = install::update_reviewed(&store, &sx(core), id, latest)
+        .map_err(|err| scrubbed(env, &err, None))?;
     Ok(SkillUpdated {
         id: updated.id,
         from: updated.from,
@@ -1349,8 +1372,19 @@ pub async fn skill_update_diff(
 pub async fn update_skill(
     state: tauri::State<'_, AppState>,
     id: String,
+    latest: String,
 ) -> CmdResult<SkillUpdated> {
-    blocking(&state, move |core| update(core, &id)).await
+    blocking(&state, move |core| update(core, &id, &latest)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_skill_method(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    method: SkillMethod,
+) -> CmdResult<SkillChange> {
+    blocking(&state, move |core| set_method(core, &id, method)).await
 }
 
 #[tauri::command]

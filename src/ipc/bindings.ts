@@ -108,12 +108,13 @@ export const commands = {
 	installLocalSkill: (token: string, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_local_skill", { token, id, renameIfTaken }, options)),
 	installGitSkill: (url: string, path: string | null, gitRef: string | null, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_git_skill", { url, path, gitRef, id, renameIfTaken }, options)),
 	setSkillClients: (id: string, clients: string[], enabled: boolean, method: SkillMethod | null, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_clients", { id, clients, enabled, method }, options)),
+	setSkillMethod: (id: string, method: SkillMethod, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_method", { id, method }, options)),
 	setProjectSkill: (project: string, skill: string, enabled: boolean, hash: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_project_skill", { project, skill, enabled, hash }, options)),
 	removeSkill: (id: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("remove_skill", { id }, options)),
 	setSkillTags: (id: string, tags: string[], options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("set_skill_tags", { id, tags }, options)),
 	checkSkillUpdates: (ids: string[], options?: InvokeOptions) => typedError<SkillUpdateCheck[], IpcError>(__TAURI_INVOKE("check_skill_updates", { ids }, options)),
 	skillUpdateDiff: (id: string, file: string, options?: InvokeOptions) => typedError<SkillFileDiff, IpcError>(__TAURI_INVOKE("skill_update_diff", { id, file }, options)),
-	updateSkill: (id: string, options?: InvokeOptions) => typedError<SkillUpdated, IpcError>(__TAURI_INVOKE("update_skill", { id }, options)),
+	updateSkill: (id: string, latest: string, options?: InvokeOptions) => typedError<SkillUpdated, IpcError>(__TAURI_INVOKE("update_skill", { id, latest }, options)),
 	listSkillFiles: (id: string, options?: InvokeOptions) => typedError<SkillFileEntry[], IpcError>(__TAURI_INVOKE("list_skill_files", { id }, options)),
 	readSkillFile: (id: string, file: string, options?: InvokeOptions) => typedError<SkillFileText, IpcError>(__TAURI_INVOKE("read_skill_file", { id, file }, options)),
 	/**  Opens the store folder of skill `id`. */
@@ -1698,7 +1699,12 @@ export type SkillUpdateCheck = {
 	error: IpcError | null,
 };
 
-export type SkillUpdateStatus = "up_to_date" | "available" | "not_tracked" | "source_unreachable";
+export type SkillUpdateStatus = "up_to_date" | "available" | "not_tracked" | "source_unreachable" | 
+/**
+ *  The check itself failed for this skill (see the error); other
+ *  skills are still checked.
+ */
+"failed";
 
 /**  What an update did. */
 export type SkillUpdated = {

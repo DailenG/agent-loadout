@@ -138,11 +138,13 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
       setUpdates(Object.fromEntries(checks.map((check) => [check.id, check])));
       const count = checks.filter((check) => check.status === "available").length;
       const unreachable = checks.filter((check) => check.status === "source_unreachable").length;
+      const failed = checks.filter((check) => check.status === "failed").length;
       notify({
-        tone: unreachable > 0 ? "info" : "success",
+        tone: unreachable + failed > 0 ? "info" : "success",
         message: [
           count > 0 ? t("skills.checked.available", { count }) : t("skills.checked.none"),
           unreachable > 0 ? t("skills.checked.unreachable", { count: unreachable }) : "",
+          failed > 0 ? t("skills.checked.failed", { count: failed }) : "",
         ].join(" ").trim(),
       });
     } catch (error) {
@@ -154,20 +156,20 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
 
   async function handleUpdateAll() {
     setIsUpdatingAll(true);
-    let updated = 0;
+    const done: string[] = [];
     let failed = 0;
     for (const check of available) {
       const skill = skills.find((entry) => entry.id === check.id);
       try {
-        await actions.update(check.id, skill?.name ?? check.id);
-        updated += 1;
+        await actions.update(check.id, skill?.name ?? check.id, check.latest ?? "");
+        done.push(check.id);
       } catch {
         failed += 1;
       }
     }
-    setUpdates((current) =>
-      Object.fromEntries(Object.entries(current).filter(([, check]) => check.status !== "available")),
-    );
+    // Failed updates keep their entry, so they can be retried or reviewed.
+    setUpdates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !done.includes(id))));
+    const updated = done.length;
     notify({
       tone: failed > 0 ? "info" : "success",
       message: failed > 0
@@ -194,6 +196,9 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
         expanded={expandedId === skill.id}
         onExpandedChange={(open) => setExpandedId(open ? skill.id : "")}
         update={updates[skill.id]}
+        onUpdated={() =>
+          setUpdates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== skill.id)))
+        }
         allTags={allTags}
       />
     );

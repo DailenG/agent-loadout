@@ -253,6 +253,7 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     installLocalSkill: async () => ok(MOCK_SKILL_INSTALLED),
     installGitSkill: async () => ok(MOCK_SKILL_INSTALLED),
     setSkillClients: async () => ok(MOCK_SKILL_CHANGE),
+    setSkillMethod: async () => ok(MOCK_SKILL_CHANGE),
     setProjectSkill: async () => ok(MOCK_SKILL_CHANGE),
     removeSkill: async () => ok(MOCK_SKILL_CHANGE),
     setSkillTags: async () => ok(MOCK_CHANGE.commit),

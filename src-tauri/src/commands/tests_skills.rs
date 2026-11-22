@@ -499,10 +499,106 @@ fn git_skill_update_check_diff_and_update() {
         ErrorCode::NotFound
     );
 
+    // Upstream moves on after the check: the update installs what was
+    // reviewed (v2) without fetching.
+    let reviewed = checks[0].latest.clone().unwrap();
+    let v3 = NOTES.replace("# Repo notes", "# Repo notes v3");
+    write(&work.join("skills").join("alpha").join("SKILL.md"), &v3);
+    push("v3");
     let before = commits(&fx);
-    let updated = skills::update(&fx.core, "alpha").unwrap();
+    let updated = skills::update(&fx.core, "alpha", &reviewed).unwrap();
     assert!(updated.commit.is_some());
+    assert_eq!(updated.to, reviewed);
     assert_eq!(commits(&fx), before + 1);
     let file = skills::read_file(&fx.core, "alpha", "SKILL.md").unwrap();
-    assert!(file.text.unwrap().contains("v2"));
+    let text = file.text.unwrap();
+    assert!(text.contains("v2") && !text.contains("v3"), "{text}");
+
+    // A later check sees v3: the old review no longer applies.
+    let checks = skills::check_updates(&fx.core, &["alpha".to_owned()]).unwrap();
+    assert_eq!(checks[0].status, SkillUpdateStatus::Available);
+    let newest = checks[0].latest.clone().unwrap();
+    assert_ne!(newest, reviewed);
+    let before = commits(&fx);
+    let err = skills::update(&fx.core, "alpha", &reviewed).unwrap_err();
+    assert_eq!(err.code, ErrorCode::EntryChanged);
+    assert_no_root(&fx, &err.message);
+    assert_eq!(commits(&fx), before, "nothing written");
+    skills::update(&fx.core, "alpha", &newest).unwrap();
+    let text = skills::read_file(&fx.core, "alpha", "SKILL.md")
+        .unwrap()
+        .text
+        .unwrap();
+    assert!(text.contains("v3"));
+}
+
+/// One skill's failed check is that skill's entry; the others are checked.
+#[test]
+fn a_failed_check_does_not_fail_the_others() {
+    let fx = Fx::new();
+    let folder = skill_folder(&fx, "repo-notes", NOTES);
+    skills::install_local(&fx.core, &folder, None, false).unwrap();
+    let checks = skills::check_updates(
+        &fx.core,
+        &["gone-skill".to_owned(), "repo-notes".to_owned()],
+    )
+    .unwrap();
+    assert_eq!(checks.len(), 2);
+    assert_eq!(checks[0].id, "gone-skill");
+    assert_eq!(checks[0].status, SkillUpdateStatus::Failed);
+    assert_eq!(checks[0].error.as_ref().unwrap().code, ErrorCode::NotFound);
+    assert_eq!(checks[1].status, SkillUpdateStatus::NotTracked);
+    // A reviewed update of a skill without a git source is refused.
+    let err = skills::update(&fx.core, "repo-notes", "0123abc").unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidValue);
+}
+
+/// Link or copy changes only the method: the clients stay as they are.
+#[test]
+fn switching_to_copies_keeps_the_clients() {
+    let fx = Fx::new();
+    let folder = skill_folder(&fx, "repo-notes", NOTES);
+    skills::install_local(&fx.core, &folder, None, false).unwrap();
+    let off = skill_folder(&fx, "off-skill", &NOTES.replace("repo-notes", "off-skill"));
+    skills::install_local(&fx.core, &off, None, false).unwrap();
+    skills::set_clients(
+        &fx.core,
+        "repo-notes",
+        &["claude-code".to_owned()],
+        true,
+        None,
+    )
+    .unwrap();
+    assert!(is_link(&claude_skills(&fx).join("repo-notes")));
+
+    let before = commits(&fx);
+    let change = skills::set_method(&fx.core, "repo-notes", skills::SkillMethod::Copy).unwrap();
+    assert!(change.commit.is_some());
+    assert_eq!(commits(&fx), before + 1);
+    assert_eq!(summaries(&fx)[0], "skill: distribute repo-notes as copy");
+    let copy = claude_skills(&fx).join("repo-notes");
+    assert!(
+        !is_link(&copy) && copy.join("SKILL.md").is_file(),
+        "now a copy"
+    );
+    let list = skills::list(&fx.core, &SkillScope::User).unwrap();
+    let skill = list
+        .skills
+        .iter()
+        .find(|skill| skill.id == "repo-notes")
+        .unwrap();
+    assert_eq!(skill.clients, ["claude-code"]);
+    assert!(!skill.all_detected);
+    assert_eq!(skill.method, skills::SkillMethod::Copy);
+
+    // An off skill stays off.
+    skills::set_method(&fx.core, "off-skill", skills::SkillMethod::Copy).unwrap();
+    let list = skills::list(&fx.core, &SkillScope::User).unwrap();
+    let skill = list
+        .skills
+        .iter()
+        .find(|skill| skill.id == "off-skill")
+        .unwrap();
+    assert!(skill.clients.is_empty() && !skill.all_detected);
+    assert!(!claude_skills(&fx).join("off-skill").exists());
 }

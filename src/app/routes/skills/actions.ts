@@ -78,10 +78,11 @@ export function useSkillActions() {
           async () => unwrap(await commands.setSkillClients(id, clients, enabled, method)),
           (change) => changed(change, t(enabled ? "skill.card.success.enabled" : "skill.card.success.disabled", { name })),
         ),
+      /** Link or copy; the skill's clients stay as they are (SPEC 12.2). */
       setMethod: (id: string, name: string, method: SkillMethod) =>
         run(
-          async () => unwrap(await commands.setSkillClients(id, [], true, method)),
-          (change) => changed(change, t("skill.card.success.enabled", { name })),
+          async () => unwrap(await commands.setSkillMethod(id, method)),
+          (change) => changed(change, t("skill.card.success.method", { name })),
         ),
       setProject: (project: string, id: string, name: string, enabled: boolean, hash: string) =>
         run(
@@ -98,9 +99,10 @@ export function useSkillActions() {
           async () => unwrap(await commands.setSkillTags(id, tags)),
           () => t("skill.card.tag.saved", { name }),
         ),
-      update: (id: string, name: string) =>
+      /** Updates to `latest`, the source commit the preview showed. */
+      update: (id: string, name: string, latest: string) =>
         run(
-          async () => unwrap(await commands.updateSkill(id)),
+          async () => unwrap(await commands.updateSkill(id, latest)),
           (updated) => {
             const message = t("skill.card.success.updated", { name });
             if (updated.links.needsAttention) {

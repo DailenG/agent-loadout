@@ -1024,6 +1024,35 @@ pub fn set_enabled(
     Ok((committed.commit, report))
 }
 
+/// Sets how skill `id` reaches client folders at user scope (SPEC 12.2:
+/// link or copy), leaving its clients as they are: one commit of
+/// `skill-meta/<id>.toml` (`skill: distribute <id> as <method>`), `None`
+/// when unchanged, then [`sync`].
+pub fn set_method(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    id: &str,
+    method: DistributionMethod,
+) -> Result<(Option<CommitId>, SyncReport), CoreError> {
+    ids::check(IdKind::Skill, id)?;
+    let name = match method {
+        DistributionMethod::Link => "link",
+        DistributionMethod::Copy => "copy",
+    };
+    let operation = Operation::new("skill.method", format!("skill: distribute {id} as {name}"))
+        .entity(format!("skill/{id}"));
+    let committed = store.transaction(operation, |tx| {
+        if !store::exists(tx, id)? {
+            return Err(store::not_found(id));
+        }
+        let mut meta = store::read_meta(tx, id)?.unwrap_or_else(|| SkillMeta::new(id));
+        meta.enable.get_or_insert_with(SkillEnable::default).method = Some(method);
+        store::stage_meta(tx, &meta)
+    })?;
+    let report = sync(store, sx)?;
+    Ok((committed.commit, report))
+}
+
 fn next_selection(
     sx: &SkillsEnv<'_>,
     current: Option<ClientSelection>,

@@ -87,6 +87,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::skills::install_local_skill,
             commands::skills::install_git_skill,
             commands::skills::set_skill_clients,
+            commands::skills::set_skill_method,
             commands::skills::set_project_skill,
             commands::skills::remove_skill,
             commands::skills::set_skill_tags,

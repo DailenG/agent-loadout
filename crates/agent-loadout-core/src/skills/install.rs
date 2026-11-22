@@ -1178,6 +1178,55 @@ pub fn update(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Updated
         ));
     };
     let (commit, files) = latest(sx, id, &source)?;
+    commit_update(store, sx, id, source, commit, files)
+}
+
+/// Updates a git skill to `expected`, the source commit the user reviewed
+/// (the app's update preview): the cache clone is used as the last check
+/// left it, without fetching. When the clone is at another commit (a later
+/// check saw a newer push), nothing is written and the error is
+/// `entry_changed`: check again and review the new content.
+pub fn update_reviewed(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    id: &str,
+    expected: &str,
+) -> Result<Updated, CoreError> {
+    let Some(source) = git_source(store, id)? else {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("skill {id:?} has no git source to update from; add it again to replace it"),
+        ));
+    };
+    let changed = || {
+        CoreError::new(
+            ErrorCode::EntryChanged,
+            format!("the source of skill {id:?} changed since the check; check for updates again"),
+        )
+    };
+    let dir = sources_dir(sx).join(id);
+    if !sx.fs.exists(&dir.join(".git")) {
+        return Err(changed());
+    }
+    let git = git_path(sx)?;
+    let head = rev_parse(sx, &git, &dir, "HEAD")?;
+    if !head.eq_ignore_ascii_case(expected.trim()) {
+        return Err(changed());
+    }
+    let files = cached_latest(store, sx, id)?.ok_or_else(changed)?;
+    commit_update(store, sx, id, source, head, files)
+}
+
+/// Writes `files` (the source at `commit`) as the store copy of `id` in one
+/// commit, then lets owned copies follow.
+fn commit_update(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    id: &str,
+    source: SkillSource,
+    commit: String,
+    files: SkillFiles,
+) -> Result<Updated, CoreError> {
     let stored = store::read_content(store, id)?;
     let changes = changes(&stored, &files);
     let short = &commit[..commit.len().min(7)];

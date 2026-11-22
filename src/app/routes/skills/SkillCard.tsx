@@ -41,12 +41,14 @@ export type SkillCardProps = {
   onExpandedChange: (expanded: boolean) => void;
   /** The last update check of this skill, if any. */
   update?: SkillUpdateCheck;
+  /** The update of `update` went through: its entry is stale now. */
+  onUpdated: () => void;
   /** Every tag in the store, for the tag editor's suggestions. */
   allTags: string[];
 };
 
 export function SkillCard(props: SkillCardProps) {
-  const { skill, clients, project, layout = "list", expanded, onExpandedChange, update, allTags } = props;
+  const { skill, clients, project, layout = "list", expanded, onExpandedChange, update, onUpdated, allTags } = props;
   const actions = useSkillActions();
   const isGrid = layout === "grid";
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
@@ -73,7 +75,7 @@ export function SkillCard(props: SkillCardProps) {
     : detected.length > 0 && detected.every((client) => skill.clients.includes(client.id));
   const partial = !project && enabledClients.length > 0 && !allEnabled;
   const updateAvailable = update?.status === "available";
-  const unreachable = update?.status === "source_unreachable";
+  const unreachable = update?.status === "source_unreachable" || update?.status === "failed";
   const description = skill.description ?? t("skills.description.empty");
   const originLabel = skill.source ? t(ORIGIN_KEYS[skill.source.kind]) : t("skill.card.sourceMethod.none");
   const enabledLabel = project
@@ -175,8 +177,9 @@ export function SkillCard(props: SkillCardProps) {
   async function handleUpdate() {
     setIsUpdating(true);
     try {
-      await actions.update(skill.id, skill.name);
+      await actions.update(skill.id, skill.name, update?.latest ?? "");
       setDialog(null);
+      onUpdated();
     } catch {
       // Reported by the action.
     } finally {
