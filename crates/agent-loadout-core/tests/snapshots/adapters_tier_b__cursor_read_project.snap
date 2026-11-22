@@ -1,0 +1,10 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "read_all(CURSOR, &doc)"
+---
+## repo-docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${env:DOCS_TOKEN}"

@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PAT}"
+      },
+      "envFile": "${userHome}/.config/example/github.env"
+    },
+    "tracker": {
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:TRACKER_TOKEN}"
+      }
+    },
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    },
+    "workspace": {
+      "command": "example-workspace-mcp",
+      "args": ["--root", "${workspaceFolder}"]
+    }
+  }
+}

@@ -89,7 +89,11 @@ fn claude_code() {
     assert_eq!(github["winner"]["layer"], "project");
     assert_eq!(github["winner"]["source"], "store:github+project");
     assert_eq!(github["shadowed"][0]["layer"], "system");
-    assert_eq!(github["also_visible_to"][0], "omp");
+    // `<P>/.mcp.json` is also Copilot's workspace file (SPEC 6.5).
+    assert_eq!(
+        github["also_visible_to"],
+        serde_json::json!(["copilot", "omp"])
+    );
     let slack = entry(&doc, "claude-code", "slack");
     assert_eq!(slack["loaded"], false);
     assert_eq!(

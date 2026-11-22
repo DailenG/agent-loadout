@@ -42,9 +42,17 @@ pub struct AdapterSpec {
 pub struct McpSpec {
     /// Operating systems the client has MCP targets on.
     pub oses: &'static [Os],
+    /// Loadout only reads this client's files (import, effective view) and
+    /// never writes them (`vscode-legacy`): it is never selected for a
+    /// write, and naming it in an enable list reports `read_only_client`.
+    pub read_only: bool,
     /// User-scope candidates: the first existing one wins, else `[0]` is
     /// created. With [`McpSpec::profiles`], this is the default profile.
     pub user: &'static [Location],
+    /// Computes the user files instead of [`McpSpec::user`] when set (VS
+    /// Code variants and profiles selected in `clients.toml`). The first
+    /// file stands for the client in the effective view.
+    pub user_files: Option<UserFiles>,
     /// Extra copies of the user file, each written too when it exists (the
     /// Claude Desktop MSIX copy). Usually [`Location::Glob`].
     pub user_mirrors: &'static [Location],
@@ -91,6 +99,12 @@ pub struct Profiles {
     /// Whether a profile name is valid for the client.
     pub valid_name: fn(&str) -> bool,
 }
+
+/// [`McpSpec::user_files`]: the user files `prefs` selects, in order and
+/// without duplicates, each with a label for [`Target::profile`] (`None`
+/// for the default file). Only lists directories; never reads files.
+pub type UserFiles =
+    fn(&Env, &dyn Fs, &ClientPrefs) -> Result<Vec<(PathBuf, Option<String>)>, CoreError>;
 
 /// [`McpSpec::same_name`] for clients that compare names exactly.
 pub fn exact_names(a: &str, b: &str) -> bool {
@@ -200,8 +214,9 @@ impl AdapterSpec {
     /// The files this client's MCP servers go to in `scope`. Only checks
     /// which files exist; never reads or writes them. `prefs` is the
     /// client's table in `clients.toml`; it selects the profiles of a
-    /// client with [`McpSpec::profiles`] (an empty list selects none) and is
-    /// ignored by the others.
+    /// client with [`McpSpec::profiles`] (an empty list selects none) and
+    /// the files of one with [`McpSpec::user_files`], and is ignored by the
+    /// others.
     ///
     /// Errors: `not_supported_on_os` when the client has no MCP target on
     /// this OS, `scope_not_supported` when it has none in `scope`,
@@ -247,8 +262,9 @@ impl AdapterSpec {
             skeleton: mcp.skeleton,
             warnings,
         };
-        let files = match (scope, &mcp.profiles) {
-            (Scope::User, Some(profiles)) => self.profile_files(profiles, env, fs, prefs)?,
+        let files = match (scope, &mcp.profiles, mcp.user_files) {
+            (Scope::User, _, Some(user_files)) => user_files(env, fs, prefs)?,
+            (Scope::User, Some(profiles), None) => self.profile_files(profiles, env, fs, prefs)?,
             _ => vec![(first_existing(self, candidates, env, fs, project)?, None)],
         };
         let mut targets = Vec::with_capacity(files.len());

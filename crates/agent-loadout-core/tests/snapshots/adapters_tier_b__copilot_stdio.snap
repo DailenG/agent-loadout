@@ -1,0 +1,28 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "golden(COPILOT, Os::Windows, &github)"
+---
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "${TOOLS_BIN}/github-mcp",
+      "args": ["--root=${WORK_ROOT}"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
+      },
+      "cwd": "${HOME}/src",
+      "tools": ["search_code", "get_issue"]
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "${TOOLS_BIN}/github-mcp"
+args = ["--root=${WORK_ROOT}"]
+cwd = "${HOME}/src"
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}"
+# tools.allow: ["search_code", "get_issue"]

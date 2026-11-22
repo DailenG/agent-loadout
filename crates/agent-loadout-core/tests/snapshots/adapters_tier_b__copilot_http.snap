@@ -1,0 +1,24 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "golden(COPILOT, Os::Linux, &tracker)"
+---
+{
+  "mcpServers": {
+    "tracker": {
+      "type": "http",
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TRACKER_TOKEN:-anonymous}"
+      },
+      "oauthClientId": "example-client"
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${TRACKER_TOKEN:-anonymous}"
+# passthrough oauthClientId: String("example-client")

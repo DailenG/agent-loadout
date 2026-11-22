@@ -151,7 +151,9 @@ pub static SPEC: AdapterSpec = AdapterSpec {
     detect: &[Probe::Path(ROOT), Probe::Executable("omp")],
     mcp: Some(McpSpec {
         oses: &[Os::Windows, Os::Linux, Os::MacOs],
+        read_only: false,
         user: &[USER_FILE],
+        user_files: None,
         user_mirrors: &[],
         profiles: Some(Profiles {
             default: DEFAULT_PROFILE,

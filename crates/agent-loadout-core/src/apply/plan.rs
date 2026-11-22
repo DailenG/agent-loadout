@@ -898,7 +898,8 @@ impl ProjectPlanner<'_, '_> {
                 let mut ids = Vec::new();
                 for spec in ADAPTERS.iter().copied() {
                     let has_files = spec.mcp.as_ref().is_some_and(|mcp| {
-                        mcp.oses.contains(&self.cx.env.os())
+                        !mcp.read_only
+                            && mcp.oses.contains(&self.cx.env.os())
                             && !(mcp.project.is_empty() && mcp.project_local.is_empty())
                     });
                     if has_files && self.detected.detected(self.cx, self.desired, spec) {
@@ -1192,7 +1193,9 @@ impl ProjectPlanner<'_, '_> {
     /// `None`), or left in a file the project no longer uses. Unchanged
     /// owned entries are removed there, like any entry no longer desired,
     /// except those of the `held` names (entries that cannot be resolved
-    /// now), which are left alone.
+    /// now), which are left alone. A planned target of a shared file (SPEC
+    /// 6.5) that covers an entry another client owns gets that client
+    /// joined, so its entries there are cleaned up too.
     fn cleanup(
         &mut self,
         project: impl Fn(&str) -> bool,
@@ -1204,15 +1207,18 @@ impl ProjectPlanner<'_, '_> {
         let covered: Vec<Covered> = self
             .inputs
             .iter()
-            .filter_map(|input| {
-                let keys = input.container_keys().ok()?;
-                Some((
+            .map(|input| {
+                let pointer = input
+                    .container_keys()
+                    .map(|keys| container_pointer(&keys))
+                    .unwrap_or_default();
+                (
                     input.target.scope,
                     input.project_id.clone(),
                     input.target.file.to_string_lossy().into_owned(),
-                    container_pointer(&keys),
+                    pointer,
                     input.kind,
-                ))
+                )
             })
             .collect();
         let mut orphans: Vec<TargetInput> = Vec::new();
@@ -1221,18 +1227,6 @@ impl ProjectPlanner<'_, '_> {
                 continue;
             };
             if row.scope == Scope::User || !project(id) {
-                continue;
-            }
-            if covered
-                .iter()
-                .any(|(scope, project_id, file, pointer, kind)| {
-                    *scope == row.scope
-                        && project_id.as_deref() == Some(id)
-                        && *file == row.file
-                        && *pointer == row.container
-                        && *kind == row.kind
-                })
-            {
                 continue;
             }
             let Some(spec) = adapter(&row.client) else {
@@ -1245,6 +1239,20 @@ impl ProjectPlanner<'_, '_> {
                 continue;
             }
             let native_disable = self.desired.prefs(spec.id).native_disable == Some(true);
+            let covering = covered
+                .iter()
+                .position(|(scope, project_id, file, pointer, kind)| {
+                    *scope == row.scope
+                        && project_id.as_deref() == Some(id)
+                        && *file == row.file
+                        && !pointer.is_empty()
+                        && *pointer == row.container
+                        && *kind == row.kind
+                });
+            if let Some(index) = covering {
+                self.inputs[index].join(spec.id, native_disable, Vec::new());
+                continue;
+            }
             let same = orphans.iter_mut().find(|input| {
                 input.target.scope == row.scope
                     && input.project_id.as_deref() == Some(id)

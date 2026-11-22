@@ -1,0 +1,36 @@
+// VS Code user MCP servers (legacy Local-harness format).
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "tracker-token",
+      "description": "Tracker API token",
+      "password": true
+    }
+  ],
+  "servers": {
+    // Converted on import: ${env:NAME} becomes a store reference.
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PAT}"
+      }
+    },
+    /* Prompted for by the editor: needs a manual secret. */
+    "tracker": {
+      "type": "http",
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:tracker-token}"
+      }
+    },
+    "editor-only": {
+      "command": "example-editor-mcp",
+      "envFile": "${workspaceFolder}/.env",
+      "dev": { "watch": "src/**/*.ts", "debug": { "type": "node" } },
+      "sandbox": { "network": false },
+    },
+  },
+}

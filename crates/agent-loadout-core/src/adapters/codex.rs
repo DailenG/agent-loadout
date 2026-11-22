@@ -301,7 +301,9 @@ pub static SPEC: AdapterSpec = AdapterSpec {
     detect: &[Probe::Path(CODEX_DIR), Probe::Executable("codex")],
     mcp: Some(McpSpec {
         oses: &[Os::Windows, Os::Linux, Os::MacOs],
+        read_only: false,
         user: &[USER_FILE],
+        user_files: None,
         user_mirrors: &[],
         profiles: None,
         project: &[Location::Project(".codex/config.toml")],

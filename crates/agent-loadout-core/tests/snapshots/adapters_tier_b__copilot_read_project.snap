@@ -1,0 +1,16 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "read_all(COPILOT, &doc)"
+---
+## repo-docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${DOCS_TOKEN}"
+## linter
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-lint-mcp"]
+cwd = "${workspaceFolder}"
+# tools.allow: ["lint"]

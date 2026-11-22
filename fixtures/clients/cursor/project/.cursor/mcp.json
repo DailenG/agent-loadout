@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "repo-docs": {
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:DOCS_TOKEN}"
+      }
+    }
+  }
+}

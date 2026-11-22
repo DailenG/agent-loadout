@@ -1,0 +1,10 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "read_all(LEGACY, &doc)"
+---
+## repo-docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+## workspace-only
+transport = "sse"
+url = "https://events.example.com/sse"

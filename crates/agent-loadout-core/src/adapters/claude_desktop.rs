@@ -74,7 +74,9 @@ pub static SPEC: AdapterSpec = AdapterSpec {
     ],
     mcp: Some(McpSpec {
         oses: &[Os::Windows, Os::MacOs],
+        read_only: false,
         user: &[CONFIG],
+        user_files: None,
         user_mirrors: &[MSIX_CONFIG],
         profiles: None,
         project: &[],

@@ -10,16 +10,17 @@ M9.
 
 - Use a throwaway `LOADOUT_HOME` and, where the client supports it, a
   throwaway config dir (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-  `PI_CODING_AGENT_DIR`). Back up any real client file a check touches
-  before starting, and restore it afterwards.
+  `PI_CODING_AGENT_DIR`, `COPILOT_HOME`). Back up any real client file a
+  check touches before starting, and restore it afterwards.
 - Run each client's own lister to confirm what it loaded (`claude mcp list`,
   the Claude Desktop developer settings, `codex mcp list`, omp `/mcp list`,
-  `pi mcp list`).
+  `pi mcp list`, VS Code's `MCP: List Servers` command, Copilot CLI `/mcp`,
+  Cursor's Settings, MCP page).
 - Write Loadout's entries with `loadout server add <id> --client <client>`
   (instant apply, M6) against the throwaway `LOADOUT_HOME`, or by hand from
   the goldens in
-  `crates/agent-loadout-core/tests/snapshots/adapters_claude__*.snap` and
-  `adapters_tier_a__*.snap`.
+  `crates/agent-loadout-core/tests/snapshots/adapters_claude__*.snap`,
+  `adapters_tier_a__*.snap` and `adapters_tier_b__*.snap`.
 - Use synthetic server names and placeholder commands only (for example the
   `example-*` names from the fixtures, or a real public test server); never
   paste tokens into a client file for these checks.
@@ -137,6 +138,61 @@ check.
 | PI-10 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
 | PI-11 | Map `[tools] deny` by hand: `"toolExposure": { "<tool>": "hidden" }`. | The tool is unreachable. Loadout does not write `toolExposure` yet (`Caps.tool_filter = None` for Pi); this confirms the mapping for a later brief. | SPEC 5.2 `[tools]` via Pi `toolExposure` |
 | PI-12 | Detection: `pi.exe`/`pi.cmd` on `PATH`, and a `~/.pi/agent` dir alone. | Either detects Pi. | SPEC 7.7, `Probe::Executable("pi")` |
+
+## GitHub Copilot (`copilot`), gate V2
+
+Machines: Windows 11 (VS Code Stable with the Copilot Chat extension, and
+the Copilot CLI); the CLI checks also on Arch Linux. Use a throwaway
+`COPILOT_HOME` for the CLI checks. The adapter's assumptions are listed in
+`crates/agent-loadout-core/src/adapters/copilot.rs`.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| COP-1 | VS Code: unset `COPILOT_HOME`, add `verify-user` (stdio, the `copilot_stdio` golden without `tools`) to `~/.copilot/mcp-config.json`, reload the window, run `MCP: List Servers` and open the agent-mode tool picker. | `verify-user` is listed and its tools are offered. Record whether VS Code also needs a setting to read this file. | SPEC 7.3 `copilot` user file ("VS Code's current Copilot-harness location") `[verify]`; `copilot::copilot_home` |
+| COP-2 | Copilot CLI: set `COPILOT_HOME` to an empty throwaway dir, add `verify-cli` to `$COPILOT_HOME/mcp-config.json`, start `copilot`, run `/mcp`. Then point `COPILOT_HOME` at a relative path. | Listed from `$COPILOT_HOME`; `~/.copilot` is not read. Record what the CLI does with a relative value (Loadout ignores it and uses `~/.copilot`). | SPEC 7.3 `$COPILOT_HOME/mcp-config.json`; `Location::EnvDir` |
+| COP-3 | Put `verify-project` in `<P>/.mcp.json`, open `<P>` in VS Code in Restricted Mode, then trust the workspace; also start the Copilot CLI in `<P>`. | VS Code lists it only once the workspace is trusted; record what the CLI does (folder trust prompt or none). | SPEC 7.4 `copilot` trust gate `[verify]`; `TrustGate::WorkspaceTrust` |
+| COP-4 | Add stdio and http servers that report their environment, arguments and request headers, with `${VERIFY_VALUE}` in `command` (a directory prefix), `args`, `env`, a header value and the `url` query, plus `${VERIFY_UNSET:-fallback}` in `args`. Start VS Code and the CLI from a shell with `VERIFY_VALUE` set. | `command`, `args`, `env` and header values are expanded and the default applies; record whether `url` is expanded (Loadout assumes not). Record any validation warning VS Code shows for `${...}` in `<P>/.mcp.json` while the runtime still expands it. | SPEC 7.4 `copilot` env refs `[verify]`; `copilot::CAPS.env_ref_fields` |
+| COP-5 | Put `verify-both` in the user file and, with other `args`, in `<P>/.mcp.json`. | Record which entry Copilot runs in `<P>` and whether fields merge (Loadout reports `ProjectSemantics::Unknown` and precedence project over user until this is known). | SPEC 7.4 `copilot` project precedence `[verify]` |
+| COP-6 | Add `"disabled": true`, then `"enabled": false`, to `verify-user`; also stop it from VS Code's server list and diff the file. | Record whether either field hides the server and whether VS Code writes one. Loadout writes neither (`native_disable = None`) and removes entries instead. | SPEC 7.4 `copilot` native disable `[verify]` |
+| COP-7 | CLI: an entry with `"type": "local"` and `"tools": ["*"]`, then `"tools": ["<one tool>"]`; the same filter in VS Code. Also an entry without `tools`. | `local` runs as stdio; `["*"]` and a missing `tools` expose every tool; a list limits the tools in both. | `copilot::CopilotJson` read spellings; `ToolFilterMech::Allow("tools")` |
+| COP-8 | Add servers named `verify.dotted` and `verify spaced`. | Record which load. Loadout accepts `[A-Za-z0-9_.-]+` for Copilot (Claude Code's rule, since `.mcp.json` is shared). | `copilot` `valid_name = dotted_word_name` `[verify]` |
+| COP-9 | Windows: a stdio entry with plain `"command": "npx"` in VS Code and the CLI. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| COP-10 | Detection: the Copilot CLI on `PATH` (`copilot.cmd` from npm), a `~/.copilot` dir alone, and the Copilot Chat extension dir alone. | Any of them detects `copilot`. Record the extension's directory name under `~/.vscode/extensions` (Loadout matches `github.copilot-chat-*`). | SPEC 7.7; `copilot::SPEC.detect` `[verify]` |
+| COP-11 | Project shared file: a project manifest with `docs` for `["claude-code", "copilot"]`, `claude-only` for `claude-code` and `copilot-only` for `copilot`; `loadout apply`; open `<P>` in Claude Code and in VS Code. Then remove `claude-code` from every entry and apply again. | One `<P>/.mcp.json` holds all three; each client lists every entry in the file (Copilot also sees `claude-only`, and the effective view says so). After the second apply only the Copilot entries remain. No entry has `inputs`, `envFile`, `dev` or `sandbox`. | SPEC 6.5 shared files; planner target join and clean-up (`copilot_shares_the_project_mcp_json_with_claude_code`) |
+
+## Cursor (`cursor`), gate V2
+
+Machines: Windows 11 with Cursor. The adapter's assumptions are listed in
+`crates/agent-loadout-core/src/adapters/cursor.rs`.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| CUR-1 | Add `verify-user` (the `cursor_stdio` golden) to `~/.cursor/mcp.json`, open Settings, MCP. | Listed and connected. | SPEC 7.3 `cursor` user file |
+| CUR-2 | Put `verify-project` in `<P>/.cursor/mcp.json` and open `<P>`. | Listed in `<P>` only. Record any approval prompt (Loadout assumes no trust gate). | SPEC 7.3 project file; `trust_gate = None` |
+| CUR-3 | Servers that report environment, arguments and headers with `${env:VERIFY_VALUE}` in `command`, `args`, `env`, `url` and a header; start Cursor from a shell with `VERIFY_VALUE` set. | Each field is expanded; record any that is not. | SPEC 7.4 `cursor` `${env:NAME}`; `cursor::CAPS.env_ref_fields` `[verify]` |
+| CUR-4 | Turn `verify-user` off with Cursor's toggle and diff `~/.cursor/mcp.json`; then hand-add `"disabled": true` to another entry. | Record where Cursor keeps the toggle and whether `disabled` is honored. Loadout writes neither (`native_disable = None`). | SPEC 7.4 `cursor` native disable `[verify]` |
+| CUR-5 | Put `verify-both` in the user file and, with other `args`, in `<P>/.cursor/mcp.json`; then try `{ "disabled": true }` alone in the project file. | Record which entry runs in `<P>`, whether fields merge, and whether any project entry hides the user one (Loadout: Replace, no project suppression, `cannot_suppress_in_project`). | SPEC 7.4 `cursor` project suppression and precedence `[verify]` |
+| CUR-6 | An SSE endpoint as `{ "type": "sse", "url": ... }` and as a bare `url`; a Streamable HTTP endpoint as a bare `url`. | All connect; record if `type` is rejected. Loadout writes `"type": "sse"` for SSE only. | SPEC 7.5 transport inference; `cursor` mapper `[verify]` |
+| CUR-7 | Servers named `verify.dotted` and `verify spaced`. | Record which load (Loadout accepts any non-empty name for Cursor). | `cursor` `valid_name` `[verify]` |
+| CUR-8 | A stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| CUR-9 | Detection: `cursor.cmd` on `PATH`, `~/.cursor` alone, `%APPDATA%\Cursor` alone; record the uninstall entry `DisplayName` (`Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*` in a `.ps1` file). | Any probe detects Cursor; the `DisplayName` is `Cursor` or the value to put in `Probe::UninstallEntry`. | SPEC 7.7; `cursor::SPEC.detect` `[verify]` |
+| CUR-10 | `"envFile": "<abs path>/verify.env"` (a `VERIFY_VALUE=verified` line) on a server that reports its environment. | The server sees `verified` (`envFile` is a passthrough field). | SPEC 7.3 `envFile`; `passthrough_of("cursor")` |
+
+## VS Code legacy `mcp.json` (`vscode-legacy`), gate V2
+
+Machines: Windows 11 (VS Code Stable, and Insiders or VSCodium if
+installed); VSL-1 also on Arch Linux. Loadout only reads these files. The
+adapter's assumptions are listed in
+`crates/agent-loadout-core/src/adapters/vscode_legacy.rs`.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| VSL-1 | With `MCP: Open User Configuration`, add `verify-legacy` in each installed variant; note the file it opens. Set `import_variants` to the installed variants in the throwaway store's `clients.toml` and run `loadout import --scan`. | The files are `%APPDATA%\<variant>\User\mcp.json` (`$XDG_CONFIG_HOME/<variant>/User/mcp.json` on Linux), and the scan lists `verify-legacy` from each. | SPEC 7.3 `vscode-legacy` user paths `[verify]`; `vscode_legacy::user_files` |
+| VSL-2 | Create a VS Code profile, open its user MCP configuration, add `verify-profile`. Then set `import_profiles = "all"` and scan again. | The file is `User\profiles\<id>\mcp.json`; the scan lists `verify-profile`. | SPEC 7.3 profile layout `[verify]` |
+| VSL-3 | With `verify-legacy` only in the user `mcp.json` and `verify-workspace` only in `<P>/.vscode/mcp.json`, open `<P>` and the Copilot agent tool picker; run `loadout effective <P> --client copilot`. | Copilot offers both (record any setting it needs); the effective view lists them as `client-compat:` layers and flags a same-named `<P>/.mcp.json` entry `duplicate_via_compat`. | SPEC 7.3 forwarding into Copilot `[verify]`; `copilot` `compat_reads` |
+| VSL-4 | Entries without `type`: one with `command`, one with `url`. | Both start; Loadout reads them as stdio and http. | SPEC 7.5 inference; `vscode-legacy` mapper |
+| VSL-5 | Detection: `code.cmd`, `code-insiders.cmd` or `codium.cmd` on `PATH`, or a variant's `User` dir alone. | Any detects `vscode-legacy`, and `all-detected` still never writes it. | SPEC 7.7; `vscode_legacy::SPEC.detect` `[verify]` |
+| VSL-6 | Record `Get-FileHash` of every file from VSL-1 to VSL-3 (in a `.ps1` file), then run `loadout server add verify-ro --client vscode-legacy --client copilot -- npx -y @modelcontextprotocol/server-everything`, `loadout import --scan`, `loadout import`, `loadout adopt`, `loadout apply` and `loadout server rm verify-ro`; hash again. Add one entry with `${env:VERIFY_VALUE}` and one with `${input:verify-token}` (plus its `inputs[]` item) before the scan. | Every hash is unchanged; the apply warns `read_only_client`; the scan imports `${env:VERIFY_VALUE}` as a reference and reports the `${input:...}` entry `needs_manual_secret`; nothing imported is enabled for `vscode-legacy`. | SPEC 7.3 "never written", 8.6 import; `McpSpec::read_only`, `import::server_from_native` |
 
 ## Apply engine (M6), gate V1
 

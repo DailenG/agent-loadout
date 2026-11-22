@@ -1,0 +1,11 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "read_all(LEGACY, &doc)"
+---
+## profile-notes
+transport = "stdio"
+command = "example-notes-mcp"
+args = ["--profile", "work"]
+
+[env]
+LOG_LEVEL = "info"

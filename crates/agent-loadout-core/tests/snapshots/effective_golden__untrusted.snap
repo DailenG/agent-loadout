@@ -1,6 +1,5 @@
 ---
 source: crates/agent-loadout-core/tests/effective_golden.rs
-assertion_line: 173
 expression: "golden(&fx, &root, &view)"
 ---
 {
@@ -20,6 +19,7 @@ expression: "golden(&fx, &root, &view)"
         },
         "shadowed": [],
         "also_visible_to": [
+          "copilot",
           "omp"
         ],
         "status": "blocked",
@@ -63,6 +63,7 @@ expression: "golden(&fx, &root, &view)"
           }
         ],
         "also_visible_to": [
+          "copilot",
           "omp"
         ],
         "status": "blocked",
@@ -116,6 +117,7 @@ expression: "golden(&fx, &root, &view)"
         },
         "shadowed": [],
         "also_visible_to": [
+          "copilot",
           "omp"
         ],
         "status": "foreign",

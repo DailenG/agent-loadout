@@ -93,11 +93,13 @@ const MCP_ADAPTER: McpExtension = McpExtension {
 pub static SPEC: AdapterSpec = AdapterSpec {
     id: ID,
     display_name: "Pi",
-    tier: Tier::A,
+    tier: Tier::B,
     detect: &[Probe::Path(agent("")), Probe::Executable("pi")],
     mcp: Some(McpSpec {
         oses: &[Os::Windows, Os::Linux, Os::MacOs],
+        read_only: false,
         user: &[agent("mcp.json")],
+        user_files: None,
         user_mirrors: &[],
         profiles: None,
         project: &[Location::Project(".pi/mcp.json")],

@@ -1,0 +1,13 @@
+{
+  // Workspace servers, read by VS Code (and omp) only.
+  "servers": {
+    "repo-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp"
+    },
+    "workspace-only": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    }
+  }
+}

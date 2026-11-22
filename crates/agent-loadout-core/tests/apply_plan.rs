@@ -421,7 +421,7 @@ fn clients_without_an_adapter_or_excluded_are_reported_not_written() {
     let fx = Fx::new();
     fx.put_server(stdio(
         "notes",
-        &["claude-code", "cursor", "warp"],
+        &["claude-code", "gemini", "warp"],
         &NOTES_ARGS,
     ));
     let plan = fx.plan();

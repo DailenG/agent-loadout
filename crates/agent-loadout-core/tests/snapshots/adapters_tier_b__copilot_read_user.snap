@@ -1,0 +1,31 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "read_all(COPILOT, &doc)"
+---
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}"
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${TRACKER_TOKEN}"
+# tools.allow: ["search", "read"]
+# passthrough oauthClientId: String("example-client")
+## events
+transport = "sse"
+url = "https://events.example.com/sse"
+## editor-only
+transport = "stdio"
+command = "example-editor-mcp"
+# unmapped envFile: String("${workspaceFolder}/.env")
+# unmapped dev: Object(NativeMap { entries: [("watch", String("src/**/*.ts"))] })
+## fallback
+transport = "stdio"
+command = "example-fallback-mcp"
+args = ["--level", "${LOG_LEVEL:-info}"]

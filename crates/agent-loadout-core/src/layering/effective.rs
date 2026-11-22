@@ -24,7 +24,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use crate::adapters::caps::{ProjectDisable, ProjectSemantics, Source};
-use crate::adapters::{ADAPTERS, AdapterSpec, Tier, adapter};
+use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
 use crate::apply::exec::PlanInputs;
 use crate::apply::ledger::{EntryKind, container_pointer};
 use crate::apply::plan::{
@@ -105,8 +105,8 @@ pub struct EffectiveEntry {
     pub loaded: bool,
     pub winner: Winner,
     pub shadowed: Vec<Shadowed>,
-    /// Other Tier A clients that read the winner's file and container (SPEC
-    /// 6.5), by id.
+    /// Other clients with an adapter that read the winner's file and
+    /// container (SPEC 6.5), by id.
     pub also_visible_to: Vec<&'static str>,
     /// The winner's plan state, when Loadout plans its file; `foreign` for
     /// an entry it does not own.
@@ -160,9 +160,10 @@ fn warnings_json<S: Serializer>(warnings: &[CoreError], serializer: S) -> Result
 }
 
 /// The effective view of `folder` for `clients` (every client with MCP
-/// support on this OS when `None`). Plans the user files and, when the
-/// folder's project is known on this machine, that project, against the
-/// store's working tree; reads files and never writes anything.
+/// support on this OS that Loadout writes when `None`). Plans the user
+/// files and, when the folder's project is known on this machine, that
+/// project, against the store's working tree; reads files and never writes
+/// anything.
 ///
 /// Errors: `unknown_client`, `no_adapter` or `not_supported_on_os` for a
 /// requested client; an invalid manifest; a store that does not load.
@@ -181,7 +182,7 @@ pub fn effective(
         None => ADAPTERS
             .iter()
             .copied()
-            .filter(|spec| on_os(spec, os))
+            .filter(|spec| on_os(spec, os) && !read_only(spec))
             .collect(),
     };
     let inputs = PlanInputs::load(store, ax)?;
@@ -284,6 +285,12 @@ fn on_os(spec: &AdapterSpec, os: Os) -> bool {
     spec.mcp.as_ref().is_some_and(|mcp| mcp.oses.contains(&os))
 }
 
+/// A client Loadout only reads (`vscode-legacy`): never a row of its own,
+/// only a compatibility source of others.
+fn read_only(spec: &AdapterSpec) -> bool {
+    spec.mcp.as_ref().is_some_and(|mcp| mcp.read_only)
+}
+
 const fn scope_of(source: Source) -> Scope {
     match source {
         Source::User => Scope::User,
@@ -341,7 +348,7 @@ struct View<'a> {
     /// parse.
     docs: BTreeMap<PathBuf, Option<Document>>,
     detected: Detected,
-    /// The files and containers each Tier A client reads (also visible to).
+    /// The files and containers each client reads (also visible to).
     readers: Option<Readers>,
     warnings: Vec<CoreError>,
 }
@@ -443,8 +450,8 @@ impl<'a> View<'a> {
     }
 
     /// The files and containers `spec` reads, highest precedence first:
-    /// its own layers, then its compatibility sources (Tier A clients
-    /// only). Problems are reported when `warn`.
+    /// its own layers, then its compatibility sources (those with an
+    /// adapter in this build). Problems are reported when `warn`.
     fn sources(&mut self, spec: &'static AdapterSpec, warn: bool) -> Vec<SourceFile> {
         let Some(mcp) = spec.mcp.as_ref() else {
             return Vec::new();
@@ -454,7 +461,7 @@ impl<'a> View<'a> {
             self.push_sources(spec, scope_of(*source), false, warn, &mut out);
         }
         for compat in mcp.caps.compat_reads {
-            if let Some(other) = adapter(compat.client).filter(|other| other.tier == Tier::A) {
+            if let Some(other) = adapter(compat.client) {
                 self.push_sources(other, scope_of(compat.source), true, false, &mut out);
             }
         }
@@ -810,16 +817,12 @@ impl<'a> View<'a> {
         out
     }
 
-    /// Other Tier A clients that read `file` and `pointer`, by id.
+    /// Other clients that read `file` and `pointer`, by id.
     fn readers_of(&mut self, client: &str, file: &Path, pointer: &str) -> Vec<&'static str> {
         if self.readers.is_none() {
             let os = self.cx.env.os();
             let mut readers = Vec::new();
-            for spec in ADAPTERS
-                .iter()
-                .copied()
-                .filter(|spec| spec.tier == Tier::A && on_os(spec, os))
-            {
+            for spec in ADAPTERS.iter().copied().filter(|spec| on_os(spec, os)) {
                 let files = self
                     .sources(spec, false)
                     .into_iter()

@@ -184,6 +184,13 @@ pub enum ErrorCode {
     /// Warning: a shared project file gets `${project}` as this machine's
     /// absolute folder; teammates see a path that is not theirs.
     PersonalPathInSharedFile,
+    /// Warning: a client Loadout only reads (`vscode-legacy`, SPEC 7.3) is
+    /// named where something would be written for it; nothing is written.
+    ReadOnlyClient,
+    /// A native value is one the client prompts the user for (VS Code
+    /// `${input:...}`): it has no store form and must be set up as a secret
+    /// by hand before the entry can be imported.
+    NeedsManualSecret,
 }
 
 impl ErrorCode {
@@ -249,6 +256,8 @@ impl ErrorCode {
             ErrorCode::PrivateInTrackedFile => "private_in_tracked_file",
             ErrorCode::ProjectKeySpelling => "project_key_spelling",
             ErrorCode::PersonalPathInSharedFile => "personal_path_in_shared_file",
+            ErrorCode::ReadOnlyClient => "read_only_client",
+            ErrorCode::NeedsManualSecret => "needs_manual_secret",
         }
     }
 }

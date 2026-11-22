@@ -10,6 +10,10 @@
 //! - [`stage_resolutions`] carries out `import` decisions of a plan ("import
 //!   their change", "respect the deletion").
 //!
+//! A read-only client (`vscode-legacy`) is a source only: what is imported
+//! from it is never enabled for it, and VS Code's `${input:...}` values are
+//! `needs_manual_secret`.
+//!
 //! Secret extraction (SPEC 11.7): every literal in `env`, `headers`,
 //! `args` and the URL goes through the classifier. Sensitive literals make
 //! the entry `needs_secret_extraction` (the extraction destinations are the
@@ -79,6 +83,16 @@ pub fn server_from_native(
         })
     };
     let native = def.fields;
+    if let Some(what) = prompted_input(&native) {
+        return Err(CoreError::new(
+            ErrorCode::NeedsManualSecret,
+            format!(
+                "{what} is a {} `${{input:...}}` value the editor prompts for; store the \
+                 value as a secret by hand (`loadout secrets set`) and reference it",
+                spec.display_name
+            ),
+        ));
+    }
     let mut fields = ServerFields {
         transport: native.transport,
         ..ServerFields::default()
@@ -146,6 +160,47 @@ fn needs_extraction(what: String) -> CoreError {
         ErrorCode::NeedsSecretExtraction,
         format!("{what} may be a secret; it needs secret extraction before import"),
     )
+}
+
+/// The field holding a VS Code input variable (`${input:id}`), a value the
+/// editor prompts the user for and keeps itself, if any.
+fn prompted_input(fields: &ServerFields) -> Option<String> {
+    const INPUT: &str = "${input:";
+    let named = |field: &str, value: &str| value.contains(INPUT).then(|| field.to_owned());
+    fields
+        .command
+        .as_deref()
+        .and_then(|value| named("`command`", value))
+        .or_else(|| {
+            fields
+                .args
+                .iter()
+                .flatten()
+                .find_map(|arg| arg.contains(INPUT).then(|| format!("argument {arg:?}")))
+        })
+        .or_else(|| {
+            fields
+                .cwd
+                .as_deref()
+                .and_then(|value| named("`cwd`", value))
+        })
+        .or_else(|| {
+            fields
+                .url
+                .as_deref()
+                .and_then(|value| named("the URL", value))
+        })
+        .or_else(|| {
+            [("env", &fields.env), ("headers", &fields.headers)]
+                .into_iter()
+                .find_map(|(kind, map)| {
+                    map.iter().flatten().find_map(|(name, value)| {
+                        value
+                            .contains(INPUT)
+                            .then(|| format!("the {kind} value of {name:?}"))
+                    })
+                })
+        })
 }
 
 fn to_toml(value: &NativeValue) -> Result<toml::Value, CoreError> {
@@ -376,8 +431,14 @@ fn candidate_server(candidate: &Candidate, only: bool) -> Result<Server, CoreErr
     let (first_client, first) = &defs[0];
     let mut server = Server::new(id.clone());
     set_fields(&mut server, &first.fields, first.tools.clone());
+    // Read-only clients (`vscode-legacy`) are sources only: the server is
+    // not enabled for them, and they get no `[client.<id>]` table.
+    let writable: Vec<&(&'static str, ImportedDef)> = defs
+        .iter()
+        .filter(|(client, _)| adapter(client).is_none_or(|spec| !is_read_only(spec)))
+        .collect();
     let mut clients = BTreeMap::new();
-    for (client, def) in &defs {
+    for (client, def) in &writable {
         let mut table = def.passthrough.clone();
         if candidate.name != id {
             table.insert(
@@ -394,10 +455,11 @@ fn candidate_server(candidate: &Candidate, only: bool) -> Result<Server, CoreErr
         origin: Some(format!("imported:{first_client}")),
         ..Meta::default()
     });
-    if !only {
+    if !only && !writable.is_empty() {
         server.enable = Some(Enable {
             clients: Some(ClientSelection::List(
-                defs.iter()
+                writable
+                    .iter()
                     .map(|(client, _)| (*client).to_owned())
                     .collect(),
             )),
@@ -408,6 +470,10 @@ fn candidate_server(candidate: &Candidate, only: bool) -> Result<Server, CoreErr
         return Err(err);
     }
     Ok(server)
+}
+
+fn is_read_only(spec: &AdapterSpec) -> bool {
+    spec.mcp.as_ref().is_some_and(|mcp| mcp.read_only)
 }
 
 fn set_fields(server: &mut Server, fields: &ServerFields, tools: Option<ToolFilter>) {
@@ -435,7 +501,8 @@ pub fn stage_adopt_identical(
     let mut adopted = Vec::new();
     for candidate in candidates {
         for source in &candidate.sources {
-            let Some(spec) = adapter(source.client) else {
+            // A read-only client (`vscode-legacy`) is never enabled.
+            let Some(spec) = adapter(source.client).filter(|spec| !is_read_only(spec)) else {
                 continue;
             };
             let Some(server) = desired

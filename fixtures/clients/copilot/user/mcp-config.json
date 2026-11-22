@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "local",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
+      },
+      "tools": ["*"]
+    },
+    "tracker": {
+      "type": "http",
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TRACKER_TOKEN}"
+      },
+      "tools": ["search", "read"],
+      "oauthClientId": "example-client"
+    },
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    },
+    "editor-only": {
+      "type": "stdio",
+      "command": "example-editor-mcp",
+      "envFile": "${workspaceFolder}/.env",
+      "dev": { "watch": "src/**/*.ts" }
+    },
+    "fallback": {
+      "command": "example-fallback-mcp",
+      "args": ["--level", "${LOG_LEVEL:-info}"]
+    }
+  }
+}

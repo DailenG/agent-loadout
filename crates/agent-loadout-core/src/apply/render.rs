@@ -321,7 +321,8 @@ pub(crate) struct Detected(BTreeMap<&'static str, bool>);
 impl Detected {
     /// The client ids `selection` names: the list as written, or for
     /// `all-detected` every client forced on in `clients.toml` or detected
-    /// whose MCP support fits `transport` on this OS.
+    /// whose MCP support fits `transport` on this OS (never a read-only
+    /// one).
     pub(crate) fn select(
         &mut self,
         cx: &RenderCx<'_>,
@@ -335,7 +336,8 @@ impl Detected {
                 .iter()
                 .filter(|spec| {
                     let fits = spec.mcp.as_ref().is_some_and(|mcp| {
-                        mcp.oses.contains(&cx.env.os())
+                        !mcp.read_only
+                            && mcp.oses.contains(&cx.env.os())
                             && transport.is_some_and(|t| mcp.caps.transports.contains(t))
                     });
                     fits && self.detected(cx, desired, spec)
@@ -362,6 +364,7 @@ impl Detected {
 }
 
 /// The adapter of `client`, if Loadout can write its user file here.
+/// A read-only client (`vscode-legacy`) is `read_only_client`.
 pub(crate) fn writable(client: &str, env: &Env) -> Result<&'static AdapterSpec, CoreError> {
     let Some(spec) = adapter(client) else {
         let code = if known_client(client).is_some() {
@@ -375,6 +378,14 @@ pub(crate) fn writable(client: &str, env: &Env) -> Result<&'static AdapterSpec, 
         ));
     };
     match &spec.mcp {
+        Some(mcp) if mcp.read_only => Err(CoreError::new(
+            ErrorCode::ReadOnlyClient,
+            format!(
+                "{} is read and imported only; nothing is written for it (enable `copilot` \
+                 for VS Code instead)",
+                spec.display_name
+            ),
+        )),
         Some(mcp) if mcp.oses.contains(&env.os()) => Ok(spec),
         _ => Err(CoreError::new(
             ErrorCode::NotSupportedOnOs,

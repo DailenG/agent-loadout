@@ -1,0 +1,10 @@
+{
+	"servers": {
+		"profile-notes": {
+			"type": "stdio",
+			"command": "example-notes-mcp",
+			"args": ["--profile", "work"],
+			"env": { "LOG_LEVEL": "info" }
+		}
+	}
+}

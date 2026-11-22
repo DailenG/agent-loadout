@@ -1,0 +1,25 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "read_all(CURSOR, &doc)"
+---
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${env:GITHUB_PAT}"
+# passthrough envFile: String("${userHome}/.config/example/github.env")
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${env:TRACKER_TOKEN}"
+## events
+transport = "sse"
+url = "https://events.example.com/sse"
+## workspace
+transport = "stdio"
+command = "example-workspace-mcp"
+args = ["--root", "${workspaceFolder}"]

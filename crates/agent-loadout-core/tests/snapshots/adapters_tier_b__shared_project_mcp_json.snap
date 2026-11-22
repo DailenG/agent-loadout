@@ -1,0 +1,24 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_b.rs
+expression: "text.replace(\"\\r\\n\", \"\\n\")"
+---
+{
+  "mcpServers": {
+    "claude-only": {
+      "type": "stdio",
+      "command": "claude-only-mcp",
+      "args": []
+    },
+    "copilot-only": {
+      "type": "stdio",
+      "command": "copilot-only-mcp",
+      "args": [],
+      "cwd": "src"
+    },
+    "docs": {
+      "type": "stdio",
+      "command": "docs-mcp",
+      "args": []
+    }
+  }
+}
