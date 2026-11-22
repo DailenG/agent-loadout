@@ -15,13 +15,17 @@ export const commands = {
 	getServer: (id: string, options?: InvokeOptions) => typedError<ServerDetail, IpcError>(__TAURI_INVOKE("get_server", { id }, options)),
 	saveServer: (draft: ServerDraft, create: boolean, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("save_server", { draft, create }, options)),
 	saveServerToml: (id: string, text: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("save_server_toml", { id, text }, options)),
+	/**  The Form's fields written into the TOML tab's text (tab switch). */
+	serverDraftToToml: (draft: ServerDraft, text: string, options?: InvokeOptions) => typedError<string, IpcError>(__TAURI_INVOKE("server_draft_to_toml", { draft, text }, options)),
+	/**  The TOML tab's text read into the Form (tab switch). */
+	serverTomlToDraft: (id: string, text: string, options?: InvokeOptions) => typedError<ServerDraft, IpcError>(__TAURI_INVOKE("server_toml_to_draft", { id, text }, options)),
 	removeServers: (ids: string[], options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("remove_servers", { ids }, options)),
 	setServerClients: (id: string, clients: ClientChoice, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_server_clients", { id, clients }, options)),
 	previewServer: (draft: ServerDraft, options?: InvokeOptions) => typedError<ClientPreview[], IpcError>(__TAURI_INVOKE("preview_server", { draft }, options)),
 	convertSnippet: (text: string, options?: InvokeOptions) => typedError<ConvertedServer[], IpcError>(__TAURI_INVOKE("convert_snippet", { text }, options)),
 	listSecretAliases: (options?: InvokeOptions) => typedError<string[], IpcError>(__TAURI_INVOKE("list_secret_aliases", undefined, options)),
 	pendingPlan: (options?: InvokeOptions) => typedError<PendingPlan, IpcError>(__TAURI_INVOKE("pending_plan", undefined, options)),
-	runApply: (clients: string[] | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("run_apply", { clients }, options)),
+	runApply: (files: FileRef[] | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("run_apply", { files }, options)),
 	listAppliedRuns: (options?: InvokeOptions) => typedError<AppliedRun[], IpcError>(__TAURI_INVOKE("list_applied_runs", undefined, options)),
 	undoApply: (applyId: string, confirmed: boolean, options?: InvokeOptions) => typedError<UndoResult, IpcError>(__TAURI_INVOKE("undo_apply", { applyId, confirmed }, options)),
 	listTools: (options?: InvokeOptions) => typedError<ToolInfo[], IpcError>(__TAURI_INVOKE("list_tools", undefined, options)),
@@ -512,6 +516,16 @@ export type ErrorCode =
  */
 "restart_required";
 
+/**
+ *  One drawer file, as "Apply selected" names it: the same project, scope
+ *  and placeholder path as its [`PlannedFile`].
+ */
+export type FileRef = {
+	projectId: string | null,
+	scope: FileScope,
+	file: string,
+};
+
 /**  Which layer a client file belongs to (SPEC 6.1). */
 export type FileScope = "user" | "project" | "project_local";
 
@@ -582,14 +596,21 @@ export type PlannedEntry = {
 
 /**  One client file of the pending plan. */
 export type PlannedFile = {
+	/**  The file under its placeholder root (`~/...`, `<P>/...`). */
 	file: string,
 	clients: string[],
 	scope: FileScope,
 	projectId: string | null,
+	/**
+	 *  The project folder under its placeholder root, for a project or
+	 *  project-local file.
+	 */
+	project: string | null,
 	counts: OpCounts,
 	/**
-	 *  Unified diff of the file text, values written `inline` masked;
-	 *  empty when the file stays as it is.
+	 *  Unified diff of the file text, with values written `inline` and
+	 *  anything else that may be a secret masked; empty when the file
+	 *  stays as it is.
 	 */
 	diff: string,
 	/**  Entries that change, need a decision or are blocked. */

@@ -80,6 +80,7 @@ pub fn run(ctx: &Context, args: &ApplyArgs) -> Result<u8, CoreError> {
         decisions: Vec::new(),
         scope: args.scope.into(),
         projects: selection(ctx, args.path.as_deref())?,
+        targets: None,
     };
     if args.dry_run {
         let store = ctx.open_store()?;

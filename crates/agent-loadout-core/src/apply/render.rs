@@ -255,15 +255,7 @@ pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
     let mut warned: BTreeSet<String> = BTreeSet::new();
     let mut detected = Detected::default();
     for (id, server) in &desired.servers {
-        let Some(selection) = server.enable.as_ref().and_then(|e| e.clients.as_ref()) else {
-            continue;
-        };
-        let transport = server_transport(server, cx.env);
-        let clients = detected.select(cx, desired, selection, transport);
-        for client in clients {
-            if desired.excluded(&client) {
-                continue;
-            }
+        for client in detected.system_clients(cx, desired, server) {
             let spec = match writable(&client, cx.env) {
                 Ok(spec) => spec,
                 Err(err) => {
@@ -316,9 +308,29 @@ pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
 
 /// Detection results, probed once per client and run.
 #[derive(Default)]
-pub(crate) struct Detected(BTreeMap<&'static str, bool>);
+pub struct Detected(BTreeMap<&'static str, bool>);
 
 impl Detected {
+    /// The clients `server` is written for at system scope on this machine,
+    /// as [`system_entries`] picks them: its selection resolved by
+    /// [`Detected::select`] (forced on in `clients.toml`, detected, fitting
+    /// its transport), minus machine exclusions and `clients.toml` opt-outs.
+    /// Empty when the server names no clients.
+    pub fn system_clients(
+        &mut self,
+        cx: &RenderCx<'_>,
+        desired: &DesiredState,
+        server: &Server,
+    ) -> Vec<String> {
+        let Some(selection) = server.enable.as_ref().and_then(|e| e.clients.as_ref()) else {
+            return Vec::new();
+        };
+        let transport = server_transport(server, cx.env);
+        let mut clients = self.select(cx, desired, selection, transport);
+        clients.retain(|client| !desired.excluded(client));
+        clients
+    }
+
     /// The client ids `selection` names: the list as written, or for
     /// `all-detected` every client forced on in `clients.toml` or detected
     /// whose MCP support fits `transport` on this OS (never a read-only

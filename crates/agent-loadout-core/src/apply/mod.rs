@@ -40,7 +40,7 @@ pub use exec::{
 };
 pub use plan::{
     Action, Decision, EntryPlan, EntryState, OnConflict, Plan, PlanOptions, ProjectSelection,
-    ScopeFilter, TargetPlan,
+    ScopeFilter, TargetFilter, TargetPlan,
 };
 
 /// What an apply runs against.
@@ -58,7 +58,7 @@ pub struct ApplyEnv<'a> {
 impl<'a> ApplyEnv<'a> {
     /// The render context; values read while rendering go to `memory` (the
     /// store's [`SecretMemory`]).
-    pub(crate) fn render_cx(&self, memory: Arc<SecretMemory>) -> render::RenderCx<'a> {
+    pub fn render_cx(&self, memory: Arc<SecretMemory>) -> render::RenderCx<'a> {
         render::RenderCx {
             env: self.env,
             fs: self.fs,

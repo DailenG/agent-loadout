@@ -97,24 +97,30 @@ export class Session {
     return (await call(`${this.base}/element/${element}/text`, "GET")) as string;
   }
 
-  /** Whether a checkbox, radio or option is selected. */
-  async selected(xpath: string): Promise<boolean> {
-    const element = await this.find(xpath);
-    return (await call(`${this.base}/element/${element}/selected`, "GET")) as boolean;
+  /** Whether each checkbox, radio or option matching `xpath` is selected (none: empty). */
+  async selectedAll(xpath: string): Promise<boolean[]> {
+    return Promise.all(
+      (await this.elements(xpath)).map(
+        async (element) => (await call(`${this.base}/element/${element}/selected`, "GET")) as boolean,
+      ),
+    );
   }
 
   /** The `aria-label` of every element matching `xpath` (diagnostics). */
   async labels(xpath: string): Promise<string[]> {
+    return Promise.all(
+      (await this.elements(xpath)).map(
+        async (element) => (await call(`${this.base}/element/${element}/attribute/aria-label`, "GET")) as string,
+      ),
+    );
+  }
+
+  private async elements(xpath: string): Promise<string[]> {
     const found = (await call(`${this.base}/elements`, "POST", {
       using: "xpath",
       value: xpath,
     })) as Record<string, string>[];
-    return Promise.all(
-      found.map(async (value) => {
-        const element = value[ELEMENT_KEY] ?? value.ELEMENT;
-        return (await call(`${this.base}/element/${element}/attribute/aria-label`, "GET")) as string;
-      }),
-    );
+    return found.map((value) => value[ELEMENT_KEY] ?? value.ELEMENT);
   }
 }
 

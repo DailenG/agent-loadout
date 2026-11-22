@@ -16952,6 +16952,15 @@ button.settings-form-item:disabled {
   font-size: 0.74rem;
 }
 
+.apply-file__project {
+  margin-right: 6px;
+  color: var(--muted);
+}
+
+.apply-file__project::after {
+  content: ":";
+}
+
 .apply-file__counts {
   display: inline-flex;
   gap: 6px;

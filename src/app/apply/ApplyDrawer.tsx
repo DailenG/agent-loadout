@@ -10,6 +10,7 @@ import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import type {
   AppliedRun,
   EntryStateKind,
+  FileRef,
   FileScope,
   PlannedFile,
 } from "@/ipc/bindings";
@@ -66,6 +67,11 @@ function failureText(error: unknown) {
   return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
 }
 
+/** A file's identity: two projects' `<P>/.mcp.json` are different files. */
+function fileKey(file: PlannedFile): string {
+  return JSON.stringify([file.projectId, file.scope, file.file]);
+}
+
 function useClientNames() {
   const { commands } = useTransport();
   const servers = useQuery({
@@ -104,7 +110,11 @@ function PlannedFileItem({ file, selected, onSelect, clientName }: FileItemProps
           type="checkbox"
           checked={selected}
           onChange={(event) => onSelect(event.target.checked)}
-          aria-label={t("apply.file.select", { file: file.file })}
+          aria-label={
+            file.project
+              ? t("apply.file.selectInProject", { file: file.file, project: file.project })
+              : t("apply.file.select", { file: file.file })
+          }
         />
         <button
           className="apply-file__toggle"
@@ -113,8 +123,9 @@ function PlannedFileItem({ file, selected, onSelect, clientName }: FileItemProps
           aria-controls={detailId}
           onClick={() => setExpanded((current) => !current)}
         >
-          <span className="apply-file__path" title={file.file}>
-            {file.file}
+          <span className="apply-file__path" title={file.project ? `${file.project}: ${file.file}` : file.file}>
+            {file.project ? <span className="apply-file__project">{file.project}</span> : null}
+            <span>{file.file}</span>
           </span>
           <span className="apply-file__counts" aria-label={t("apply.counts.aria", { ...counts })}>
             <span className="apply-count apply-count--create">+{counts.create}</span>
@@ -275,7 +286,7 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
   const apply = useMutation({
-    mutationFn: async (clients: string[] | null) => unwrap(await commands.runApply(clients)),
+    mutationFn: async (selected: FileRef[] | null) => unwrap(await commands.runApply(selected)),
     onSuccess: (result) => {
       setSelectedFiles(new Set());
       reportChange(result, t("apply.applied"));
@@ -288,9 +299,10 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
     scope,
     files: files.filter((file) => file.scope === scope),
   })).filter((group) => group.files.length > 0);
-  const selectedClients = Array.from(
-    new Set(files.filter((file) => selectedFiles.has(file.file)).flatMap((file) => file.clients)),
-  );
+  // The files "Apply selected" sends: only these are written.
+  const selectedRefs: FileRef[] = files
+    .filter((file) => selectedFiles.has(fileKey(file)))
+    .map(({ projectId, scope, file }) => ({ projectId, scope, file }));
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -302,13 +314,13 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  function setSelected(file: string, selected: boolean) {
+  function setSelected(key: string, selected: boolean) {
     setSelectedFiles((current) => {
       const next = new Set(current);
       if (selected) {
-        next.add(file);
+        next.add(key);
       } else {
-        next.delete(file);
+        next.delete(key);
       }
       return next;
     });
@@ -373,12 +385,12 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
             >
               <h4 className="apply-drawer__section-title">{t(SCOPE_KEYS[group.scope])}</h4>
               <ul className="apply-files">
-                {group.files.map((file) => (
+                {group.files.map((file, index) => (
                   <PlannedFileItem
-                    key={file.file}
+                    key={`${fileKey(file)}#${index}`}
                     file={file}
-                    selected={selectedFiles.has(file.file)}
-                    onSelect={(selected) => setSelected(file.file, selected)}
+                    selected={selectedFiles.has(fileKey(file))}
+                    onSelect={(selected) => setSelected(fileKey(file), selected)}
                     clientName={clientName}
                   />
                 ))}
@@ -397,8 +409,8 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
           <button
             className="secondary-button secondary-button--compact"
             type="button"
-            disabled={apply.isPending || selectedClients.length === 0}
-            onClick={() => apply.mutate(selectedClients)}
+            disabled={apply.isPending || selectedRefs.length === 0}
+            onClick={() => apply.mutate(selectedRefs)}
           >
             {t("apply.action.selected")}
           </button>

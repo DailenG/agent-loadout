@@ -10,9 +10,10 @@ use agent_loadout_core::adapters::detect::detect;
 use agent_loadout_core::adapters::mapper::WriteCx;
 use agent_loadout_core::adapters::{ADAPTERS, AdapterSpec, adapter};
 use agent_loadout_core::apply::import::server_from_native;
-use agent_loadout_core::apply::render::{DesiredState, RenderCx, native_name, render};
+use agent_loadout_core::apply::render::{DesiredState, Detected, RenderCx, native_name, render};
 use agent_loadout_core::apply::{self, EntryState, Plan, PlanOptions, ScopeFilter, instant_apply};
 use agent_loadout_core::formats::{Document, Format};
+use agent_loadout_core::model::TomlDocument;
 use agent_loadout_core::model::applied::Scope as TargetScope;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::ids::{self, IdKind};
@@ -174,14 +175,6 @@ impl ClientChoice {
             Some(ClientSelection::List(ids))
         }
     }
-
-    fn selects(&self, client: &ClientInfo) -> bool {
-        if self.all_detected {
-            client.detected && client.supported
-        } else {
-            self.clients.contains(&client.id)
-        }
-    }
 }
 
 /// An environment variable or header: the value is a literal or holds
@@ -322,6 +315,22 @@ fn system_plan(core: &Core, store: Option<&Store<'_>>) -> Result<Plan, CoreError
     apply::preview(store, &core.apply_env(), &options)
 }
 
+/// What rendering reads: the desired state of the store's working tree (or
+/// none) and the store's secret memory.
+fn render_inputs(
+    core: &Core,
+    store: Option<&Store<'_>>,
+) -> Result<(DesiredState, Arc<SecretMemory>), CoreError> {
+    let machine = Machine::load(core.fs.as_ref(), &core.home.state_dir())?;
+    Ok(match store {
+        Some(store) => (
+            DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
+            store.secret_memory().clone(),
+        ),
+        None => (DesiredState::empty(), Arc::new(SecretMemory::new()?)),
+    })
+}
+
 fn pill_state(state: EntryState) -> Option<PillState> {
     match state {
         EntryState::Synced => Some(PillState::Enabled),
@@ -337,8 +346,10 @@ fn pill_state(state: EntryState) -> Option<PillState> {
     }
 }
 
-fn pill(plan: &Plan, server: &str, choice: &ClientChoice, client: &ClientInfo) -> ClientPill {
-    let selected = choice.selects(client);
+/// `selected`: the clients the core writes the server for here
+/// ([`Detected::system_clients`]).
+fn pill(plan: &Plan, server: &str, selected: &[String], client: &ClientInfo) -> ClientPill {
+    let selected = selected.contains(&client.id);
     if !client.supported {
         return ClientPill {
             client: client.id.clone(),
@@ -393,7 +404,7 @@ fn launch_text(fields: &Server) -> String {
     }
 }
 
-fn row(plan: &Plan, clients: &[ClientInfo], server: &Server) -> ServerRow {
+fn row(plan: &Plan, clients: &[ClientInfo], selected: &[String], server: &Server) -> ServerRow {
     let body = &server.body;
     let choice = ClientChoice::from_selection(
         server
@@ -426,7 +437,7 @@ fn row(plan: &Plan, clients: &[ClientInfo], server: &Server) -> ServerRow {
         tags: body.tags.clone().unwrap_or_default(),
         pills: clients
             .iter()
-            .map(|client| pill(plan, &server.id, &choice, client))
+            .map(|client| pill(plan, &server.id, selected, client))
             .collect(),
         clients: choice,
         problems,
@@ -443,10 +454,17 @@ pub fn list(core: &Core) -> CmdResult<ServerList> {
         Some(store) => store.servers()?,
         None => Vec::new(),
     };
+    let (desired, memory) = render_inputs(core, store.as_ref())?;
+    let ax = core.apply_env();
+    let cx = ax.render_cx(memory);
+    let mut detected = Detected::default();
     let servers = entries
         .iter()
         .map(|entry| match &entry.document {
-            Ok(doc) => row(&plan, &clients, doc.value()),
+            Ok(doc) => {
+                let selected = detected.system_clients(&cx, &desired, doc.value());
+                row(&plan, &clients, &selected, doc.value())
+            }
             Err(err) => ServerRow {
                 id: entry.id.clone(),
                 display_name: None,
@@ -701,20 +719,40 @@ pub fn save(core: &Core, draft: &ServerDraft, create: bool) -> CmdResult<ChangeR
     )
 }
 
-/// Saves the TOML tab: the text must parse as this server's file.
-pub fn save_toml(core: &Core, id: &str, text: &str) -> CmdResult<ChangeResult> {
+/// `text` as server `id`'s file: it parses, validates and names `id`.
+fn parse_server(id: &str, text: &str) -> Result<TomlDocument<Server>, CoreError> {
     ids::check(IdKind::Server, id)?;
-    let relative = server_path(id)?;
-    let doc = agent_loadout_core::model::TomlDocument::<Server>::parse(text)
-        .map_err(|diagnostic| diagnostic.to_core_error(None))?;
+    let doc =
+        TomlDocument::<Server>::parse(text).map_err(|diagnostic| diagnostic.to_core_error(None))?;
     validated(doc.value())?;
     if doc.value().id != id {
         return Err(CoreError::new(
             ErrorCode::IdMismatch,
             format!("the file says id {:?}, not {id:?}", doc.value().id),
-        )
-        .into());
+        ));
     }
+    Ok(doc)
+}
+
+/// The TOML tab after Form edits: the Form's fields written into `text`
+/// (the file as the TOML tab has it), keeping its comments and the keys
+/// the Form does not show. Nothing is saved.
+pub fn draft_to_toml(draft: &ServerDraft, text: &str) -> CmdResult<String> {
+    let mut doc = parse_server(&draft.id, text)?;
+    apply_draft(doc.value_mut(), draft)?;
+    Ok(doc.to_text()?)
+}
+
+/// The Form after TOML edits: `text` read as server `id`'s file. Nothing
+/// is saved.
+pub fn toml_to_draft(id: &str, text: &str) -> CmdResult<ServerDraft> {
+    Ok(draft_of(parse_server(id, text)?.value()))
+}
+
+/// Saves the TOML tab: the text must parse as this server's file.
+pub fn save_toml(core: &Core, id: &str, text: &str) -> CmdResult<ChangeResult> {
+    parse_server(id, text)?;
+    let relative = server_path(id)?;
     let store = core.open_store()?.ok_or_else(|| not_found(id))?;
     if store.read_to_string(&relative)?.is_none() {
         return Err(not_found(id).into());
@@ -846,41 +884,35 @@ fn render_preview(
     preview
 }
 
-/// The Preview tab: the draft rendered for each client it enables, masked,
-/// or why a client cannot have it. Nothing is written.
+/// The Preview tab: the draft rendered for each client the core writes it
+/// for, masked, or why a client cannot have it. An existing server keeps
+/// what the Form does not show (`[client.*]`, `[os.*]`, other keys), as
+/// [`save`] does. Nothing is written.
 pub fn preview(core: &Core, draft: &ServerDraft) -> CmdResult<Vec<ClientPreview>> {
-    let mut server = Server::new(draft.id.clone());
-    apply_draft(&mut server, draft)?;
-    validated(&server)?;
+    ids::check(IdKind::Server, &draft.id)?;
     let clients = client_infos(core);
     let store = core.open_store()?;
-    let machine = Machine::load(core.fs.as_ref(), &core.home.state_dir())?;
-    let desired = match &store {
-        Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
-        None => DesiredState::empty(),
+    let stored = match &store {
+        Some(store) => store
+            .server(&draft.id)
+            .ok()
+            .flatten()
+            .map(|doc| doc.value().clone()),
+        None => None,
     };
-    let memory = match &store {
-        Some(store) => store.secret_memory().clone(),
-        None => Arc::new(SecretMemory::new()?),
-    };
+    let mut server = stored.unwrap_or_else(|| Server::new(draft.id.clone()));
+    apply_draft(&mut server, draft)?;
+    validated(&server)?;
+    let (desired, memory) = render_inputs(core, store.as_ref())?;
     let ax = core.apply_env();
-    let cx = RenderCx {
-        env: ax.env,
-        fs: ax.fs,
-        loadout_home: &core.home.path,
-        registry: ax.registry,
-        delivery: ax.delivery,
-        memory,
-    };
+    let cx = ax.render_cx(memory);
+    let selected = Detected::default().system_clients(&cx, &desired, &server);
     Ok(clients
         .iter()
-        .filter(|client| draft.clients.selects(client))
-        .filter_map(|client| adapter(&client.id))
-        .map(|spec| {
-            if !clients
-                .iter()
-                .any(|client| client.id == spec.id && client.supported)
-            {
+        .filter(|client| selected.contains(&client.id))
+        .filter_map(|client| adapter(&client.id).map(|spec| (client, spec)))
+        .map(|(client, spec)| {
+            if !client.supported {
                 return ClientPreview {
                     client: spec.id.to_owned(),
                     name: native_name(&server, spec.id),
@@ -1106,6 +1138,20 @@ pub async fn save_server_toml(
     text: String,
 ) -> CmdResult<ChangeResult> {
     blocking(&state, move |core| save_toml(core, &id, &text)).await
+}
+
+/// The Form's fields written into the TOML tab's text (tab switch).
+#[tauri::command]
+#[specta::specta]
+pub async fn server_draft_to_toml(draft: ServerDraft, text: String) -> CmdResult<String> {
+    draft_to_toml(&draft, &text)
+}
+
+/// The TOML tab's text read into the Form (tab switch).
+#[tauri::command]
+#[specta::specta]
+pub async fn server_toml_to_draft(id: String, text: String) -> CmdResult<ServerDraft> {
+    toml_to_draft(&id, &text)
 }
 
 #[tauri::command]

@@ -221,6 +221,29 @@ pub enum ProjectSelection {
     Only(PathBuf),
 }
 
+/// One target file a plan may be narrowed to (the GUI's "Apply selected").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetFilter {
+    pub scope: Scope,
+    /// The project folder of a project or project-local target; `None` for
+    /// a user file and for the clean-up target of a project this machine no
+    /// longer knows.
+    pub project: Option<PathBuf>,
+    pub file: PathBuf,
+}
+
+impl TargetFilter {
+    fn matches(&self, target: &Target) -> bool {
+        self.scope == target.scope
+            && layering::same_path(&self.file, &target.file)
+            && match (&self.project, &target.project) {
+                (None, None) => true,
+                (Some(a), Some(b)) => layering::same_path(a, b),
+                _ => false,
+            }
+    }
+}
+
 /// Inputs that select and steer a plan.
 #[derive(Debug, Clone, Default)]
 pub struct PlanOptions {
@@ -231,6 +254,9 @@ pub struct PlanOptions {
     pub decisions: Vec<Decision>,
     pub scope: ScopeFilter,
     pub projects: ProjectSelection,
+    /// Only these target files (within the other filters); all when
+    /// `None`.
+    pub targets: Option<Vec<TargetFilter>>,
 }
 
 impl PlanOptions {
@@ -245,6 +271,12 @@ impl PlanOptions {
         self.clients
             .as_ref()
             .is_none_or(|clients| clients.iter().any(|id| id == client))
+    }
+
+    fn selects_target(&self, target: &Target) -> bool {
+        self.targets
+            .as_ref()
+            .is_none_or(|targets| targets.iter().any(|filter| filter.matches(target)))
     }
 
     /// Whether user files are planned.
@@ -647,6 +679,7 @@ pub fn plan(
         plan.warnings.append(&mut planner.warnings);
         inputs.append(&mut planner.inputs);
     }
+    inputs.retain(|input| options.selects_target(&input.target));
     for input in inputs {
         let bytes = read_target(cx.fs, &input.target.file)?;
         plan.targets

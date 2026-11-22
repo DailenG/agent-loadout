@@ -106,12 +106,9 @@ pub fn server_from_native(
             .map(|arg| convert(arg, FieldSet::ARGS))
             .collect::<Result<Vec<_>, _>>()?;
         let flagged = classify_args_import(&args);
-        if let Some((arg, _)) = args
-            .iter()
-            .zip(flagged)
-            .find(|(_, reason)| reason.is_some())
-        {
-            return Err(needs_extraction(format!("argument {arg:?}")));
+        // Named by position, never by value: the message may reach a UI.
+        if let Some(index) = flagged.iter().position(Option::is_some) {
+            return Err(needs_extraction(format!("argument {}", index + 1)));
         }
         fields.args = (!args.is_empty()).then_some(args);
     }

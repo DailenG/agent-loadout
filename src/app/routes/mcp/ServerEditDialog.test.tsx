@@ -3,7 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { errorMessage } from "@/i18n/en";
 import type { ClientPreview, ConvertedServer, ServerDraft } from "@/ipc/bindings";
-import { MOCK_CLIENTS, ok, type MockTransportOptions } from "@/test/mockTransport";
+import { MOCK_CLIENTS, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import { ServerEditDialog, type ServerEditDialogProps } from "./ServerEditDialog";
 
@@ -121,6 +121,72 @@ describe("ServerEditDialog", () => {
     await waitFor(() => expect(lastArgs(transport, "saveServerToml")?.slice(0, 2)).toEqual(["demo", edited]));
     expect(transport.calls).not.toContain("saveServer");
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("writes Form edits into the TOML text and saves them from the TOML tab", async () => {
+    const original = 'schema = 1\nid = "demo"\n# kept\ncommand = "demo-server"\n';
+    const synced = 'schema = 1\nid = "demo"\n# kept\ncommand = "demo-edited"\n';
+    const serverDraftToToml = vi.fn(async () => ok(synced));
+    const { user, transport } = renderDialog(
+      { mode: "edit", serverId: "demo" },
+      { getServer: async () => ok({ draft: DRAFT, invalid: null, toml: original }), serverDraftToToml },
+    );
+    const command = await screen.findByLabelText("Command");
+    await user.clear(command);
+    await user.type(command, "demo-edited");
+
+    await user.click(screen.getByRole("tab", { name: "TOML" }));
+    await waitFor(() => expect(document.querySelector(".cm-editor")).not.toBeNull());
+    const [sentDraft, sentText] = lastArgs(transport, "serverDraftToToml") as [ServerDraft, string];
+    expect(sentDraft.command).toBe("demo-edited");
+    expect(sentText).toBe(original);
+    const editorRoot = document.querySelector<HTMLElement>(".cm-editor");
+    const view = editorRoot ? EditorView.findFromDOM(editorRoot) : null;
+    expect(view?.state.doc.toString()).toBe(synced);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(lastArgs(transport, "saveServerToml")?.slice(0, 2)).toEqual(["demo", synced]));
+    expect(transport.calls).not.toContain("saveServer");
+  });
+
+  it("reads TOML edits into the Form, and a text that does not parse keeps the TOML tab", async () => {
+    const original = 'schema = 1\nid = "demo"\ncommand = "demo-server"\n';
+    const edited = 'schema = 1\nid = "demo"\ncommand = "from-toml"\n';
+    let parses = false;
+    const serverTomlToDraft = vi.fn(async () =>
+      parses
+        ? ok({ ...DRAFT, command: "from-toml" })
+        : mockIpcError({ code: "parse_error", message: "detail" }),
+    );
+    const { user, transport } = renderDialog(
+      { mode: "edit", serverId: "demo", initialTab: "toml" },
+      { getServer: async () => ok({ draft: DRAFT, invalid: null, toml: original }), serverTomlToDraft },
+    );
+    await waitFor(() => expect(document.querySelector(".cm-editor")).not.toBeNull());
+    const editorRoot = document.querySelector<HTMLElement>(".cm-editor");
+    const view = editorRoot ? EditorView.findFromDOM(editorRoot) : null;
+    view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "not = [toml" } });
+
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(errorMessage("parse_error"));
+    expect(screen.getByRole("tab", { name: "TOML" })).toHaveAttribute("aria-selected", "true");
+
+    parses = true;
+    view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: edited } });
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    expect(await screen.findByLabelText("Command")).toHaveValue("from-toml");
+    expect(lastArgs(transport, "serverTomlToDraft")).toEqual(["demo", edited]);
+
+    // Back on the TOML tab, the editor shows the edited text, not the file.
+    await user.click(screen.getByRole("tab", { name: "TOML" }));
+    await waitFor(() => expect(document.querySelector(".cm-editor")).not.toBeNull());
+    const reopened = document.querySelector<HTMLElement>(".cm-editor");
+    expect(reopened ? EditorView.findFromDOM(reopened)?.state.doc.toString() : null).toBe(edited);
+
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(transport.calls).toContain("saveServer"));
+    expect((lastArgs(transport, "saveServer") as [ServerDraft, boolean])[0].command).toBe("from-toml");
   });
 
   it("opens a file that does not load on the TOML tab only", async () => {

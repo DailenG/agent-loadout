@@ -3,8 +3,10 @@
 // enables it for Claude Code with its pill, and checks the temp
 // `.claude.json`.
 //
-// The app only ever runs with USERPROFILE, HOME, APPDATA, LOCALAPPDATA,
-// LOADOUT_HOME and WEBVIEW2_USER_DATA_FOLDER inside a fresh temp folder;
+// The app only ever runs with an environment built from an allowlist
+// (`appEnv`): USERPROFILE, HOME, APPDATA, LOCALAPPDATA, XDG_CONFIG_HOME,
+// XDG_DATA_HOME, LOADOUT_HOME and WEBVIEW2_USER_DATA_FOLDER inside a fresh
+// temp folder, and no client override variable (CLAUDE_CONFIG_DIR, ...);
 // `assertProfileInTemp` refuses to start the driver otherwise. Run it in a
 // disposable machine (Windows Sandbox) if WebView2 cannot start that way.
 //
@@ -14,11 +16,12 @@
 // the app or the driver is missing.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { appEnv, assertProfileInTemp, profileDirs } from "./profileGuard";
 import { Session, waitFor } from "./webdriver";
 
 const REPO = resolve(import.meta.dirname, "../..");
@@ -44,23 +47,6 @@ if (missing) {
   console.warn(`smoke_mcp skipped: ${missing}`);
 }
 
-/**
- * Refuses to start unless every profile variable the app reads resolves
- * under the OS temp folder: the app must never see the real profile, so a
- * client this test forgets cannot be written for real (M15 incident).
- */
-export function assertProfileInTemp(env: NodeJS.ProcessEnv) {
-  const temp = realpathSync(tmpdir());
-  for (const name of ["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "WEBVIEW2_USER_DATA_FOLDER"]) {
-    const value = env[name];
-    const rel = value !== undefined && isAbsolute(value) ? relative(temp, realpathSync(value)) : "..";
-    const inside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-    if (!inside) {
-      throw new Error(`refusing to start: ${name} (${value ?? "unset"}) is not under ${temp}`);
-    }
-  }
-}
-
 /** The app's own data folder Tauri creates under the (Known Folder) local app data. */
 const tauriAppData =
   process.platform === "win32" && process.env.LOCALAPPDATA
@@ -76,30 +62,15 @@ describe.skipIf(missing !== null)("MCP smoke", () => {
 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), "loadout-e2e-"));
-    const dirs = {
-      home: join(root, "home"),
-      appdata: join(root, "appdata"),
-      localappdata: join(root, "localappdata"),
-      xdg: join(root, "xdg"),
-      loadout: join(root, "loadout"),
-      webview: join(root, "webview"),
-    };
+    const dirs = profileDirs(root);
     Object.values(dirs).forEach((dir) => mkdirSync(dir, { recursive: true }));
     // Claude Code counts as installed when its user file exists.
     writeFileSync(join(dirs.home, ".claude.json"), "{}\n");
     tauriAppDataExisted = tauriAppData === null || existsSync(tauriAppData);
 
-    const env = {
-      ...process.env,
-      HOME: dirs.home,
-      USERPROFILE: dirs.home,
-      APPDATA: dirs.appdata,
-      LOCALAPPDATA: dirs.localappdata,
-      XDG_CONFIG_HOME: join(dirs.xdg, "config"),
-      XDG_DATA_HOME: join(dirs.xdg, "data"),
-      LOADOUT_HOME: dirs.loadout,
-      WEBVIEW2_USER_DATA_FOLDER: dirs.webview,
-    };
+    // Never `...process.env`: a client override variable of the developer's
+    // shell (CLAUDE_CONFIG_DIR, ...) would send writes to real files.
+    const env = appEnv(process.env, dirs);
     assertProfileInTemp(env);
     const args = NATIVE_DRIVER ? ["--native-driver", NATIVE_DRIVER] : [];
     driver = spawn(DRIVER, args, { stdio: "ignore", env });
@@ -139,11 +110,16 @@ describe.skipIf(missing !== null)("MCP smoke", () => {
     await app.click("//button[normalize-space(.)='Add']");
     await app.type("//label[span[normalize-space(.)='ID']]//input", "e2e-fake");
     await app.type("//label[span[normalize-space(.)='Command']]//input", "fake-mcp-command");
-    // A new server has no client; refuse to save if any client is selected,
-    // so nothing but the pill below can enable one.
-    const allDetected = "//label[span[normalize-space(.)='All detected clients']]//input";
-    if (await app.selected(allDetected)) {
-      throw new Error("refusing to save: All detected clients is selected");
+    // A new server has no client; refuse to save if any client is selected
+    // ("All detected clients" or any client's own box), so nothing but the
+    // pill below can enable one.
+    const clientBoxes = "//div[@role='dialog']//label[contains(@class, 'mcp-form-app')]//input[@type='checkbox']";
+    const boxes = await app.selectedAll(clientBoxes);
+    if (boxes.length < 2) {
+      throw new Error(`refusing to save: expected the client checkboxes, found ${boxes.length}`);
+    }
+    if (boxes.some(Boolean)) {
+      throw new Error("refusing to save: a client is selected");
     }
     await app.click("//div[@role='dialog']//button[normalize-space(.)='Save']");
 

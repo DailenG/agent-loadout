@@ -22,6 +22,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::servers::get_server,
             commands::servers::save_server,
             commands::servers::save_server_toml,
+            commands::servers::server_draft_to_toml,
+            commands::servers::server_toml_to_draft,
             commands::servers::remove_servers,
             commands::servers::set_server_clients,
             commands::servers::preview_server,

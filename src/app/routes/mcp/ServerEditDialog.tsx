@@ -209,6 +209,9 @@ type ServerEditorProps = ServerEditDialogProps & {
   invalid?: IpcError | null;
 };
 
+/** Which side holds edits the other has not seen yet. */
+type Edited = "form" | "toml" | null;
+
 function ServerEditor(props: ServerEditorProps) {
   const { clients, focusPaste = false, initialDraft, initialToml, invalid, mode, onClose, serverId } = props;
   const { commands } = useTransport();
@@ -216,11 +219,50 @@ function ServerEditor(props: ServerEditorProps) {
   const [tab, setTab] = useState<EditTab>(props.initialTab ?? "form");
   const [draft, setDraft] = useState(initialDraft);
   const [tomlText, setTomlText] = useState(initialToml ?? "");
+  // Form edits are written into the TOML text when the TOML tab opens;
+  // TOML edits are read into the Form when it is left (a text that does
+  // not parse keeps the TOML tab open). Save then always has every edit.
+  const [edited, setEdited] = useState<Edited>(null);
+  const [isSwitching, setIsSwitching] = useState(false);
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const panelId = useId();
   const savesToml = tab === "toml";
   const canSave = !(savesToml && initialToml === null);
+
+  function editDraft(update: (current: ServerDraft) => ServerDraft) {
+    setDraft(update);
+    setEdited("form");
+  }
+
+  function editToml(text: string) {
+    setTomlText(text);
+    setEdited("toml");
+  }
+
+  async function selectTab(next: EditTab) {
+    if (next === tab || isSwitching) {
+      return;
+    }
+    setError("");
+    setIsSwitching(true);
+    try {
+      if (initialToml !== null && serverId) {
+        if (next === "toml" && edited === "form") {
+          setTomlText(unwrap(await commands.serverDraftToToml(normalizeDraft(draft), tomlText)));
+          setEdited(null);
+        } else if (tab === "toml" && edited === "toml") {
+          setDraft(unwrap(await commands.serverTomlToDraft(serverId, tomlText)));
+          setEdited(null);
+        }
+      }
+      setTab(next);
+    } catch (failure) {
+      setError(failureText(failure));
+    } finally {
+      setIsSwitching(false);
+    }
+  }
 
   async function handleSave() {
     setError("");
@@ -255,7 +297,7 @@ function ServerEditor(props: ServerEditorProps) {
               aria-selected={tab === item.id}
               aria-controls={`${panelId}-panel`}
               disabled={Boolean(invalid) && item.id !== "toml"}
-              onClick={() => setTab(item.id)}
+              onClick={() => void selectTab(item.id)}
             >
               {t(item.label)}
             </button>
@@ -263,7 +305,7 @@ function ServerEditor(props: ServerEditorProps) {
         </div>
         <div id={`${panelId}-panel`} role="tabpanel" aria-labelledby={`${panelId}-${tab}`} className="mcp-edit-panel">
           {tab === "form" ? (
-            <ServerForm clients={clients} draft={draft} mode={mode} focusPaste={focusPaste} onChange={setDraft} />
+            <ServerForm clients={clients} draft={draft} mode={mode} focusPaste={focusPaste} onChange={editDraft} />
           ) : null}
           {tab === "toml" ? (
             initialToml === null ? (
@@ -276,7 +318,7 @@ function ServerEditor(props: ServerEditorProps) {
                   </div>
                 ) : null}
                 <span>{t("mcp.dialog.toml.label")}</span>
-                <TomlEditor value={initialToml} onChange={setTomlText} ariaLabel={t("mcp.dialog.toml.label")} />
+                <TomlEditor value={tomlText} onChange={editToml} ariaLabel={t("mcp.dialog.toml.label")} />
                 <p className="mcp-form-hint">{t("mcp.dialog.toml.hint")}</p>
               </div>
             )
@@ -293,7 +335,7 @@ function ServerEditor(props: ServerEditorProps) {
           className="primary-button primary-button--compact"
           type="button"
           onClick={() => void handleSave()}
-          disabled={isSaving || !canSave}
+          disabled={isSaving || isSwitching || !canSave}
         >
           {isSaving ? t("mcp.dialog.saving") : t("mcp.dialog.save")}
         </button>

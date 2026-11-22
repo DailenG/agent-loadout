@@ -19,6 +19,7 @@ const USER_FILE: PlannedFile = {
   clients: ["claude-code"],
   scope: "user",
   projectId: null,
+  project: null,
   counts: { create: 1, update: 2, remove: 0, disable: 0 },
   diff: [
     "--- a/.claude.json",
@@ -68,15 +69,24 @@ const PROJECT_FILE: PlannedFile = {
   clients: ["claude-code", "cursor"],
   scope: "project",
   projectId: "demo-project",
+  project: "~/code/demo",
   counts: { create: 0, update: 0, remove: 0, disable: 4 },
   diff: "",
   entries: [],
   problem: { code: "trust_required", message: "synthetic" },
 };
 
+// Same placeholder path as PROJECT_FILE, in another project.
+const OTHER_PROJECT_FILE: PlannedFile = {
+  ...PROJECT_FILE,
+  projectId: "other-project",
+  project: "~/code/other",
+  problem: null,
+};
+
 const PLAN: PendingPlan = {
   applyMode: "instant",
-  files: [USER_FILE, CODEX_FILE, PROJECT_FILE],
+  files: [USER_FILE, CODEX_FILE, PROJECT_FILE, OTHER_PROJECT_FILE],
   pending: 9,
   writes: 3,
   unresolved: 1,
@@ -125,11 +135,13 @@ describe("ApplyDrawer", () => {
 
     expect(within(user).getByText(USER_FILE.file)).toBeInTheDocument();
     expect(within(user).getByText(CODEX_FILE.file)).toBeInTheDocument();
-    expect(within(project).getByText(PROJECT_FILE.file)).toBeInTheDocument();
+    expect(within(project).getAllByText(PROJECT_FILE.file)).toHaveLength(2);
+    expect(within(project).getByText("~/code/demo")).toBeInTheDocument();
+    expect(within(project).getByText("~/code/other")).toBeInTheDocument();
     expect(
       within(user).getByLabelText(t("apply.counts.aria", { create: 1, update: 2, remove: 0, disable: 0 })),
     ).toHaveTextContent("+1~2-0!0");
-    expect(within(project).getByText("Claude Code, Cursor")).toBeInTheDocument();
+    expect(within(project).getAllByText("Claude Code, Cursor")).toHaveLength(2);
     expect(within(project).getByText(/needs to be trusted/)).toBeInTheDocument();
   });
 
@@ -155,21 +167,30 @@ describe("ApplyDrawer", () => {
     expect(within(entries).getByText("A secret has no value.")).toBeInTheDocument();
   });
 
-  it("applies the selected files' clients", async () => {
+  it("applies only the selected files, told apart by project", async () => {
     const runApply = vi.fn(async () => ok(MOCK_CHANGE));
     const { user, transport } = renderDrawer({ commands: { runApply } });
     const selectedButton = await screen.findByRole("button", { name: t("apply.action.selected") });
     expect(selectedButton).toBeDisabled();
 
     await user.click(await screen.findByRole("checkbox", { name: t("apply.file.select", { file: USER_FILE.file }) }));
-    await user.click(
-      screen.getByRole("checkbox", { name: t("apply.file.select", { file: PROJECT_FILE.file }) }),
-    );
+    const demo = screen.getByRole("checkbox", {
+      name: t("apply.file.selectInProject", { file: PROJECT_FILE.file, project: "~/code/demo" }),
+    });
+    const other = screen.getByRole("checkbox", {
+      name: t("apply.file.selectInProject", { file: PROJECT_FILE.file, project: "~/code/other" }),
+    });
+    await user.click(demo);
+    expect(demo).toBeChecked();
+    expect(other).not.toBeChecked();
     await user.click(selectedButton);
 
     await waitFor(() => expect(runApply).toHaveBeenCalled());
     const call = transport.invocations.find((item) => item.command === "runApply");
-    expect(call?.args[0]).toEqual(["claude-code", "cursor"]);
+    expect(call?.args[0]).toEqual([
+      { projectId: null, scope: "user", file: "~/.claude.json" },
+      { projectId: "demo-project", scope: "project", file: "<P>/.mcp.json" },
+    ]);
     expect(await screen.findByText(t("apply.applied"))).toBeInTheDocument();
   });
 

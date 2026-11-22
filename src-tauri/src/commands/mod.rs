@@ -2,7 +2,8 @@
 //! value that crosses IPC is a typed struct or enum; display strings live in
 //! the frontend catalog (`src/i18n/en.ts`), keyed by these enums and by
 //! [`ErrorCode`]. No secret value crosses IPC: rendered client entries and
-//! diffs are masked by the core before they leave this crate.
+//! diffs are masked by the core, and drawer diffs also have every possible
+//! secret in the client file masked, before they leave this crate.
 //!
 //! Each command is a thin `#[tauri::command]` over a plain function taking
 //! a [`Core`], so the same functions run against a temp home in tests.
@@ -26,7 +27,7 @@ use agent_loadout_core::secrets::delivery::DeliveryEnv;
 use agent_loadout_core::secrets::providers::keyring::{KeyringBackend, OsKeyring};
 use agent_loadout_core::store::{CommitId, Store};
 use agent_loadout_core::{CoreError, Env, ErrorCode, Fs, Os, RealFs, brand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 /// The CLI has no Windows registry probe yet and neither has the app (M4
@@ -254,7 +255,7 @@ pub fn data_home(state: tauri::State<'_, AppState>) -> CmdResult<DataHome> {
 }
 
 /// Which layer a client file belongs to (SPEC 6.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum FileScope {
     User,

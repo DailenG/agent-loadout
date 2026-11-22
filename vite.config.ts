@@ -24,7 +24,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
-    include: ["src/**/*.test.{ts,tsx}"],
+    // The e2e specs (`*.spec.ts`) need the app; the e2e helpers' unit
+    // tests (`*.test.ts`) do not.
+    include: ["src/**/*.test.{ts,tsx}", "tests/e2e/**/*.test.ts"],
     environmentOptions: {
       jsdom: {
         url: "http://127.0.0.1/",

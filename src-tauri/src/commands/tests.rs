@@ -11,8 +11,9 @@ use agent_loadout_core::secrets::delivery::DeliveryEnv;
 use agent_loadout_core::store::{LogFilter, Operation, Store};
 use agent_loadout_testkit::{MemKeyring, TempHome};
 
+use super::apply::FileRef;
 use super::servers::{ClientChoice, KeyValue, PillState, ServerDraft, TransportKind};
-use super::{ApplyStatusKind, Core, EntryStateKind, apply, servers, tools};
+use super::{ApplyStatusKind, Core, EntryStateKind, FileScope, apply, servers, tools};
 
 struct Fx {
     th: TempHome,
@@ -292,6 +293,25 @@ fn paste_anything_detects_the_client_shape() {
     );
     assert!(!serde_json::to_string(&secret).unwrap().contains(literal));
 
+    // A flagged argument is named by its position, never by its value.
+    let argument = servers::convert(
+        &fx.core,
+        &format!(r#"{{ "mcpServers": {{ "fake": {{ "command": "fake", "args": ["--stdio", "--api-key={literal}"] }} }} }}"#),
+    )
+    .unwrap();
+    assert!(argument[0].draft.is_none());
+    let problem = argument[0].problem.as_ref().unwrap();
+    assert_eq!(
+        problem.code,
+        agent_loadout_core::ErrorCode::NeedsSecretExtraction
+    );
+    assert!(
+        problem.message.contains("argument 2"),
+        "{}",
+        problem.message
+    );
+    assert!(!serde_json::to_string(&argument).unwrap().contains(literal));
+
     let err = servers::convert(&fx.core, "{ not: [config").unwrap_err();
     assert_eq!(err.code, agent_loadout_core::ErrorCode::ParseError);
     // Plain text reads as a YAML scalar: parsed, but no entry in it.
@@ -306,6 +326,24 @@ fn edits_keep_comments_and_the_toml_tab_checks_the_id() {
     let detail = servers::get(&fx.core, "fake").unwrap();
     let commented = detail.toml.replace("[enable]", "# kept comment\n[enable]");
     servers::save_toml(&fx.core, "fake", &commented).unwrap();
+
+    // Tab switches: Form edits go into the TOML text, comment kept; TOML
+    // edits come back as the Form's draft; a broken text blocks the switch.
+    let detail = servers::get(&fx.core, "fake").unwrap();
+    let mut form = detail.draft.unwrap();
+    form.description = Some("From the form".to_owned());
+    let synced = servers::draft_to_toml(&form, &detail.toml).unwrap();
+    assert!(synced.contains("# kept comment"), "{synced}");
+    assert!(synced.contains("From the form"), "{synced}");
+    let back =
+        servers::toml_to_draft("fake", &synced.replace("From the form", "From the TOML")).unwrap();
+    assert_eq!(back.description.as_deref(), Some("From the TOML"));
+    assert_eq!(
+        servers::toml_to_draft("fake", "not = [toml")
+            .unwrap_err()
+            .code,
+        agent_loadout_core::ErrorCode::ParseError
+    );
 
     let mut edited = servers::get(&fx.core, "fake").unwrap().draft.unwrap();
     edited.description = Some("Edited in the form".to_owned());
@@ -393,7 +431,12 @@ fn the_drawer_shows_pending_files_and_applies_them() {
     assert!(file.diff.contains("b/~/.claude.json"), "{}", file.diff);
     assert_eq!(file.entries[0].note.state, EntryStateKind::PendingCreate);
 
-    let result = apply::run(&fx.core, Some(vec!["claude-code".to_owned()])).unwrap();
+    let only_claude = FileRef {
+        project_id: None,
+        scope: FileScope::User,
+        file: "~/.claude.json".to_owned(),
+    };
+    let result = apply::run(&fx.core, Some(vec![only_claude])).unwrap();
     assert_eq!(result.apply.unwrap().files_written, 1);
     let pending = apply::pending(&fx.core).unwrap();
     assert_eq!(pending.pending, 0);
@@ -427,4 +470,255 @@ fn tools_list_user_files_from_the_adapter_table() {
         tools::folder_of(&fx.core, "nope").unwrap_err().code(),
         agent_loadout_core::ErrorCode::UnknownClient
     );
+}
+
+/// `[omp] profiles` in `clients.toml`.
+#[test]
+fn open_folder_follows_the_listed_profile() {
+    let fx = Fx::new();
+    fx.stage(&[(
+        "clients.toml",
+        "schema = 1\n\n[omp]\nprofiles = [\"work\"]\n",
+    )]);
+    let profile = fx
+        .th
+        .home()
+        .join(".omp")
+        .join("profiles")
+        .join("work")
+        .join("agent");
+    std::fs::create_dir_all(&profile).unwrap();
+
+    let tools = tools::list(&fx.core).unwrap();
+    let omp = tools.iter().find(|tool| tool.id == "omp").unwrap();
+    assert_eq!(
+        omp.user_files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["~/.omp/profiles/work/agent/mcp.json"]
+    );
+    assert_eq!(tools::folder_of(&fx.core, "omp").unwrap(), profile);
+}
+
+/// The pills, the Preview tab and a pill toggle use the core's rule: a
+/// client forced on in `clients.toml` counts although it is not detected,
+/// and a client whose transports do not fit never counts.
+#[test]
+fn pills_and_preview_follow_the_core_selection() {
+    let fx = Fx::new();
+    // Claude Code is detected through its user file; Cursor is not
+    // installed but forced on; Codex is forced on but has no SSE.
+    std::fs::write(fx.claude(), "{}\n").unwrap();
+    fx.stage(&[
+        (
+            "clients.toml",
+            "schema = 1\n\n[cursor]\nenabled = true\n\n[codex]\nenabled = true\n",
+        ),
+        (
+            "servers/remote.toml",
+            "schema = 1\nid = \"remote\"\ntransport = \"sse\"\nurl = \"https://fake.example.test/sse\"\n\n[enable]\nclients = \"all-detected\"\n",
+        ),
+    ]);
+    apply::run(&fx.core, None).unwrap();
+    let cursor_file = fx.th.home().join(".cursor").join("mcp.json");
+    assert!(fx.read(&cursor_file).contains("remote"));
+
+    let list = servers::list(&fx.core).unwrap();
+    let row = &list.servers[0];
+    let pill = |client: &str| row.pills.iter().find(|p| p.client == client).unwrap();
+    assert!(pill("claude-code").selected);
+    assert_eq!(pill("claude-code").state, PillState::Enabled);
+    assert!(pill("cursor").selected, "forced on in clients.toml");
+    assert_eq!(pill("cursor").state, PillState::Enabled);
+    assert!(!pill("codex").selected, "codex has no SSE");
+    assert_eq!(pill("codex").state, PillState::Disabled);
+
+    let draft = servers::get(&fx.core, "remote").unwrap().draft.unwrap();
+    let previewed: Vec<String> = servers::preview(&fx.core, &draft)
+        .unwrap()
+        .into_iter()
+        .map(|preview| preview.client)
+        .collect();
+    assert!(previewed.contains(&"cursor".to_owned()), "{previewed:?}");
+    assert!(
+        previewed.contains(&"claude-code".to_owned()),
+        "{previewed:?}"
+    );
+    assert!(!previewed.contains(&"codex".to_owned()), "{previewed:?}");
+
+    // Turning Claude Code off (the page's toggle: the selected pills
+    // without it) keeps the forced-on client's entry.
+    let rest: Vec<String> = row
+        .pills
+        .iter()
+        .filter(|p| p.selected && p.client != "claude-code")
+        .map(|p| p.client.clone())
+        .collect();
+    servers::set_clients_for(
+        &fx.core,
+        "remote",
+        &ClientChoice {
+            all_detected: false,
+            clients: rest,
+        },
+    )
+    .unwrap();
+    assert!(!fx.read(&fx.claude()).contains("remote"));
+    assert!(fx.read(&cursor_file).contains("remote"));
+}
+
+/// Preview of a stored server keeps what the Form does not show.
+#[test]
+fn preview_of_a_stored_server_keeps_its_other_fields() {
+    let fx = Fx::new();
+    let os = host_os().as_str();
+    fx.stage(&[(
+        "servers/native.toml",
+        &format!(
+            "schema = 1\nid = \"native\"\ntransport = \"stdio\"\ncommand = \"fake-mcp\"\n\n[enable]\nclients = [\"claude-code\"]\n\n[os.{os}]\ncommand = \"fake-mcp-for-this-os\"\n\n[client.claude-code]\nnative_name = \"FakeNative\"\n"
+        ),
+    )]);
+    let draft = servers::get(&fx.core, "native").unwrap().draft.unwrap();
+    let previews = servers::preview(&fx.core, &draft).unwrap();
+    assert_eq!(previews.len(), 1);
+    assert_eq!(previews[0].name, "FakeNative");
+    let text = previews[0].text.as_deref().expect("rendered");
+    assert!(text.contains("\"FakeNative\""), "{text}");
+    assert!(text.contains("fake-mcp-for-this-os"), "{text}");
+}
+
+fn project(fx: &Fx, name: &str, id: &str) -> PathBuf {
+    let root = fx.th.projects().join(name);
+    let manifest = root.join(".loadout");
+    std::fs::create_dir_all(&manifest).unwrap();
+    std::fs::write(
+        manifest.join("project.toml"),
+        format!(
+            "schema = 1\nid = \"{id}\"\nname = \"{name}\"\n\n[defaults]\nclients = [\"claude-code\"]\n\n[servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\n"
+        ),
+    )
+    .unwrap();
+    let project = agent_loadout_core::layering::Project::load(fx.core.fs.as_ref(), &root)
+        .unwrap()
+        .unwrap();
+    let state = fx.core.home.state_dir();
+    let mut trust =
+        agent_loadout_core::layering::TrustStore::load(fx.core.fs.as_ref(), &state).unwrap();
+    trust.trust(&project);
+    trust.save(fx.core.fs.as_ref(), &state).unwrap();
+    root
+}
+
+/// "Apply selected" writes only the selected file, even when other files
+/// look the same (`<P>/.mcp.json` of two projects) or share its client.
+#[test]
+fn apply_selected_writes_only_the_selected_files() {
+    let fx = Fx::new();
+    drop(fx.store());
+    let alpha = project(&fx, "alpha", "alpha-a1b2");
+    let beta = project(&fx, "beta", "beta-c3d4");
+    let machine =
+        agent_loadout_core::store::Machine::load(fx.core.fs.as_ref(), &fx.core.home.state_dir())
+            .unwrap()
+            .unwrap()
+            .id;
+    let mut overlay = format!(
+        "schema = 1\nmachine_id = \"{machine}\"\nlabel = \"test-desk\"\nos = \"{}\"\n",
+        host_os().as_str()
+    );
+    for (id, root) in [("alpha-a1b2", &alpha), ("beta-c3d4", &beta)] {
+        // A TOML basic string: Debug doubles the backslashes.
+        let path = format!("{:?}", root.to_string_lossy());
+        overlay.push_str(&format!("\n[projects.{id}]\npath = {path}\n"));
+    }
+    fx.stage(&[
+        (&format!("machines/{machine}.toml"), &overlay),
+        (
+            "servers/fake.toml",
+            &server_file(
+                "fake",
+                "transport = \"stdio\"\ncommand = \"fake-mcp\"",
+                &["claude-code"],
+            ),
+        ),
+    ]);
+
+    let pending = apply::pending(&fx.core).unwrap();
+    let shared: Vec<_> = pending
+        .files
+        .iter()
+        .filter(|file| file.file == "<P>/.mcp.json")
+        .collect();
+    assert_eq!(shared.len(), 2, "{:#?}", pending.files);
+    assert_ne!(shared[0].project_id, shared[1].project_id);
+    assert_ne!(shared[0].project, shared[1].project);
+    assert!(
+        pending
+            .files
+            .iter()
+            .any(|file| file.file == "~/.claude.json")
+    );
+
+    let result = apply::run(
+        &fx.core,
+        Some(vec![FileRef {
+            project_id: Some("alpha-a1b2".to_owned()),
+            scope: FileScope::Project,
+            file: "<P>/.mcp.json".to_owned(),
+        }]),
+    )
+    .unwrap();
+    assert_eq!(result.apply.unwrap().files_written, 1);
+    assert!(fx.read(&alpha.join(".mcp.json")).contains("docs-mcp"));
+    assert!(!beta.join(".mcp.json").exists());
+    assert!(!fx.read(&fx.claude()).contains("fake-mcp"));
+    let pending = apply::pending(&fx.core).unwrap();
+    assert_eq!(pending.files.len(), 2, "{:#?}", pending.files);
+}
+
+/// Diffs cross IPC: secrets of entries Loadout does not own are masked in
+/// the context lines too.
+#[test]
+fn drawer_diffs_mask_secrets_of_other_entries() {
+    let fx = Fx::new();
+    // Assembled at run time so no token-shaped literal is in the source.
+    let token = format!("{}_{}", "ghp", "a1B2c3D4".repeat(5));
+    let password = "not-a-real-password-0001";
+    std::fs::write(
+        fx.claude(),
+        format!(
+            "{{\n  \"mcpServers\": {{\n    \"other\": {{\n      \"command\": \"other-mcp\",\n      \"args\": [\"--auth-token={password}\"],\n      \"env\": {{\n        \"DB_PASSWORD\": \"{password}\",\n        \"GITHUB_TOKEN\": \"{token}\"\n      }}\n    }}\n  }}\n}}\n"
+        ),
+    )
+    .unwrap();
+    fx.stage(&[(
+        "servers/fake.toml",
+        &server_file(
+            "fake",
+            "transport = \"stdio\"\ncommand = \"fake-mcp\"",
+            &["claude-code"],
+        ),
+    )]);
+    let pending = apply::pending(&fx.core).unwrap();
+    let diff = &pending.files[0].diff;
+    assert!(
+        diff.contains("GITHUB_TOKEN"),
+        "the line is in the context: {diff}"
+    );
+    assert!(diff.contains("fake-mcp"), "{diff}");
+    let json = serde_json::to_string(&pending).unwrap();
+    assert!(!json.contains(&token), "{diff}");
+    assert!(!json.contains(password), "{diff}");
+
+    // References and plain values stay readable.
+    let masked = apply::mask_diff(
+        "+  \"API_TOKEN\": \"${API_TOKEN}\",\n+  \"Authorization\": \"Bearer ${env:TOKEN}\",\n+  password = \"hunter2-not-real\"\n+  \"requiresAuth\": true,\n+  - \"--api-key=plain-not-real\"\n+  \"LOG_LEVEL\": \"info\"\n",
+    );
+    assert!(masked.contains("\"${API_TOKEN}\""), "{masked}");
+    assert!(masked.contains("Bearer ${env:TOKEN}"), "{masked}");
+    assert!(masked.contains("password = \"********\""), "{masked}");
+    assert!(masked.contains("\"requiresAuth\": true"), "{masked}");
+    assert!(masked.contains("\"--api-key=********\""), "{masked}");
+    assert!(masked.contains("\"LOG_LEVEL\": \"info\""), "{masked}");
 }

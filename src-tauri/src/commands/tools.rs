@@ -91,7 +91,7 @@ fn project_file(location: &Location, core: &Core) -> Option<String> {
 fn tool(core: &Core, spec: &AdapterSpec, desired: Option<&DesiredState>) -> Option<ToolInfo> {
     let mcp = spec.mcp.as_ref()?;
     let detection = detect(spec, &core.env, core.fs.as_ref(), &NO_REGISTRY);
-    let prefs = desired.map_or_else(ClientPrefs::default, |desired| desired.prefs(spec.id));
+    let prefs = prefs_of(desired, spec.id);
     let mut warnings: Vec<IpcError> = detection.warnings.iter().map(IpcError::from).collect();
     let user_files =
         match spec.mcp_targets(&core.env, core.fs.as_ref(), TargetScope::User, None, &prefs) {
@@ -135,19 +135,23 @@ fn tool(core: &Core, spec: &AdapterSpec, desired: Option<&DesiredState>) -> Opti
     })
 }
 
+/// The store's desired state, for `clients.toml` preferences (omp profiles);
+/// none without a store.
+fn desired_state(core: &Core) -> Result<Option<DesiredState>, CoreError> {
+    let Some(store) = core.open_store()? else {
+        return Ok(None);
+    };
+    let machine = Machine::load(core.fs.as_ref(), &core.home.state_dir())?;
+    DesiredState::load(&store, machine.as_ref().map(|m| m.id.as_str())).map(Some)
+}
+
+fn prefs_of(desired: Option<&DesiredState>, client: &str) -> ClientPrefs {
+    desired.map_or_else(ClientPrefs::default, |desired| desired.prefs(client))
+}
+
 /// Every client with an MCP config, in table order.
 pub fn list(core: &Core) -> CmdResult<Vec<ToolInfo>> {
-    let store = core.open_store()?;
-    let desired = match &store {
-        Some(store) => {
-            let machine = Machine::load(core.fs.as_ref(), &core.home.state_dir())?;
-            Some(DesiredState::load(
-                store,
-                machine.as_ref().map(|m| m.id.as_str()),
-            )?)
-        }
-        None => None,
-    };
+    let desired = desired_state(core)?;
     Ok(ADAPTERS
         .iter()
         .filter_map(|spec| tool(core, spec, desired.as_ref()))
@@ -155,8 +159,8 @@ pub fn list(core: &Core) -> CmdResult<Vec<ToolInfo>> {
 }
 
 /// The folder a client's user file lives in (the file's parent), opened in
-/// the OS file manager. The path comes from the adapter table, not the
-/// caller.
+/// the OS file manager. The path comes from the adapter table and the same
+/// preferences as [`list`], not the caller.
 pub fn folder_of(core: &Core, client: &str) -> Result<std::path::PathBuf, CoreError> {
     let spec = adapter(client).ok_or_else(|| {
         CoreError::new(
@@ -164,13 +168,8 @@ pub fn folder_of(core: &Core, client: &str) -> Result<std::path::PathBuf, CoreEr
             format!("unknown client {client:?}"),
         )
     })?;
-    let targets = spec.mcp_targets(
-        &core.env,
-        core.fs.as_ref(),
-        TargetScope::User,
-        None,
-        &ClientPrefs::default(),
-    )?;
+    let prefs = prefs_of(desired_state(core)?.as_ref(), spec.id);
+    let targets = spec.mcp_targets(&core.env, core.fs.as_ref(), TargetScope::User, None, &prefs)?;
     let file = targets
         .first()
         .map(|target| target.file.clone())
