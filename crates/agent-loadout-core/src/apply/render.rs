@@ -179,6 +179,17 @@ impl DesiredState {
             == Some(false);
         by_machine || opted_out
     }
+
+    /// Whether this machine released `client`'s entry of server `id`
+    /// (overlay `[enable.released]`): it is not written or owned here.
+    pub fn released(&self, id: &str, client: &str) -> bool {
+        self.overlay
+            .as_ref()
+            .and_then(|overlay| overlay.enable.as_ref())
+            .and_then(|enable| enable.released.as_ref())
+            .and_then(|released| released.get(id))
+            .is_some_and(|clients| clients.iter().any(|c| c == client))
+    }
 }
 
 fn load_model<T: crate::model::StoreModel>(
@@ -314,7 +325,8 @@ impl Detected {
     /// The clients `server` is written for at system scope on this machine,
     /// as [`system_entries`] picks them: its selection resolved by
     /// [`Detected::select`] (forced on in `clients.toml`, detected, fitting
-    /// its transport), minus machine exclusions and `clients.toml` opt-outs.
+    /// its transport), minus machine exclusions, entries this machine
+    /// released and `clients.toml` opt-outs.
     /// Empty when the server names no clients.
     pub fn system_clients(
         &mut self,
@@ -327,7 +339,7 @@ impl Detected {
         };
         let transport = server_transport(server, cx.env);
         let mut clients = self.select(cx, desired, selection, transport);
-        clients.retain(|client| !desired.excluded(client));
+        clients.retain(|client| !desired.excluded(client) && !desired.released(&server.id, client));
         clients
     }
 

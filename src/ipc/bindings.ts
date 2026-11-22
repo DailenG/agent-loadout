@@ -51,7 +51,7 @@ export const commands = {
 	revealProjectFolder: (id: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_project_folder", { id }, options)),
 	effectiveMatrix: (projectId: string, options?: InvokeOptions) => typedError<EffectiveMatrix, IpcError>(__TAURI_INVOKE("effective_matrix", { projectId }, options)),
 	resolverDetail: (entry: EntryRef, options?: InvokeOptions) => typedError<ResolverDetail, IpcError>(__TAURI_INVOKE("resolver_detail", { entry }, options)),
-	resolveEntry: (entry: EntryRef, action: ResolveAction, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("resolve_entry", { entry, action }, options)),
+	resolveEntry: (entry: EntryRef, action: ResolveAction, fingerprint: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("resolve_entry", { entry, action, fingerprint }, options)),
 };
 
 /* Constants */
@@ -353,6 +353,11 @@ export type ErrorCode =
  *  step 1, after three re-plans). The file is left as it is.
  */
 "file_changed_during_apply" | 
+/**
+ *  The entry a resolution was chosen for changed (in the file or in the
+ *  store) since the resolver showed it; nothing was done (SPEC 13.4).
+ */
+"entry_changed" | 
 /**
  *  The edited file did not read back as planned: an owned entry differs
  *  from the desired one, or something outside the owned entries changed
@@ -834,6 +839,12 @@ export type ResolverDetail = {
 	/**  The actions this state allows, the default first. */
 	actions: ResolveAction[],
 	problem: IpcError | null,
+	/**
+	 *  Keyed hash of what is shown (state, file entry, desired entry);
+	 *  `resolve_entry` sends it back and is refused (`entry_changed`) when
+	 *  the entry changed in between.
+	 */
+	fingerprint: string,
 };
 
 /**  One manifest file of the trust review. */

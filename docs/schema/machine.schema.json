@@ -77,6 +77,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "released": {
+          "description": "Entries this machine released (drift resolver, \"Release\nownership\"): by server id, the clients whose entry of that server\nis left as the user edited it and is not managed on this machine.\nOther machines keep managing theirs.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       }
     },

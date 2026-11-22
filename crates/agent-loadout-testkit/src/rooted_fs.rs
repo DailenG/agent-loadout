@@ -100,4 +100,8 @@ impl Fs for RootedFs {
     fn open_lock_file(&self, path: &Path) -> io::Result<File> {
         RealFs.open_lock_file(self.check(path))
     }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        RealFs.canonicalize(self.check(path))
+    }
 }

@@ -30,7 +30,8 @@ use std::path::{Path, PathBuf};
 
 pub use git::ProjectRepo;
 pub use manifest::{
-    LOCAL_FILE, ManifestFile, Project, SHARED_FILE, content_hash, discover, path_key, same_path,
+    LOCAL_FILE, ManifestFile, Project, SHARED_FILE, content_hash, discover, path_key, resolved,
+    same_folder, same_path,
 };
 pub use merge::{
     EntryBody, EntryLayer, ProjectEntry, deep_merge, default_clients, project_entries, remove_path,
@@ -137,7 +138,7 @@ fn load_status(fs: &dyn Fs, env: &Env, id: &str, root: &Path, trust: &TrustStore
     }
     // A manifest directly in the home directory is ignored (SPEC 6.1):
     // there, project files are the user files of several clients.
-    if same_path(root, env.home()) {
+    if same_folder(fs, root, env.home()) {
         return ProjectStatus::Failed(
             CoreError::new(
                 ErrorCode::InvalidPath,

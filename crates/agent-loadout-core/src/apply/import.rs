@@ -32,11 +32,13 @@ use crate::apply::plan::{Action, EntryPlan, EntryState, Plan, read_target};
 use crate::apply::render::{DesiredState, native_name, native_to_template, render};
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
+use crate::layering::projects::overlay_doc;
 use crate::model::TomlDocument;
 use crate::model::applied::Scope;
 use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
 use crate::model::ids::{self, IdKind};
 use crate::model::server::{Enable, Meta, Server, ServerFields, ToolFilter};
+use crate::secrets::catalog::overlay_path;
 use crate::secrets::classify::{classify_args_import, classify_import};
 use crate::secrets::delivery::Sharing;
 use crate::store::{Transaction, server_path};
@@ -540,17 +542,19 @@ pub fn stage_adopt_identical(
 }
 
 /// Whether `entry` is resolved by a store edit: an `import`, or the
-/// release of an entry that is still desired (its server stops being
-/// enabled for the client).
+/// release of an entry that is still desired (recorded in this machine's
+/// overlay).
 pub fn is_store_resolution(entry: &EntryPlan) -> bool {
     entry.action == Action::Import || (entry.action == Action::Release && entry.desired.is_some())
 }
 
 /// Carries out the store side of a plan's decisions ([`is_store_resolution`]):
-/// a changed native entry becomes the server definition; a deleted one, or
-/// one released, stops the server from being enabled for that client.
-/// Returns the changed server ids; entries that cannot be staged are left
-/// for the re-plan to report.
+/// a changed native entry becomes the server definition; a deleted one
+/// stops the server from being enabled for that client (synced, SPEC 8.2
+/// "respect deletion"); a released one is recorded in this machine's
+/// overlay only (`[enable.released]`), so other machines keep managing
+/// their entry. Returns the changed server ids; entries that cannot be
+/// staged are left for the re-plan to report.
 pub fn stage_resolutions(
     tx: &mut Transaction<'_>,
     plan: &Plan,
@@ -585,11 +589,19 @@ pub fn stage_resolutions(
             if !desired.servers.contains_key(id) {
                 continue;
             }
-            let edit = match (&entry.action, &entry.state, &entry.observed) {
-                (Action::Release, _, _) | (_, EntryState::Missing, _) => {
+            if entry.action == Action::Release {
+                if let Err(err) = release_client(tx, id, client) {
+                    result
+                        .failed
+                        .push((client.to_owned(), entry.name.clone(), err));
+                }
+                continue;
+            }
+            let edit = match (&entry.state, &entry.observed) {
+                (EntryState::Missing, _) => {
                     update_server(tx, id, |server| disable_client(server, client))
                 }
-                (_, _, Some(observed)) => {
+                (_, Some(observed)) => {
                     server_from_native(spec, &entry.name, observed).and_then(|def| {
                         update_server(tx, id, |server| {
                             set_fields(server, &def.fields, def.tools.clone());
@@ -613,6 +625,60 @@ pub fn stage_resolutions(
         }
     }
     Ok(result)
+}
+
+/// Records in this machine's overlay that it released `client`'s entry of
+/// server `id` (`[enable.released]`).
+fn release_client(tx: &mut Transaction<'_>, id: &str, client: &str) -> Result<(), CoreError> {
+    let mut doc = overlay_doc(tx)?;
+    let enable = doc.value_mut().enable.get_or_insert_with(Default::default);
+    let clients = enable
+        .released
+        .get_or_insert_with(BTreeMap::new)
+        .entry(id.to_owned())
+        .or_default();
+    if clients.iter().any(|c| c == client) {
+        return Ok(());
+    }
+    clients.push(client.to_owned());
+    let relative = overlay_path(&tx.machine().id)?;
+    tx.write(&relative, doc.to_text()?)?;
+    tx.add_entity(format!("machine/{}", tx.machine().id));
+    Ok(())
+}
+
+/// Drops this machine's releases of server `id` for `clients` (they are
+/// enabled again by an explicit choice); returns whether the overlay
+/// changed.
+pub fn unrelease_clients(
+    tx: &mut Transaction<'_>,
+    id: &str,
+    clients: &[String],
+) -> Result<bool, CoreError> {
+    let mut doc = overlay_doc(tx)?;
+    let Some(enable) = doc.value_mut().enable.as_mut() else {
+        return Ok(false);
+    };
+    let Some(released) = enable.released.as_mut() else {
+        return Ok(false);
+    };
+    let Some(list) = released.get_mut(id) else {
+        return Ok(false);
+    };
+    let before = list.len();
+    list.retain(|client| !clients.contains(client));
+    if list.len() == before {
+        return Ok(false);
+    }
+    if list.is_empty() {
+        released.remove(id);
+    }
+    if released.is_empty() {
+        enable.released = None;
+    }
+    let relative = overlay_path(&tx.machine().id)?;
+    tx.write(&relative, doc.to_text()?)?;
+    Ok(true)
 }
 
 /// Result of [`stage_resolutions`].

@@ -127,6 +127,13 @@ impl TrustStore {
         }
     }
 
+    /// Whether this machine has a trust record for `project`'s id at its
+    /// folder (current content or not).
+    pub fn knows(&self, project: &Project) -> bool {
+        self.record(&project.root)
+            .is_some_and(|record| record.id == project.id)
+    }
+
     /// Trusts `project`'s current manifests, replacing the record of its
     /// folder.
     pub fn trust(&mut self, project: &Project) {

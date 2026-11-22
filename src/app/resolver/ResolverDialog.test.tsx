@@ -2,9 +2,9 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
 import { ResolverDialog } from "@/app/resolver/ResolverDialog";
-import { t } from "@/i18n/en";
+import { errorMessage, t } from "@/i18n/en";
 import type { EntryRef, PendingPlan, ResolveAction, ResolverDetail } from "@/ipc/bindings";
-import { MOCK_CLIENTS, ok } from "@/test/mockTransport";
+import { MOCK_CLIENTS, mockIpcError, ok } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
 
 const ENTRY: EntryRef = {
@@ -25,6 +25,7 @@ const DRIFTED: ResolverDetail = {
   desired: '{ "mcpServers": { "github": { "args": ["--v1"] } } }',
   actions: ["overwrite", "import_theirs", "release", "skip"],
   problem: null,
+  fingerprint: "hmac-sha256:shown",
 };
 
 function renderResolver(detail: ResolverDetail) {
@@ -66,7 +67,11 @@ describe("ResolverDialog", () => {
     const dialog = await screen.findByRole("dialog");
     await user.click(await within(dialog).findByRole("button", { name: t(label as never) }));
     await waitFor(() =>
-      expect(transport.invocations.find((call) => call.command === "resolveEntry")?.args).toEqual([ENTRY, action]),
+      expect(transport.invocations.find((call) => call.command === "resolveEntry")?.args).toEqual([
+        ENTRY,
+        action,
+        "hmac-sha256:shown",
+      ]),
     );
   });
 
@@ -89,6 +94,7 @@ describe("ResolverDialog", () => {
       expect(transport.invocations.find((call) => call.command === "resolveEntry")?.args).toEqual([
         ENTRY,
         "respect_deletion",
+        "hmac-sha256:shown",
       ]),
     );
   });
@@ -117,7 +123,49 @@ describe("ResolverDialog", () => {
     ]);
     await user.click(within(dialog).getByRole("button", { name: t("resolver.action.skip") }));
     await waitFor(() =>
-      expect(transport.invocations.find((call) => call.command === "resolveEntry")?.args).toEqual([ENTRY, "skip"]),
+      expect(transport.invocations.find((call) => call.command === "resolveEntry")?.args).toEqual([
+        ENTRY,
+        "skip",
+        "hmac-sha256:shown",
+      ]),
+    );
+  });
+
+  it("shows the entry again when it changed since it was shown", async () => {
+    let version = 0;
+    const { user, transport } = renderWithProviders(
+      <ResolverDialog entry={ENTRY} clientName={(id) => id} onClose={() => undefined} />,
+      {
+        commands: {
+          resolverDetail: async () => {
+            version += 1;
+            return ok(
+              version === 1
+                ? DRIFTED
+                : { ...DRIFTED, current: '{ "args": ["--edited-again"] }', fingerprint: "hmac-sha256:now" },
+            );
+          },
+          resolveEntry: async () =>
+            mockIpcError({ code: "entry_changed", message: "github changed since it was shown" }),
+        },
+      },
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(await within(dialog).findByRole("button", { name: t("resolver.action.importTheirs") }));
+    expect(await screen.findByText(errorMessage("entry_changed"))).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole("region", { name: t("resolver.column.current") })).toHaveTextContent(
+        "--edited-again",
+      ),
+    );
+    // The next action carries the new fingerprint.
+    await user.click(within(dialog).getByRole("button", { name: t("resolver.action.overwrite") }));
+    await waitFor(() =>
+      expect(transport.invocations.filter((call) => call.command === "resolveEntry").at(-1)?.args).toEqual([
+        ENTRY,
+        "overwrite",
+        "hmac-sha256:now",
+      ]),
     );
   });
 

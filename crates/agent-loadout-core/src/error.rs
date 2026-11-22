@@ -83,6 +83,9 @@ pub enum ErrorCode {
     /// A client file kept changing between planning and writing (SPEC 8.4
     /// step 1, after three re-plans). The file is left as it is.
     FileChangedDuringApply,
+    /// The entry a resolution was chosen for changed (in the file or in the
+    /// store) since the resolver showed it; nothing was done (SPEC 13.4).
+    EntryChanged,
     /// The edited file did not read back as planned: an owned entry differs
     /// from the desired one, or something outside the owned entries changed
     /// (SPEC 8.4 step 3). The file is left as it is.
@@ -250,6 +253,7 @@ impl ErrorCode {
             ErrorCode::TimeoutUnitConflict => "timeout_unit_conflict",
             ErrorCode::ClientMcpReplacedByExtension => "client_mcp_replaced_by_extension",
             ErrorCode::FileChangedDuringApply => "file_changed_during_apply",
+            ErrorCode::EntryChanged => "entry_changed",
             ErrorCode::SelfCheckFailed => "self_check_failed",
             ErrorCode::FileLocked => "file_locked",
             ErrorCode::DeliveryUnavailable => "delivery_unavailable",

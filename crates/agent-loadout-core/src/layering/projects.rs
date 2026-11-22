@@ -18,7 +18,7 @@ use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::layering::manifest::manifest_dir;
 use crate::layering::{
-    LOCAL_FILE, Project, ProjectRepo, SHARED_FILE, TrustStore, discover, same_path,
+    LOCAL_FILE, Project, ProjectRepo, SHARED_FILE, TrustStore, discover, same_folder, same_path,
 };
 use crate::model::TomlDocument;
 use crate::model::ids::{self, IdKind};
@@ -95,7 +95,7 @@ pub fn prepare_init(
     root: &Path,
     name: Option<&str>,
 ) -> Result<InitPlan, CoreError> {
-    if same_path(root, env.home()) {
+    if same_folder(fs, root, env.home()) {
         return Err(CoreError::new(
             ErrorCode::InvalidPath,
             "a manifest in the home folder would apply to every folder; pick a project folder",
@@ -297,14 +297,26 @@ pub struct ManifestReview {
 
 /// Each manifest file of `project` against the store mirror (the content
 /// last trusted).
-pub fn review(store: &dyn StoreRead, project: &Project) -> Result<Vec<ManifestReview>, CoreError> {
+pub fn review(
+    store: &dyn StoreRead,
+    project: &Project,
+    trust: &TrustStore,
+) -> Result<Vec<ManifestReview>, CoreError> {
+    // The mirror is synced: content trusted on another machine, or before
+    // this machine forgot the project, was never shown here. Without a
+    // trust record of its own, every file is reviewed in full (`new`).
+    let trusted_here = trust.knows(project);
     let dir = manifest_dir(&project.root);
     let mut reviews = Vec::new();
     for (file, manifest) in [
         (SHARED_FILE, project.shared.as_ref()),
         (LOCAL_FILE, project.local.as_ref()),
     ] {
-        let trusted = store.read_file(&mirror_path(&project.id, file))?;
+        let trusted = if trusted_here {
+            store.read_file(&mirror_path(&project.id, file))?
+        } else {
+            None
+        };
         let current = manifest.map(|m| String::from_utf8_lossy(&m.bytes).into_owned());
         let path = dir.join(file);
         let (change, diff) = match (&trusted, &current) {

@@ -75,9 +75,11 @@ export function ResolverDialog({ entry, clientName, onClose }: ResolverDialogPro
   }, [onClose]);
 
   const resolve = useMutation({
-    mutationFn: async (action: ResolveAction) => ({
+    // The fingerprint of the versions shown: the backend refuses
+    // (`entry_changed`) when the entry changed since.
+    mutationFn: async ({ action, fingerprint }: { action: ResolveAction; fingerprint: string }) => ({
       action,
-      result: unwrap(await commands.resolveEntry(entry, action)),
+      result: unwrap(await commands.resolveEntry(entry, action, fingerprint)),
     }),
     onSuccess: ({ action, result }) => {
       if (action !== "skip") {
@@ -85,7 +87,11 @@ export function ResolverDialog({ entry, clientName, onClose }: ResolverDialogPro
       }
       onClose();
     },
-    onError: (error) => notify({ tone: "error", message: failureText(error) }),
+    onError: (error) => {
+      notify({ tone: "error", message: failureText(error) });
+      // Show the entry as it is now.
+      void detail.refetch();
+    },
   });
 
   const data = detail.data;
@@ -150,8 +156,8 @@ export function ResolverDialog({ entry, clientName, onClose }: ResolverDialogPro
                       : "secondary-button secondary-button--compact"
                   }
                   title={t(HINT_KEYS[action])}
-                  disabled={resolve.isPending}
-                  onClick={() => resolve.mutate(action)}
+                  disabled={resolve.isPending || detail.isFetching}
+                  onClick={() => resolve.mutate({ action, fingerprint: data.fingerprint })}
                 >
                   {t(ACTION_KEYS[action])}
                 </button>

@@ -418,7 +418,7 @@ const messages = {
   "resolver.hint.overwrite": "Write the desired entry over the file's version.",
   "resolver.hint.importTheirs": "Make the file's version the store's server definition.",
   "resolver.hint.release":
-    "Leave the entry as it is, stop managing it, and stop enabling the server for this client.",
+    "Leave the entry as it is and stop managing it on this machine. Other machines keep managing theirs.",
   "resolver.hint.skip": "Leave it for now; it stays in Pending changes.",
   "resolver.hint.recreate": "Write the entry into the file again.",
   "resolver.hint.respectDeletion": "Keep it deleted and stop enabling the server for this client.",
@@ -474,6 +474,7 @@ const errorMessages: Record<ErrorCode, string> = {
   timeout_unit_conflict: "Two clients read this timeout in different units.",
   client_mcp_replaced_by_extension: "An extension takes over this client's MCP support.",
   file_changed_during_apply: "A client file kept changing during apply and was left as it is.",
+  entry_changed: "The entry changed since it was shown; nothing was done. Review it again.",
   self_check_failed: "A written file did not read back as planned and was left as it is.",
   file_locked: "Another program kept a client file open.",
   delivery_unavailable: "The requested secret delivery mode is not available here.",

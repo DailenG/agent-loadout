@@ -3,7 +3,7 @@
 //! desired), and the actions its state allows, carried out by the
 //! planner's per-entry decision on that file alone, in one commit.
 
-use agent_loadout_core::apply::resolve::{filter_of, resolve, three_way};
+use agent_loadout_core::apply::resolve::{filter_of, fingerprint, resolve, three_way};
 use agent_loadout_core::apply::{
     self, EntryPlan, EntryState, OnConflict, PlanOptions, TargetPlan, placeholder_path,
 };
@@ -82,6 +82,10 @@ pub struct ResolverDetail {
     /// The actions this state allows, the default first.
     pub actions: Vec<ResolveAction>,
     pub problem: Option<IpcError>,
+    /// Keyed hash of what is shown (state, file entry, desired entry);
+    /// `resolve_entry` sends it back and is refused (`entry_changed`) when
+    /// the entry changed in between.
+    pub fingerprint: String,
 }
 
 /// The actions `entry` allows. Imports and releases edit store servers, so
@@ -155,15 +159,33 @@ pub fn detail(core: &Core, entry: &EntryRef) -> CmdResult<ResolverDetail> {
             .problem
             .as_ref()
             .map(|err| scrubbed(&core.env, err, root)),
+        fingerprint: fingerprint(&core.apply_env(), &found)?,
     })
 }
 
 /// Carries out `action` for `entry`: the planner's decision for that entry
 /// on its file alone (other pending changes of the same file apply with
-/// it), in one store commit. `skip` changes nothing.
-pub fn run(core: &Core, entry: &EntryRef, action: ResolveAction) -> CmdResult<ChangeResult> {
+/// it), in one store commit. `skip` changes nothing. Refused with
+/// `entry_changed` unless the entry still has `shown` (the fingerprint of
+/// the detail the user acted on); the core checks it again inside the
+/// transaction.
+pub fn run(
+    core: &Core,
+    entry: &EntryRef,
+    action: ResolveAction,
+    shown: &str,
+) -> CmdResult<ChangeResult> {
     let (target, found) = locate(core, entry)?;
     let root = target.project.clone();
+    if fingerprint(&core.apply_env(), &found)? != shown {
+        return Err(IpcError {
+            code: ErrorCode::EntryChanged,
+            message: format!(
+                "{}/{} changed since the resolver showed it; nothing was done",
+                entry.client, entry.name
+            ),
+        });
+    }
     let allowed = actions(&found, target.scope != TargetScope::User);
     if !allowed.contains(&action) {
         return Err(IpcError {
@@ -186,6 +208,7 @@ pub fn run(core: &Core, entry: &EntryRef, action: ResolveAction) -> CmdResult<Ch
         &entry.name,
         found.state,
         action.resolution(),
+        shown,
     )
     .map_err(|err| scrubbed(&core.env, &err, root.as_deref()))?;
     Ok(ChangeResult::new(&core.env, commit.as_ref(), Some(&report)))
@@ -206,6 +229,7 @@ pub async fn resolve_entry(
     state: tauri::State<'_, AppState>,
     entry: EntryRef,
     action: ResolveAction,
+    fingerprint: String,
 ) -> CmdResult<ChangeResult> {
-    blocking(&state, move |core| run(core, &entry, action)).await
+    blocking(&state, move |core| run(core, &entry, action, &fingerprint)).await
 }

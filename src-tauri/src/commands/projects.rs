@@ -13,7 +13,8 @@ use agent_loadout_core::apply::{
 };
 use agent_loadout_core::layering::projects::{self, Layout, ManifestChange};
 use agent_loadout_core::layering::{
-    KnownProject, Project, ProjectStatus, TrustState, TrustStore, known_projects, same_path,
+    KnownProject, Project, ProjectStatus, TrustState, TrustStore, known_projects, resolved,
+    same_folder, same_path,
 };
 use agent_loadout_core::model::applied::ApplyTrigger;
 use agent_loadout_core::store::Store;
@@ -307,29 +308,37 @@ pub fn validate_folder(core: &Core, folder: &Path) -> Result<PathBuf, CoreError>
     {
         return Err(invalid(folder, "the folder path holds `.` or `..` parts"));
     }
-    if folder.parent().is_none() {
+    if !core.fs.is_dir(folder) {
+        return Err(
+            CoreError::new(ErrorCode::NotFound, "the folder does not exist").with_path(folder),
+        );
+    }
+    // Compared with links resolved (a junction to the home folder is the
+    // home folder); the overlay keeps the spelling the user picked.
+    let fs = core.fs.as_ref();
+    let real = resolved(fs, folder);
+    if folder.parent().is_none() || real.parent().is_none() {
         return Err(invalid(
             folder,
             "a drive or file-system root cannot be a project; pick a project folder",
         ));
     }
-    if same_path(folder, core.env.home()) {
+    if same_folder(fs, folder, core.env.home()) {
         return Err(invalid(
             folder,
             "a manifest in the home folder would apply to every folder; pick a project folder",
         ));
     }
-    let data = &core.home.path;
-    if folder.ancestors().any(|ancestor| same_path(ancestor, data)) {
+    let data = resolved(fs, &core.home.path);
+    let inside_data = |path: &Path| {
+        path.ancestors()
+            .any(|ancestor| same_path(ancestor, &data) || same_path(ancestor, &core.home.path))
+    };
+    if inside_data(folder) || inside_data(&real) {
         return Err(invalid(
             folder,
             "the folder is inside Loadout's data directory",
         ));
-    }
-    if !core.fs.is_dir(folder) {
-        return Err(
-            CoreError::new(ErrorCode::NotFound, "the folder does not exist").with_path(folder),
-        );
     }
     Ok(folder.to_path_buf())
 }
@@ -418,8 +427,11 @@ pub fn review(core: &Core, id: &str) -> CmdResult<TrustReview> {
     let root = known.root.clone();
     let scrub_err = |err: &CoreError| scrubbed(&core.env, err, Some(&root));
     let project = loaded(&known).map_err(|err| scrub_err(&err))?;
+    let trust_store = TrustStore::load(core.fs.as_ref(), &core.home.state_dir())?;
     let reviews = match &store {
-        Some(store) => projects::review(store, project).map_err(|err| scrub_err(&err))?,
+        Some(store) => {
+            projects::review(store, project, &trust_store).map_err(|err| scrub_err(&err))?
+        }
         None => Vec::new(),
     };
     let files = reviews

@@ -648,7 +648,7 @@ A client is "detected" when any probe passes: its config dir exists, its executa
 |---|---|---|
 | `synced` | Native equals desired and equals what we wrote | none |
 | `pending_create` / `pending_update` / `pending_remove` | Desired changed; file not yet updated | apply |
-| `drifted` | We own it; native changed since we wrote it | ask: overwrite / import change into store / release ownership |
+| `drifted` | We own it; native changed since we wrote it | ask: overwrite / import change into store / release ownership (this machine only: recorded in its overlay `[enable.released]`, other machines keep managing theirs) |
 | `missing` | We own it; someone deleted it | ask: re-create (default) / respect deletion (remove from enable list) |
 | `conflict` | `drifted` and desired also changed | ask, with 3-way view (last written / native / desired) |
 | `foreign` | Native entry we do not own | never touched; offered for adopt/import |
@@ -1146,7 +1146,7 @@ Clicking a cell shows the provenance chain (winner file, shadowed entries, reade
 ### 13.4 Apply drawer and drift resolver (new)
 
 - Drawer lists files grouped by scope with op counts; each expands to a unified diff (masked). Buttons: Apply all, Apply selected, Discard pending (review mode).
-- Resolver for `drifted` / `conflict` / `collision`: three columns (last written, current file, desired) with actions Overwrite, Import theirs into store, Release ownership, Skip.
+- Resolver for `drifted` / `conflict` / `collision` / `missing`: three columns (last written, current file, desired) with the actions of the entry's state (8.2): Overwrite, Import theirs into store, Release ownership, Skip; Re-create, Respect deletion for `missing`. Release ownership is recorded in this machine's overlay (`[enable.released]`, server id to clients), never in the synced server file; naming the client again (a pill toggle) manages the entry here again. The resolver shows a fingerprint (keyed hash of the state, the file entry and the desired entry); a resolution is refused with `entry_changed` when the entry no longer has it.
 
 ### 13.5 History page (new, modeled on SkillDock's backup history dialog)
 

@@ -1007,6 +1007,16 @@ fn user_entry(name: &str) -> EntryRef {
     }
 }
 
+/// Runs `action` with the fingerprint of the detail the resolver shows now.
+fn act(
+    core: &Core,
+    entry: &EntryRef,
+    action: ResolveAction,
+) -> super::CmdResult<super::ChangeResult> {
+    let shown = resolve::detail(core, entry).unwrap().fingerprint;
+    resolve::run(core, entry, action, &shown)
+}
+
 /// Saves `fake` for Claude Code, then edits its entry by hand: drifted.
 fn drifted(fx: &Fx) {
     servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
@@ -1045,13 +1055,53 @@ fn resolver_overwrites_a_drifted_entry() {
 
     // Skip changes nothing.
     let before = fx.commits();
-    let skipped = resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Skip).unwrap();
+    let skipped = act(&fx.core, &user_entry("fake"), ResolveAction::Skip).unwrap();
     assert!(skipped.commit.is_none());
     // An action the state does not allow is refused.
-    let err = resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Recreate).unwrap_err();
+    let err = act(&fx.core, &user_entry("fake"), ResolveAction::Recreate).unwrap_err();
     assert_eq!(err.code, agent_loadout_core::ErrorCode::InvalidValue);
 
-    let result = resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Overwrite).unwrap();
+    // The file changes after the resolver showed it: refused, nothing done.
+    let shown = detail.fingerprint.clone();
+    let text = fx
+        .read(&fx.claude())
+        .replace("fake-mcp-edited", "fake-mcp-edited-again");
+    std::fs::write(fx.claude(), text).unwrap();
+    let err = resolve::run(
+        &fx.core,
+        &user_entry("fake"),
+        ResolveAction::ImportTheirs,
+        &shown,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, agent_loadout_core::ErrorCode::EntryChanged);
+    assert_eq!(fx.commits(), before, "nothing committed");
+    assert!(
+        !fx.store_file("servers/fake.toml")
+            .contains("fake-mcp-edited")
+    );
+    // The core checks again inside the transaction.
+    let store = fx.store();
+    let err = agent_loadout_core::apply::resolve::resolve(
+        &store,
+        &fx.core.apply_env(),
+        agent_loadout_core::apply::TargetFilter {
+            scope: agent_loadout_core::model::applied::Scope::User,
+            project: None,
+            file: fx.claude(),
+        },
+        "claude-code",
+        "fake",
+        agent_loadout_core::apply::EntryState::Drifted,
+        agent_loadout_core::apply::OnConflict::Import,
+        &shown,
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), agent_loadout_core::ErrorCode::EntryChanged);
+    drop(store);
+    assert_eq!(fx.commits(), before);
+
+    let result = act(&fx.core, &user_entry("fake"), ResolveAction::Overwrite).unwrap();
     assert_eq!(fx.commits(), before + 1, "one commit");
     assert!(result.apply.unwrap().files_written == 1);
     let text = fx.read(&fx.claude());
@@ -1067,7 +1117,7 @@ fn resolver_imports_a_drifted_change_into_the_store() {
     let fx = Fx::new();
     drifted(&fx);
     let before = fx.commits();
-    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::ImportTheirs).unwrap();
+    act(&fx.core, &user_entry("fake"), ResolveAction::ImportTheirs).unwrap();
     assert_eq!(fx.commits(), before + 1);
     assert_eq!(fx.summaries()[0], "adopt: claude-code/fake drift");
     assert!(
@@ -1080,22 +1130,86 @@ fn resolver_imports_a_drifted_change_into_the_store() {
     assert_eq!(pending.unresolved, 0, "{:#?}", pending.files);
 }
 
+/// Copies one machine's store to another (a sync through a shared
+/// remote, as far as these tests need it).
+fn copy_store(from: &Fx, to: &Fx) {
+    fn copy(src: &Path, dst: &Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for entry in std::fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let target = dst.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+    let dst = to.core.home.store_dir();
+    if dst.exists() {
+        std::fs::remove_dir_all(&dst).unwrap();
+    }
+    copy(&from.core.home.store_dir(), &dst);
+}
+
+/// Release is a fact about this machine: it is recorded in this machine's
+/// overlay, and another machine sharing the store keeps managing (and
+/// keeps) its own entry.
 #[test]
-fn resolver_releases_ownership() {
-    let fx = Fx::new();
-    drifted(&fx);
-    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Release).unwrap();
-    assert_eq!(fx.summaries()[0], "resolve: release claude-code/fake");
-    // The entry stays; the server is no longer enabled for Claude Code;
-    // the entry is foreign now (nothing pending, nothing owned).
-    assert!(fx.read(&fx.claude()).contains("fake-mcp-edited"));
-    let server = fx.store_file("servers/fake.toml");
-    assert!(!server.contains("\"claude-code\""), "{server}");
-    let pending = apply::pending(&fx.core).unwrap();
-    assert_eq!(pending.pending, 0, "{:#?}", pending.files);
+fn resolver_releases_ownership_on_this_machine_only() {
+    let b = Fx::new();
+    servers::save(&b.core, &draft("fake", &["claude-code"]), true).unwrap();
+    assert!(b.read(&b.claude()).contains("\"fake-mcp\""));
+
+    // Machine A gets the store, applies it, then edits its entry.
+    let a = Fx::new();
+    copy_store(&b, &a);
+    apply::run(&a.core, None).unwrap();
+    let text = a
+        .read(&a.claude())
+        .replace("\"fake-mcp\"", "\"fake-mcp-edited\"");
+    std::fs::write(a.claude(), text).unwrap();
+
+    act(&a.core, &user_entry("fake"), ResolveAction::Release).unwrap();
+    assert_eq!(a.summaries()[0], "resolve: release claude-code/fake");
+    // On A: the entry stays as edited, nothing pending, nothing owned.
+    assert!(a.read(&a.claude()).contains("fake-mcp-edited"));
+    assert_eq!(apply::pending(&a.core).unwrap().pending, 0);
     let ledger =
-        std::fs::read_to_string(fx.core.home.state_dir().join("ledger.json")).unwrap_or_default();
+        std::fs::read_to_string(a.core.home.state_dir().join("ledger.json")).unwrap_or_default();
     assert!(!ledger.contains("\"key\": \"fake\""), "{ledger}");
+    // The synced server is untouched; A's overlay records the release.
+    let server = a.store_file("servers/fake.toml");
+    assert!(server.contains("\"claude-code\""), "{server}");
+    let machine =
+        agent_loadout_core::store::Machine::load(a.core.fs.as_ref(), &a.core.home.state_dir())
+            .unwrap()
+            .unwrap()
+            .id;
+    let overlay = a.store_file(&format!("machines/{machine}.toml"));
+    assert!(overlay.contains("[enable.released]"), "{overlay}");
+
+    // Machine B syncs: its unchanged entry is neither removed nor pending.
+    copy_store(&a, &b);
+    let pending = apply::pending(&b.core).unwrap();
+    assert_eq!(pending.pending, 0, "{:#?}", pending.files);
+    apply::run(&b.core, None).unwrap();
+    assert!(b.read(&b.claude()).contains("\"fake-mcp\""));
+
+    // Enabling the client again on A manages the entry there again.
+    servers::set_clients_for(
+        &a.core,
+        "fake",
+        &ClientChoice {
+            all_detected: false,
+            clients: vec!["claude-code".to_owned()],
+        },
+    )
+    .unwrap();
+    assert!(
+        !a.store_file(&format!("machines/{machine}.toml"))
+            .contains("released")
+    );
 }
 
 #[test]
@@ -1115,7 +1229,7 @@ fn resolver_recreates_or_respects_a_deletion() {
     );
     assert!(detail.current.is_none());
 
-    resolve::run(
+    act(
         &fx.core,
         &user_entry("fake"),
         ResolveAction::RespectDeletion,
@@ -1142,7 +1256,7 @@ fn resolver_recreates_or_respects_a_deletion() {
     )
     .unwrap();
     std::fs::write(fx.claude(), "{\n  \"mcpServers\": {}\n}\n").unwrap();
-    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Recreate).unwrap();
+    act(&fx.core, &user_entry("fake"), ResolveAction::Recreate).unwrap();
     assert!(fx.read(&fx.claude()).contains("\"fake-mcp\""));
 }
 
@@ -1168,7 +1282,7 @@ fn resolver_handles_a_collision() {
     assert!(detail.last_written.is_none(), "never written");
     assert!(detail.current.as_deref().unwrap().contains("theirs-mcp"));
 
-    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::ImportTheirs).unwrap();
+    act(&fx.core, &user_entry("fake"), ResolveAction::ImportTheirs).unwrap();
     assert!(fx.store_file("servers/fake.toml").contains("theirs-mcp"));
     assert!(fx.read(&fx.claude()).contains("theirs-mcp"));
     assert_eq!(apply::pending(&fx.core).unwrap().unresolved, 0);
@@ -1183,7 +1297,7 @@ fn resolver_adopts_and_overwrites_a_collision() {
     )
     .unwrap();
     servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
-    resolve::run(&fx.core, &user_entry("fake"), ResolveAction::Overwrite).unwrap();
+    act(&fx.core, &user_entry("fake"), ResolveAction::Overwrite).unwrap();
     let text = fx.read(&fx.claude());
     assert!(
         text.contains("\"fake-mcp\"") && !text.contains("theirs-mcp"),
@@ -1207,6 +1321,24 @@ fn resolver_shows_three_versions_of_a_conflict() {
             &["claude-code"],
         ),
     )]);
+    // Another slot's row for the same file, container and key (a project
+    // scope, another client) comes first in the ledger: the lookup is by
+    // slot and client, so it is not taken.
+    let ledger_path = fx.core.home.state_dir().join("ledger.json");
+    let mut ledger: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&ledger_path).unwrap()).unwrap();
+    let entries = ledger["entries"].as_array_mut().unwrap();
+    let mut decoy = entries
+        .iter()
+        .find(|row| row["key"] == "fake")
+        .unwrap()
+        .clone();
+    decoy["scope"] = "project".into();
+    decoy["project_id"] = "decoy-a1b2".into();
+    decoy["client"] = "codex".into();
+    decoy["written_hash"] = format!("hmac-sha256:{}", "0".repeat(64)).into();
+    entries.insert(0, decoy);
+    std::fs::write(&ledger_path, serde_json::to_string_pretty(&ledger).unwrap()).unwrap();
     let detail = resolve::detail(&fx.core, &user_entry("fake")).unwrap();
     assert_eq!(detail.state, EntryStateKind::Conflict);
     let last = detail.last_written.as_deref().expect("recovered");
@@ -1257,6 +1389,98 @@ fn project_entries_offer_no_store_edits() {
         [ResolveAction::Overwrite, ResolveAction::Skip]
     );
     assert_eq!(detail.file, "<P>/.mcp.json");
-    resolve::run(&fx.core, &entry, ResolveAction::Overwrite).unwrap();
+    act(&fx.core, &entry, ResolveAction::Overwrite).unwrap();
     assert!(!fx.read(&mcp).contains("docs-mcp-edited"));
+}
+
+/// A folder that is a link to the home folder is the home folder: refused
+/// when picked, and a known project there is unusable (SPEC 6.1, 17).
+#[test]
+fn a_link_to_home_is_the_home_folder() {
+    let fx = Fx::new();
+    let link = fx.th.projects().join("home-link");
+    std::fs::create_dir_all(fx.th.projects()).unwrap();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir(fx.th.home(), &link);
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(fx.th.home(), &link);
+    if let Err(err) = made {
+        eprintln!("skipped a_link_to_home_is_the_home_folder: cannot create a symlink here: {err}");
+        return;
+    }
+    let err = projects::inspect(&fx.core, &link, "t".to_owned()).unwrap_err();
+    assert_eq!(
+        err.code,
+        agent_loadout_core::ErrorCode::InvalidPath,
+        "{}",
+        err.message
+    );
+    let err = projects::init(&fx.core, &link, false, None).unwrap_err();
+    assert_eq!(err.code, agent_loadout_core::ErrorCode::InvalidPath);
+    assert!(!fx.th.home().join(".loadout").exists());
+    // Known through the link (an overlay written elsewhere): unusable.
+    std::fs::create_dir_all(fx.th.home().join(".loadout")).unwrap();
+    std::fs::write(
+        fx.th.home().join(".loadout/project.local.toml"),
+        "schema = 1\nid = \"linked-a1b2\"\n",
+    )
+    .unwrap();
+    let overlay = agent_loadout_core::model::machine::MachineOverlay {
+        projects: Some(
+            [(
+                "linked-a1b2".to_owned(),
+                agent_loadout_core::model::machine::MachineProject {
+                    path: link.to_string_lossy().into_owned(),
+                    extra: Default::default(),
+                },
+            )]
+            .into(),
+        ),
+        ..agent_loadout_core::model::machine::MachineOverlay::new(
+            "01J0000000000000000000000A",
+            "test-desk",
+            host_os(),
+        )
+    };
+    let known = agent_loadout_core::layering::known_projects(
+        fx.core.fs.as_ref(),
+        &fx.core.env,
+        Some(&overlay),
+        &agent_loadout_core::layering::TrustStore::default(),
+    );
+    assert!(
+        matches!(
+            known[0].status,
+            agent_loadout_core::layering::ProjectStatus::Failed(_)
+        ),
+        "{:?}",
+        known[0].status
+    );
+}
+
+/// The synced mirror is not what this machine trusted: after a remove and
+/// a new add, the review shows every file in full.
+#[test]
+fn review_shows_full_content_without_a_trust_record_here() {
+    let fx = Fx::new();
+    let root = unbound_project(&fx);
+    projects::add(&fx.core, &root).unwrap();
+    let hash = projects::review(&fx.core, "app-a1b2").unwrap().hash;
+    projects::trust(&fx.core, "app-a1b2", &hash).unwrap();
+    // Trusted here, unchanged: shown as unchanged.
+    let review = projects::review(&fx.core, "app-a1b2").unwrap();
+    assert_eq!(review.files[0].change, ManifestChangeKind::Unchanged);
+
+    projects::remove(&fx.core, "app-a1b2").unwrap();
+    projects::add(&fx.core, &root).unwrap();
+    let review = projects::review(&fx.core, "app-a1b2").unwrap();
+    assert_eq!(review.trust, ProjectTrust::Untrusted);
+    assert_eq!(review.files[0].change, ManifestChangeKind::New);
+    assert!(
+        review.files[0]
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("docs-mcp")
+    );
 }

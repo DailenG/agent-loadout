@@ -53,7 +53,7 @@ pub fn manifest_dir(root: &Path) -> PathBuf {
 pub fn discover(env: &Env, fs: &dyn Fs, folder: &Path) -> Option<PathBuf> {
     folder
         .ancestors()
-        .take_while(|dir| !same_path(dir, env.home()))
+        .take_while(|dir| !same_folder(fs, dir, env.home()))
         .find(|dir| {
             let manifests = manifest_dir(dir);
             fs.exists(&manifests.join(SHARED_FILE)) || fs.exists(&manifests.join(LOCAL_FILE))
@@ -73,6 +73,19 @@ pub fn path_key(path: &Path) -> String {
 /// Whether `a` and `b` name the same folder ([`path_key`]).
 pub fn same_path(a: &Path, b: &Path) -> bool {
     path_key(a) == path_key(b)
+}
+
+/// `path` with symlinks and junctions resolved through `fs`, or as it is
+/// when it cannot be resolved (it does not exist).
+pub fn resolved(fs: &dyn Fs, path: &Path) -> PathBuf {
+    fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Whether `a` and `b` are the same folder once links are resolved: a
+/// junction or symlink to the home folder is the home folder (SPEC 6.1,
+/// 17).
+pub fn same_folder(fs: &dyn Fs, a: &Path, b: &Path) -> bool {
+    same_path(a, b) || same_path(&resolved(fs, a), &resolved(fs, b))
 }
 
 /// [`path_key`] of a path written as text, with Windows rules when

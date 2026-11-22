@@ -291,7 +291,8 @@ fn trust(ctx: &Context, path: &Path) -> Result<u8, CoreError> {
     let project = load_project(fs, &root)?;
     warn_all(&project.warnings);
     let store = ctx.open_store_for_change()?;
-    let reviews = projects::review(&store, &project)?;
+    let trust_store = TrustStore::load(fs, &ctx.home.state_dir())?;
+    let reviews = projects::review(&store, &project, &trust_store)?;
     if !ctx.json {
         for review in &reviews {
             match review.change {

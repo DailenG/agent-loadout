@@ -53,6 +53,13 @@ pub trait Fs: Send + Sync {
     /// Opens `path` for use as an advisory lock file, creating it if needed.
     /// The contents are never read or written.
     fn open_lock_file(&self, path: &Path) -> io::Result<File>;
+
+    /// `path` with symlinks and junctions resolved (`std::fs::canonicalize`;
+    /// on Windows a `\\?\` path). Views that cannot resolve links return
+    /// `path` as it is.
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        Ok(path.to_path_buf())
+    }
 }
 
 /// The real file system, unconfined.
@@ -153,6 +160,10 @@ impl Fs for RealFs {
             .create(true)
             .truncate(false)
             .open(path)
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        std::fs::canonicalize(path)
     }
 }
 

@@ -3,8 +3,9 @@
 //! written, as in the file now and as desired, and resolved through the
 //! planner's per-entry [`Decision`] in one store commit.
 
+use crate::adapters::mapper::Canonical;
 use crate::apply::exec::PlanInputs;
-use crate::apply::ledger::EntryKind;
+use crate::apply::ledger::{EntryKind, LedgerKey, LedgerSlot};
 use crate::apply::plan::{
     self, Decision, EntryPlan, EntryState, OnConflict, PlanOptions, ProjectSelection, ScopeFilter,
     TargetFilter, TargetPlan,
@@ -15,6 +16,25 @@ use crate::error::CoreError;
 use crate::formats::NativeValue;
 use crate::model::applied::{ApplyTrigger, Scope};
 use crate::store::{CommitId, LogFilter, Machine, Operation, Store};
+
+/// What the resolver showed for `entry`, as one keyed hash: its state, the
+/// entry in the file and the desired entry (canonical forms). A resolution
+/// is carried out only while the entry still has this fingerprint, so an
+/// action never applies to content the user did not see. Keyed with the
+/// ledger key (inline entries hold secret values); without one yet, with
+/// the zero key a read-only plan uses.
+pub fn fingerprint(ax: &ApplyEnv<'_>, entry: &EntryPlan) -> Result<String, CoreError> {
+    let key = LedgerKey::load(ax.fs, &ax.home.state_dir())?
+        .unwrap_or_else(|| LedgerKey::from_bytes([0; 32]));
+    let value = NativeValue::Array(vec![
+        NativeValue::String(entry.state.as_str().to_owned()),
+        NativeValue::String(entry.client.unwrap_or_default().to_owned()),
+        NativeValue::String(entry.name.clone()),
+        entry.observed.clone().unwrap_or(NativeValue::Null),
+        entry.desired.clone().unwrap_or(NativeValue::Null),
+    ]);
+    Ok(key.hash(&Canonical::of(&value)))
+}
 
 /// The three columns of the resolver, each rendered as the file writes the
 /// entry ([`TargetPlan::snippet`]) and masked; `None` where there is
@@ -75,12 +95,16 @@ fn recovered(
     };
     let inputs = PlanInputs::load(Some(store), ax)?;
     let file = target.file.to_string_lossy();
-    let row = inputs.ledger.entries.iter().find(|row| {
-        row.kind == EntryKind::McpEntry
-            && row.file == file
-            && row.container == target.pointer
-            && row.key == entry.name
-    });
+    let slot = LedgerSlot {
+        scope: target.scope,
+        project_id: target.project_id.as_deref(),
+        file: &file,
+        container: &target.pointer,
+    };
+    let row = inputs
+        .ledger
+        .get(&slot, &entry.name)
+        .filter(|row| row.kind == EntryKind::McpEntry && row.client == client);
     let Some((hash, commit)) =
         row.and_then(|row| row.written_hash.as_ref().zip(row.store_commit.as_ref()))
     else {
@@ -158,10 +182,14 @@ pub fn filter_of(target: &TargetPlan) -> TargetFilter {
 
 /// Resolves entry `name` of `client` in the target `filter` selects with
 /// `resolution`, applying only that file, in one store transaction: a
-/// commit when the store or a client file changes (an import or a release
-/// edits the server, an overwrite writes the file), none otherwise.
+/// commit when the store or a client file changes (an import edits the
+/// server, a release this machine's overlay, an overwrite writes the
+/// file), none otherwise. Inside the transaction the entry is planned
+/// again and must still have the [`fingerprint`] `expected` (what the
+/// resolver showed); otherwise `entry_changed` and nothing is done.
 /// Summaries: `adopt: <client>/<name> drift` for an import of a changed
 /// entry (SPEC 8.6), else `resolve: <action> <client>/<name>`.
+#[allow(clippy::too_many_arguments)]
 pub fn resolve(
     store: &Store<'_>,
     ax: &ApplyEnv<'_>,
@@ -170,6 +198,7 @@ pub fn resolve(
     name: &str,
     state: EntryState,
     resolution: OnConflict,
+    expected: &str,
 ) -> Result<(ApplyReport, Option<CommitId>), CoreError> {
     let entry = format!("{client}/{name}");
     let summary = match (resolution, state) {
@@ -186,13 +215,14 @@ pub fn resolve(
                 name: name.to_owned(),
                 resolution,
             }],
-            targets: Some(vec![filter]),
+            targets: Some(vec![filter.clone()]),
             ..PlanOptions::default()
         },
         trigger: ApplyTrigger::Review,
     };
     let operation = Operation::new("entry.resolve", summary.clone());
     let committed = store.transaction(operation, |tx| {
+        check_unchanged(tx, ax, &filter, client, name, expected)?;
         let report = apply_in(tx, ax, &request)?;
         // The apply names a file-only run `apply: ...`; the commit is the
         // resolution.
@@ -200,4 +230,47 @@ pub fn resolve(
         Ok(report)
     })?;
     Ok((committed.value, committed.commit))
+}
+
+/// `entry_changed` unless entry `name` of `client` in the target `filter`
+/// selects, planned against the transaction's view of the store, still has
+/// the fingerprint `expected`.
+fn check_unchanged(
+    tx: &crate::store::Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+    filter: &TargetFilter,
+    client: &str,
+    name: &str,
+    expected: &str,
+) -> Result<(), CoreError> {
+    let state_dir = ax.home.state_dir();
+    let desired = DesiredState::load(tx, Some(&tx.machine().id))?;
+    let ledger = crate::apply::ledger::Ledger::load(ax.fs, &state_dir)?;
+    let key = LedgerKey::load(ax.fs, &state_dir)?.unwrap_or_else(|| LedgerKey::from_bytes([0; 32]));
+    let cx = ax.render_cx(tx.store().secret_memory().clone());
+    let options = PlanOptions {
+        targets: Some(vec![filter.clone()]),
+        ..PlanOptions::default()
+    };
+    let now = plan::plan(&cx, &desired, &ledger, &key, &options)?;
+    let entry = now
+        .targets
+        .iter()
+        .flat_map(|target| &target.entries)
+        .find(|entry| entry.name == name && entry.client == Some(client));
+    let same = match entry {
+        Some(entry) => fingerprint(ax, entry)? == expected,
+        None => false,
+    };
+    if same {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            crate::error::ErrorCode::EntryChanged,
+            format!(
+                "{client}/{name} changed since the resolver showed it; nothing was done. Open it \
+                 again to see the current versions"
+            ),
+        ))
+    }
 }

@@ -55,6 +55,12 @@ pub struct MachineEnable {
     /// Clients never written on this machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_clients: Option<Vec<String>>,
+    /// Entries this machine released (drift resolver, "Release
+    /// ownership"): by server id, the clients whose entry of that server
+    /// is left as the user edited it and is not managed on this machine.
+    /// Other machines keep managing theirs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<BTreeMap<String, Vec<String>>>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -127,6 +133,11 @@ impl MachineOverlay {
             .and_then(|e| e.exclude_clients.as_ref())
         {
             d.check_client_ids(clients, "enable.exclude_clients");
+        }
+        for (id, clients) in self.enable.iter().flat_map(|e| e.released.iter().flatten()) {
+            let path = join("enable.released", id);
+            d.check_id(IdKind::Server, id, &path);
+            d.check_client_ids(clients, &path);
         }
         for (alias, entry) in self.secrets.iter().flatten() {
             let path = join("secrets", alias);

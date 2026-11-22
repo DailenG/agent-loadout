@@ -807,11 +807,29 @@ pub fn remove(core: &Core, ids_to_remove: &[String]) -> CmdResult<ChangeResult> 
 }
 
 /// Enables a server for exactly these clients (pill toggles, Enable All,
-/// Disable All).
+/// Disable All). A client named explicitly is managed again on this
+/// machine even if its entry was released here.
 pub fn set_clients_for(core: &Core, id: &str, choice: &ClientChoice) -> CmdResult<ChangeResult> {
     ids::check(IdKind::Server, id)?;
     let store = core.open_store()?.ok_or_else(|| not_found(id))?;
     let mut doc = store.server(id)?.ok_or_else(|| not_found(id))?;
+    // Clients whose entry this machine released are not shown as selected
+    // here, but other machines still manage them: they stay in the synced
+    // list unless the choice names them (which manages them here again).
+    let (desired, _) = render_inputs(core, Some(&store))?;
+    let requested = choice.clients.clone();
+    let mut choice = choice.clone();
+    if !choice.all_detected
+        && let Some(ClientSelection::List(old)) =
+            doc.value().enable.as_ref().and_then(|e| e.clients.as_ref())
+    {
+        for client in old {
+            if desired.released(id, client) && !choice.clients.contains(client) {
+                choice.clients.push(client.clone());
+            }
+        }
+    }
+    let choice = &choice;
     set_clients(doc.value_mut(), choice);
     validated(doc.value())?;
     let text = doc.to_text()?;
@@ -822,7 +840,10 @@ pub fn set_clients_for(core: &Core, id: &str, choice: &ClientChoice) -> CmdResul
         "server.enable",
         id,
         format!("server: enable {id} for clients"),
-        |tx| tx.write(&relative, text),
+        |tx| {
+            tx.write(&relative, text)?;
+            agent_loadout_core::apply::import::unrelease_clients(tx, id, &requested).map(drop)
+        },
     )
 }
 
