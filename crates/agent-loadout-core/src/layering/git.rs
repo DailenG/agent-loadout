@@ -8,10 +8,14 @@ use std::path::{Path, PathBuf};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 
-/// The work tree holding a project folder.
+/// The work tree holding a project folder. Its folders are spelled like the
+/// folder it was discovered from: git2 reports resolved paths (symlinks
+/// such as macOS `/var`, Windows 8.3 short names expanded), and files the
+/// caller reads or writes through [`Fs`] stay under the spelling it uses.
 pub struct ProjectRepo {
     repo: git2::Repository,
     workdir: PathBuf,
+    commondir: PathBuf,
 }
 
 impl std::fmt::Debug for ProjectRepo {
@@ -37,10 +41,15 @@ impl ProjectRepo {
             Err(err) if err.code() == git2::ErrorCode::NotFound => return Ok(None),
             Err(err) => return Err(git_error(err).with_path(root)),
         };
-        let Some(workdir) = repo.workdir().map(Path::to_path_buf) else {
+        let Some(workdir) = repo.workdir().map(|dir| spelled_like(dir, root)) else {
             return Ok(None);
         };
-        Ok(Some(Self { repo, workdir }))
+        let commondir = spelled_like(repo.commondir(), root);
+        Ok(Some(Self {
+            repo,
+            workdir,
+            commondir,
+        }))
     }
 
     /// The work tree root.
@@ -91,7 +100,7 @@ impl ProjectRepo {
     /// `info/exclude` of the repository. Linked work trees share the one in
     /// the common directory.
     pub fn exclude_file(&self) -> PathBuf {
-        self.repo.commondir().join("info").join("exclude")
+        self.commondir.join("info").join("exclude")
     }
 
     /// Hides `path` from git by appending `/<relative path>` to
@@ -130,6 +139,31 @@ impl ProjectRepo {
         crate::apply::write_atomic(fs, &file, text.as_bytes())?;
         Ok(true)
     }
+}
+
+/// `path`, an existing folder as git2 reports it, spelled from the deepest
+/// ancestor-or-self of `root` it lies under once both are resolved; as it
+/// is when it already shares a spelling with `root` or cannot be resolved.
+fn spelled_like(path: &Path, root: &Path) -> PathBuf {
+    if root.starts_with(path) || path.starts_with(root) {
+        return path.to_path_buf();
+    }
+    let Ok(real) = std::fs::canonicalize(path) else {
+        return path.to_path_buf();
+    };
+    for base in root.ancestors() {
+        let Ok(real_base) = std::fs::canonicalize(base) else {
+            continue;
+        };
+        if let Ok(rest) = real.strip_prefix(&real_base) {
+            return if rest.as_os_str().is_empty() {
+                base.to_path_buf()
+            } else {
+                base.join(rest)
+            };
+        }
+    }
+    path.to_path_buf()
 }
 
 /// The deepest existing ancestor-or-self of `path` and the rest below it.

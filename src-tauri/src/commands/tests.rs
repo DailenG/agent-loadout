@@ -841,7 +841,13 @@ fn init_is_private_by_default_trusted_and_one_commit() {
         "no manifest: the page offers Init"
     );
     assert_eq!(picked.name, "fresh");
-    assert!(picked.path.starts_with('~') || picked.path.starts_with('%'));
+    // The folder is outside every placeholder root.
+    let external = if cfg!(windows) {
+        "%EXTERNAL%"
+    } else {
+        "$EXTERNAL"
+    };
+    assert_eq!(picked.path, format!("{external}/fresh"));
 
     let before = fx.commits();
     let done = projects::init(&fx.core, &root, false, None).unwrap();

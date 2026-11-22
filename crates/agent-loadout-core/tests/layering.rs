@@ -320,9 +320,11 @@ fn git_helpers_track_ignore_and_exclude() {
     assert!(!project.exclude(&fx.fs, &omp).unwrap());
     let text = std::fs::read_to_string(repo.path().join("info").join("exclude")).unwrap();
     assert_eq!(text.matches("/.omp/mcp.json").count(), 1, "{text}");
+    // Spelled like the folder it was discovered from, not as git2 resolves
+    // it (a symlinked temp folder, Windows 8.3 names).
     assert_eq!(
         project.exclude_file(),
-        repo.path().join("info").join("exclude")
+        root.join(".git").join("info").join("exclude")
     );
 }
 
@@ -338,7 +340,7 @@ fn a_linked_worktree_excludes_through_the_common_dir() {
     repo.worktree("tree", &tree, None).unwrap();
 
     let project = ProjectRepo::discover(&tree).unwrap().unwrap();
-    let common = repo.path().join("info").join("exclude");
+    let common = root.join(".git").join("info").join("exclude");
     assert_eq!(
         path_key(&project.exclude_file()),
         path_key(&common),

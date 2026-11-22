@@ -87,7 +87,13 @@ fn install_a_local_skill_enable_for_claude_code_and_the_link_exists() {
     let (path, shown, name) = skills::inspect_source(&fx.core, &folder).unwrap();
     assert_eq!(path, folder);
     assert_eq!(name, "repo-notes");
-    assert!(shown.starts_with('~') || shown.starts_with('%'), "{shown}");
+    // The download folder is outside every placeholder root.
+    let external = if cfg!(windows) {
+        "%EXTERNAL%"
+    } else {
+        "$EXTERNAL"
+    };
+    assert_eq!(shown, format!("{external}/repo-notes"));
 
     let installed = skills::install_local(&fx.core, &folder, None, false).unwrap();
     assert_eq!(installed.id, "repo-notes");
@@ -474,7 +480,14 @@ fn git_skill_update_check_diff_and_update() {
     let list = skills::list(&fx.core, &SkillScope::User).unwrap();
     let source = list.skills[0].source.clone().unwrap();
     assert_eq!(source.path.as_deref(), Some("skills/alpha"));
-    assert_eq!(source.url.as_deref(), Some("file:///~/up.git"));
+    // The home folder is scrubbed as written: `C:/...` follows the third
+    // slash on Windows, `/...` replaces it elsewhere.
+    let shown_url = if cfg!(windows) {
+        "file:///~/up.git"
+    } else {
+        "file://~/up.git"
+    };
+    assert_eq!(source.url.as_deref(), Some(shown_url));
     assert_no_root(&fx, &serde_json::to_string(&list).unwrap());
 
     let checks = skills::check_updates(&fx.core, &[]).unwrap();
