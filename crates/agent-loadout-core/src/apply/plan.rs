@@ -396,6 +396,22 @@ impl TargetInput {
     }
 }
 
+impl EntryPlan {
+    /// Whether the entry is blocked because a secret cannot be had on this
+    /// machine (SPEC 11.9, 14 exit code 5).
+    pub fn blocked_by_secret(&self) -> bool {
+        self.problem.as_ref().is_some_and(|err| {
+            matches!(
+                err.code(),
+                ErrorCode::MissingSecret
+                    | ErrorCode::SecretLocked
+                    | ErrorCode::ProviderUnavailable
+                    | ErrorCode::ProviderTooOld
+            )
+        })
+    }
+}
+
 impl TargetPlan {
     /// The client named in reports: the first one.
     pub fn client(&self) -> &'static str {

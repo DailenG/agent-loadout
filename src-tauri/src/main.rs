@@ -18,8 +18,27 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app_info,
             commands::list_scopes,
             commands::data_home,
+            commands::servers::list_servers,
+            commands::servers::get_server,
+            commands::servers::save_server,
+            commands::servers::save_server_toml,
+            commands::servers::remove_servers,
+            commands::servers::set_server_clients,
+            commands::servers::preview_server,
+            commands::servers::convert_snippet,
+            commands::servers::list_secret_aliases,
+            commands::apply::pending_plan,
+            commands::apply::run_apply,
+            commands::apply::list_applied_runs,
+            commands::apply::undo_apply,
+            commands::tools::list_tools,
+            commands::tools::reveal_tool_folder,
         ])
         .error_handling(ErrorHandlingMode::Result)
+        // One TypeScript type per Rust type: the IPC types serialize and
+        // deserialize alike, so the `_Serialize`/`_Deserialize` split adds
+        // nothing.
+        .disable_serde_phases()
         .constant("PRODUCT_NAME", brand::PRODUCT_NAME)
         .constant("APP_ID", brand::APP_ID)
         .constant("REPO", brand::REPO)

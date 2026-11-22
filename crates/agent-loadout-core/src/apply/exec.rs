@@ -29,6 +29,7 @@ use crate::formats::{Document, NativeMap, NativeValue};
 use crate::layering::ProjectRepo;
 use crate::model::applied::{AppliedRecord, AppliedTarget, ApplyOutcome, ApplyTrigger};
 use crate::model::ids;
+use crate::model::settings::ApplyMode;
 use crate::model::{SCHEMA_VERSION, TomlDocument};
 use crate::store::{ApplyRef, CommitId, Machine, Operation, Store, Transaction, utc_datetime};
 
@@ -97,6 +98,70 @@ impl ApplyReport {
     pub fn unresolved(&self) -> usize {
         self.targets.iter().map(TargetResult::unresolved).sum()
     }
+
+    /// What the run left for the user, most severe first (SPEC 14 exit
+    /// codes 1, 4, 5 and 7; the CLI maps it to its exit code, the app to
+    /// its notice).
+    pub fn status(&self) -> ApplyStatus {
+        if self
+            .targets
+            .iter()
+            .any(|target| target.outcome == ApplyOutcome::Failed)
+        {
+            ApplyStatus::FileFailed
+        } else if self.unresolved() > 0 {
+            ApplyStatus::NeedsDecision
+        } else if self
+            .targets
+            .iter()
+            .flat_map(|target| &target.entries)
+            .any(EntryPlan::blocked_by_secret)
+        {
+            ApplyStatus::MissingSecrets
+        } else if self.targets.iter().any(|target| {
+            target
+                .error
+                .as_ref()
+                .is_some_and(|error| error.code() == ErrorCode::TrustRequired)
+        }) {
+            ApplyStatus::TrustRequired
+        } else {
+            ApplyStatus::Done
+        }
+    }
+}
+
+/// What an apply run left for the user ([`ApplyReport::status`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ApplyStatus {
+    /// Nothing: every file is written or needed no change.
+    Done,
+    /// A file could not be written.
+    FileFailed,
+    /// Entries need a decision (collision, conflict, drift).
+    NeedsDecision,
+    /// Entries are blocked by secrets this machine cannot provide.
+    MissingSecrets,
+    /// A project waits for its manifests to be trusted.
+    TrustRequired,
+}
+
+/// In instant mode (`apply_mode`, the default), applies a staged store edit
+/// inside its transaction, so the edit and its apply are one commit
+/// (SPEC 8.7). `None` in review mode.
+pub fn instant_apply(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+) -> Result<Option<ApplyReport>, CoreError> {
+    let machine = tx.machine().id.clone();
+    if DesiredState::load(tx, Some(&machine))?.apply_mode() != ApplyMode::Instant {
+        return Ok(None);
+    }
+    let request = ApplyRequest {
+        options: PlanOptions::default(),
+        trigger: ApplyTrigger::Instant,
+    };
+    apply_in(tx, ax, &request).map(Some)
 }
 
 /// Plans against the store's working tree (or an empty desired state when

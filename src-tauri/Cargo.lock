@@ -30,6 +30,7 @@ name = "agent-loadout-app"
 version = "0.1.0"
 dependencies = [
  "agent-loadout-core",
+ "agent-loadout-testkit",
  "serde",
  "serde_json",
  "specta",
@@ -63,6 +64,16 @@ dependencies = [
  "toml_edit 0.25.20+spec-1.1.0",
  "windows-permissions",
  "zip",
+]
+
+[[package]]
+name = "agent-loadout-testkit"
+version = "0.1.0"
+dependencies = [
+ "agent-loadout-core",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

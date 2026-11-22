@@ -1,0 +1,237 @@
+import { screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { t } from "@/i18n/en";
+import type { AppliedRun, PendingPlan, PlannedFile } from "@/ipc/bindings";
+import {
+  MOCK_APPLY_RUN,
+  MOCK_CHANGE,
+  MOCK_CLIENTS,
+  mockIpcError,
+  ok,
+  type MockTransportOptions,
+} from "@/test/mockTransport";
+import { renderWithProviders } from "@/test/renderWithProviders";
+
+const USER_FILE: PlannedFile = {
+  // The backend sends placeholder paths, never the profile path.
+  file: "~/.claude.json",
+  clients: ["claude-code"],
+  scope: "user",
+  projectId: null,
+  counts: { create: 1, update: 2, remove: 0, disable: 0 },
+  diff: [
+    "--- a/.claude.json",
+    "+++ b/.claude.json",
+    "@@ -1,3 +1,4 @@",
+    ' "mcpServers": {',
+    '-  "old": {}',
+    '+  "demo": { "env": { "TOKEN": "********" } }',
+    " }",
+  ].join("\n"),
+  entries: [
+    {
+      action: "skip",
+      name: "drifty",
+      client: "claude-code",
+      server: "drifty",
+      state: "drifted",
+      unresolved: true,
+      problem: null,
+    },
+    {
+      action: "skip",
+      name: "locked-out",
+      client: "claude-code",
+      server: "locked-out",
+      state: "blocked",
+      unresolved: false,
+      problem: { code: "missing_secret", message: "synthetic" },
+    },
+  ],
+  problem: null,
+  warnings: [],
+};
+
+const CODEX_FILE: PlannedFile = {
+  ...USER_FILE,
+  file: "~/.codex/config.toml",
+  clients: ["codex"],
+  counts: { create: 0, update: 0, remove: 3, disable: 0 },
+  diff: "",
+  entries: [],
+};
+
+const PROJECT_FILE: PlannedFile = {
+  ...USER_FILE,
+  file: "<P>/.mcp.json",
+  clients: ["claude-code", "cursor"],
+  scope: "project",
+  projectId: "demo-project",
+  counts: { create: 0, update: 0, remove: 0, disable: 4 },
+  diff: "",
+  entries: [],
+  problem: { code: "trust_required", message: "synthetic" },
+};
+
+const PLAN: PendingPlan = {
+  applyMode: "instant",
+  files: [USER_FILE, CODEX_FILE, PROJECT_FILE],
+  pending: 9,
+  writes: 3,
+  unresolved: 1,
+  warnings: [],
+};
+
+const RUNS: AppliedRun[] = [
+  {
+    applyId: "01MOCKRUNB000000000000000000",
+    commit: "0000000000000000000000000000000000000002",
+    time: "2026-01-02T03:04:05Z",
+    summary: "apply: 1 file (codex)",
+    latest: true,
+  },
+  {
+    applyId: "01MOCKRUNA000000000000000000",
+    commit: "0000000000000000000000000000000000000001",
+    time: "2026-01-01T03:04:05Z",
+    summary: "apply: 2 files (claude-code)",
+    latest: false,
+  },
+];
+
+function renderDrawer(options: MockTransportOptions = {}) {
+  return renderWithProviders(<ApplyDrawer open onClose={() => undefined} />, {
+    commands: {
+      pendingPlan: async () => ok(PLAN),
+      listServers: async () => ok({ servers: [], clients: MOCK_CLIENTS, warnings: [] }),
+      ...options.commands,
+    },
+  });
+}
+
+describe("ApplyDrawer", () => {
+  it("renders nothing and queries nothing while closed", () => {
+    const { transport } = renderWithProviders(<ApplyDrawer open={false} onClose={() => undefined} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(transport.calls).not.toContain("pendingPlan");
+  });
+
+  it("groups files by scope with op counts and clients", async () => {
+    renderDrawer();
+    const user = await screen.findByRole("region", { name: t("apply.scope.user") });
+    const project = screen.getByRole("region", { name: t("apply.scope.project") });
+    expect(screen.queryByRole("region", { name: t("apply.scope.projectLocal") })).not.toBeInTheDocument();
+
+    expect(within(user).getByText(USER_FILE.file)).toBeInTheDocument();
+    expect(within(user).getByText(CODEX_FILE.file)).toBeInTheDocument();
+    expect(within(project).getByText(PROJECT_FILE.file)).toBeInTheDocument();
+    expect(
+      within(user).getByLabelText(t("apply.counts.aria", { create: 1, update: 2, remove: 0, disable: 0 })),
+    ).toHaveTextContent("+1~2-0!0");
+    expect(within(project).getByText("Claude Code, Cursor")).toBeInTheDocument();
+    expect(within(project).getByText(/needs to be trusted/)).toBeInTheDocument();
+  });
+
+  it("expands a file to its masked diff and the entries needing attention", async () => {
+    const { user } = renderDrawer();
+    const toggle = await screen.findByRole("button", { name: new RegExp(USER_FILE.file.replace(/\./g, "\\.")) });
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    const diff = screen.getByLabelText(t("apply.file.diff", { file: USER_FILE.file }));
+    const added = within(diff).getByText(/"demo"/);
+    expect(added).toHaveClass("apply-diff__line--added");
+    expect(added).toHaveTextContent("********");
+    expect(within(diff).getByText(/"old"/)).toHaveClass("apply-diff__line--removed");
+
+    const entries = screen.getByRole("list", { name: t("apply.entries.aria") });
+    expect(within(entries).getByText("drifty")).toBeInTheDocument();
+    expect(
+      within(entries).getByText(t("apply.entries.needsDecision", { state: t("apply.state.drifted") })),
+    ).toBeInTheDocument();
+    expect(within(entries).getByText("locked-out")).toBeInTheDocument();
+    expect(within(entries).getByText(t("apply.state.blocked"))).toBeInTheDocument();
+    expect(within(entries).getByText("A secret has no value.")).toBeInTheDocument();
+  });
+
+  it("applies the selected files' clients", async () => {
+    const runApply = vi.fn(async () => ok(MOCK_CHANGE));
+    const { user, transport } = renderDrawer({ commands: { runApply } });
+    const selectedButton = await screen.findByRole("button", { name: t("apply.action.selected") });
+    expect(selectedButton).toBeDisabled();
+
+    await user.click(await screen.findByRole("checkbox", { name: t("apply.file.select", { file: USER_FILE.file }) }));
+    await user.click(
+      screen.getByRole("checkbox", { name: t("apply.file.select", { file: PROJECT_FILE.file }) }),
+    );
+    await user.click(selectedButton);
+
+    await waitFor(() => expect(runApply).toHaveBeenCalled());
+    const call = transport.invocations.find((item) => item.command === "runApply");
+    expect(call?.args[0]).toEqual(["claude-code", "cursor"]);
+    expect(await screen.findByText(t("apply.applied"))).toBeInTheDocument();
+  });
+
+  it("applies everything with null", async () => {
+    const { user, transport } = renderDrawer();
+    await user.click(await screen.findByRole("button", { name: t("apply.action.all") }));
+    await waitFor(() =>
+      expect(transport.invocations.find((item) => item.command === "runApply")?.args[0]).toBeNull(),
+    );
+  });
+
+  it("shows the empty state when nothing is pending", async () => {
+    renderDrawer({
+      commands: {
+        pendingPlan: async () => ok({ ...PLAN, files: [], pending: 0, writes: 0, unresolved: 0 }),
+      },
+    });
+    expect(await screen.findByText(t("apply.empty.title"))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("apply.action.all") })).toBeDisabled();
+  });
+
+  it("closes on Escape and on the backdrop", async () => {
+    const onClose = vi.fn();
+    const { user, container } = renderWithProviders(<ApplyDrawer open onClose={onClose} />);
+    await screen.findByRole("dialog");
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await user.click(container.querySelector(".apply-drawer-backdrop") as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("undoes a recent apply", async () => {
+    const { user, transport } = renderDrawer({ commands: { listAppliedRuns: async () => ok(RUNS) } });
+    expect(await screen.findByText(RUNS[0].summary)).toBeInTheDocument();
+    const buttons = screen.getAllByRole("button", { name: t("apply.undo.action") });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[0]);
+    await waitFor(() =>
+      expect(transport.invocations.find((item) => item.command === "undoApply")?.args).toEqual([
+        RUNS[0].applyId,
+        false,
+      ]),
+    );
+  });
+
+  it("asks before undoing when later applies changed the same entries", async () => {
+    const undoApply = vi.fn(async (applyId: string, confirmed: boolean) =>
+      confirmed
+        ? ok({ applyId, restored: [], tag: "auto/pre-rollback/mock", commit: null, apply: MOCK_APPLY_RUN })
+        : mockIpcError({ code: "confirmation_required", message: "synthetic" }),
+    );
+    const { user } = renderDrawer({
+      commands: { listAppliedRuns: async () => ok(RUNS), undoApply },
+    });
+    await screen.findByText(RUNS[1].summary);
+    await user.click(screen.getAllByRole("button", { name: t("apply.undo.action") })[1]);
+
+    expect(await screen.findByText(t("apply.undo.confirmMessage"))).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: t("apply.undo.confirmAction") }));
+    await waitFor(() => expect(undoApply).toHaveBeenLastCalledWith(RUNS[1].applyId, true));
+    await waitFor(() =>
+      expect(screen.queryByText(t("apply.undo.confirmMessage"))).not.toBeInTheDocument(),
+    );
+  });
+});

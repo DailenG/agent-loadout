@@ -42,3 +42,5 @@ pub const COMMIT_AUTHOR_NAME: &str = "loadout";
 pub const COMMIT_EMAIL_DOMAIN: &str = "loadout.invalid";
 /// `Loadout-Client` trailer name of the CLI (`loadout-cli/<version>`).
 pub const CLI_CLIENT_NAME: &str = "loadout-cli";
+/// `Loadout-Client` trailer name of the desktop app (`loadout-app/<version>`).
+pub const APP_CLIENT_NAME: &str = "loadout-app";

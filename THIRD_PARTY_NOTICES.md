@@ -29,6 +29,14 @@ from the projects below. Every derived source file carries this header:
 | `src/app/components/notifications.tsx` | `src/app/notifications.tsx` | MIT | Copyright (c) 2026 wanghuan |
 | `src/app/components/SettingsGroup.tsx` (settings group, form row and theme picker markup, `ThemeIcon`) | `src/app/routes/settings.tsx` | MIT | Copyright (c) 2026 wanghuan |
 | `src/i18n/en.ts` (shell strings of the `en` catalog) | `src/app/i18n.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/mcp/McpPage.tsx` (toolbar, server card, monogram, detail container, two-click delete, empty state, M15) | `src/app/routes/mcp.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/mcp/ClientPill.tsx` ("Enable in Tools" pill markup) | `src/app/routes/mcp.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/mcp/ServerEditDialog.tsx` (dialog shell, header, footer, client checkbox grid) | `src/app/routes/mcp.tsx` (`McpEditDialog`) | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/mcp/icons.tsx` | `src/app/routes/mcp.tsx`, `src/features/skills/components/PowerToggleIcon.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/tools/ToolsPage.tsx` (grid layout; refresh button markup from `src/app/App.tsx`) | `src/app/routes/tools.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/tools/ToolManageDialog.tsx` (dialog shell) | `src/features/skills/components/ToolManageDialog.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/ToolLogo.tsx` (`McpToolLogo` and the logo manifest, keyed by Loadout client ids) | `src/app/routes/mcp.tsx`, `src/features/skills/utils/tool-logo-manifest.json` | MIT | Copyright (c) 2026 wanghuan |
+| `public/tool-logos/*` (client logos: the clients' trademarks, used nominatively to identify them, SPEC 18) | `public/tool-logos/*` | trademarks of their owners | |
 
 Each further port adds a row here with its origin path at
 `DailenG/skilldock@181b52b`.

@@ -35,7 +35,9 @@ use crate::paths::LoadoutHome;
 use crate::secrets::delivery::DeliveryEnv;
 use crate::secrets::scanner::SecretMemory;
 
-pub use exec::{ApplyReport, ApplyRequest, TargetResult, apply_in, preview, run};
+pub use exec::{
+    ApplyReport, ApplyRequest, ApplyStatus, TargetResult, apply_in, instant_apply, preview, run,
+};
 pub use plan::{
     Action, Decision, EntryPlan, EntryState, OnConflict, Plan, PlanOptions, ProjectSelection,
     ScopeFilter, TargetPlan,

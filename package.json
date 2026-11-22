@@ -12,12 +12,18 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run --config tests/e2e/vitest.config.ts",
     "bindings": "cargo test --manifest-path src-tauri/Cargo.toml -- --ignored --exact tests::write_bindings",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@tanstack/react-query": "^5.108.2",
     "@tauri-apps/api": "^2.12.5",
+    "codemirror": "^6.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

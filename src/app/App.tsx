@@ -19,6 +19,8 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { PendingChangesPill } from "@/app/apply/PendingChangesPill";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { AppTooltip } from "@/app/components/AppTooltip";
 import { EmptyPage } from "@/app/components/EmptyPage";
@@ -27,6 +29,8 @@ import { NotificationProvider, useNotifications } from "@/app/components/notific
 import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/SettingsGroup";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
+import { McpPage } from "@/app/routes/mcp/McpPage";
+import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import {
   dataHomeSourceLabels,
   errorMessage,
@@ -660,6 +664,7 @@ function AboutPage() {
 function RoutePage(props: {
   route: RouteDefinition;
   onNavigate: (route: RouteKey) => void;
+  onOpenPending: () => void;
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
 }) {
@@ -670,7 +675,18 @@ function RoutePage(props: {
   if (route.key === "about") {
     return <AboutPage />;
   }
-  if (route.key === "skills" || route.key === "mcp") {
+  if (route.key === "mcp") {
+    return (
+      <McpPage
+        onOpenPending={props.onOpenPending}
+        onOpenInstall={() => props.onNavigate("install")}
+      />
+    );
+  }
+  if (route.key === "tools") {
+    return <ToolsPage />;
+  }
+  if (route.key === "skills") {
     return (
       <>
         <HeaderToolbar>
@@ -718,6 +734,7 @@ function AppContent(props: { features: FeatureFlags }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarHandleTop, setSidebarHandleTop] = useState<number | null>(null);
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   useQueryErrorToasts();
 
   const visibleRoutes = routes.filter((route) => !route.flag || props.features[route.flag]);
@@ -840,6 +857,7 @@ function AppContent(props: { features: FeatureFlags }) {
           >
             <div className="page-header__row" data-tauri-drag-region={macOSDragRegion}>
               <h1>{t(activeDefinition.labelKey)}</h1>
+              <PendingChangesPill onOpen={() => setIsDrawerOpen(true)} />
               <div className="mcp-header-toolbar-slot" ref={setToolbarHost} />
             </div>
             <p>{t(activeDefinition.descriptionKey)}</p>
@@ -852,6 +870,7 @@ function AppContent(props: { features: FeatureFlags }) {
               <RoutePage
                 route={activeDefinition}
                 onNavigate={navigate}
+                onOpenPending={() => setIsDrawerOpen(true)}
                 theme={theme}
                 onThemeChange={setTheme}
               />
@@ -859,6 +878,7 @@ function AppContent(props: { features: FeatureFlags }) {
           </HeaderToolbarProvider>
         </section>
       </main>
+      <ApplyDrawer open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
     </div>
   );
 }

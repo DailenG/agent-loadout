@@ -27,6 +27,8 @@ views, tags and restore: `loadout show|tag|restore|backup`,
 `restore --from`), M13 (git remotes through the system git with `system`,
 `gh` or `token` auth; `loadout remote token|create-github`), M14 (desktop
 app shell: Tauri 2 with typed IPC, the SkillDock shell port, empty pages),
+M15 (desktop MCP page with per-client pills, Form/TOML/Preview editor and
+paste-anything, Tools page, pending-changes drawer with "Undo this apply"),
 M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and
 M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
 editors, and the ported user-scope clients) are in place. Gates V1 (Tier A)
@@ -58,6 +60,7 @@ npm run dev:mock               # the frontend in a browser, mock backend
 npx tauri dev                  # the app
 npx tauri build --debug
 npm run bindings               # regenerate src/ipc/bindings.ts after command changes
+npm run test:e2e               # tauri-driver smoke test (see tests/e2e/smoke_mcp.spec.ts)
 ```
 
 `src-tauri` is a Cargo workspace of its own, so the root workspace builds

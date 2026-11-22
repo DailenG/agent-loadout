@@ -24,18 +24,15 @@ pub mod tag;
 use std::path::Path;
 
 use agent_loadout_core::adapters::detect::NoRegistry;
-use agent_loadout_core::apply::render::DesiredState;
-use agent_loadout_core::apply::{
-    ApplyEnv, ApplyReport, ApplyRequest, EntryPlan, PlanOptions, TargetResult, apply_in,
-};
+pub use agent_loadout_core::apply::instant_apply;
+use agent_loadout_core::apply::{ApplyEnv, ApplyReport, ApplyStatus, EntryPlan, TargetResult};
 use agent_loadout_core::model::Diagnostic;
-use agent_loadout_core::model::applied::{ApplyOutcome, ApplyTrigger};
-use agent_loadout_core::model::settings::ApplyMode;
+use agent_loadout_core::model::applied::ApplyOutcome;
 use agent_loadout_core::paths::{LoadoutHome, SyncRoot, SyncRootKind};
 use agent_loadout_core::secrets::delivery::DeliveryEnv;
 use agent_loadout_core::secrets::providers::keyring::KeyringBackend;
 use agent_loadout_core::secrets::providers::onepassword::OpCli;
-use agent_loadout_core::store::{CommitId, Store, Transaction};
+use agent_loadout_core::store::{CommitId, Store};
 use agent_loadout_core::{CoreError, Env, ErrorCode, Fs, RealFs, brand};
 use serde_json::{Value, json};
 
@@ -147,66 +144,17 @@ pub fn exit_code(err: &CoreError) -> u8 {
     }
 }
 
-/// Whether an entry is blocked because a secret cannot be had on this
-/// machine (SPEC 11.9, 14 exit code 5).
-pub fn blocked_by_secret(entry: &EntryPlan) -> bool {
-    entry.problem.as_ref().is_some_and(|err| {
-        matches!(
-            err.code(),
-            ErrorCode::MissingSecret
-                | ErrorCode::SecretLocked
-                | ErrorCode::ProviderUnavailable
-                | ErrorCode::ProviderTooOld
-        )
-    })
-}
-
-/// In instant mode (`apply_mode`, the default), applies a staged store edit
-/// inside its transaction, so the edit and its apply are one commit
-/// (SPEC 8.7). `None` in review mode.
-pub fn instant_apply(
-    tx: &mut Transaction<'_>,
-    ax: &ApplyEnv<'_>,
-) -> Result<Option<ApplyReport>, CoreError> {
-    let machine = tx.machine().id.clone();
-    if DesiredState::load(tx, Some(&machine))?.apply_mode() != ApplyMode::Instant {
-        return Ok(None);
-    }
-    let request = ApplyRequest {
-        options: PlanOptions::default(),
-        trigger: ApplyTrigger::Instant,
-    };
-    apply_in(tx, ax, &request).map(Some)
-}
-
-/// The exit code of an apply run: 1 when a file failed, 4 when entries
-/// need a decision, 5 when entries are blocked by missing secrets, 7 when
-/// a project waits for `loadout project trust`, else 0.
+/// The exit code of an apply run ([`ApplyReport::status`]): 1 when a file
+/// failed, 4 when entries need a decision, 5 when entries are blocked by
+/// missing secrets, 7 when a project waits for `loadout project trust`,
+/// else 0.
 pub fn apply_exit_code(report: &ApplyReport) -> u8 {
-    if report
-        .targets
-        .iter()
-        .any(|target| target.outcome == ApplyOutcome::Failed)
-    {
-        1
-    } else if report.unresolved() > 0 {
-        EXIT_UNRESOLVED
-    } else if report
-        .targets
-        .iter()
-        .flat_map(|target| &target.entries)
-        .any(blocked_by_secret)
-    {
-        EXIT_MISSING_SECRETS
-    } else if report.targets.iter().any(|target| {
-        target
-            .error
-            .as_ref()
-            .is_some_and(|error| error.code() == ErrorCode::TrustRequired)
-    }) {
-        EXIT_TRUST_REQUIRED
-    } else {
-        0
+    match report.status() {
+        ApplyStatus::Done => 0,
+        ApplyStatus::FileFailed => 1,
+        ApplyStatus::NeedsDecision => EXIT_UNRESOLVED,
+        ApplyStatus::MissingSecrets => EXIT_MISSING_SECRETS,
+        ApplyStatus::TrustRequired => EXIT_TRUST_REQUIRED,
     }
 }
 

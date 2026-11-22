@@ -11,6 +11,22 @@ export const commands = {
 	listScopes: (options?: InvokeOptions) => __TAURI_INVOKE<Scope[]>("list_scopes", undefined, options),
 	/**  The resolved `LOADOUT_HOME` (SPEC 4.5). Reads nothing inside it. */
 	dataHome: (options?: InvokeOptions) => typedError<DataHome, IpcError>(__TAURI_INVOKE("data_home", undefined, options)),
+	listServers: (options?: InvokeOptions) => typedError<ServerList, IpcError>(__TAURI_INVOKE("list_servers", undefined, options)),
+	getServer: (id: string, options?: InvokeOptions) => typedError<ServerDetail, IpcError>(__TAURI_INVOKE("get_server", { id }, options)),
+	saveServer: (draft: ServerDraft, create: boolean, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("save_server", { draft, create }, options)),
+	saveServerToml: (id: string, text: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("save_server_toml", { id, text }, options)),
+	removeServers: (ids: string[], options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("remove_servers", { ids }, options)),
+	setServerClients: (id: string, clients: ClientChoice, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_server_clients", { id, clients }, options)),
+	previewServer: (draft: ServerDraft, options?: InvokeOptions) => typedError<ClientPreview[], IpcError>(__TAURI_INVOKE("preview_server", { draft }, options)),
+	convertSnippet: (text: string, options?: InvokeOptions) => typedError<ConvertedServer[], IpcError>(__TAURI_INVOKE("convert_snippet", { text }, options)),
+	listSecretAliases: (options?: InvokeOptions) => typedError<string[], IpcError>(__TAURI_INVOKE("list_secret_aliases", undefined, options)),
+	pendingPlan: (options?: InvokeOptions) => typedError<PendingPlan, IpcError>(__TAURI_INVOKE("pending_plan", undefined, options)),
+	runApply: (clients: string[] | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("run_apply", { clients }, options)),
+	listAppliedRuns: (options?: InvokeOptions) => typedError<AppliedRun[], IpcError>(__TAURI_INVOKE("list_applied_runs", undefined, options)),
+	undoApply: (applyId: string, confirmed: boolean, options?: InvokeOptions) => typedError<UndoResult, IpcError>(__TAURI_INVOKE("undo_apply", { applyId, confirmed }, options)),
+	listTools: (options?: InvokeOptions) => typedError<ToolInfo[], IpcError>(__TAURI_INVOKE("list_tools", undefined, options)),
+	/**  Opens the folder of `client`'s user MCP file. */
+	revealToolFolder: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_tool_folder", { client }, options)),
 };
 
 /* Constants */
@@ -25,14 +41,136 @@ export const PRODUCT_NAME = "Loadout" as const;
 export const REPO = "DailenG/agent-loadout" as const;
 
 /* Types */
+/**  What the executor does with an entry (SPEC 8.3). */
+export type ActionKind = "none" | "create" | "update" | "remove" | "disable" | "adopt" | "adopt_overwrite" | "refresh" | "forget" | "release" | "import" | "skip";
+
 export type AppInfo = {
 	/**  The app crate's version (`CARGO_PKG_VERSION`). */
 	version: string,
 	platform: Platform,
 };
 
+/**  One client file of an apply run. */
+export type AppliedFile = {
+	file: string,
+	clients: string[],
+	scope: FileScope,
+	outcome: OutcomeKind,
+	written: boolean,
+	counts: OpCounts,
+	error: IpcError | null,
+	/**  Entries with a problem or a pending decision. */
+	notes: EntryNote[],
+	warnings: IpcError[],
+};
+
+/**  An apply run this machine recorded, newest first. */
+export type AppliedRun = {
+	applyId: string,
+	commit: string,
+	/**  RFC 3339, UTC. */
+	time: string,
+	summary: string,
+	/**  The newest run: undoing it never asks (SPEC 8.7). */
+	latest: boolean,
+};
+
+/**
+ *  Whether store edits apply at once (the default) or wait for review
+ *  (SPEC 8.7 `apply_mode`).
+ */
+export type ApplyModeKind = "instant" | "review";
+
+/**  An apply run as the app shows it (`loadout apply` report). */
+export type ApplyRun = {
+	applyId: string,
+	outcome: OutcomeKind,
+	status: ApplyStatusKind,
+	/**
+	 *  Recorded in the store (`applied.toml` and the `Loadout-Apply`
+	 *  trailer), so it can be undone.
+	 */
+	recorded: boolean,
+	filesWritten: number,
+	unresolved: number,
+	/**  Files written or needing attention. */
+	files: AppliedFile[],
+	warnings: IpcError[],
+};
+
+/**  What an apply run left for the user (the CLI's exit codes 0, 1, 4, 5, 7). */
+export type ApplyStatusKind = "done" | "file_failed" | "needs_decision" | "missing_secrets" | "trust_required";
+
+/**
+ *  A store change and the apply that went with it: instant mode applies in
+ *  the same commit (SPEC 8.7); review mode leaves `apply` empty.
+ */
+export type ChangeResult = {
+	commit: string | null,
+	apply: ApplyRun | null,
+};
+
+/**  The clients a server is enabled for at system scope. */
+export type ClientChoice = {
+	/**  Every detected client whose capabilities fit (`all-detected`). */
+	allDetected: boolean,
+	/**  The listed clients, when not `all_detected`. */
+	clients: string[],
+};
+
+/**  A client the MCP page can enable servers for. */
+export type ClientInfo = {
+	id: string,
+	name: string,
+	/**  Installed on this machine (SPEC 7.7 probes). */
+	detected: boolean,
+	/**  Has an MCP config on this operating system. */
+	supported: boolean,
+};
+
+/**  One server for one client. */
+export type ClientPill = {
+	client: string,
+	/**  The store enables the server for this client. */
+	selected: boolean,
+	state: PillState,
+	reason: IpcError | null,
+};
+
+/**  One client's rendered entry for the Preview tab. */
+export type ClientPreview = {
+	client: string,
+	/**  The native entry key. */
+	name: string,
+	/**  `json`, `jsonc`, `toml`, `json5` or `yaml`. */
+	format: string,
+	/**
+	 *  The entry inside its container, as the client file would hold it,
+	 *  with values written in plain text (`inline`) masked.
+	 */
+	text: string | null,
+	/**  The delivery mode chosen for references (`env`, `launch`, ...). */
+	delivery: string | null,
+	/**  Why the client cannot get this server. */
+	problem: IpcError | null,
+	warnings: IpcError[],
+};
+
+/**  One server found in a pasted snippet. */
+export type ConvertedServer = {
+	name: string,
+	/**  The client whose shape the snippet has. */
+	sourceClient: string,
+	draft: ServerDraft | null,
+	/**  Why it cannot be taken as it is (`needs_secret_extraction`, ...). */
+	problem: IpcError | null,
+};
+
 export type DataHome = {
-	/**  Absolute path, for display. */
+	/**
+	 *  The folder under its placeholder root (`%LOCALAPPDATA%/Loadout`),
+	 *  for display.
+	 */
 	path: string,
 	source: DataHomeSource,
 };
@@ -45,6 +183,24 @@ export type DataHomeSource =
 "env_var" | 
 /**  The per-OS default (SPEC 4.5). */
 "default";
+
+/**  How secret references reach the server (SPEC 11.4). */
+export type DeliveryKind = "auto" | "env" | "launch" | "command" | "inline";
+
+/**  One entry of a client file that needs attention or changed. */
+export type EntryNote = {
+	/**  The native entry key. */
+	name: string,
+	client: string | null,
+	server: string | null,
+	state: EntryStateKind,
+	/**  The entry needs a decision (Overwrite, Import theirs, Skip). */
+	unresolved: boolean,
+	problem: IpcError | null,
+};
+
+/**  An entry compared with what is desired and what was written (SPEC 8.2). */
+export type EntryStateKind = "synced" | "pending_create" | "pending_update" | "pending_remove" | "drifted" | "missing" | "conflict" | "foreign" | "collision" | "blocked";
 
 /**
  *  Stable error code, serialized as `snake_case` (the same string as
@@ -356,6 +512,9 @@ export type ErrorCode =
  */
 "restart_required";
 
+/**  Which layer a client file belongs to (SPEC 6.1). */
+export type FileScope = "user" | "project" | "project_local";
+
 /**
  *  A failed command: the stable code the frontend localizes from, plus
  *  English diagnostic detail (never shown as state).
@@ -363,6 +522,81 @@ export type ErrorCode =
 export type IpcError = {
 	code: ErrorCode,
 	message: string,
+};
+
+/**
+ *  An environment variable or header: the value is a literal or holds
+ *  references (`${secret:ALIAS}`, `${env:NAME}`), never a secret itself.
+ */
+export type KeyValue = {
+	key: string,
+	value: string,
+};
+
+/**  Planned or done create, update, remove and disable operations. */
+export type OpCounts = {
+	create: number,
+	update: number,
+	remove: number,
+	disable: number,
+};
+
+/**  Result of an apply run or of one file (SPEC 8.7). */
+export type OutcomeKind = "ok" | "partial" | "blocked" | "failed";
+
+export type PendingPlan = {
+	applyMode: ApplyModeKind,
+	/**  Files with work, decisions or problems. */
+	files: PlannedFile[],
+	/**
+	 *  Entries waiting for an apply, a decision, or blocked: the header's
+	 *  pending-changes pill (SPEC 13.1).
+	 */
+	pending: number,
+	writes: number,
+	unresolved: number,
+	warnings: IpcError[],
+};
+
+/**  A pill's state (SPEC 13.2). */
+export type PillState = 
+/**  Not enabled, and nothing of it in the client's file. */
+"disabled" | 
+/**  Enabled and written as desired. */
+"enabled" | 
+/**  The store and the client file differ until the next apply. */
+"pending" | 
+/**
+ *  The file changed since it was written, or collides with a foreign
+ *  entry: needs a decision.
+ */
+"drift" | 
+/**  Cannot be written; see the reason. */
+"blocked" | 
+/**  The client has no MCP config at this scope or on this OS. */
+"not_supported";
+
+export type PlannedEntry = {
+	action: ActionKind,
+} & EntryNote;
+
+/**  One client file of the pending plan. */
+export type PlannedFile = {
+	file: string,
+	clients: string[],
+	scope: FileScope,
+	projectId: string | null,
+	counts: OpCounts,
+	/**
+	 *  Unified diff of the file text, values written `inline` masked;
+	 *  empty when the file stays as it is.
+	 */
+	diff: string,
+	/**  Entries that change, need a decision or are blocked. */
+	entries: PlannedEntry[],
+	/**  The whole file is blocked (`parse_error`, `trust_required`, ...). */
+	problem: IpcError | null,
+	warnings: IpcError[],
 };
 
 /**
@@ -379,6 +613,121 @@ export type Platform = "windows" | "linux" | "macos";
 export type Scope = 
 /**  User-wide configuration of every client. */
 { kind: "system" };
+
+export type ServerDetail = {
+	/**
+	 *  The Form view; `None` when the file does not load (see `invalid`),
+	 *  so only the TOML tab can fix it.
+	 */
+	draft: ServerDraft | null,
+	invalid: IpcError | null,
+	/**  `store/servers/<id>.toml` as it is. */
+	toml: string,
+};
+
+/**
+ *  The edit dialog's Form (SPEC 13.2). Store values only: the store never
+ *  holds a secret value (SPEC 11.8), so nothing here needs masking.
+ */
+export type ServerDraft = {
+	id: string,
+	displayName: string | null,
+	description: string | null,
+	transport: TransportKind,
+	command: string | null,
+	args: string[],
+	url: string | null,
+	cwd: string | null,
+	env: KeyValue[],
+	headers: KeyValue[],
+	clients: ClientChoice,
+	delivery: DeliveryKind | null,
+	toolsAllow: string[],
+	toolsDeny: string[],
+};
+
+export type ServerList = {
+	servers: ServerRow[],
+	/**  Clients with an MCP config, in adapter table order. */
+	clients: ClientInfo[],
+	/**  Plan problems outside any server row. */
+	warnings: IpcError[],
+};
+
+/**  One row of the MCP page. */
+export type ServerRow = {
+	id: string,
+	displayName: string | null,
+	description: string | null,
+	transport: TransportKind | null,
+	/**
+	 *  Command and arguments, or the URL, as stored: references are shown,
+	 *  values never.
+	 */
+	launch: string,
+	origin: string | null,
+	tags: string[],
+	clients: ClientChoice,
+	/**  One pill per client the page lists, in [`ServerList::clients`] order. */
+	pills: ClientPill[],
+	/**  Problems of this server's entries (`missing_secret`, ...), once each. */
+	problems: IpcError[],
+	/**
+	 *  The server file does not load; the row offers only Edit (TOML) and
+	 *  Delete.
+	 */
+	invalid: IpcError | null,
+};
+
+export type TierKind = "a" | "b" | "c" | "d";
+
+export type ToolFile = {
+	path: string,
+	exists: boolean,
+};
+
+/**  One client on the Tools page. */
+export type ToolInfo = {
+	id: string,
+	name: string,
+	tier: TierKind,
+	detected: boolean,
+	/**  Has an MCP config on this operating system. */
+	supported: boolean,
+	/**  Loadout only reads this client (`vscode-legacy`). */
+	readOnly: boolean,
+	/**  User-scope MCP files (the first existing one is used). */
+	userFiles: ToolFile[],
+	/**
+	 *  Project files, relative to the project folder (`<P>/...`) or absolute
+	 *  for a user file keyed by project.
+	 */
+	projectFiles: string[],
+	transports: Transports,
+	/**  The client expands environment references (`${env:NAME}`) itself. */
+	envRefs: boolean,
+	/**  The client reads its file only at launch. */
+	restartRequired: boolean,
+	warnings: IpcError[],
+};
+
+export type TransportKind = "stdio" | "http" | "sse";
+
+export type Transports = {
+	stdio: boolean,
+	http: boolean,
+	sse: boolean,
+};
+
+export type UndoResult = {
+	applyId: string,
+	/**  Store files restored from before the run. */
+	restored: string[],
+	/**  The `auto/pre-rollback/<ts>` tag. */
+	tag: string,
+	commit: string | null,
+	apply: ApplyRun,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
