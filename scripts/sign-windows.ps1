@@ -2,7 +2,12 @@
 .SYNOPSIS
     Signs one file for a Loadout Windows build (SPEC 16.1). Tauri runs this
     as bundle.windows.signCommand for the app executable, loadout.exe, the
-    NSIS uninstaller and the installer.
+    NSIS uninstaller, the installer, and the NSIS plugin DLLs packed inside
+    the installer (NSISdl, StartMenu, System, nsDialogs, nsis_tauri_utils).
+    The plugins are signed on purpose (Tauri's default): they are extracted
+    to %TEMP% and run as part of our installer, and unsigned DLLs there draw
+    more antivirus false positives. Signing them means the Loadout identity
+    vouches for that exact copy as shipped in the Loadout installer.
 
 .DESCRIPTION
     Signing happens only when all four variables are set:

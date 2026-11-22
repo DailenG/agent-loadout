@@ -1,0 +1,13 @@
+{
+  "productName": "agent-loadout",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/loadout.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/loadout.desktop"
+      }
+    }
+  }
+}

@@ -126,11 +126,11 @@ fn main() {
     let builder = specta_builder();
     let context = tauri::generate_context!();
     // SPEC 16.4: the updater exists only in release builds whose config
-    // carries `plugins.updater`, and only on Windows or in an AppImage.
+    // carries `plugins.updater`, packaged as the NSIS installer or the
+    // AppImage (the bundle type Tauri stamps into the binary).
     let updater = commands::updates::updater_supported(
         context.config().plugins.0.contains_key("updater"),
-        cfg!(windows),
-        std::env::var_os("APPIMAGE").is_some(),
+        tauri::utils::platform::bundle_type(),
     );
     let mut app = tauri::Builder::default()
         .manage(commands::AppState::from_process())

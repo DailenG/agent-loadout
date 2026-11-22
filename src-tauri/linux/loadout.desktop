@@ -1,0 +1,15 @@
+{{!-- Tauri's freedesktop main.desktop with Name fixed to Loadout: on Linux the
+productName is agent-loadout (tauri.linux.conf.json, the deb/rpm package name). --}}[Desktop Entry]
+Categories={{categories}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}}{{exec_arg}}
+StartupWMClass={{exec}}
+Icon={{icon}}
+Name=Loadout
+Terminal=false
+Type=Application
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}

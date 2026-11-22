@@ -1,13 +1,17 @@
 //! In-app updates (SPEC 16.4). The updater plugin is part of the app only
 //! when the build's configuration carries `plugins.updater` (the release
 //! job merges it in from repository variables; committed configuration has
-//! no endpoint and no public key) and the app runs as the Windows NSIS
-//! install or as an AppImage. AUR, deb, rpm, source and macOS builds never
-//! have it. Settings > Updates turns checking off (`check_for_updates` in
+//! no endpoint and no public key) and the binary is the one Tauri patched as
+//! the NSIS install or the AppImage (`bundle_type`, stamped into the binary
+//! at bundle time, so an inherited `APPIMAGE` variable changes nothing).
+//! AUR, deb, rpm, source, `cargo run` and macOS builds never have it.
+//! Settings > Updates turns checking off (`check_for_updates` in
 //! `local-settings.toml`); with it off, or without the updater, nothing
 //! here touches the network.
 
 use std::sync::Mutex;
+
+use tauri::utils::config::BundleType;
 
 use agent_loadout_core::error::{CoreError, ErrorCode};
 use agent_loadout_core::local_settings::LocalSettings;
@@ -17,10 +21,10 @@ use specta::Type;
 use super::{AppState, CmdResult, Core, IpcError, blocking};
 
 /// Whether this process runs with the updater plugin: a build configured
-/// for it, on Windows, or on Linux inside an AppImage (`APPIMAGE` set by
-/// the AppImage runtime).
-pub fn updater_supported(configured: bool, windows: bool, appimage: bool) -> bool {
-    configured && (windows || (cfg!(target_os = "linux") && appimage))
+/// for it, packaged as the NSIS installer or the AppImage. `bundle` is
+/// `tauri::utils::platform::bundle_type()`.
+pub fn updater_supported(configured: bool, bundle: Option<BundleType>) -> bool {
+    configured && matches!(bundle, Some(BundleType::Nsis | BundleType::AppImage))
 }
 
 /// Process-wide updater state: whether the plugin is registered, and the
@@ -187,19 +191,26 @@ mod tests {
     use crate::commands::tests::Fx;
 
     #[test]
-    fn the_updater_needs_a_configured_build_on_windows_or_an_appimage() {
+    fn the_updater_needs_a_configured_nsis_or_appimage_build() {
         assert!(
-            !updater_supported(false, true, false),
+            !updater_supported(false, Some(BundleType::Nsis)),
             "no feed, no updater"
         );
-        assert!(!updater_supported(false, false, true));
-        assert!(updater_supported(true, true, false));
-        assert!(!updater_supported(true, false, false), "deb, rpm, AUR");
-        assert_eq!(
-            updater_supported(true, false, true),
-            cfg!(target_os = "linux"),
-            "AppImage only on Linux"
-        );
+        assert!(!updater_supported(false, Some(BundleType::AppImage)));
+        assert!(updater_supported(true, Some(BundleType::Nsis)));
+        assert!(updater_supported(true, Some(BundleType::AppImage)));
+        for other in [
+            None,
+            Some(BundleType::Deb),
+            Some(BundleType::Rpm),
+            Some(BundleType::Msi),
+            Some(BundleType::App),
+        ] {
+            assert!(
+                !updater_supported(true, other.clone()),
+                "{other:?}: deb, rpm, AUR, unbundled and macOS builds"
+            );
+        }
     }
 
     #[test]

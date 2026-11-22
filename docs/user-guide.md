@@ -41,9 +41,9 @@ version):
 | Asset | What it is |
 |---|---|
 | `Loadout_X.Y.Z_x64-setup.exe` | Windows installer (NSIS, per user) |
-| `Loadout_X.Y.Z_amd64.AppImage` | Linux AppImage |
-| `Loadout_X.Y.Z_amd64.deb` | Debian and Ubuntu package |
-| `Loadout-X.Y.Z-1.x86_64.rpm` | Fedora and openSUSE package |
+| `agent-loadout_X.Y.Z_amd64.AppImage` | Linux AppImage |
+| `agent-loadout_X.Y.Z_amd64.deb` | Debian and Ubuntu package |
+| `agent-loadout-X.Y.Z-1.x86_64.rpm` | Fedora and openSUSE package |
 | `agent-loadout-X.Y.Z-x86_64-linux.tar.gz` | Linux binaries (used by the AUR `agent-loadout-bin` package) |
 | `SHA256SUMS` | SHA-256 checksums of the assets above |
 | `latest.json`, `*.sig` | The in-app updater feed and update signatures (only on releases built with the updater key) |
@@ -91,14 +91,16 @@ or `paru -S agent-loadout`. Both install `/usr/bin/loadout` (the CLI),
 
 ### Other Linux distributions
 
-- **AppImage**: `chmod +x Loadout_X.Y.Z_amd64.AppImage`, then run it.
-- **Debian, Ubuntu**: `sudo apt install ./Loadout_X.Y.Z_amd64.deb`
-- **Fedora, openSUSE**: `sudo dnf install ./Loadout-X.Y.Z-1.x86_64.rpm`
-  (or `sudo zypper install ./Loadout-X.Y.Z-1.x86_64.rpm`)
+- **AppImage**: `chmod +x agent-loadout_X.Y.Z_amd64.AppImage`, then run it.
+- **Debian, Ubuntu**: `sudo apt install ./agent-loadout_X.Y.Z_amd64.deb`
+- **Fedora, openSUSE**: `sudo dnf install ./agent-loadout-X.Y.Z-1.x86_64.rpm`
+  (or `sudo zypper install ./agent-loadout-X.Y.Z-1.x86_64.rpm`)
 
-The `.deb` and `.rpm` install the desktop app as `/usr/bin/agent-loadout-app`
-and the CLI as `/usr/bin/loadout`. The AppImage holds both, but only the app
-is started from it; for the CLI on `PATH`, use a package or `cargo install`.
+The `.deb` and `.rpm` packages are named `agent-loadout` (not `loadout`, the
+name of an unrelated tool's packages). They install the desktop app as
+`/usr/bin/agent-loadout-app`, with a "Loadout" menu entry, and the CLI as
+`/usr/bin/loadout`. The AppImage holds both, but only the app is started
+from it; for the CLI on `PATH`, use a package or `cargo install`.
 
 The desktop app needs WebKitGTK 4.1. If the window opens blank, see
 [Blank window on Linux](#blank-window-on-linux). To store secrets in the OS
@@ -622,7 +624,7 @@ the app with the DMA-BUF renderer turned off:
 WEBKIT_DISABLE_DMABUF_RENDERER=1 agent-loadout-app
 ```
 
-For the AppImage: `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./Loadout_X.Y.Z_amd64.AppImage`.
+For the AppImage: `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./agent-loadout_X.Y.Z_amd64.AppImage`.
 To make it permanent for the menu entry, copy the desktop file to
 `~/.local/share/applications/` and change its `Exec=` line to
 `Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 agent-loadout-app`. Loadout does
@@ -690,8 +692,8 @@ Then remove the program:
   `winget uninstall --id DailenG.AgentLoadout`). This removes the install
   folder from your user `PATH`.
 - **Arch Linux**: `sudo pacman -R agent-loadout` (or `agent-loadout-bin`).
-- **Debian, Ubuntu, Fedora, openSUSE**: the package is named `loadout`:
-  `sudo apt remove loadout` or `sudo dnf remove loadout`.
+- **Debian, Ubuntu, Fedora, openSUSE**: the package is named `agent-loadout`:
+  `sudo apt remove agent-loadout` or `sudo dnf remove agent-loadout`.
 - **AppImage**: delete the file.
 - **cargo**: `cargo uninstall agent-loadout`.
 

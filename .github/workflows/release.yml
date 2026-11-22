@@ -102,12 +102,19 @@ jobs:
 
       - name: Azure login (OIDC)
         if: env.SIGNING == 'true'
-        uses: azure/login@v2
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           allow-no-subscriptions: ${{ vars.AZURE_SUBSCRIPTION_ID == '' }}
+      # GitHub's ID token expires within minutes, long before the build
+      # reaches its first signCommand; the login caches only an ARM token.
+      # Fetch the Trusted Signing token now (valid about an hour). The token
+      # itself never reaches the log (--output none).
+      - name: Trusted Signing token
+        if: env.SIGNING == 'true'
+        run: az account get-access-token --scope https://codesigning.azure.net/.default --output none
       - name: Code-signing kit
         if: env.SIGNING == 'true'
         uses: actions/checkout@v4
@@ -115,6 +122,9 @@ jobs:
           repository: DailenG/code-signing-kit
           token: ${{ secrets.CODE_SIGNING_KIT_TOKEN }}
           path: code-signing-kit
+          # Read from disk only; the token must not stay in .git/config
+          # while npm and cargo build scripts run.
+          persist-credentials: false
       - name: Signing tools
         if: env.SIGNING == 'true'
         shell: pwsh
@@ -221,9 +231,11 @@ jobs:
           }' > "$RUNNER_TEMP/tauri.updater.conf.json"
 
       # The updater config is in every Linux bundle, but the app turns the
-      # updater on only inside the AppImage (APPIMAGE set); deb and rpm
-      # installs, and the AUR packages cut from the deb, never update
-      # themselves (SPEC 16.2).
+      # updater on only in the binary Tauri stamps as the AppImage
+      # (bundle_type); deb and rpm installs, and the AUR packages cut from
+      # the deb, never update themselves (SPEC 16.2). On Linux the product
+      # name, and so the package and file names, is agent-loadout
+      # (tauri.linux.conf.json).
       - name: Build AppImage, deb and rpm
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -240,7 +252,8 @@ jobs:
         run: |
           set -euo pipefail
           bundle=src-tauri/target/release/bundle
-          deb="$bundle/deb/Loadout_${VERSION}_amd64.deb"
+          deb="$bundle/deb/agent-loadout_${VERSION}_amd64.deb"
+          dpkg-deb -f "$deb" Package | grep -qx agent-loadout
           dpkg-deb -c "$deb" | grep -q ' ./usr/bin/loadout$'
           dpkg-deb -c "$deb" | grep -q ' ./usr/bin/agent-loadout-app$'
           top="agent-loadout-${VERSION}-x86_64-linux"
@@ -250,9 +263,9 @@ jobs:
           cp LICENSE THIRD_PARTY_NOTICES.md "stage/$top/"
           mkdir -p out
           tar -C stage -czf "out/$top.tar.gz" "$top"
-          cp "$deb" "$bundle/rpm/Loadout-${VERSION}-1.x86_64.rpm" "$bundle/appimage/Loadout_${VERSION}_amd64.AppImage" out/
+          cp "$deb" "$bundle/rpm/agent-loadout-${VERSION}-1.x86_64.rpm" "$bundle/appimage/agent-loadout_${VERSION}_amd64.AppImage" out/
           if [ "$UPDATER" = true ]; then
-            cp "$bundle/appimage/Loadout_${VERSION}_amd64.AppImage.sig" out/
+            cp "$bundle/appimage/agent-loadout_${VERSION}_amd64.AppImage.sig" out/
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -286,7 +299,7 @@ jobs:
         run: |
           set -euo pipefail
           win="Loadout_${VERSION}_x64-setup.exe"
-          app="Loadout_${VERSION}_amd64.AppImage"
+          app="agent-loadout_${VERSION}_amd64.AppImage"
           if [ ! -f "dist/$win.sig" ] || [ ! -f "dist/$app.sig" ]; then
             echo "No updater signatures (LOADOUT_UPDATER_PUBKEY not set): no latest.json."
             exit 0
