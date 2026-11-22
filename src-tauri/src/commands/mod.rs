@@ -27,6 +27,7 @@ mod tests_skills;
 #[cfg(test)]
 mod tests_versioning;
 pub mod tools;
+pub mod updates;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

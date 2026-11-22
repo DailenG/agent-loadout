@@ -223,6 +223,9 @@ pub enum ErrorCode {
     /// A skill's source (git repository or folder) cannot be reached or no
     /// longer holds the skill (SPEC 12.4). The store copy is left intact.
     SourceUnreachable,
+    /// The desktop app's update check or install failed, or updates are
+    /// turned off or not part of this build (SPEC 16.4).
+    UpdateFailed,
 }
 
 impl ErrorCode {
@@ -297,6 +300,7 @@ impl ErrorCode {
             ErrorCode::ClientEnableRequired => "client_enable_required",
             ErrorCode::RestartRequired => "restart_required",
             ErrorCode::SourceUnreachable => "source_unreachable",
+            ErrorCode::UpdateFailed => "update_failed",
         }
     }
 }

@@ -6,3 +6,5 @@ target/
 # ACL schemas tauri-build regenerates on every build.
 /src-tauri/gen/
 
+# The CLI that `scripts/stage-cli.mjs` stages for `bundle.externalBin`.
+/src-tauri/binaries/

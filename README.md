@@ -39,14 +39,19 @@ archive, MCP by form or pasted config), M20 core and CLI
 (`loadout migrate skilldock [--apply]`: SkillDock's `~/.skilldock`, read only,
 into the store in one commit, with a report of every item; the migration
 wizard page follows),
-M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and
+M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build),
 M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
-editors, and the ported user-scope clients) are in place. Gates V1 (Tier A)
+editors, and the ported user-scope clients) and M23 (packaging: the NSIS
+installer with `loadout` on the user PATH, AppImage/deb/rpm, AUR PKGBUILDs,
+winget manifests, the release workflow with Azure Trusted Signing, and the
+optional updater) are in place. Gates V1 (Tier A)
 and V2 (Tier B),
 the real-client checks, are partly run; see
 [docs/verify/README.md](docs/verify/README.md).
-Nothing is released yet. JSON Schemas for store files, for editor completion,
-are in [docs/schema](docs/schema).
+Nothing is released yet. Installing and using Loadout:
+[docs/user-guide.md](docs/user-guide.md); supported clients:
+[docs/adapters.md](docs/adapters.md). JSON Schemas for store files, for
+editor completion, are in [docs/schema](docs/schema).
 
 ## Build
 

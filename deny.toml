@@ -19,6 +19,10 @@ allow = [
     # Permissive; the app crate's Tauri tree (`src-tauri`, M14): brotli's
     # alloc crates, libloading and foldhash/zlib-rs.
     "BSD-3-Clause",
+    # Permissive data license; Mozilla's root certificates in
+    # webpki-root-certs, through reqwest's rustls-platform-verifier (the app
+    # crate's Tauri tree and its updater plugin, M23).
+    "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     # File-level copyleft; reached through dirs -> dirs-sys -> option-ext.

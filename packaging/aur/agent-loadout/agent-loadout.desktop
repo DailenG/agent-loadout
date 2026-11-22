@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Loadout
+Comment=Manage MCP servers, skills and secret references for AI coding clients
+Exec=agent-loadout-app
+Icon=agent-loadout-app
+Terminal=false
+Categories=Development;
+StartupWMClass=agent-loadout-app

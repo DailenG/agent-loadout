@@ -29,6 +29,10 @@ pub struct LocalSettings {
     pub schema: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_remote_offer: Option<BackupRemoteOffer>,
+    /// Settings > Updates switch (SPEC 16.4). Absent means on; read only
+    /// by builds that carry the updater.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_for_updates: Option<bool>,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -38,6 +42,7 @@ impl Default for LocalSettings {
         Self {
             schema: SCHEMA_VERSION,
             backup_remote_offer: None,
+            check_for_updates: None,
             extra: toml::Table::new(),
         }
     }

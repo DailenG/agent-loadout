@@ -1,0 +1,328 @@
+# Release (SPEC 16, M23): on a version tag, builds the Windows NSIS installer
+# (signed with Azure Trusted Signing when configured) and the Linux AppImage,
+# .deb and .rpm on Ubuntu 22.04, then creates a draft GitHub release with
+# every asset, SHA256SUMS, the AUR -bin tarball, the rendered winget
+# manifests and, when the updater key is configured, latest.json.
+#
+# Repository configuration (Settings > Secrets and variables > Actions), all
+# optional; without them the release is unsigned and has no updater feed:
+#
+#   Variables
+#     LOADOUT_SIGN_ACCOUNT    Trusted Signing account name     } all four turn
+#     LOADOUT_SIGN_ENDPOINT   e.g. https://eus.codesigning.azure.net } signing on
+#     LOADOUT_SIGN_PROFILE    certificate profile name         }
+#     AZURE_CLIENT_ID         app registration with a federated credential
+#     AZURE_TENANT_ID         for this repository (OIDC, no client secret)
+#     AZURE_SUBSCRIPTION_ID   optional; the login runs without one
+#     LOADOUT_UPDATER_PUBKEY  public key from `npx tauri signer generate`
+#     LOADOUT_UPDATER_ENDPOINT  optional; default is this repository's
+#                             releases/latest/download/latest.json
+#   Secrets
+#     CODE_SIGNING_KIT_TOKEN  read-only token for DailenG/code-signing-kit
+#     TAURI_SIGNING_PRIVATE_KEY           private updater key (with the
+#     TAURI_SIGNING_PRIVATE_KEY_PASSWORD  variable LOADOUT_UPDATER_PUBKEY)
+#
+# Every job runs in the `release` environment, so the maintainer can add a
+# required reviewer and scope the Azure federated credential to it.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the crate and package versions
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          workspace="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          app="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+          npm="$(jq -r .version package.json)"
+          aur="$(sed -n 's/^pkgver=//p' packaging/aur/agent-loadout/PKGBUILD)"
+          for v in "$workspace" "$app" "$npm" "$aur"; do
+            if [ "$v" != "$tag" ]; then
+              echo "::error::tag $GITHUB_REF_NAME, but versions are workspace $workspace, app $app, package.json $npm, AUR $aur"
+              exit 1
+            fi
+          done
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SIGNING: ${{ vars.LOADOUT_SIGN_ACCOUNT != '' && vars.LOADOUT_SIGN_ENDPOINT != '' && vars.LOADOUT_SIGN_PROFILE != '' }}
+      UPDATER: ${{ vars.LOADOUT_UPDATER_PUBKEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Updater config
+        if: env.UPDATER == 'true'
+        shell: bash
+        env:
+          PUBKEY: ${{ vars.LOADOUT_UPDATER_PUBKEY }}
+          ENDPOINT: ${{ vars.LOADOUT_UPDATER_ENDPOINT || 'https://github.com/DailenG/agent-loadout/releases/latest/download/latest.json' }}
+        run: |
+          jq -n --arg pubkey "$PUBKEY" --arg endpoint "$ENDPOINT" '{
+            bundle: { createUpdaterArtifacts: true },
+            plugins: { updater: {
+              pubkey: $pubkey,
+              endpoints: [$endpoint],
+              requireSignedVersion: true,
+              windows: { installMode: "passive" }
+            } }
+          }' > "$RUNNER_TEMP/tauri.updater.conf.json"
+
+      - name: Azure login (OIDC)
+        if: env.SIGNING == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: ${{ vars.AZURE_SUBSCRIPTION_ID == '' }}
+      - name: Code-signing kit
+        if: env.SIGNING == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: DailenG/code-signing-kit
+          token: ${{ secrets.CODE_SIGNING_KIT_TOKEN }}
+          path: code-signing-kit
+      - name: Signing tools
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: |
+          Import-Module (Join-Path $env:GITHUB_WORKSPACE 'code-signing-kit\module\TrustedSigning\TrustedSigning.psd1')
+          Install-TrustedSigningTool
+
+      # signCommand (tauri.conf.json) runs scripts/sign-windows.ps1 for the
+      # app, loadout.exe, the uninstaller and the installer; with the
+      # LOADOUT_SIGN_* values empty it prints "unsigned dev build".
+      - name: Build NSIS installer
+        shell: pwsh
+        env:
+          LOADOUT_SIGN_KIT: ${{ env.SIGNING == 'true' && format('{0}\code-signing-kit', github.workspace) || '' }}
+          LOADOUT_SIGN_ACCOUNT: ${{ env.SIGNING == 'true' && vars.LOADOUT_SIGN_ACCOUNT || '' }}
+          LOADOUT_SIGN_ENDPOINT: ${{ env.SIGNING == 'true' && vars.LOADOUT_SIGN_ENDPOINT || '' }}
+          LOADOUT_SIGN_PROFILE: ${{ env.SIGNING == 'true' && vars.LOADOUT_SIGN_PROFILE || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $configs = @('--config', 'src-tauri/tauri.release.conf.json')
+          if ($env:UPDATER -eq 'true') { $configs += @('--config', (Join-Path $env:RUNNER_TEMP 'tauri.updater.conf.json')) }
+          npx tauri build @configs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Installs the built installer silently into a temp folder: checks that
+      # it ships loadout.exe next to the app, that the CLI runs, and (when
+      # signing ran) that every shipped executable verifies.
+      - name: Install, smoke test and verify signatures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = "src-tauri\target\release\bundle\nsis\Loadout_$($env:VERSION)_x64-setup.exe"
+          $dir = Join-Path $env:RUNNER_TEMP 'loadout-install'
+          $p = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          $files = @($installer) + @('agent-loadout-app.exe', 'loadout.exe', 'uninstall.exe' | ForEach-Object { Join-Path $dir $_ })
+          foreach ($f in $files) { if (-not (Test-Path -LiteralPath $f)) { throw "missing $f" } }
+          & (Join-Path $dir 'loadout.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'loadout --version failed' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $dir) { throw 'the install folder is not on the user PATH' }
+          if ($env:SIGNING -eq 'true') {
+            Import-Module (Join-Path $env:GITHUB_WORKSPACE 'code-signing-kit\module\TrustedSigning\TrustedSigning.psd1')
+            $signtool = Get-TrustedSigningTool -Name 'signtool.exe'
+            foreach ($f in $files) {
+              & $signtool verify /pa $f
+              if ($LASTEXITCODE -ne 0) { throw "signtool verify /pa failed for $f" }
+            }
+          }
+          else {
+            Write-Output 'Signing is not configured: unsigned build, signatures not verified.'
+          }
+
+      - name: Collect assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp src-tauri/target/release/bundle/nsis/Loadout_${VERSION}_x64-setup.exe out/
+          if [ "$UPDATER" = true ]; then
+            cp src-tauri/target/release/bundle/nsis/Loadout_${VERSION}_x64-setup.exe.sig out/
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    environment: release
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      UPDATER: ${{ vars.LOADOUT_UPDATER_PUBKEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: WebKitGTK and other Tauri build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Updater config
+        if: env.UPDATER == 'true'
+        env:
+          PUBKEY: ${{ vars.LOADOUT_UPDATER_PUBKEY }}
+          ENDPOINT: ${{ vars.LOADOUT_UPDATER_ENDPOINT || 'https://github.com/DailenG/agent-loadout/releases/latest/download/latest.json' }}
+        run: |
+          jq -n --arg pubkey "$PUBKEY" --arg endpoint "$ENDPOINT" '{
+            bundle: { createUpdaterArtifacts: true },
+            plugins: { updater: {
+              pubkey: $pubkey,
+              endpoints: [$endpoint],
+              requireSignedVersion: true
+            } }
+          }' > "$RUNNER_TEMP/tauri.updater.conf.json"
+
+      # The updater config is in every Linux bundle, but the app turns the
+      # updater on only inside the AppImage (APPIMAGE set); deb and rpm
+      # installs, and the AUR packages cut from the deb, never update
+      # themselves (SPEC 16.2).
+      - name: Build AppImage, deb and rpm
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          configs=(--config src-tauri/tauri.release.conf.json)
+          if [ "$UPDATER" = true ]; then
+            configs+=(--config "$RUNNER_TEMP/tauri.updater.conf.json")
+          fi
+          npx tauri build "${configs[@]}" --bundles appimage,deb,rpm
+
+      - name: Smoke test and AUR tarball
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/release/bundle
+          deb="$bundle/deb/Loadout_${VERSION}_amd64.deb"
+          dpkg-deb -c "$deb" | grep -q ' ./usr/bin/loadout$'
+          dpkg-deb -c "$deb" | grep -q ' ./usr/bin/agent-loadout-app$'
+          top="agent-loadout-${VERSION}-x86_64-linux"
+          mkdir -p "stage/$top"
+          dpkg-deb -x "$deb" "stage/$top"
+          "stage/$top/usr/bin/loadout" --version
+          cp LICENSE THIRD_PARTY_NOTICES.md "stage/$top/"
+          mkdir -p out
+          tar -C stage -czf "out/$top.tar.gz" "$top"
+          cp "$deb" "$bundle/rpm/Loadout-${VERSION}-1.x86_64.rpm" "$bundle/appimage/Loadout_${VERSION}_amd64.AppImage" out/
+          if [ "$UPDATER" = true ]; then
+            cp "$bundle/appimage/Loadout_${VERSION}_amd64.AppImage.sig" out/
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: out/
+          if-no-files-found: error
+
+  publish:
+    needs: [version, windows, linux]
+    runs-on: ubuntu-22.04
+    environment: release
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Gather assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp artifacts/windows/* artifacts/linux/* dist/
+
+      # The updater feed (SPEC 16.4): the NSIS installer for Windows and the
+      # AppImage for Linux, each with its minisign signature.
+      - name: latest.json
+        run: |
+          set -euo pipefail
+          win="Loadout_${VERSION}_x64-setup.exe"
+          app="Loadout_${VERSION}_amd64.AppImage"
+          if [ ! -f "dist/$win.sig" ] || [ ! -f "dist/$app.sig" ]; then
+            echo "No updater signatures (LOADOUT_UPDATER_PUBKEY not set): no latest.json."
+            exit 0
+          fi
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg winsig "$(cat "dist/$win.sig")" --arg winurl "$base/$win" \
+            --arg appsig "$(cat "dist/$app.sig")" --arg appurl "$base/$app" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $date,
+              platforms: {
+                "windows-x86_64": { signature: $winsig, url: $winurl },
+                "windows-x86_64-nsis": { signature: $winsig, url: $winurl },
+                "linux-x86_64": { signature: $appsig, url: $appurl },
+                "linux-x86_64-appimage": { signature: $appsig, url: $appurl }
+              }
+            }' > dist/latest.json
+
+      - name: winget manifests
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'winget'
+          & ./packaging/winget/render.ps1 -Version $env:VERSION -Installer "dist/Loadout_$($env:VERSION)_x64-setup.exe" -OutDir $out
+          Compress-Archive -Path (Join-Path $out 'manifests') -DestinationPath "dist/winget-manifests-$($env:VERSION).zip"
+
+      - name: SHA256SUMS
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+
+      # A draft: the maintainer reviews and publishes it. latest.json is
+      # served from releases/latest only once the release is published.
+      - name: Draft release
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft --verify-tag --generate-notes --title "Loadout $VERSION"

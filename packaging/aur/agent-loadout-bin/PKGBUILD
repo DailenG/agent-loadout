@@ -1,0 +1,49 @@
+# Maintainer: DailenG <https://github.com/DailenG>
+#
+# Loadout from the release tarball (SPEC 16.2), which the release workflow
+# (.github/workflows/release.yml) cuts from the Ubuntu 22.04 .deb: the CLI
+# /usr/bin/loadout, the desktop app /usr/bin/agent-loadout-app, the desktop
+# entry and icons. The in-app updater stays off in this package (it runs
+# only inside the AppImage); update through the AUR. At release time run
+# `updpkgsums` to replace SKIP with the tarball's SHA-256 (also listed in the
+# release's SHA256SUMS), then `makepkg --printsrcinfo > .SRCINFO`.
+
+pkgname=agent-loadout-bin
+_pkgname=agent-loadout
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Manage MCP servers, skills and secret references for AI coding clients (prebuilt)'
+arch=('x86_64')
+url='https://github.com/DailenG/agent-loadout'
+license=('MIT')
+depends=(
+  'cairo'
+  'dbus'
+  'gdk-pixbuf2'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'hicolor-icon-theme'
+  'libgcc'
+  'libsoup3'
+  'webkit2gtk-4.1'
+  'zlib'
+)
+optdepends=(
+  'git: git remotes for backup and sync'
+  'github-cli: gh authentication for git remotes'
+  '1password-cli: 1Password secret references'
+  'gnome-keyring: Secret Service provider for the OS keyring (or KWallet, KeePassXC)'
+)
+provides=("$_pkgname" 'loadout')
+conflicts=("$_pkgname")
+options=('!strip' '!debug')
+source_x86_64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-$CARCH-linux.tar.gz")
+sha256sums_x86_64=('SKIP')
+
+package() {
+  cd "$_pkgname-$pkgver-$CARCH-linux"
+  cp -a usr "$pkgdir/"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES.md "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
+}

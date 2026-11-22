@@ -1,0 +1,5 @@
+# Files read by Linux tools keep LF on every checkout (Windows clones use
+# core.autocrlf): makepkg runs PKGBUILDs with bash and checks the desktop
+# file's SHA-256 over its exact bytes.
+packaging/aur/** text eol=lf
+*.sh text eol=lf

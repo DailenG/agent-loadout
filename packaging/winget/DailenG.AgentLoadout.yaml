@@ -1,0 +1,8 @@
+# Template: packaging/winget/render.ps1 fills {{VERSION}}.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+
+PackageIdentifier: DailenG.AgentLoadout
+PackageVersion: '{{VERSION}}'
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.10.0

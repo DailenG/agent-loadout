@@ -64,6 +64,23 @@ const messages = {
   "settings.theme.option.light": "Light",
   "settings.theme.option.dark": "Dark",
   "settings.theme.option.system": "Follow System",
+  "settings.updates.title": "Updates",
+  "settings.updates.unavailable.label": "In-app updates",
+  "settings.updates.unavailable.description":
+    "This build has no in-app updater. Update Loadout with your package manager, or download a new release from the releases page.",
+  "settings.updates.switch.label": "Check for updates",
+  "settings.updates.switch.description":
+    "Look for a new release when Loadout starts. When off, Loadout never contacts the network for updates.",
+  "settings.updates.check.label": "Check now",
+  "settings.updates.check.description": "Ask the release feed whether a newer version is available.",
+  "settings.updates.check.off": "Turn on Check for updates to look for a new release.",
+  "settings.updates.check.action": "Check now",
+  "settings.updates.checking": "Checking...",
+  "settings.updates.current": "You have the newest version.",
+  "settings.updates.offer": "Loadout {version} is available (you have {current}).",
+  "settings.updates.install": "Install and restart",
+  "settings.updates.installing": "Installing...",
+  "settings.updates.startupOffer": "Loadout {version} is available. Install it from Settings > Updates.",
   "about.group.app": "Application",
   "about.version.label": "Version",
   "about.version.description": "{product} {version} on {platform}.",
@@ -1167,6 +1184,7 @@ const errorMessages: Record<ErrorCode, string> = {
   client_enable_required: "Enable the new server once in the client.",
   restart_required: "Restart the client to load the change.",
   source_unreachable: "The skill's source cannot be reached; its copy in the store is unchanged.",
+  update_failed: "The update could not be checked or installed. Loadout keeps working as it is.",
 };
 
 export function errorMessage(code: ErrorCode): string {

@@ -271,6 +271,11 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     trashToolSkill: async () => ok("%LOCALAPPDATA%/Loadout/backups/trash/mock"),
     vendorAgentsSkill: async () => ok(MOCK_SKILL_INSTALLED),
     runAgentsSkillCli: async () => ok(""),
+    // No updater by default: the mock build is like a package-manager build.
+    updaterStatus: async () => ok({ available: false, enabled: true }),
+    setCheckForUpdates: async (enabled) => ok({ available: false, enabled }),
+    checkForUpdate: async () => mockIpcError({ code: "update_failed", message: "no updater in the mock" }),
+    installUpdate: async () => mockIpcError({ code: "update_failed", message: "no updater in the mock" }),
   };
   const merged = { ...defaults, ...options.commands } as Commands;
 

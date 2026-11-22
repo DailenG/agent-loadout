@@ -1,0 +1,80 @@
+# Maintainer: DailenG <https://github.com/DailenG>
+#
+# Loadout built from the release source tarball (SPEC 16.2). Installs the
+# CLI as /usr/bin/loadout and the desktop app as /usr/bin/agent-loadout-app.
+# This build has no in-app updater (no updater config is merged in); update
+# through the AUR. At release time run `updpkgsums` to replace the tarball's
+# SKIP with its SHA-256, then `makepkg --printsrcinfo > .SRCINFO`.
+
+pkgname=agent-loadout
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Manage MCP servers, skills and secret references for AI coding clients'
+arch=('x86_64')
+url='https://github.com/DailenG/agent-loadout'
+license=('MIT')
+depends=(
+  'cairo'
+  'dbus'
+  'gdk-pixbuf2'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'hicolor-icon-theme'
+  'libgcc'
+  'libsoup3'
+  'webkit2gtk-4.1'
+  'zlib'
+)
+makedepends=('cargo' 'nodejs' 'npm')
+optdepends=(
+  'git: git remotes for backup and sync'
+  'github-cli: gh authentication for git remotes'
+  '1password-cli: 1Password secret references'
+  'gnome-keyring: Secret Service provider for the OS keyring (or KWallet, KeePassXC)'
+)
+provides=('loadout')
+conflicts=('agent-loadout-bin')
+options=('!lto')
+source=(
+  "$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+  'agent-loadout.desktop'
+)
+sha256sums=('SKIP'
+            'dd9b38cdfe479ced09da8b37aa2638c1377b661d4413f40b96f815fcb3e4c044')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  local host
+  host="$(rustc -vV | sed -n 's/^host: //p')"
+  cargo fetch --locked --target "$host"
+  cargo fetch --locked --target "$host" --manifest-path src-tauri/Cargo.toml
+  npm ci --no-audit --no-fund
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --frozen --release -p agent-loadout --bin loadout
+  # The desktop app with the frontend embedded; no bundles (makepkg packages).
+  npx tauri build --no-bundle -- --frozen
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  ./target/release/loadout --version
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/loadout "$pkgdir/usr/bin/loadout"
+  install -Dm755 src-tauri/target/release/agent-loadout-app "$pkgdir/usr/bin/agent-loadout-app"
+  install -Dm644 "$srcdir/agent-loadout.desktop" "$pkgdir/usr/share/applications/agent-loadout.desktop"
+  install -Dm644 src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/agent-loadout-app.png"
+  install -Dm644 src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/agent-loadout-app.png"
+  install -Dm644 src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/agent-loadout-app.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES.md "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
+}

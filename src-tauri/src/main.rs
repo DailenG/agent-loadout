@@ -105,6 +105,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::skills::trash_tool_skill,
             commands::skills::vendor_agents_skill,
             commands::skills::run_agents_skill_cli,
+            commands::updates::updater_status,
+            commands::updates::set_check_for_updates,
+            commands::updates::check_for_update,
+            commands::updates::install_update,
         ])
         .error_handling(ErrorHandlingMode::Result)
         // One TypeScript type per Rust type: the IPC types serialize and
@@ -120,17 +124,31 @@ fn specta_builder() -> Builder<tauri::Wry> {
 
 fn main() {
     let builder = specta_builder();
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+    // SPEC 16.4: the updater exists only in release builds whose config
+    // carries `plugins.updater`, and only on Windows or in an AppImage.
+    let updater = commands::updates::updater_supported(
+        context.config().plugins.0.contains_key("updater"),
+        cfg!(windows),
+        std::env::var_os("APPIMAGE").is_some(),
+    );
+    let mut app = tauri::Builder::default()
         .manage(commands::AppState::from_process())
+        .manage(commands::updates::Updates::new(updater))
         // The folder picker of Add folder runs from Rust (the path stays in
         // the backend), so the frontend needs no dialog permission.
-        .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(builder.invoke_handler())
+        .plugin(tauri_plugin_dialog::init());
+    if updater {
+        // Commands call the updater from Rust; the frontend gets no updater
+        // permission.
+        app = app.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    app.invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("the Loadout window failed to start");
 }
 

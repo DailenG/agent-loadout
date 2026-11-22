@@ -128,6 +128,19 @@ export const commands = {
 	trashToolSkill: (client: string, scope: SkillScope, name: string, options?: InvokeOptions) => typedError<string, IpcError>(__TAURI_INVOKE("trash_tool_skill", { client, scope, name }, options)),
 	vendorAgentsSkill: (name: string, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("vendor_agents_skill", { name, id, renameIfTaken }, options)),
 	runAgentsSkillCli: (action: AgentsCliAction, name: string, options?: InvokeOptions) => typedError<string, IpcError>(__TAURI_INVOKE("run_agents_skill_cli", { action, name }, options)),
+	updaterStatus: (options?: InvokeOptions) => typedError<UpdaterStatus, IpcError>(__TAURI_INVOKE("updater_status", undefined, options)),
+	setCheckForUpdates: (enabled: boolean, options?: InvokeOptions) => typedError<UpdaterStatus, IpcError>(__TAURI_INVOKE("set_check_for_updates", { enabled }, options)),
+	/**
+	 *  Asks the update feed for a newer release. `None` when this is the
+	 *  newest. Only runs when the build has the updater and the switch is on.
+	 */
+	checkForUpdate: (options?: InvokeOptions) => typedError<UpdateOffer | null, IpcError>(__TAURI_INVOKE("check_for_update", undefined, options)),
+	/**
+	 *  Downloads the update the last check found, verifies its signature
+	 *  against the build's public key, installs it and restarts the app. On
+	 *  Windows the NSIS installer closes the app itself.
+	 */
+	installUpdate: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("install_update", undefined, options)),
 };
 
 /* Constants */
@@ -771,7 +784,12 @@ export type ErrorCode =
  *  A skill's source (git repository or folder) cannot be reached or no
  *  longer holds the skill (SPEC 12.4). The store copy is left intact.
  */
-"source_unreachable";
+"source_unreachable" | 
+/**
+ *  The desktop app's update check or install failed, or updates are
+ *  turned off or not part of this build (SPEC 16.4).
+ */
+"update_failed";
 
 /**
  *  `env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`; refs stay refs,
@@ -1916,6 +1934,25 @@ export type UndoResult = {
 	tag: string,
 	commit: string | null,
 	apply: ApplyRun,
+};
+
+/**  A newer release the check found. */
+export type UpdateOffer = {
+	version: string,
+	currentVersion: string,
+	/**  Release notes from the update feed, if any. */
+	notes: string | null,
+};
+
+/**  What Settings > Updates shows. */
+export type UpdaterStatus = {
+	/**
+	 *  This build carries the updater (else the section says updates come
+	 *  from the package manager or the releases page).
+	 */
+	available: boolean,
+	/**  The Settings switch; on unless turned off. */
+	enabled: boolean,
 };
 
 /* Tauri Specta runtime */

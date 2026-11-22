@@ -33,16 +33,30 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
+  # SPEC 16.2: the Arch container runs the workspace tests, the frontend
+  # tests and the AUR packages' `makepkg --nobuild` validation.
   archlinux:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
       - name: System packages
-        run: pacman -Syu --noconfirm --needed base-devel git rustup
+        run: pacman -Syu --noconfirm --needed base-devel git rustup nodejs npm namcap
       - uses: actions/checkout@v4
       - name: Toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - run: cargo test --workspace --locked
+      - run: npm ci
+      - run: npm test
+      # makepkg refuses root and checks the runtime dependencies, so they
+      # are installed (which also proves every name exists in the Arch
+      # repositories) and an unprivileged user runs the validation.
+      - name: AUR runtime dependencies
+        run: |
+          pacman -S --noconfirm --needed $(sed -n 's/^\tdepends = //p' packaging/aur/agent-loadout/.SRCINFO)
+          useradd --create-home builder
+          chown -R builder "$GITHUB_WORKSPACE"
+      - name: makepkg --nobuild
+        run: sudo -u builder -H bash -c 'cd "$1" && rustup default stable && bash packaging/aur/validate.sh' _ "$GITHUB_WORKSPACE"
 
   deny:
     runs-on: ubuntu-22.04

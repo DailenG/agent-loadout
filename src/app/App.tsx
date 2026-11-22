@@ -37,6 +37,7 @@ import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
 import { SkillsPage } from "@/app/routes/skills/SkillsPage";
 import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRemoteStep";
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
+import { UpdatesSection, useStartupUpdateCheck } from "@/app/routes/settings/updates/UpdatesSection";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import {
   dataHomeSourceLabels,
@@ -630,6 +631,7 @@ function SettingsPage(props: {
       <VersioningSection onOpenPending={props.onOpenPending} />
       <MigrateSection onOpenPending={props.onOpenPending} />
       <SecretsSection onOpenPending={props.onOpenPending} />
+      <UpdatesSection />
     </div>
   );
 }
@@ -760,6 +762,7 @@ function AppContent(props: { features: FeatureFlags }) {
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   useQueryErrorToasts();
+  useStartupUpdateCheck();
 
   const visibleRoutes = routes.filter((route) => !route.flag || props.features[route.flag]);
   const activeDefinition =
