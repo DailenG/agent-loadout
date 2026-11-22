@@ -13,7 +13,7 @@ use crate::adapters::caps::{
 };
 use crate::adapters::detect::Probe;
 use crate::adapters::location::Location;
-use crate::adapters::mapper::{McpServersJson, word_name};
+use crate::adapters::mapper::{McpServersJson, dotted_word_name};
 use crate::adapters::spec::{AdapterSpec, ContainerPath, McpSpec, Tier, exact_names};
 use crate::env::Os;
 use crate::formats::Format;
@@ -63,7 +63,7 @@ const CAPS: Caps = Caps {
     passthrough_allowlist: passthrough_of(ID),
 };
 
-/// Names are `[A-Za-z0-9_-]+` (SPEC 5.1).
+/// Names are `[A-Za-z0-9_.-]+` (gate V1, CC-7; SPEC 5.1 had no `.`).
 static MAPPER: McpServersJson = McpServersJson {
     caps: &CAPS,
     type_field: true,
@@ -71,7 +71,7 @@ static MAPPER: McpServersJson = McpServersJson {
     cwd: false,
     http_aliases: &[],
     url_implies_http: false,
-    valid_name: word_name,
+    valid_name: dotted_word_name,
 };
 
 pub static SPEC: AdapterSpec = AdapterSpec {

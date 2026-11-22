@@ -375,18 +375,20 @@ fn fields_a_client_cannot_express_block_the_target() {
         );
     }
 
-    // Claude Code names are `[A-Za-z0-9_-]`; `native_name` fixes the rest.
-    let dotted = stdio("notes.v2", "npx", &[], &[]);
-    let err = write(CODE, Os::Linux, &dotted).unwrap_err();
+    // Claude Code names are `[A-Za-z0-9_.-]` (gate V1); `native_name` fixes
+    // the rest.
+    write(CODE, Os::Linux, &stdio("notes.v2", "npx", &[], &[])).unwrap();
+    let spaced = stdio("notes v2", "npx", &[], &[]);
+    let err = write(CODE, Os::Linux, &spaced).unwrap_err();
     assert_eq!(
         err,
         MapError::InvalidName {
-            name: "notes.v2".to_owned()
+            name: "notes v2".to_owned()
         }
     );
     assert_eq!(err.code(), ErrorCode::InvalidId);
     write(CODE, Os::Linux, &stdio("Notes_v2-x", "npx", &[], &[])).unwrap();
-    write(DESKTOP, Os::Windows, &dotted).unwrap();
+    write(DESKTOP, Os::Windows, &spaced).unwrap();
 }
 
 #[test]

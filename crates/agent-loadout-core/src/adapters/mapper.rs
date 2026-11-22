@@ -228,6 +228,14 @@ pub trait EntryMapper: Sync {
 
     /// Sorted, client defaults dropped; used for equality and hashing.
     fn canonical(&self, value: &NativeValue) -> Canonical;
+
+    /// Why the client itself does not load this entry, when it does not
+    /// (gate V1 CC-5: Claude Code skips a `url` entry without `type`). Such
+    /// an entry still reads back, so import can take it, but importing it
+    /// starts a server the client never ran.
+    fn skipped_by_client(&self, _value: &NativeValue) -> Option<&'static str> {
+        None
+    }
 }
 
 /// Keys every `mcpServers` entry may have.
@@ -437,18 +445,32 @@ impl EntryMapper for McpServersJson {
         drop_default_enabled(&mut entry, self.caps);
         Canonical::of(&NativeValue::Object(entry))
     }
+
+    fn skipped_by_client(&self, value: &NativeValue) -> Option<&'static str> {
+        let entry = value.as_object()?;
+        (!self.url_implies_http && entry.contains_key("url") && !entry.contains_key(TYPE))
+            .then_some("has a `url` but no `type`, so the client skips it")
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Shared by the mappers
 
-/// `[A-Za-z0-9_-]+`, the entry name rule of Claude Code (SPEC 5.1), Codex
-/// and Pi.
+/// `[A-Za-z0-9_-]+`, the entry name rule of Pi (SPEC 5.1; V2 verifies it).
 pub fn word_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// `[A-Za-z0-9_.-]+`: Claude Code and Codex also load names with `.`
+/// (gate V1, CC-7 and CX-6, on Windows and Linux).
+pub fn dotted_word_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-' || byte == b'.'
+        })
 }
 
 /// The existing entry of a write, when it is an object.

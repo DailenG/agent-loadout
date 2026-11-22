@@ -500,14 +500,16 @@ fn fields_a_client_cannot_express_block_the_target() {
         assert_eq!(blocked(spec, &foreign), field("trust"));
     }
 
-    // Name rules: Codex and Pi `[A-Za-z0-9_-]`; omp also `.`, `:` and
-    // single inner spaces, up to 100 characters.
+    // Name rules: Codex `[A-Za-z0-9_.-]` (gate V1), Pi `[A-Za-z0-9_-]`; omp
+    // also `:` and single inner spaces, up to 100 characters.
     let named = |name: &str| stdio(name, "x", &[], &[]);
     let invalid = |name: &str| MapError::InvalidName {
         name: name.to_owned(),
     };
+    assert_eq!(blocked(PI, &named("notes.v2")), invalid("notes.v2"));
+    write(CODEX, Os::Linux, &named("notes.v2")).unwrap();
+    assert_eq!(blocked(CODEX, &named("team:notes")), invalid("team:notes"));
     for spec in [CODEX, PI] {
-        assert_eq!(blocked(spec, &named("notes.v2")), invalid("notes.v2"));
         write(spec, Os::Linux, &named("Notes_v2-x")).unwrap();
     }
     for name in ["notes.v2", "team:notes", "Team Notes"] {

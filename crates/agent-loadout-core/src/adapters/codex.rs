@@ -20,10 +20,10 @@ use crate::adapters::detect::Probe;
 use crate::adapters::location::Location;
 use crate::adapters::mapper::{
     Canonical, EntryMapper, Launch, MapError, RenderedServer, ServerDef, WriteCx, carry_over,
-    check_name, check_transport, drop_default_enabled, drop_empty, existing_entry, is_tool_key,
-    read_disabled, read_tools, shape, split_rest, string_field, string_list, string_map,
-    string_map_field, strings, unsupported, word_name, write_enabled, write_passthrough,
-    write_tools,
+    check_name, check_transport, dotted_word_name, drop_default_enabled, drop_empty,
+    existing_entry, is_tool_key, read_disabled, read_tools, shape, split_rest, string_field,
+    string_list, string_map, string_map_field, strings, unsupported, write_enabled,
+    write_passthrough, write_tools,
 };
 use crate::adapters::spec::{AdapterSpec, ContainerPath, McpSpec, Tier, exact_names};
 use crate::env::Os;
@@ -106,7 +106,7 @@ const MODELED_KEYS: [&str; 10] = [
 /// The `[mcp_servers.<name>]` table: `command, args, env, env_vars, cwd` or
 /// `url, bearer_token_env_var, http_headers, env_http_headers`, plus
 /// `enabled`, `enabled_tools`, `disabled_tools` and the timeouts. Names
-/// are `[A-Za-z0-9_-]+` (`[verify]`).
+/// are `[A-Za-z0-9_.-]+` (gate V1, CX-6).
 #[derive(Debug)]
 pub struct CodexToml;
 
@@ -122,7 +122,7 @@ impl EntryMapper for CodexToml {
         server: &RenderedServer,
         cx: &WriteCx<'_>,
     ) -> Result<NativeValue, MapError> {
-        check_name(word_name, &server.name)?;
+        check_name(dotted_word_name, &server.name)?;
         check_transport(&CAPS, &server.launch)?;
         let existing = existing_entry(cx);
         let keep_empty = |key: &str| existing.is_some_and(|entry| entry.contains_key(key));
