@@ -21,14 +21,18 @@
     machine. With any of them missing the script prints "unsigned dev build"
     and exits 0, so local and contributor builds stay unsigned.
 
-    The kit's TrustedSigning module does the signing. When the kit's service
-    principal variables are present (AZURE_CLIENT_SECRET with tenant and
-    client id, the maintainer's machine), Invoke-TrustedSigning is used as is.
-    Without a client secret (the release job, logged in to Azure through a
-    GitHub OIDC federated credential), the kit's AzureTrustedSignTool is
-    called directly so Azure.Identity picks up the existing login.
+    The kit's Invoke-TrustedSigning (code-signing-kit 1.1.0 or later) does
+    the signing; this script maps the three LOADOUT_SIGN_* target values
+    onto the kit's AZURE_TRUSTED_SIGNING_* names and passes the file. The
+    service principal comes from AZURE_TENANT_ID, AZURE_CLIENT_ID and
+    AZURE_CLIENT_SECRET in the environment: in the release job, the
+    `release` environment's secrets, given to the build step only; on the
+    maintainer's machine, the user variables Set-TrustedSigningCredential
+    records, or a 1Password Environment the kit is pointed at with
+    TRUSTED_SIGNING_OP_ENVIRONMENT. (SPEC 16.1 decision: client secret now;
+    a GitHub OIDC federated credential is the documented future option.)
 
-    This script never reads, prints or stores a credential.
+    This script never reads, prints or stores a credential itself.
 
 .PARAMETER Path
     File to sign in place.
@@ -60,7 +64,7 @@ if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
     Write-Error ('sign-windows: LOADOUT_SIGN_KIT does not hold module\TrustedSigning: {0}' -f $kit)
     exit 1
 }
-Import-Module $manifest -Force
+Import-Module $manifest -Force -MinimumVersion 1.1.0
 
 # The kit reads the Trusted Signing target from these names.
 $env:AZURE_TRUSTED_SIGNING_ACCOUNT = $env:LOADOUT_SIGN_ACCOUNT
@@ -68,25 +72,9 @@ $env:AZURE_TRUSTED_SIGNING_ENDPOINT = $env:LOADOUT_SIGN_ENDPOINT
 $env:AZURE_TRUSTED_SIGNING_PROFILE = $env:LOADOUT_SIGN_PROFILE
 
 try {
-    if ($env:AZURE_CLIENT_SECRET) {
-        Invoke-TrustedSigning -Path $file | Out-Null
-    }
-    else {
-        # Existing Azure login (OIDC in the release job): the kit's tool,
-        # installed by Install-TrustedSigningTool, without the kit's check
-        # for a stored client secret.
-        $tools = Join-Path $env:USERPROFILE '.dotnet\tools'
-        if (($env:PATH -split ';') -notcontains $tools) {
-            $env:PATH = '{0};{1}' -f $env:PATH, $tools
-        }
-        if (-not (Get-Command AzureTrustedSignTool -ErrorAction SilentlyContinue)) {
-            throw 'AzureTrustedSignTool is not installed. Run Install-TrustedSigningTool from the kit first.'
-        }
-        & AzureTrustedSignTool sign -g $file -t $env:LOADOUT_SIGN_ENDPOINT -a $env:LOADOUT_SIGN_ACCOUNT -p $env:LOADOUT_SIGN_PROFILE
-        if ($LASTEXITCODE -ne 0) {
-            throw ('AzureTrustedSignTool exited with {0}' -f $LASTEXITCODE)
-        }
-    }
+    # The kit prints the signing tool's output and returns the signed path;
+    # neither holds a credential.
+    Invoke-TrustedSigning -Path $file | ForEach-Object { Write-Host $_ }
 }
 catch {
     Write-Error ('sign-windows: signing failed for {0}: {1}' -f (Split-Path -Leaf $file), $_.Exception.Message)

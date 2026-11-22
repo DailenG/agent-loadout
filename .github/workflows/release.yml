@@ -4,26 +4,32 @@
 # every asset, SHA256SUMS, the AUR -bin tarball, the rendered winget
 # manifests and, when the updater key is configured, latest.json.
 #
-# Repository configuration (Settings > Secrets and variables > Actions), all
-# optional; without them the release is unsigned and has no updater feed:
+# Configuration lives on the `release` environment (Settings > Environments
+# > release; the environment is limited to v* tags), all optional: without
+# it the release is unsigned and has no updater feed. Nothing here prints a
+# secret: no `set -x`, no environment dumps, and secrets reach only the step
+# that needs them.
 #
-#   Variables
-#     LOADOUT_SIGN_ACCOUNT    Trusted Signing account name     } all four turn
-#     LOADOUT_SIGN_ENDPOINT   e.g. https://eus.codesigning.azure.net } signing on
-#     LOADOUT_SIGN_PROFILE    certificate profile name         }
-#     AZURE_CLIENT_ID         app registration with a federated credential
-#     AZURE_TENANT_ID         for this repository (OIDC, no client secret)
-#     AZURE_SUBSCRIPTION_ID   optional; the login runs without one
+#   Environment variables
+#     LOADOUT_SIGN_ACCOUNT    Trusted Signing account name
+#     LOADOUT_SIGN_ENDPOINT   e.g. https://eus.codesigning.azure.net
+#     LOADOUT_SIGN_PROFILE    certificate profile name
 #     LOADOUT_UPDATER_PUBKEY  public key from `npx tauri signer generate`
 #     LOADOUT_UPDATER_ENDPOINT  optional; default is this repository's
 #                             releases/latest/download/latest.json
-#   Secrets
-#     CODE_SIGNING_KIT_TOKEN  read-only token for DailenG/code-signing-kit
+#   Environment secrets
+#     AZURE_TENANT_ID         Entra tenant of the signing service principal
+#     AZURE_CLIENT_ID         its application (client) id
+#     AZURE_CLIENT_SECRET     a client secret of that app registration
+#     CODE_SIGNING_KIT_SSH_KEY  private half of a read-only deploy key on DailenG/code-signing-kit
 #     TAURI_SIGNING_PRIVATE_KEY           private updater key (with the
 #     TAURI_SIGNING_PRIVATE_KEY_PASSWORD  variable LOADOUT_UPDATER_PUBKEY)
 #
-# Every job runs in the `release` environment, so the maintainer can add a
-# required reviewer and scope the Azure federated credential to it.
+# Signing runs only when all six signing values (the three variables and
+# the three AZURE_* secrets) are set. It uses the service principal's client
+# secret through the kit's Invoke-TrustedSigning (SPEC 16.1 decision,
+# 2026-11-22); a GitHub OIDC federated credential, with no stored secret, is
+# the documented future option.
 
 name: Release
 
@@ -68,10 +74,10 @@ jobs:
     environment: release
     permissions:
       contents: read
-      id-token: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      SIGNING: ${{ vars.LOADOUT_SIGN_ACCOUNT != '' && vars.LOADOUT_SIGN_ENDPOINT != '' && vars.LOADOUT_SIGN_PROFILE != '' }}
+      # true or false only; no secret value enters this variable.
+      SIGNING: ${{ vars.LOADOUT_SIGN_ACCOUNT != '' && vars.LOADOUT_SIGN_ENDPOINT != '' && vars.LOADOUT_SIGN_PROFILE != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
       UPDATER: ${{ vars.LOADOUT_UPDATER_PUBKEY != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -100,27 +106,12 @@ jobs:
             } }
           }' > "$RUNNER_TEMP/tauri.updater.conf.json"
 
-      - name: Azure login (OIDC)
-        if: env.SIGNING == 'true'
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          allow-no-subscriptions: ${{ vars.AZURE_SUBSCRIPTION_ID == '' }}
-      # GitHub's ID token expires within minutes, long before the build
-      # reaches its first signCommand; the login caches only an ARM token.
-      # Fetch the Trusted Signing token now (valid about an hour). The token
-      # itself never reaches the log (--output none).
-      - name: Trusted Signing token
-        if: env.SIGNING == 'true'
-        run: az account get-access-token --scope https://codesigning.azure.net/.default --output none
       - name: Code-signing kit
         if: env.SIGNING == 'true'
         uses: actions/checkout@v4
         with:
           repository: DailenG/code-signing-kit
-          token: ${{ secrets.CODE_SIGNING_KIT_TOKEN }}
+          ssh-key: ${{ secrets.CODE_SIGNING_KIT_SSH_KEY }}
           path: code-signing-kit
           # Read from disk only; the token must not stay in .git/config
           # while npm and cargo build scripts run.
@@ -133,8 +124,11 @@ jobs:
           Install-TrustedSigningTool
 
       # signCommand (tauri.conf.json) runs scripts/sign-windows.ps1 for the
-      # app, loadout.exe, the uninstaller and the installer; with the
-      # LOADOUT_SIGN_* values empty it prints "unsigned dev build".
+      # app, loadout.exe, the NSIS plugins, the uninstaller and the
+      # installer; with the LOADOUT_SIGN_* values empty it prints "unsigned
+      # dev build". The AZURE_* secrets are passed only when signing, and
+      # only to this step; the kit's Invoke-TrustedSigning reads them from
+      # the environment (Azure.Identity, client secret).
       - name: Build NSIS installer
         shell: pwsh
         env:
@@ -142,6 +136,9 @@ jobs:
           LOADOUT_SIGN_ACCOUNT: ${{ env.SIGNING == 'true' && vars.LOADOUT_SIGN_ACCOUNT || '' }}
           LOADOUT_SIGN_ENDPOINT: ${{ env.SIGNING == 'true' && vars.LOADOUT_SIGN_ENDPOINT || '' }}
           LOADOUT_SIGN_PROFILE: ${{ env.SIGNING == 'true' && vars.LOADOUT_SIGN_PROFILE || '' }}
+          AZURE_TENANT_ID: ${{ env.SIGNING == 'true' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ env.SIGNING == 'true' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ env.SIGNING == 'true' && secrets.AZURE_CLIENT_SECRET || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
