@@ -179,6 +179,10 @@ pub enum ErrorCode {
     /// Warning: a client loads the same server twice, once through another
     /// tool's file it also reads (SPEC 6.4 `client-compat:`).
     DuplicateViaCompat,
+    /// Warning: a client runs same-named entries of its own files as
+    /// separate servers (Cursor's user and project files, gate V2 CUR-5),
+    /// so two servers of that name run (SPEC 6.4).
+    DuplicateAcrossLayers,
     /// A private (local-layer) entry would go to a project file that the
     /// project's git repository tracks (SPEC 6.5); the entry is blocked.
     PrivateInTrackedFile,
@@ -273,6 +277,7 @@ impl ErrorCode {
             ErrorCode::UnsetNotExpressible => "unset_not_expressible",
             ErrorCode::TrustRequired => "trust_required",
             ErrorCode::DuplicateViaCompat => "duplicate_via_compat",
+            ErrorCode::DuplicateAcrossLayers => "duplicate_across_layers",
             ErrorCode::PrivateInTrackedFile => "private_in_tracked_file",
             ErrorCode::ProjectKeySpelling => "project_key_spelling",
             ErrorCode::PersonalPathInSharedFile => "personal_path_in_shared_file",

@@ -18,7 +18,11 @@
 //!   difference before overwriting it).
 //! - VS Code can also forward servers from its legacy `mcp.json` files into
 //!   Copilot sessions, so the effective view lists `vscode-legacy` as a
-//!   `client-compat` source and flags duplicates.
+//!   `client-compat` source and flags duplicates. For a name in both
+//!   `<P>/.vscode/mcp.json` and `<P>/.mcp.json`, VS Code runs the
+//!   `.vscode/mcp.json` entry (gate V2 VSL-3, FB-15), so that file outranks
+//!   Copilot's own layers; the Copilot CLI reads only `.mcp.json` and runs
+//!   the other one, which the `duplicate_via_compat` warning says.
 //!
 //! Assumptions left for gate V2 (`scripts/verify-clients.md`, COP-*):
 //! `[verify]` that VS Code's Copilot harness reads the user file above
@@ -33,7 +37,7 @@
 //! for the Copilot CLI, `~/.copilot` and the Copilot Chat extension.
 
 use crate::adapters::caps::{
-    Caps, CompatSource, EnvRefSyntax, FieldSet, ProjectSemantics, Source, ToolFilterMech,
+    Caps, CompatSource, EnvRefSyntax, FieldSet, Outrank, ProjectSemantics, Source, ToolFilterMech,
     TransportSet, TrustGate,
 };
 use crate::adapters::detect::Probe;
@@ -84,11 +88,13 @@ const CAPS: Caps = Caps {
         CompatSource {
             client: "vscode-legacy",
             source: Source::Project,
+            outranks: Some(Outrank {
+                source: Source::Project,
+                host: "VS Code",
+                others: "the Copilot CLI",
+            }),
         },
-        CompatSource {
-            client: "vscode-legacy",
-            source: Source::User,
-        },
+        CompatSource::below("vscode-legacy", Source::User),
     ],
     trust_gate: Some(TrustGate::WorkspaceTrust),
     rewrites_file_at_runtime: false,

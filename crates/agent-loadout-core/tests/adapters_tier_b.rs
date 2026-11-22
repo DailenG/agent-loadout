@@ -1240,22 +1240,36 @@ fn effective_view_lists_legacy_vscode_as_copilot_compat() {
     let (report, commit) = fx.apply();
     assert!(commit.is_some(), "{report:#?}");
 
+    // VS Code runs the `.vscode/mcp.json` entry over the same-named
+    // `<P>/.mcp.json` one (gate V2 VSL-3, FB-15); the Copilot CLI reads
+    // only `.mcp.json`, which the warning says.
     let doc = view(&fx, &root, Some(&["copilot"]));
     let docs = row(&doc, "copilot", "repo-docs");
-    assert_eq!(docs["winner"]["layer"], "project");
-    assert_eq!(docs["winner"]["file"], "<P>/.mcp.json");
+    assert_eq!(docs["loaded"], true);
     assert_eq!(
-        docs["shadowed"][0]["layer"],
+        docs["winner"]["layer"],
         "client-compat:<P>/.vscode/mcp.json"
     );
+    assert_eq!(docs["winner"]["file"], "<P>/.vscode/mcp.json");
+    assert_eq!(docs["winner"]["source"], "foreign");
+    assert_eq!(
+        docs["shadowed"],
+        serde_json::json!([{ "layer": "project", "file": "<P>/.mcp.json" }])
+    );
     assert_eq!(docs["warnings"][0]["code"], "duplicate_via_compat");
+    let message = docs["warnings"][0]["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("VS Code runs \"repo-docs\" from <P>/.vscode/mcp.json over")
+            && message.contains("the Copilot CLI reads only <P>/.mcp.json"),
+        "{message}"
+    );
     let also: Vec<&str> = docs["also_visible_to"]
         .as_array()
         .unwrap()
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect();
-    assert!(also.contains(&"claude-code"), "{also:?}");
+    assert!(also.contains(&"omp"), "{also:?}");
     assert_eq!(
         row(&doc, "copilot", "workspace-only")["winner"]["layer"],
         "client-compat:<P>/.vscode/mcp.json"
@@ -1265,6 +1279,27 @@ fn effective_view_lists_legacy_vscode_as_copilot_compat() {
     assert!(
         layer.starts_with("client-compat:") && layer.ends_with("Code/User/mcp.json"),
         "{layer}"
+    );
+    // Copilot's own user file still ranks above VS Code's user file.
+    fx.write(
+        &fx.th.home().join(".copilot").join("mcp-config.json"),
+        r#"{ "mcpServers": { "github": { "type": "stdio", "command": "github-mcp" } } }"#,
+    );
+    let doc = view(&fx, &root, Some(&["copilot"]));
+    let github = row(&doc, "copilot", "github");
+    assert_eq!(
+        github["winner"]["layer"],
+        "foreign:~/.copilot/mcp-config.json"
+    );
+    let shadowed = github["shadowed"][0]["layer"].as_str().unwrap();
+    assert!(
+        shadowed.starts_with("client-compat:") && shadowed.ends_with("Code/User/mcp.json"),
+        "{shadowed}"
+    );
+    let message = github["warnings"][0]["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("GitHub Copilot loads \"github\" from ~/.copilot/mcp-config.json"),
+        "{message}"
     );
 
     // Claude Code's project entry is visible to Copilot too.
@@ -1334,4 +1369,118 @@ fn omp_compat_reads_resolve_to_cursor_and_vscode() {
         also.as_array().unwrap().iter().any(|v| v == "omp"),
         "{also}"
     );
+}
+
+#[test]
+fn cursor_runs_same_named_user_and_project_entries_side_by_side() {
+    let fx = Fx::new();
+    let mut github = store_stdio("github", &["cursor"], &["-y", "github-mcp"]);
+    github.body.env = Some(
+        [("DEBUG", "1"), ("KEEP", "yes")]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect(),
+    );
+    fx.put_server(github);
+    fx.put_server(store_stdio("noisy", &["cursor"], &["-y", "noisy-mcp"]));
+    // An override with `unset` and a suppression, both for Cursor.
+    let root = project(
+        &fx,
+        "side-by-side",
+        "side-by-side-e5f6",
+        "[servers.github]\nfrom = \"github\"\nunset = [\"env.DEBUG\"]\nclients = [\"cursor\"]\n\n\
+         [servers.noisy]\nenabled = false\nclients = [\"cursor\"]\n",
+    );
+    let plan = fx.plan();
+    let codes: Vec<ErrorCode> = plan
+        .warnings
+        .iter()
+        .chain(plan.targets.iter().flat_map(|target| &target.warnings))
+        .map(|warning| warning.code())
+        .collect();
+    // Cursor runs both entries, so `unset` is not merged away from anything.
+    assert!(
+        !format!("{plan:?}").contains("UnsetNotExpressible"),
+        "{plan:#?}"
+    );
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|code| **code == ErrorCode::CannotSuppressInProject)
+            .count(),
+        1,
+        "{plan:#?}"
+    );
+    let (report, commit) = fx.apply();
+    assert!(commit.is_some(), "{report:#?}");
+
+    // Both `github` entries load, one row per file, neither shadowing the
+    // other (gate V2 CUR-5, FB-17).
+    let doc = view(&fx, &root, Some(&["cursor"]));
+    let rows: Vec<&Value> = doc["clients"]["cursor"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["name"] == "github")
+        .collect();
+    let layers: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|entry| {
+            (
+                entry["winner"]["layer"].as_str().unwrap(),
+                entry["winner"]["file"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        layers,
+        [
+            ("project", "<P>/.cursor/mcp.json"),
+            ("system", "~/.cursor/mcp.json")
+        ],
+        "{doc:#}"
+    );
+    for entry in &rows {
+        assert_eq!(entry["loaded"], true, "{entry:#}");
+        assert_eq!(entry["shadowed"], serde_json::json!([]), "{entry:#}");
+        assert_eq!(entry["status"], "synced", "{entry:#}");
+        let codes = warning_codes(entry);
+        assert!(codes.contains(&"duplicate_across_layers"), "{entry:#}");
+        assert!(!codes.contains(&"unset_not_expressible"), "{entry:#}");
+        let message = entry["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["code"] == "duplicate_across_layers")
+            .unwrap()["message"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            message,
+            "Cursor runs a separate server named \"github\" from each of \
+             <P>/.cursor/mcp.json and ~/.cursor/mcp.json: same-named entries of its own \
+             files do not replace each other"
+        );
+    }
+    // Only the project row needs the one-time enable in Cursor.
+    assert!(warning_codes(rows[0]).contains(&"client_enable_required"));
+    assert!(!warning_codes(rows[1]).contains(&"client_enable_required"));
+
+    // The suppression cannot be expressed: `noisy` keeps loading.
+    let noisy = row(&doc, "cursor", "noisy");
+    assert_eq!(noisy["loaded"], true, "{noisy:#}");
+    assert_eq!(
+        warning_codes(noisy),
+        ["cannot_suppress_in_project"],
+        "{noisy:#}"
+    );
+}
+
+fn warning_codes(entry: &Value) -> Vec<&str> {
+    entry["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|warning| warning["code"].as_str().unwrap())
+        .collect()
 }

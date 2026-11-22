@@ -8,10 +8,15 @@
 //! file is `system`, the shared project file `project`, the private target
 //! `project-local`; an entry Loadout does not own is `foreign:<file>`),
 //! then the other tools' files of [`Caps::compat_reads`]
-//! (`client-compat:<file>`). The first candidate wins and the others are
-//! shadowed. An entry the plan cannot write (`blocked`) never wins over one
-//! that is there; a name only such entries hold is reported with
-//! `loaded: false`.
+//! (`client-compat:<file>`); a compatibility file that one host of `C`
+//! prefers ([`CompatSource::outranks`]: VS Code's `.vscode/mcp.json` for
+//! Copilot) comes right before the layer it outranks. The first candidate
+//! wins and the others are shadowed. For a client whose own layers coexist
+//! ([`ProjectSemantics::Coexist`]: Cursor), every live entry of its own
+//! files is a loaded row of its own, and these rows carry
+//! `duplicate_across_layers`. An entry the plan cannot write (`blocked`)
+//! never wins over one that is there; a name only such entries hold is
+//! reported with `loaded: false`.
 //!
 //! [`Caps::precedence`]: crate::adapters::caps::Caps::precedence
 //! [`Caps::compat_reads`]: crate::adapters::caps::Caps::compat_reads
@@ -23,7 +28,7 @@ use std::path::{Path, PathBuf};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
-use crate::adapters::caps::{ProjectDisable, ProjectSemantics, Source};
+use crate::adapters::caps::{CompatSource, Outrank, ProjectDisable, ProjectSemantics, Source};
 use crate::adapters::detect::replacing_extension;
 use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
 use crate::apply::exec::PlanInputs;
@@ -113,7 +118,8 @@ pub struct EffectiveEntry {
     /// an entry it does not own.
     #[serde(serialize_with = "state_json")]
     pub status: Option<EntryState>,
-    /// `duplicate_via_compat`, `cannot_suppress_in_project`,
+    /// `duplicate_via_compat`, `duplicate_across_layers`,
+    /// `cannot_suppress_in_project`,
     /// `unset_not_expressible`, `trust_required`,
     /// `client_mcp_replaced_by_extension`, `client_enable_required` and the
     /// problems the plan has with this name's entries.
@@ -133,7 +139,8 @@ pub struct ProjectRef {
 pub struct EffectiveView {
     /// The nearest project at or above the folder, if any.
     pub project: Option<ProjectRef>,
-    /// Entries per client id, by name.
+    /// Entries per client id, by name; a client whose own layers coexist
+    /// (Cursor) has one row per file for a name in several of them.
     pub clients: BTreeMap<&'static str, Vec<EffectiveEntry>>,
     /// Files that could not be read or parsed, and other problems outside
     /// any entry.
@@ -306,6 +313,9 @@ struct SourceFile {
     scope: Scope,
     /// Another tool's file (SPEC 6.4 `client-compat`).
     compat: bool,
+    /// Where another tool's file ranks, when above one of the client's own
+    /// layers.
+    outrank: Option<Outrank>,
     file: PathBuf,
     format: Format,
     keys: Vec<String>,
@@ -328,11 +338,22 @@ struct Candidate {
     file: PathBuf,
     pointer: String,
     compat: bool,
+    outrank: Option<Outrank>,
     presence: Presence,
     value: Option<NativeValue>,
     source: String,
     status: Option<EntryState>,
     problem: Option<CoreError>,
+}
+
+/// What a client's rows share, by entry name.
+struct ClientCx {
+    /// Names hidden through a list (Claude Code `disabledMcpServers`).
+    suppressed: Vec<String>,
+    member_problems: Vec<(String, CoreError)>,
+    project_warnings: Vec<(String, CoreError)>,
+    /// `client_mcp_replaced_by_extension`, for every row.
+    extension: Option<CoreError>,
 }
 
 /// A client id and the files and containers (pointers) it reads.
@@ -369,128 +390,228 @@ impl<'a> View<'a> {
         }
         let (suppressed, member_problems) = self.suppressed(spec);
         let has_project_files = !mcp.project.is_empty() || !mcp.project_local.is_empty();
-        let project_warnings = self.project_warnings(spec, has_project_files);
-        // An extension replacing the client's MCP support (Pi
-        // `pi-mcp-adapter`), installed for the user or for this project.
-        let extension = replacing_extension(spec, self.cx.env, self.cx.fs, self.root);
+        let cx = ClientCx {
+            suppressed,
+            member_problems,
+            project_warnings: self.project_warnings(spec, has_project_files),
+            // An extension replacing the client's MCP support (Pi
+            // `pi-mcp-adapter`), installed for the user or for this project.
+            extension: replacing_extension(spec, self.cx.env, self.cx.fs, self.root),
+        };
+        let coexist = mcp.caps.project_semantics == ProjectSemantics::Coexist;
 
         let mut out = Vec::with_capacity(rows.len());
         for (name, candidates) in rows {
-            let live: Vec<&Candidate> = candidates
-                .iter()
-                .filter(|candidate| candidate.presence != Presence::Blocked)
-                .collect();
-            let winner = live.first().copied().unwrap_or(&candidates[0]);
-            let enabled = if mcp.caps.project_semantics == ProjectSemantics::DeepMerge {
-                // Fields merge across the client's own layers: the highest
-                // one that sets `enabled` decides.
-                live.iter()
-                    .filter(|candidate| !candidate.compat)
-                    .find_map(|candidate| enabled_of(candidate.value.as_ref()))
-                    .or_else(|| enabled_of(winner.value.as_ref()))
-            } else {
-                enabled_of(winner.value.as_ref())
-            };
-            let loaded = winner.presence != Presence::Blocked
-                && enabled != Some(false)
-                && !suppressed.contains(&name);
-
-            let mut warnings: Vec<CoreError> = Vec::new();
-            let native = live.iter().find(|candidate| !candidate.compat);
-            let compat = live.iter().find(|candidate| candidate.compat);
-            if let (Some(native), Some(compat)) = (native, compat) {
-                push_unique(
-                    &mut warnings,
-                    CoreError::new(
-                        ErrorCode::DuplicateViaCompat,
-                        format!(
-                            "{} loads {name:?} from {} and also, as a compatibility source, \
-                             from {}",
-                            spec.display_name,
-                            self.display(&native.file),
-                            self.display(&compat.file)
-                        ),
-                    )
-                    .with_path(&compat.file),
+            let live = |candidate: &&Candidate| candidate.presence != Presence::Blocked;
+            let first = candidates.iter().find(live).unwrap_or(&candidates[0]);
+            // The entries the client runs: the first live one and, for a
+            // client whose own layers coexist (Cursor), every other live
+            // entry of its own files too, each as a server of its own.
+            let mut heads = vec![first];
+            if coexist {
+                heads.extend(
+                    candidates
+                        .iter()
+                        .filter(live)
+                        .filter(|candidate| !candidate.compat && !std::ptr::eq(*candidate, first)),
                 );
             }
-            for problem in candidates.iter().filter_map(|c| c.problem.as_ref()) {
-                push_unique(&mut warnings, problem.clone());
+            for (index, winner) in heads.iter().copied().enumerate() {
+                // A further head is a row of its own; the first row holds
+                // every other candidate.
+                let group: Vec<&Candidate> = if index == 0 {
+                    candidates
+                        .iter()
+                        .filter(|candidate| {
+                            !heads[1..]
+                                .iter()
+                                .any(|head| std::ptr::eq(*head, *candidate))
+                        })
+                        .collect()
+                } else {
+                    vec![winner]
+                };
+                let entry = self.row(spec, &cx, &name, winner, &group, &heads);
+                out.push(entry);
             }
-            for (member, problem) in &member_problems {
-                if *member == name {
-                    push_unique(&mut warnings, problem.clone());
-                }
-            }
-            for (entry, warning) in &project_warnings {
-                if *entry == name {
-                    push_unique(&mut warnings, warning.clone());
-                }
-            }
-            if let Some(extension) = &extension {
-                push_unique(&mut warnings, extension.clone());
-            }
-            // Loadout's own project entry of a client that lists new project
-            // servers as disabled (Cursor): "loaded" assumes the user enabled
-            // it there once.
-            if loaded
-                && !winner.compat
-                && matches!(winner.layer, Layer::Project | Layer::ProjectLocal)
-                && let Some(hint) = client_enable_required(spec, &[name.as_str()], &winner.file)
-            {
-                push_unique(&mut warnings, hint);
-            }
-
-            let shadowed = live
-                .iter()
-                .filter(|candidate| !std::ptr::eq(**candidate, winner))
-                .map(|candidate| Shadowed {
-                    layer: candidate.layer.clone(),
-                    file: self.display(&candidate.file),
-                })
-                .collect();
-            let also_visible_to = self.readers_of(spec.id, &winner.file, &winner.pointer);
-            out.push(EffectiveEntry {
-                loaded,
-                winner: Winner {
-                    layer: winner.layer.clone(),
-                    file: self.display(&winner.file),
-                    source: winner.source.clone(),
-                },
-                shadowed,
-                also_visible_to,
-                status: winner.status,
-                warnings,
-                name,
-            });
         }
         out
     }
 
+    /// The row of `name` whose entry `winner` the client runs; `group` holds
+    /// it and the candidates it shadows (or blocks), `heads` every entry of
+    /// the name the client runs.
+    fn row(
+        &mut self,
+        spec: &'static AdapterSpec,
+        cx: &ClientCx,
+        name: &str,
+        winner: &Candidate,
+        group: &[&Candidate],
+        heads: &[&Candidate],
+    ) -> EffectiveEntry {
+        let mcp = spec
+            .mcp
+            .as_ref()
+            .expect("selected clients have MCP support");
+        let live: Vec<&Candidate> = group
+            .iter()
+            .copied()
+            .filter(|candidate| candidate.presence != Presence::Blocked)
+            .collect();
+        let enabled = if mcp.caps.project_semantics == ProjectSemantics::DeepMerge {
+            // Fields merge across the client's own layers: the highest one
+            // that sets `enabled` decides.
+            live.iter()
+                .filter(|candidate| !candidate.compat)
+                .find_map(|candidate| enabled_of(candidate.value.as_ref()))
+                .or_else(|| enabled_of(winner.value.as_ref()))
+        } else {
+            enabled_of(winner.value.as_ref())
+        };
+        let loaded = winner.presence != Presence::Blocked
+            && enabled != Some(false)
+            && !cx.suppressed.iter().any(|member| member == name);
+
+        let mut warnings: Vec<CoreError> = Vec::new();
+        let native = live.iter().find(|candidate| !candidate.compat);
+        let compat = live.iter().find(|candidate| candidate.compat);
+        if let (Some(native), Some(compat)) = (native, compat) {
+            let message = match winner.outrank.filter(|_| winner.compat) {
+                // One host runs the compatibility entry, the others the
+                // client's own (VS Code and the Copilot CLI, gate V2 VSL-3).
+                Some(outrank) => format!(
+                    "{} runs {name:?} from {} over the same-named entry in {}; {} reads only \
+                     {} of the two and runs that entry",
+                    outrank.host,
+                    self.display(&winner.file),
+                    self.display(&native.file),
+                    outrank.others,
+                    self.display(&native.file)
+                ),
+                None => format!(
+                    "{} loads {name:?} from {} and also, as a compatibility source, from {}",
+                    spec.display_name,
+                    self.display(&native.file),
+                    self.display(&compat.file)
+                ),
+            };
+            push_unique(
+                &mut warnings,
+                CoreError::new(ErrorCode::DuplicateViaCompat, message).with_path(&compat.file),
+            );
+        }
+        if heads.len() > 1 {
+            let files: Vec<String> = heads.iter().map(|head| self.display(&head.file)).collect();
+            push_unique(
+                &mut warnings,
+                CoreError::new(
+                    ErrorCode::DuplicateAcrossLayers,
+                    format!(
+                        "{} runs a separate server named {name:?} from each of {}: same-named \
+                         entries of its own files do not replace each other",
+                        spec.display_name,
+                        files.join(" and ")
+                    ),
+                )
+                .with_path(&winner.file),
+            );
+        }
+        for problem in group.iter().filter_map(|c| c.problem.as_ref()) {
+            push_unique(&mut warnings, problem.clone());
+        }
+        for (member, problem) in &cx.member_problems {
+            if member == name {
+                push_unique(&mut warnings, problem.clone());
+            }
+        }
+        for (entry, warning) in &cx.project_warnings {
+            if entry == name {
+                push_unique(&mut warnings, warning.clone());
+            }
+        }
+        if let Some(extension) = &cx.extension {
+            push_unique(&mut warnings, extension.clone());
+        }
+        // Loadout's own project entry of a client that lists new project
+        // servers as disabled (Cursor): "loaded" assumes the user enabled it
+        // there once.
+        if loaded
+            && !winner.compat
+            && matches!(winner.layer, Layer::Project | Layer::ProjectLocal)
+            && let Some(hint) = client_enable_required(spec, &[name], &winner.file)
+        {
+            push_unique(&mut warnings, hint);
+        }
+
+        let shadowed = live
+            .iter()
+            .filter(|candidate| !std::ptr::eq(**candidate, winner))
+            .map(|candidate| Shadowed {
+                layer: candidate.layer.clone(),
+                file: self.display(&candidate.file),
+            })
+            .collect();
+        let also_visible_to = self.readers_of(spec.id, &winner.file, &winner.pointer);
+        EffectiveEntry {
+            name: name.to_owned(),
+            loaded,
+            winner: Winner {
+                layer: winner.layer.clone(),
+                file: self.display(&winner.file),
+                source: winner.source.clone(),
+            },
+            shadowed,
+            also_visible_to,
+            status: winner.status,
+            warnings,
+        }
+    }
+
     /// The files and containers `spec` reads, highest precedence first:
-    /// its own layers, then its compatibility sources (those with an
-    /// adapter in this build). Problems are reported when `warn`.
+    /// its own layers, each after the compatibility sources that outrank
+    /// it, then its other compatibility sources (those with an adapter in
+    /// this build). Problems are reported when `warn`.
     fn sources(&mut self, spec: &'static AdapterSpec, warn: bool) -> Vec<SourceFile> {
         let Some(mcp) = spec.mcp.as_ref() else {
             return Vec::new();
         };
         let mut out = Vec::new();
         for source in mcp.caps.precedence {
-            self.push_sources(spec, scope_of(*source), false, warn, &mut out);
+            for compat in mcp.caps.compat_reads {
+                if compat
+                    .outranks
+                    .is_some_and(|outrank| outrank.source == *source)
+                {
+                    self.push_compat(compat, &mut out);
+                }
+            }
+            self.push_sources(spec, scope_of(*source), false, None, warn, &mut out);
         }
         for compat in mcp.caps.compat_reads {
-            if let Some(other) = adapter(compat.client) {
-                self.push_sources(other, scope_of(compat.source), true, false, &mut out);
+            if compat.outranks.is_none() {
+                self.push_compat(compat, &mut out);
             }
         }
         out
     }
 
+    /// Adds the files and containers of compatibility source `compat`.
+    fn push_compat(&mut self, compat: &CompatSource, out: &mut Vec<SourceFile>) {
+        if let Some(other) = adapter(compat.client) {
+            let scope = scope_of(compat.source);
+            self.push_sources(other, scope, true, compat.outranks, false, out);
+        }
+    }
+
+    /// Adds the files and containers of `spec` in `scope`: another tool's
+    /// file when `compat`, ranked as `outrank` says.
     fn push_sources(
         &mut self,
         spec: &'static AdapterSpec,
         scope: Scope,
         compat: bool,
+        outrank: Option<Outrank>,
         warn: bool,
         out: &mut Vec<SourceFile>,
     ) {
@@ -540,6 +661,7 @@ impl<'a> View<'a> {
             out.push(SourceFile {
                 scope,
                 compat,
+                outrank,
                 file: target.file.clone(),
                 format: target.format,
                 keys,
@@ -602,6 +724,7 @@ impl<'a> View<'a> {
                 file: source.file.clone(),
                 pointer: source.pointer.clone(),
                 compat: source.compat,
+                outrank: source.outrank,
                 presence: Presence::File,
                 value: Some(value.clone()),
                 source: ours.as_ref().map_or_else(
@@ -630,6 +753,7 @@ impl<'a> View<'a> {
                     file: source.file.clone(),
                     pointer: source.pointer.clone(),
                     compat: source.compat,
+                    outrank: source.outrank,
                     presence,
                     value: entry.written.clone(),
                     source: self.source_name(target.scope, id),

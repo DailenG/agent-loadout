@@ -57,18 +57,9 @@ const CAPS: Caps = Caps {
     project_semantics: ProjectSemantics::Replace,
     precedence: &[Source::Project, Source::User],
     compat_reads: &[
-        CompatSource {
-            client: claude_code::ID,
-            source: Source::User,
-        },
-        CompatSource {
-            client: cursor::ID,
-            source: Source::Project,
-        },
-        CompatSource {
-            client: claude_code::ID,
-            source: Source::Project,
-        },
+        CompatSource::below(claude_code::ID, Source::User),
+        CompatSource::below(cursor::ID, Source::Project),
+        CompatSource::below(claude_code::ID, Source::Project),
     ],
     trust_gate: Some(TrustGate::TrustedFolder),
     rewrites_file_at_runtime: false,

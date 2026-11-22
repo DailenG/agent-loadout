@@ -13,6 +13,11 @@
 //!   Disabled until it is enabled once in Customize > MCPs (gate V2 CUR-2);
 //!   that toggle is Cursor's own state, so plans and `effective` carry a
 //!   `client_enable_required` hint ([`TrustGate::ClientEnable`]).
+//! - Same-named entries: a user and a project entry both run, as separate
+//!   servers listed per source (gate V2 CUR-5, FB-17), so the layers are
+//!   [`ProjectSemantics::Coexist`]: `effective` lists one loaded row per
+//!   file with `duplicate_across_layers`, and a project cannot hide or
+//!   replace a user server (`cannot_suppress_in_project`).
 //!
 //! Verified at gate V2 (Windows Sandbox, Cursor 3.31; `docs/verify/cursor.md`):
 //! `"disabled": true` is ignored and the UI toggle lives in Cursor's own
@@ -48,7 +53,8 @@ const CAPS: Caps = Caps {
     command_ref: None,
     native_disable: None,
     project_disable: None,
-    project_semantics: ProjectSemantics::Replace,
+    project_semantics: ProjectSemantics::Coexist,
+    // Only the order `effective` lists same-named entries in.
     precedence: &[Source::Project, Source::User],
     compat_reads: &[],
     trust_gate: Some(TrustGate::ClientEnable("Cursor > Customize > MCPs")),

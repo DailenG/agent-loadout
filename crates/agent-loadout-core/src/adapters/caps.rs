@@ -130,6 +130,10 @@ pub enum ProjectSemantics {
     Replace,
     /// Fields of the higher layer merge over the lower one.
     DeepMerge,
+    /// Both entries load, each as a server of its own under the same name
+    /// (Cursor, gate V2 CUR-5): nothing shadows across the client's own
+    /// layers, and [`Caps::precedence`] only orders how they are listed.
+    Coexist,
     Unknown,
 }
 
@@ -152,6 +156,36 @@ pub struct CompatSource {
     /// The client whose file it is.
     pub client: &'static str,
     pub source: Source,
+    /// Where the file ranks: `None` below every layer of the client's own;
+    /// otherwise above one of them, for the host that reads it.
+    pub outranks: Option<Outrank>,
+}
+
+impl CompatSource {
+    /// `client`'s `source` file, ranked below every layer of the client's
+    /// own.
+    pub const fn below(client: &'static str, source: Source) -> Self {
+        Self {
+            client,
+            source,
+            outranks: None,
+        }
+    }
+}
+
+/// A compatibility file that one host of a client prefers over the
+/// client's own layer `source` and every layer below it, while its other
+/// hosts do not read the file at all (VS Code runs `<P>/.vscode/mcp.json`
+/// over a same-named `<P>/.mcp.json` entry; the Copilot CLI reads only
+/// `.mcp.json`; gate V2 VSL-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Outrank {
+    pub source: Source,
+    /// The host that reads the file and runs its entry ("VS Code").
+    pub host: &'static str,
+    /// The client's hosts that do not read the file and so run the entry
+    /// of its own layer ("the Copilot CLI").
+    pub others: &'static str,
 }
 
 /// A client's approval gate for project files.

@@ -74,58 +74,19 @@ const CAPS: Caps = Caps {
     project_semantics: ProjectSemantics::Replace,
     precedence: &[Source::Project, Source::User],
     compat_reads: &[
-        CompatSource {
-            client: "claude-code",
-            source: Source::User,
-        },
-        CompatSource {
-            client: "claude-code",
-            source: Source::Project,
-        },
-        CompatSource {
-            client: "codex",
-            source: Source::User,
-        },
-        CompatSource {
-            client: "codex",
-            source: Source::Project,
-        },
-        CompatSource {
-            client: "gemini",
-            source: Source::User,
-        },
-        CompatSource {
-            client: "gemini",
-            source: Source::Project,
-        },
-        CompatSource {
-            client: "opencode",
-            source: Source::User,
-        },
-        CompatSource {
-            client: "opencode",
-            source: Source::Project,
-        },
-        CompatSource {
-            client: "cursor",
-            source: Source::User,
-        },
-        CompatSource {
-            client: "cursor",
-            source: Source::Project,
-        },
-        CompatSource {
-            client: "windsurf",
-            source: Source::User,
-        },
-        CompatSource {
-            client: "windsurf",
-            source: Source::Project,
-        },
-        CompatSource {
-            client: "vscode-legacy",
-            source: Source::Project,
-        },
+        CompatSource::below("claude-code", Source::User),
+        CompatSource::below("claude-code", Source::Project),
+        CompatSource::below("codex", Source::User),
+        CompatSource::below("codex", Source::Project),
+        CompatSource::below("gemini", Source::User),
+        CompatSource::below("gemini", Source::Project),
+        CompatSource::below("opencode", Source::User),
+        CompatSource::below("opencode", Source::Project),
+        CompatSource::below("cursor", Source::User),
+        CompatSource::below("cursor", Source::Project),
+        CompatSource::below("windsurf", Source::User),
+        CompatSource::below("windsurf", Source::Project),
+        CompatSource::below("vscode-legacy", Source::Project),
     ],
     trust_gate: None,
     rewrites_file_at_runtime: false,

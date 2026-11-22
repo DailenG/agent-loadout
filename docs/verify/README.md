@@ -141,7 +141,7 @@ the per-client pages give the rescored results.
 | [Delivery](delivery.md) | DX-11 (sandbox) | 1 | FB-12 | |
 | [Codex](codex.md) | CX-9, CX-10 (sandbox) | 2 | none | |
 | [Copilot](copilot.md) | COP-1 to COP-11 (sandbox) | 10 | none (COP-6 recorded) | COP-7; CLI parts of COP-4, 5, 9 (Copilot policy, environment note) |
-| [Cursor](cursor.md) | CUR-1 to CUR-10 (sandbox) | 10 | FB-13 (CUR-2) | none |
+| [Cursor](cursor.md) | CUR-1 to CUR-10 (sandbox) | 10 | FB-13 (CUR-2), FB-17 (CUR-5) | none |
 | [VS Code legacy](vscode-legacy.md) | VSL-1 to VSL-6 (sandbox) | 5 | VSL-3 partial, FB-15 | VSL-1 on Arch; VSL-3 tool picker |
 
 **Environment note, Copilot CLI policy (not a Loadout result).** On the
@@ -231,20 +231,26 @@ in Copilot"), then `copilot logout` and `copilot login` before the next run.
   value correctly; SPEC 7.3 now says so. Left: the `TimeoutField` note for
   omp and the user guide should warn that a small omp `timeout` can stop a
   slow server (for example `npx` on first run) from starting at all.
-- **FB-15 VSL-3: duplicate across `.vscode/mcp.json` and `<P>/.mcp.json`.**
-  The missing `duplicate_via_compat` was a harness error, not a bug: `<P>`
-  was not a Loadout project, so `loadout effective` printed "No project
-  here: user scope only." and read no project layer. The detection itself
-  (`layering/effective.rs`: a live native candidate plus a live compat
-  candidate of the same name) is covered by
-  `effective_view_lists_legacy_vscode_as_copilot_compat`.
-  `scripts/verify-clients.md` VSL-3 now makes `<P>` a project first. One
-  real gap remains: for a name in both files VS Code 1.147 ran the
-  `<P>/.vscode/mcp.json` entry, while Loadout's effective view makes
-  `<P>/.mcp.json` (Copilot's own project layer) the winner and the compat
-  entry shadowed. Rerun VSL-3 in a project to confirm which entry VS Code
-  runs, then order compat layers for `copilot` accordingly (or say in the
-  warning that VS Code may run the compat entry).
+- **FB-15 VSL-3: duplicate across `.vscode/mcp.json` and `<P>/.mcp.json`.
+  Done.** The missing `duplicate_via_compat` in the first run was a
+  harness error: `<P>` was not a Loadout project, so `loadout effective`
+  printed "No project here: user scope only." and read no project layer;
+  `scripts/verify-clients.md` VSL-3 now makes `<P>` a project first. The
+  rerun in a project (VS Code 1.147) showed the real gap: for
+  `verify-workspace` in both files, `effective --client copilot` made
+  `foreign:<P>/.mcp.json` the winner and shadowed
+  `client-compat:<P>/.vscode/mcp.json`, but VS Code started only the
+  `.vscode/mcp.json` entry. A compatibility source can now outrank one of
+  the client's own layers (`CompatSource::outranks`, an `Outrank` naming
+  the host that prefers the file and the hosts that do not read it).
+  Copilot's `vscode-legacy` project source outranks its project layer, so
+  the `.vscode/mcp.json` entry wins, the `<P>/.mcp.json` entry is
+  shadowed, and `duplicate_via_compat` stays, now reading "VS Code runs
+  "x" from `<P>/.vscode/mcp.json` over the same-named entry in
+  `<P>/.mcp.json`; the Copilot CLI reads only `<P>/.mcp.json` of the two
+  and runs that entry". Copilot's user-scope compat source and every
+  other compat ordering are unchanged
+  (`effective_view_lists_legacy_vscode_as_copilot_compat`).
 - **FB-16 Restart hint for Claude Desktop (AP-6). Done.** A server added
   while Claude Desktop runs starts only after a full restart. A target
   whose file an apply actually wrote now gets the new informational code
@@ -257,3 +263,19 @@ in Copilot"), then `copilot logout` and `copilot login` before the next run.
   runs that leave the file as it is do not
   (`writing_claude_desktop_asks_for_a_restart`,
   `writing_claude_desktop_prints_a_restart_hint`).
+- **FB-17 Cursor runs same-named user and project entries (CUR-5). Done.**
+  A `verify-both` entry in `~/.cursor/mcp.json` and in
+  `<P>/.cursor/mcp.json` started twice in Cursor 3.31, listed per source,
+  while the adapter declared `ProjectSemantics::Replace` and the effective
+  view made the project entry the winner over a shadowed user entry. New
+  `ProjectSemantics::Coexist` (both entries load as servers of their own),
+  set for Cursor: the effective view now lists one loaded row per file for
+  such a name, with no shadowing between Cursor's user and project files,
+  and each row carries the new warning `duplicate_across_layers` ("Cursor
+  runs a separate server named "x" from each of `<P>/.cursor/mcp.json`
+  and `~/.cursor/mcp.json`..."). Cursor's `precedence` now only orders
+  those rows. The planner and suppression logic only branch on
+  `DeepMerge`, so a Cursor `unset` raises no `unset_not_expressible`, and
+  a suppression stays `cannot_suppress_in_project` (Cursor has no
+  `project_disable`)
+  (`cursor_runs_same_named_user_and_project_entries_side_by_side`).
