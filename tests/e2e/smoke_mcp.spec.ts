@@ -115,6 +115,9 @@ describe.skipIf(missing !== null)("MCP smoke", () => {
     // ("All detected clients" or any client's own box), so nothing but the
     // pill below can enable one.
     const clientBoxes = "//div[@role='dialog']//label[contains(@class, 'mcp-form-app')]//input[@type='checkbox']";
+    // The per-client boxes come with the server list, which may still be
+    // loading when the dialog opens; until then only "All detected clients" shows.
+    await waitFor(async () => (await app.count(clientBoxes)) >= 2, "the client checkboxes").catch(() => undefined);
     const boxes = await app.selectedAll(clientBoxes);
     if (boxes.length < 2) {
       throw new Error(`refusing to save: expected the client checkboxes, found ${boxes.length}`);
