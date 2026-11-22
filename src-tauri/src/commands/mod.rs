@@ -11,6 +11,7 @@
 pub mod apply;
 pub mod effective;
 pub mod history;
+pub mod migrate;
 pub mod projects;
 pub mod remotes;
 pub mod resolve;
@@ -19,6 +20,8 @@ pub mod servers;
 pub mod skills;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_migrate;
 #[cfg(test)]
 mod tests_skills;
 #[cfg(test)]

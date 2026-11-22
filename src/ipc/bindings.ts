@@ -109,6 +109,9 @@ export const commands = {
 	installGitSkill: (url: string, path: string | null, gitRef: string | null, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_git_skill", { url, path, gitRef, id, renameIfTaken }, options)),
 	setSkillClients: (id: string, clients: string[], enabled: boolean, method: SkillMethod | null, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_clients", { id, clients, enabled, method }, options)),
 	setSkillMethod: (id: string, method: SkillMethod, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_method", { id, method }, options)),
+	planSkilldockMigration: (options?: InvokeOptions) => typedError<MigrationReport, IpcError>(__TAURI_INVOKE("plan_skilldock_migration", undefined, options)),
+	applySkilldockMigration: (options?: InvokeOptions) => typedError<MigrationApplied, IpcError>(__TAURI_INVOKE("apply_skilldock_migration", undefined, options)),
+	replaceSkilldockWrapper: (client: string, name: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("replace_skilldock_wrapper", { client, name }, options)),
 	setProjectSkill: (project: string, skill: string, enabled: boolean, hash: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_project_skill", { project, skill, enabled, hash }, options)),
 	removeSkill: (id: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("remove_skill", { id }, options)),
 	setSkillTags: (id: string, tags: string[], options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("set_skill_tags", { id, tags }, options)),
@@ -973,6 +976,88 @@ export type MergeConflictEntry = {
 };
 
 export type MergeKind = "up_to_date" | "fast_forward" | "merged" | "conflicts";
+
+/**  What the migration did. */
+export type MigrationApplied = {
+	report: MigrationReport,
+	/**  `auto/pre-migrate/<ts>`. */
+	tag: string,
+	/**  `None` when nothing was left to migrate. */
+	commit: string | null,
+	postTag: string | null,
+	/**  SkillDock's backup repository was cloned into `imports/` now. */
+	backupImported: boolean,
+};
+
+export type MigrationCounts = {
+	migrated: number,
+	needsReview: number,
+	skipped: number,
+};
+
+/**
+ *  A plaintext value replaced by a reference; the value itself never
+ *  leaves core.
+ */
+export type MigrationExtraction = {
+	server: string,
+	/**  `env.NAME`, `headers.NAME`, `args[N]` or `url`. */
+	field: string,
+	alias: string,
+	/**  Why it counts as sensitive. */
+	reason: string,
+	/**  The default destination (`keyring://loadout/<alias>`). */
+	suggestedRef: string,
+};
+
+/**  One line of the report. */
+export type MigrationItem = {
+	kind: MigrationItemKind,
+	name: string,
+	status: MigrationItemStatus,
+	/**  English detail (paths under placeholders). */
+	detail: string,
+	/**  The error code behind a review or skip. */
+	code: ErrorCode | null,
+	/**  The store id it became. */
+	id: string | null,
+	offers: MigrationOffer[],
+};
+
+export type MigrationItemKind = "server" | "skill" | "setting" | "client_entry" | "skill_link" | "credential" | "backup" | "plugin" | "skillhub" | "file";
+
+export type MigrationItemStatus = "migrated" | "needs_review" | "skipped";
+
+/**  A follow-up of a report item. Entries and aliases, never paths. */
+export type MigrationOffer = 
+/**  "Replace SkillDock wrapper" (`replace_skilldock_wrapper`). */
+{ kind: "replace_wrapper"; client: string; name: string } | 
+/**  A different native entry: decide in Pending changes. */
+{ kind: "review_entry"; client: string; name: string } | 
+/**  A value replaced by `${secret:<alias>}`: the extraction step. */
+{ kind: "set_secret"; alias: string } | 
+/**  An absolute command: machine-specific. */
+{ kind: "machine_path"; server: string } | 
+/**  SkillDock's GitHub token: a token remote in Settings. */
+{ kind: "keyring_token" } | 
+/**
+ *  SkillDock's GitHub backup repository as a git remote (URL with any
+ *  userinfo masked).
+ */
+{ kind: "add_remote"; url: string };
+
+/**  The report of a dry run or a migration. */
+export type MigrationReport = {
+	/**  `~/.skilldock`, under its placeholder root. */
+	source: string,
+	items: MigrationItem[],
+	extractions: MigrationExtraction[],
+	servers: string[],
+	skills: string[],
+	counts: MigrationCounts,
+	/**  Store files the migration writes (dry run). */
+	files: string[],
+};
 
 /**  A server that needs an alias, with the clients it is enabled for. */
 export type NeededBy = {

@@ -18462,3 +18462,92 @@ button.settings-form-item:disabled {
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+/* M20 migration wizard (SPEC 15.1). */
+.migrate-note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.migrate-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.migrate-items,
+.migrate-secrets {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.migrate-item,
+.migrate-secret {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.migrate-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.migrate-item__detail,
+.migrate-item__offers {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.migrate-item__offers {
+  padding-left: 18px;
+}
+
+.migrate-item--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.migrate-secret {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.migrate-secret__copy {
+  display: grid;
+  gap: 2px;
+  font-size: 0.82rem;
+}
+
+.migrate-secret__copy span,
+.migrate-secret__later {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.migrate-secret__input {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--heading);
+  font: inherit;
+}

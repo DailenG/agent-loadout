@@ -30,6 +30,7 @@ import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/Setti
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
 import { HistoryPage } from "@/app/routes/history/HistoryPage";
 import { InstallPage } from "@/app/routes/install/InstallPage";
+import { MigrateSection } from "@/app/routes/migrate/MigrateSection";
 import { McpPage } from "@/app/routes/mcp/McpPage";
 import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
@@ -627,6 +628,7 @@ function SettingsPage(props: {
         </SettingsItem>
       </SettingsGroup>
       <VersioningSection onOpenPending={props.onOpenPending} />
+      <MigrateSection onOpenPending={props.onOpenPending} />
       <SecretsSection onOpenPending={props.onOpenPending} />
     </div>
   );
