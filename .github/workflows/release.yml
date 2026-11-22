@@ -250,9 +250,19 @@ jobs:
           set -euo pipefail
           bundle=src-tauri/target/release/bundle
           deb="$bundle/deb/agent-loadout_${VERSION}_amd64.deb"
-          dpkg-deb -f "$deb" Package | grep -qx agent-loadout
-          dpkg-deb -c "$deb" | grep -q ' ./usr/bin/loadout$'
-          dpkg-deb -c "$deb" | grep -q ' ./usr/bin/agent-loadout-app$'
+          # Read whole outputs first: `dpkg-deb -c ... | grep -q` lets grep
+          # exit at the first match, dpkg-deb then dies of SIGPIPE, and
+          # pipefail fails the step although the file is there.
+          package=$(dpkg-deb -f "$deb" Package)
+          listing=$(dpkg-deb -c "$deb")
+          if [ "$package" != agent-loadout ]; then
+            echo "::error::deb Package is '$package', expected agent-loadout"; exit 1
+          fi
+          for bin in loadout agent-loadout-app; do
+            if ! grep -q " ./usr/bin/$bin\$" <<<"$listing"; then
+              echo "::error::the deb has no /usr/bin/$bin"; grep ' ./usr/bin/' <<<"$listing" || true; exit 1
+            fi
+          done
           top="agent-loadout-${VERSION}-x86_64-linux"
           mkdir -p "stage/$top"
           dpkg-deb -x "$deb" "stage/$top"
