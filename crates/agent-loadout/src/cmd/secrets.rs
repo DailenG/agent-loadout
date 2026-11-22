@@ -493,7 +493,9 @@ fn store_in_keyring(
         .map_err(|resolution| resolution.into_error(account))
 }
 
-/// The value piped on stdin, without its final line break. A terminal is
+/// The value piped on stdin, without a leading byte order mark (Windows
+/// PowerShell 5.1 pipes one when `$OutputEncoding` is UTF-8 with BOM; gate
+/// V2 sandbox run) and without its final line break. A terminal is
 /// refused, so a value is never echoed on screen.
 pub(crate) fn read_value() -> Result<SecretValue, CoreError> {
     let mut stdin = std::io::stdin();
@@ -508,10 +510,11 @@ pub(crate) fn read_value() -> Result<SecretValue, CoreError> {
     stdin
         .read_to_string(&mut text)
         .map_err(|err| CoreError::new(ErrorCode::IoError, format!("cannot read stdin: {err}")))?;
-    let value = text
+    let text_ref = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let value = text_ref
         .strip_suffix('\n')
         .map(|rest| rest.strip_suffix('\r').unwrap_or(rest))
-        .unwrap_or(&text);
+        .unwrap_or(text_ref);
     if value.is_empty() {
         return Err(CoreError::new(ErrorCode::InvalidValue, "no value on stdin"));
     }

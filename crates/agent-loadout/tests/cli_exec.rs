@@ -455,10 +455,12 @@ fn the_service_account_token_reaches_only_op() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    // As Windows PowerShell 5.1 pipes it: a byte order mark and CRLF, both
+    // dropped (the stub accepts only the exact token).
     set.stdin
         .take()
         .unwrap()
-        .write_all(format!("{TOKEN}\n").as_bytes())
+        .write_all(format!("\u{feff}{TOKEN}\r\n").as_bytes())
         .unwrap();
     let output = set.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
