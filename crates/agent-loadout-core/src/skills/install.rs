@@ -1126,6 +1126,33 @@ pub fn check_update(
     })
 }
 
+/// The source's files as the last [`check_update`] (or install, or
+/// [`update`]) left them in the cache clone, without contacting the
+/// source: what the update preview compares with the store copy. `None`
+/// for a skill without a git source or without a cache clone.
+pub fn cached_latest(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    id: &str,
+) -> Result<Option<SkillFiles>, CoreError> {
+    let Some(source) = git_source(store, id)? else {
+        return Ok(None);
+    };
+    let dir = sources_dir(sx).join(id);
+    if !sx.fs.is_dir(&dir) {
+        return Ok(None);
+    }
+    let path = source.path.as_deref().map(check_repo_path).transpose()?;
+    let skill_dir = match &path {
+        Some(path) => join_rel(&dir, path),
+        None => dir.clone(),
+    };
+    if !sx.fs.exists(&skill_dir.join(SKILL_FILE)) {
+        return Ok(None);
+    }
+    read_in_clone(sx.fs, &dir, &skill_dir).map(Some)
+}
+
 /// What [`update`] did.
 #[derive(Debug, Clone)]
 pub struct Updated {

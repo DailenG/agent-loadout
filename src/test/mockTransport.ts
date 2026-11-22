@@ -16,6 +16,10 @@ import type {
   RemotesOverview,
   Scope,
   ServerList,
+  SkillChange,
+  SkillClient,
+  SkillInstalled,
+  SkillList,
   ToolInfo,
 } from "@/ipc/bindings";
 import type { CommandResult, Commands, Transport } from "@/ipc/transport";
@@ -131,6 +135,39 @@ export function mockIpcError(error: IpcError): CommandResult<never> {
   return { status: "error", error };
 }
 
+/** Six clients with skill folders (SPEC 7.6), Claude Code and Codex detected. */
+export const MOCK_SKILL_CLIENTS: SkillClient[] = [
+  { id: "claude-code", name: "Claude Code", detected: true },
+  { id: "omp", name: "omp", detected: false },
+  { id: "codex", name: "Codex", detected: true },
+  { id: "pi", name: "Pi", detected: false },
+  { id: "copilot", name: "GitHub Copilot", detected: false },
+  { id: "cursor", name: "Cursor", detected: false },
+];
+
+export const MOCK_SKILL_LIST: SkillList = {
+  skills: [],
+  clients: MOCK_SKILL_CLIENTS,
+  project: null,
+  agentsCli: null,
+  sizeWarning: null,
+};
+
+export const MOCK_SKILL_CHANGE: SkillChange = {
+  commit: MOCK_CHANGE.commit,
+  links: { notes: [], warnings: [], needsAttention: false },
+};
+
+export const MOCK_SKILL_INSTALLED: SkillInstalled = {
+  id: "repo-notes",
+  name: "repo-notes",
+  commit: MOCK_CHANGE.commit,
+  sourceCommit: null,
+  renamedFrom: null,
+  links: null,
+  warnings: [],
+};
+
 export function createMockTransport(options: MockTransportOptions = {}): MockTransport {
   const calls: (keyof Commands)[] = [];
   const invocations: MockInvocation[] = [];
@@ -210,6 +247,26 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     listOpEnvironment: async () => ok({ names: null }),
     mapOpEnvironment: async () => ok({ mapped: [], kept: [], replaced: null, change: MOCK_CHANGE }),
     setOpAccount: async () => ok(MOCK_CHANGE),
+    listSkills: async () => ok(MOCK_SKILL_LIST),
+    listSkillToolDirs: async () => ok([]),
+    pickSkillSource: async () => ok(null),
+    installLocalSkill: async () => ok(MOCK_SKILL_INSTALLED),
+    installGitSkill: async () => ok(MOCK_SKILL_INSTALLED),
+    setSkillClients: async () => ok(MOCK_SKILL_CHANGE),
+    setProjectSkill: async () => ok(MOCK_SKILL_CHANGE),
+    removeSkill: async () => ok(MOCK_SKILL_CHANGE),
+    setSkillTags: async () => ok(MOCK_CHANGE.commit),
+    checkSkillUpdates: async () => ok([]),
+    skillUpdateDiff: async (_id, file) => ok({ path: file, before: "", after: "", binary: false }),
+    updateSkill: async (id) => ok({ id, from: null, to: "0000000", commit: MOCK_CHANGE.commit, changes: [], links: MOCK_SKILL_CHANGE.links }),
+    listSkillFiles: async () => ok([]),
+    readSkillFile: async (_id, file) => ok({ path: file, text: "", bytes: 0 }),
+    revealSkillFolder: async () => ok(null),
+    revealSkillToolFolder: async () => ok(null),
+    importToolSkill: async () => ok(MOCK_SKILL_INSTALLED),
+    trashToolSkill: async () => ok("%LOCALAPPDATA%/Loadout/backups/trash/mock"),
+    vendorAgentsSkill: async () => ok(MOCK_SKILL_INSTALLED),
+    runAgentsSkillCli: async () => ok(""),
   };
   const merged = { ...defaults, ...options.commands } as Commands;
 

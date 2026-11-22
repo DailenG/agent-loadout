@@ -381,7 +381,7 @@ pub struct RestoreFromResult {
 }
 
 /// `url` with userinfo (`https://user:token@host/...`) masked.
-fn mask_url(url: &str) -> String {
+pub(super) fn mask_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_owned();
     };

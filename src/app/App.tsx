@@ -24,15 +24,16 @@ import { PendingChangesPill } from "@/app/apply/PendingChangesPill";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { AppTooltip } from "@/app/components/AppTooltip";
 import { EmptyPage } from "@/app/components/EmptyPage";
-import { HeaderToolbar, HeaderToolbarProvider } from "@/app/components/HeaderSlots";
+import { HeaderToolbarProvider } from "@/app/components/HeaderSlots";
 import { NotificationProvider, useNotifications } from "@/app/components/notifications";
 import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/SettingsGroup";
-import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
 import { HistoryPage } from "@/app/routes/history/HistoryPage";
+import { InstallPage } from "@/app/routes/install/InstallPage";
 import { McpPage } from "@/app/routes/mcp/McpPage";
 import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
+import { SkillsPage } from "@/app/routes/skills/SkillsPage";
 import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRemoteStep";
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
@@ -712,14 +713,10 @@ function RoutePage(props: {
     return <ProjectsPage />;
   }
   if (route.key === "skills") {
-    return (
-      <>
-        <HeaderToolbar>
-          <ToolbarGoInstallButton onClick={() => props.onNavigate("install")} />
-        </HeaderToolbar>
-        <EmptyPage message={t(route.emptyKey)} />
-      </>
-    );
+    return <SkillsPage onOpenInstall={() => props.onNavigate("install")} />;
+  }
+  if (route.key === "install") {
+    return <InstallPage onOpenSkills={() => props.onNavigate("skills")} />;
   }
   return <EmptyPage message={t(route.emptyKey)} />;
 }

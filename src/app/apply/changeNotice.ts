@@ -26,6 +26,13 @@ export const storeQueryKeys = {
   mergeConflicts: ["list_merge_conflicts"],
   remotes: ["remotes_overview"],
   secrets: ["secrets_overview"],
+  /** Prefix of `["list_skills", scope]`. */
+  skills: ["list_skills"],
+  /** Prefix of `["list_skill_tool_dirs", scope]`. */
+  skillToolDirs: ["list_skill_tool_dirs"],
+  /** Prefix of `["list_skill_files", id]` and `["read_skill_file", id, file]`. */
+  skillFiles: ["list_skill_files"],
+  skillFile: ["read_skill_file"],
 } as const;
 
 const STATUS_KEYS = {

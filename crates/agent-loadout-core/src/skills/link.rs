@@ -560,13 +560,23 @@ fn desired(
 
 /// `[skills]` of a project's manifests: `enable` from both files, `share`
 /// and `defaults.clients` from the private file over the shared one.
-struct ProjectSkills {
-    enable: Vec<String>,
-    share: bool,
-    clients: ClientSelection,
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectSkills {
+    pub enable: Vec<String>,
+    pub share: bool,
+    pub clients: ClientSelection,
 }
 
-fn project_skills(project: &Project) -> ProjectSkills {
+/// The client ids of `selection` that have skill folders, `all-detected`
+/// resolved with the detection probes (for listings; unknown clients are
+/// left out).
+pub fn selected_clients(sx: &SkillsEnv<'_>, selection: &ClientSelection) -> Vec<&'static str> {
+    let mut ignored = Vec::new();
+    resolve_clients(sx, selection, "", &mut ignored)
+}
+
+/// `[skills]` of `project` as links are made from it.
+pub fn project_skills(project: &Project) -> ProjectSkills {
     let layers: Vec<&ProjectManifest> = [project.local.as_ref(), project.shared.as_ref()]
         .into_iter()
         .flatten()
@@ -1182,7 +1192,7 @@ pub fn set_project_enabled(
 }
 
 /// Whether `[skills] enable` of `manifest` lists `id`.
-fn manifest_enables(manifest: &ProjectManifest, id: &str) -> bool {
+pub fn manifest_enables(manifest: &ProjectManifest, id: &str) -> bool {
     manifest
         .skills
         .as_ref()

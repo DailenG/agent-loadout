@@ -167,7 +167,7 @@ pub struct TrustReview {
     pub warnings: Vec<IpcError>,
 }
 
-fn trust_of(project: &KnownProject) -> ProjectTrust {
+pub(super) fn trust_of(project: &KnownProject) -> ProjectTrust {
     match &project.status {
         ProjectStatus::Missing => ProjectTrust::Missing,
         ProjectStatus::Failed(_) => ProjectTrust::Invalid,
@@ -192,7 +192,11 @@ fn known(core: &Core, store: Option<&Store<'_>>) -> Result<Vec<KnownProject>, Co
 }
 
 /// The known project `id`, or `not_found`.
-fn find(core: &Core, store: Option<&Store<'_>>, id: &str) -> Result<KnownProject, CoreError> {
+pub(super) fn find(
+    core: &Core,
+    store: Option<&Store<'_>>,
+    id: &str,
+) -> Result<KnownProject, CoreError> {
     known(core, store)?
         .into_iter()
         .find(|project| project.id == id)
@@ -200,7 +204,7 @@ fn find(core: &Core, store: Option<&Store<'_>>, id: &str) -> Result<KnownProject
 }
 
 /// The loaded project of `known`, or why there is none.
-fn loaded(known: &KnownProject) -> Result<&Project, CoreError> {
+pub(super) fn loaded(known: &KnownProject) -> Result<&Project, CoreError> {
     match &known.status {
         ProjectStatus::Loaded { project, .. } => Ok(project),
         ProjectStatus::Missing => Err(CoreError::new(

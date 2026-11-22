@@ -93,6 +93,49 @@ pub fn stage_meta(tx: &mut Transaction<'_>, meta: &SkillMeta) -> Result<(), Core
     tx.write(&relative, text)
 }
 
+/// Longest tag (characters), as SkillDock's tag editor allowed.
+pub const MAX_TAG_CHARS: usize = 20;
+
+/// Sets the tags of skill `id` (SPEC 12.1): one commit of
+/// `skill-meta/<id>.toml` (`skill: tag <id>`), `None` when they are
+/// unchanged. Tags are trimmed, empty ones dropped, duplicates (ignoring
+/// case) kept once; a tag longer than [`MAX_TAG_CHARS`] or holding a
+/// control character is `invalid_value`.
+pub fn set_tags(
+    store: &Store<'_>,
+    id: &str,
+    tags: &[String],
+) -> Result<Option<crate::store::CommitId>, CoreError> {
+    ids::check(IdKind::Skill, id)?;
+    let mut clean: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag = tag.trim();
+        if tag.is_empty() {
+            continue;
+        }
+        if tag.chars().count() > MAX_TAG_CHARS || tag.chars().any(char::is_control) {
+            return Err(CoreError::new(
+                ErrorCode::InvalidValue,
+                format!("tag {tag:?} is longer than {MAX_TAG_CHARS} characters or not one line"),
+            ));
+        }
+        if !clean.iter().any(|known| known.eq_ignore_ascii_case(tag)) {
+            clean.push(tag.to_owned());
+        }
+    }
+    let operation = crate::store::Operation::new("skill.tag", format!("skill: tag {id}"))
+        .entity(format!("skill/{id}"));
+    let committed = store.transaction(operation, |tx| {
+        if !exists(tx, id)? {
+            return Err(not_found(id));
+        }
+        let mut meta = read_meta(tx, id)?.unwrap_or_else(|| SkillMeta::new(id));
+        meta.tags = (!clean.is_empty()).then(|| clean.clone());
+        stage_meta(tx, &meta)
+    })?;
+    Ok(committed.commit)
+}
+
 /// Stages `files` as the content of `id`: files that are not in `files`
 /// any more are removed. A new file below a link in the store folder (put
 /// there by hand or by a pulled commit) is `invalid_path`: writing it would

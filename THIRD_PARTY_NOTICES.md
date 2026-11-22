@@ -36,6 +36,15 @@ from the projects below. Every derived source file carries this header:
 | `src/app/routes/tools/ToolsPage.tsx` (grid layout; refresh button markup from `src/app/App.tsx`) | `src/app/routes/tools.tsx` | MIT | Copyright (c) 2026 wanghuan |
 | `src/app/routes/tools/ToolManageDialog.tsx` (dialog shell) | `src/features/skills/components/ToolManageDialog.tsx` | MIT | Copyright (c) 2026 wanghuan |
 | `src/app/components/ToolLogo.tsx` (`McpToolLogo` and the logo manifest, keyed by Loadout client ids) | `src/app/routes/mcp.tsx`, `src/features/skills/utils/tool-logo-manifest.json` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/SkillsPage.tsx` (toolbar, list/grid/grouped views, grouped section headers, empty states, M19) | `src/features/skills/components/SkillListPage.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/SkillCard.tsx` (card markup, enabled-tools badge, tag editor, power toggle, two-click delete, details, grid detail modal) | `src/features/skills/components/SkillCard.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/ToolSyncPanel.tsx` ("Enable in Tools" panel and pills) | `src/features/skills/components/ToolSyncPanel.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/SkillSourceSwitcher.tsx` (source tabs and "More" menu) | `src/features/skills/components/SkillSourceSwitcher.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/SkillSourceView.tsx` (tool folder rows: status badges, import, open folder, two-click delete, details) | `src/features/skills/components/SkillSourceView.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/SkillFileDialog.tsx` (dialog shell, file list, preview) | `src/features/skills/components/SkillFileDialog.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/SkillDiffView.tsx` (unified merge view and the end-of-file anchor) | `src/features/skills/components/SkillDiffView.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/skills/icons.tsx` | `src/features/skills/components/{SkillCard,SkillSourceView,SkillListPage,SkillSourceSwitcher}.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/routes/install/InstallPage.tsx` (category switcher, install tabs and icons, Git form, local install form) | `src/app/routes/market.tsx`, `src/features/install/components/{RepoInstallPanel,LocalInstallPanel}.tsx` | MIT | Copyright (c) 2026 wanghuan |
 | `public/tool-logos/*` (client logos: the clients' trademarks, used nominatively to identify them, SPEC 18) | `public/tool-logos/*` | trademarks of their owners | |
 
 Each further port adds a row here with its origin path at

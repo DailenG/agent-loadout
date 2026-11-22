@@ -47,6 +47,11 @@ const TOOL_LOGOS: Record<string, string> = {
   "vscode-legacy": "/tool-logos/github-copilot.svg",
 };
 
+/** The logo of `clientId`, if the set has one. */
+export function toolLogoUrl(clientId: string): string | undefined {
+  return TOOL_LOGOS[clientId];
+}
+
 /** A client's logo, or its first letter when there is none. */
 export function ToolLogo({ clientId, name }: { clientId: string; name: string }) {
   const [failed, setFailed] = useState(false);

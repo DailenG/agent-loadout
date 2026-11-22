@@ -31,7 +31,14 @@ M15 (desktop MCP page with per-client pills, Form/TOML/Preview editor and
 paste-anything, Tools page, pending-changes drawer with "Undo this apply"),
 M18 (skills store and CLI: `loadout skills ls|add|rm|enable|disable|update|scan`,
 installs from git, folders and `.zip`/`.skill` archives, junction links on
-Windows, project links hidden through `.git/info/exclude`),
+Windows, project links hidden through `.git/info/exclude`), M19 (desktop
+Skills page with list, grid and grouped views, per-tool "Enable in Tools"
+pills, tool folders as managed/unmanaged/conflict, file browser and update
+diff, a project scope; Install page: Skill from Git or a local folder or
+archive, MCP by form or pasted config), M20 core and CLI
+(`loadout migrate skilldock [--apply]`: SkillDock's `~/.skilldock`, read only,
+into the store in one commit, with a report of every item; the migration
+wizard page follows),
 M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and
 M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
 editors, and the ported user-scope clients) are in place. Gates V1 (Tier A)

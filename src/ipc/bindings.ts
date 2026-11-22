@@ -97,6 +97,33 @@ export const commands = {
 	listOpEnvironment: (id: string, options?: InvokeOptions) => typedError<OpEnvironmentNames, IpcError>(__TAURI_INVOKE("list_op_environment", { id }, options)),
 	mapOpEnvironment: (id: string, names: string[], account: string | null, options?: InvokeOptions) => typedError<MapResult, IpcError>(__TAURI_INVOKE("map_op_environment", { id, names, account }, options)),
 	setOpAccount: (account: string | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_op_account", { account }, options)),
+	listSkills: (scope: SkillScope, options?: InvokeOptions) => typedError<SkillList, IpcError>(__TAURI_INVOKE("list_skills", { scope }, options)),
+	listSkillToolDirs: (scope: SkillScope, options?: InvokeOptions) => typedError<ToolSkillDir[], IpcError>(__TAURI_INVOKE("list_skill_tool_dirs", { scope }, options)),
+	/**
+	 *  Opens the OS picker for a folder or a `.zip`/`.skill` file; `None` when
+	 *  the user cancels. The path is validated and kept here; the frontend
+	 *  gets a token and the placeholder path.
+	 */
+	pickSkillSource: (kind: SkillSourcePick, options?: InvokeOptions) => typedError<PickedSkillSource | null, IpcError>(__TAURI_INVOKE("pick_skill_source", { kind }, options)),
+	installLocalSkill: (token: string, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_local_skill", { token, id, renameIfTaken }, options)),
+	installGitSkill: (url: string, path: string | null, gitRef: string | null, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_git_skill", { url, path, gitRef, id, renameIfTaken }, options)),
+	setSkillClients: (id: string, clients: string[], enabled: boolean, method: SkillMethod | null, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_clients", { id, clients, enabled, method }, options)),
+	setProjectSkill: (project: string, skill: string, enabled: boolean, hash: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_project_skill", { project, skill, enabled, hash }, options)),
+	removeSkill: (id: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("remove_skill", { id }, options)),
+	setSkillTags: (id: string, tags: string[], options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("set_skill_tags", { id, tags }, options)),
+	checkSkillUpdates: (ids: string[], options?: InvokeOptions) => typedError<SkillUpdateCheck[], IpcError>(__TAURI_INVOKE("check_skill_updates", { ids }, options)),
+	skillUpdateDiff: (id: string, file: string, options?: InvokeOptions) => typedError<SkillFileDiff, IpcError>(__TAURI_INVOKE("skill_update_diff", { id, file }, options)),
+	updateSkill: (id: string, options?: InvokeOptions) => typedError<SkillUpdated, IpcError>(__TAURI_INVOKE("update_skill", { id }, options)),
+	listSkillFiles: (id: string, options?: InvokeOptions) => typedError<SkillFileEntry[], IpcError>(__TAURI_INVOKE("list_skill_files", { id }, options)),
+	readSkillFile: (id: string, file: string, options?: InvokeOptions) => typedError<SkillFileText, IpcError>(__TAURI_INVOKE("read_skill_file", { id, file }, options)),
+	/**  Opens the store folder of skill `id`. */
+	revealSkillFolder: (id: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_skill_folder", { id }, options)),
+	/**  Opens `client`'s skill folder in `scope`. */
+	revealSkillToolFolder: (client: string, scope: SkillScope, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_skill_tool_folder", { client, scope }, options)),
+	importToolSkill: (client: string, scope: SkillScope, name: string, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("import_tool_skill", { client, scope, name, id, renameIfTaken }, options)),
+	trashToolSkill: (client: string, scope: SkillScope, name: string, options?: InvokeOptions) => typedError<string, IpcError>(__TAURI_INVOKE("trash_tool_skill", { client, scope, name }, options)),
+	vendorAgentsSkill: (name: string, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("vendor_agents_skill", { name, id, renameIfTaken }, options)),
+	runAgentsSkillCli: (action: AgentsCliAction, name: string, options?: InvokeOptions) => typedError<string, IpcError>(__TAURI_INVOKE("run_agents_skill_cli", { action, name }, options)),
 };
 
 /* Constants */
@@ -118,6 +145,28 @@ export type AddedRemote = {
 	remote: RemoteEntry,
 	/**  `tool_not_found` (git or gh missing), `remote_unreachable`. */
 	warnings: IpcError[],
+};
+
+/**  The agents `skills` CLI actions (SPEC 12.4: only through the CLI). */
+export type AgentsCliAction = "update" | "remove";
+
+/**  `~/.agents/skills` when the compatibility setting is on. */
+export type AgentsCliList = {
+	dir: string,
+	skills: AgentsCliSkill[],
+	/**  The `skills` CLI is on `PATH` (update and remove need it). */
+	cliFound: boolean,
+	warnings: IpcError[],
+};
+
+/**  A skill of the agents CLI (SPEC 12.4), read only. */
+export type AgentsCliSkill = {
+	name: string,
+	path: string,
+	isLink: boolean,
+	source: string | null,
+	sourceUrl: string | null,
+	description: string | null,
 };
 
 /**  One row of the missing-secret checklist (SPEC 11.9). */
@@ -762,6 +811,15 @@ export type FoundManifest = {
 	known: boolean,
 };
 
+/**
+ *  A `SKILL.md` frontmatter field (SPEC 12.1: all fields shown): strings as
+ *  written, other values as JSON.
+ */
+export type FrontmatterField = {
+	key: string,
+	value: string,
+};
+
 /**  How a git remote authenticates (SPEC 9.6). */
 export type GitAuthDto = 
 /**  The user's own git credentials (GCM, SSH agent, any helper). */
@@ -975,6 +1033,15 @@ export type PickedRemoteFolder = {
 	/**  With the home folder as `~`. */
 	path: string,
 	syncTool: SyncTool | null,
+};
+
+/**  A picked folder or archive, as the frontend sees it. */
+export type PickedSkillSource = {
+	/**  Names the source in `install_local_skill`. */
+	token: string,
+	/**  Under its placeholder root. */
+	path: string,
+	name: string,
 };
 
 /**  A pill's state (SPEC 13.2). */
@@ -1434,6 +1501,215 @@ export type ServerRow = {
 	invalid: IpcError | null,
 };
 
+/**  A store change and the client folders that followed. */
+export type SkillChange = {
+	commit: string | null,
+	links: SkillSync,
+};
+
+/**  A client with a skill folder (SPEC 7.6). */
+export type SkillClient = {
+	id: string,
+	name: string,
+	detected: boolean,
+};
+
+/**  Class of a client skill folder entry (SPEC 12.5). */
+export type SkillEntryClass = "managed" | "unmanaged" | "mismatch";
+
+export type SkillFileChange = {
+	path: string,
+	kind: SkillFileChangeKind,
+};
+
+export type SkillFileChangeKind = "added" | "modified" | "removed";
+
+/**
+ *  One file of an update preview: the store copy against the source as
+ *  the last check fetched it. `None` where the file does not exist.
+ */
+export type SkillFileDiff = {
+	path: string,
+	before: string | null,
+	after: string | null,
+	/**  Either side is not UTF-8 text (or too large to show). */
+	binary: boolean,
+};
+
+/**  A file of a store skill. */
+export type SkillFileEntry = {
+	path: string,
+	bytes: number,
+};
+
+/**  A file's text for the file browser. */
+export type SkillFileText = {
+	path: string,
+	/**  `None` for a binary or very large file. */
+	text: string | null,
+	bytes: number,
+};
+
+/**  One store skill on the Skills page. */
+export type SkillInfo = {
+	id: string,
+	name: string,
+	description: string | null,
+	fields: FrontmatterField[],
+	tags: string[],
+	source: SkillSourceInfo | null,
+	/**  User scope: `enable.clients` is `all-detected`. */
+	allDetected: boolean,
+	/**
+	 *  User scope: the clients the skill is enabled for (`all-detected`
+	 *  resolved).
+	 */
+	clients: string[],
+	method: SkillMethod,
+	/**  Project scope: listed in the project's `[skills] enable`. */
+	projectEnabled: boolean,
+	/**
+	 *  Project scope: enabled by the shared `project.toml` of a project
+	 *  that has a private file too, so it cannot be turned off here.
+	 */
+	projectShared: boolean,
+	links: SkillLinkInfo[],
+	/**  Size of the content in bytes. */
+	bytes: number,
+	/**  Only skills with content are distributed. */
+	hasContent: boolean,
+	problems: IpcError[],
+};
+
+/**  An install (or import, or vendoring) into the store. */
+export type SkillInstalled = {
+	id: string,
+	name: string,
+	commit: string | null,
+	sourceCommit: string | null,
+	/**  The id the name asked for, when it was taken (confirmed). */
+	renamedFrom: string | null,
+	links: SkillSync | null,
+	warnings: IpcError[],
+};
+
+/**  An entry Loadout owns in a client skill folder. */
+export type SkillLinkInfo = {
+	client: string,
+	scope: FileScope,
+	projectId: string | null,
+	path: string,
+	method: SkillLinkMethod,
+};
+
+/**  How one owned entry was made. */
+export type SkillLinkMethod = "junction" | "symlink" | "copy";
+
+/**  An entry a change made, removed, or left for the user. */
+export type SkillLinkNote = {
+	client: string,
+	scope: FileScope,
+	projectId: string | null,
+	skillId: string,
+	path: string,
+	method: SkillLinkMethod,
+	status: SkillLinkStatus,
+	/**  Where a colliding link points. */
+	foundTarget: string | null,
+	error: IpcError | null,
+};
+
+/**  What happened to one client folder entry (SPEC 12.2). */
+export type SkillLinkStatus = "created" | "adopted" | "unchanged" | "updated" | "removed" | "foreign" | "collision" | "changed" | "blocked";
+
+/**  The Skills page. */
+export type SkillList = {
+	skills: SkillInfo[],
+	clients: SkillClient[],
+	project: SkillProject | null,
+	agentsCli: AgentsCliList | null,
+	/**  The store's skills pass 500 MB together. */
+	sizeWarning: IpcError | null,
+};
+
+/**  How a skill reaches client folders at user scope (SPEC 12.2). */
+export type SkillMethod = "link" | "copy";
+
+/**  Where a store skill came from (SPEC 12.1 `[source] kind`). */
+export type SkillOrigin = "git" | "local" | "agents_cli" | "catalog" | "authored";
+
+/**  The project the Skills page is scoped to. */
+export type SkillProject = {
+	id: string,
+	name: string,
+	path: string,
+	trust: ProjectTrust,
+	/**
+	 *  Content hash of the manifests as shown; project enables send it
+	 *  back, and other content is `trust_required` (SPEC 17).
+	 */
+	hash: string,
+	/**  The project's `defaults.clients`, resolved. */
+	clients: string[],
+	/**  `[skills] share`: copies to commit instead of hidden links. */
+	share: boolean,
+};
+
+/**
+ *  The scope the Skills page shows (SPEC 13.7: project scope shows the
+ *  project-enabled skills).
+ */
+export type SkillScope = { kind: "user" } | { kind: "project"; id: string };
+
+/**
+ *  A skill's source, URL userinfo masked and local paths under their
+ *  placeholder roots.
+ */
+export type SkillSourceInfo = {
+	kind: SkillOrigin,
+	url: string | null,
+	/**  The skill folder inside the repository. */
+	path: string | null,
+	gitRef: string | null,
+	commit: string | null,
+};
+
+/**  What the local install picks in the OS dialog. */
+export type SkillSourcePick = "folder" | 
+/**  A `.zip` or `.skill` file. */
+"archive";
+
+/**  What client folders did after a change. */
+export type SkillSync = {
+	/**  Entries other than `unchanged`. */
+	notes: SkillLinkNote[],
+	warnings: IpcError[],
+	/**  An entry needs a decision (foreign, collision, changed) or failed. */
+	needsAttention: boolean,
+};
+
+/**  An update check (SPEC 12.4). */
+export type SkillUpdateCheck = {
+	id: string,
+	status: SkillUpdateStatus,
+	current: string | null,
+	latest: string | null,
+	changes: SkillFileChange[],
+	error: IpcError | null,
+};
+
+export type SkillUpdateStatus = "up_to_date" | "available" | "not_tracked" | "source_unreachable";
+
+/**  What an update did. */
+export type SkillUpdated = {
+	id: string,
+	from: string | null,
+	to: string,
+	commit: string | null,
+	changes: SkillFileChange[],
+	links: SkillSync,
+};
+
 /**
  *  A sync tool whose folder holds a folder remote: supported, since each
  *  machine writes only its own subfolder (SPEC 9.6).
@@ -1481,6 +1757,25 @@ export type ToolInfo = {
 	/**  The client reads its file only at launch. */
 	restartRequired: boolean,
 	warnings: IpcError[],
+};
+
+/**  One client's skill folder in the page's scope. */
+export type ToolSkillDir = {
+	client: string,
+	name: string,
+	dir: string,
+	exists: boolean,
+	entries: ToolSkillEntry[],
+};
+
+export type ToolSkillEntry = {
+	name: string,
+	path: string,
+	class: SkillEntryClass,
+	linkTarget: string | null,
+	/**  The store skill of a managed entry. */
+	skillId: string | null,
+	description: string | null,
 };
 
 export type TransportKind = "stdio" | "http" | "sse";

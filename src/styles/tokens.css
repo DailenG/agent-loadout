@@ -18391,3 +18391,74 @@ button.settings-form-item:disabled {
   min-height: 96px;
   resize: vertical;
 }
+
+/* M19 Skills and Install (SPEC 13.7): the pieces SkillDock did not have. */
+.skills-scope-select {
+  flex: 0 0 auto;
+  width: 190px;
+}
+
+.skills-scope-note,
+.skills-source-folder,
+.skill-project-panel__note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.tool-pill.is-undetected:not(.is-enabled) {
+  opacity: 0.62;
+}
+
+.skill-method-select {
+  flex: 0 0 auto;
+  width: 168px;
+}
+
+.skill-method-select .app-select__trigger {
+  min-height: 30px;
+  font-size: 0.78rem;
+}
+
+.skill-card__problems {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-mcp-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.install-mcp-options .install-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-strong);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.install-mcp-options .install-card:hover {
+  border-color: var(--accent);
+}
+
+.install-mcp-options .install-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.install-mcp-options .install-card__title-row svg {
+  width: 18px;
+  height: 18px;
+}
+
+.install-mcp-options .install-card__lead {
+  color: var(--muted);
+  font-size: 0.82rem;
+}

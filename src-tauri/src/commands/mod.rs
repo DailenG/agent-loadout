@@ -16,8 +16,11 @@ pub mod remotes;
 pub mod resolve;
 pub mod secrets;
 pub mod servers;
+pub mod skills;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_skills;
 #[cfg(test)]
 mod tests_versioning;
 pub mod tools;
