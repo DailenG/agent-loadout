@@ -753,3 +753,47 @@ fn import_their_change_turns_drift_into_a_store_edit() {
     assert!(head.trailers.apply.is_some());
     assert!(fx.plan().targets.iter().all(|t| !t.has_work()));
 }
+
+/// Gate V2 FB-16 (AP-6): Claude Desktop reads its file only at launch, so a
+/// run that writes it reports `restart_required` on that target; a run that
+/// leaves it as it is does not, and other clients never do.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn writing_claude_desktop_asks_for_a_restart() {
+    let restart = |target: &apply::TargetResult| {
+        target
+            .warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::RestartRequired)
+    };
+    let fx = Fx::new();
+    fx.put_server(stdio("notes", &["claude-desktop", "omp"], &NOTES_ARGS));
+    let (report, _) = fx.apply();
+    let desktop = report
+        .targets
+        .iter()
+        .find(|t| t.clients.contains(&"claude-desktop"))
+        .unwrap_or_else(|| panic!("{report:#?}"));
+    assert!(desktop.written && restart(desktop), "{desktop:#?}");
+    let message = desktop
+        .warnings
+        .iter()
+        .find(|w| w.code() == ErrorCode::RestartRequired)
+        .unwrap()
+        .message();
+    assert!(message.contains("fully quit Claude Desktop"), "{message}");
+    assert!(
+        report
+            .targets
+            .iter()
+            .filter(|t| !t.clients.contains(&"claude-desktop"))
+            .all(|t| !restart(t)),
+        "{report:#?}"
+    );
+
+    let (again, _) = fx.apply();
+    assert!(
+        again.targets.iter().all(|t| !t.written && !restart(t)),
+        "{again:#?}"
+    );
+}

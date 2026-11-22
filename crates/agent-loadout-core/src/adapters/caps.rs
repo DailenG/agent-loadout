@@ -166,6 +166,12 @@ pub enum TrustGate {
     TrustedFolder,
     /// The editor workspace must be trusted (VS Code).
     WorkspaceTrust,
+    /// Each server in the project file stays disabled until the user
+    /// enables it once in the client, at this place in its UI (Cursor:
+    /// "Customize > MCPs", gate V2 CUR-2). The toggle lives in the client's
+    /// own storage, so Loadout cannot read it and only reports a hint
+    /// (`client_enable_required`).
+    ClientEnable(&'static str),
 }
 
 /// Native tool filtering fields.

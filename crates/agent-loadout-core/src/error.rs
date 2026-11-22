@@ -201,6 +201,15 @@ pub enum ErrorCode {
     /// file whose target entry cannot be located unambiguously (anchors,
     /// aliases, flow style). The target is blocked; the file is untouched.
     ReadOnlyFormat,
+    /// Info: a client lists each new server of its project file as disabled
+    /// until the user enables it once in the client (Cursor > Customize >
+    /// MCPs, gate V2 CUR-2). The toggle is the client's own state, so
+    /// Loadout cannot read it; the entry is written anyway.
+    ClientEnableRequired,
+    /// Info: a client reads its file only at launch (Claude Desktop, gate V2
+    /// AP-6), and the file was written; the change loads after a full quit
+    /// and restart of the client.
+    RestartRequired,
 }
 
 impl ErrorCode {
@@ -270,6 +279,8 @@ impl ErrorCode {
             ErrorCode::ReadOnlyClient => "read_only_client",
             ErrorCode::NeedsManualSecret => "needs_manual_secret",
             ErrorCode::ReadOnlyFormat => "read_only_format",
+            ErrorCode::ClientEnableRequired => "client_enable_required",
+            ErrorCode::RestartRequired => "restart_required",
         }
     }
 }

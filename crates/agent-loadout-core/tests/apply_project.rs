@@ -848,3 +848,69 @@ fn a_project_install_of_pi_mcp_adapter_warns() {
     let rows = &view.clients["pi"];
     assert!(!rows.is_empty() && rows.iter().all(|row| replaced(&row.warnings)));
 }
+
+/// Gate V2 FB-13 (CUR-2): Cursor lists new project servers as Disabled
+/// until each is enabled in Customize > MCPs. A Cursor project target with
+/// entries Loadout writes or owns, the apply report and Cursor's project
+/// rows of the effective view carry `client_enable_required`; the user file
+/// and user rows do not.
+#[test]
+fn cursor_project_entries_need_a_one_time_enable() {
+    use agent_loadout_core::CoreError;
+    use agent_loadout_core::layering::{Layer, effective};
+
+    let hint = |warnings: &[CoreError]| {
+        warnings
+            .iter()
+            .find(|w| w.code() == ErrorCode::ClientEnableRequired)
+            .map(|w| w.message().to_owned())
+    };
+    let fx = Fx::new();
+    fx.put_server(stdio("github", &["cursor"], &["-y", "github-mcp"]));
+    let root = fx.th.projects().join("cursed");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"cursed-a1b2\"\n\n[defaults]\nclients = [\"cursor\"]\n\n\
+         [servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\n",
+    );
+    fx.know_projects(&[("cursed-a1b2", &root)]);
+    fx.trust(&root);
+
+    let project_file = root.join(".cursor").join("mcp.json");
+    let user_file = fx.th.home().join(".cursor").join("mcp.json");
+    let plan = fx.plan();
+    let message =
+        hint(&target(&plan, &project_file).warnings).unwrap_or_else(|| panic!("{plan:#?}"));
+    assert!(message.contains("Customize > MCPs"), "{message}");
+    assert!(message.contains("\"docs\""), "{message}");
+    assert_eq!(hint(&target(&plan, &user_file).warnings), None);
+
+    let (report, _) = fx.apply();
+    let written = report
+        .targets
+        .iter()
+        .find(|t| t.file == project_file)
+        .unwrap_or_else(|| panic!("{report:#?}"));
+    assert!(
+        written.written && hint(&written.warnings).is_some(),
+        "{written:#?}"
+    );
+
+    // Owned and synced: still a hint, since Loadout cannot see the toggle.
+    let plan = fx.plan();
+    assert!(hint(&target(&plan, &project_file).warnings).is_some());
+
+    let store = fx.store();
+    let cursor = ["cursor".to_owned()];
+    let view = effective(Some(&store), &fx.ax(), &root, Some(&cursor)).unwrap();
+    for row in &view.clients["cursor"] {
+        let project = row.winner.layer == Layer::Project;
+        assert_eq!(hint(&row.warnings).is_some(), project, "{row:#?}");
+    }
+    assert!(
+        view.clients["cursor"]
+            .iter()
+            .any(|row| row.name == "docs" && row.loaded && row.winner.layer == Layer::Project)
+    );
+}

@@ -212,17 +212,19 @@ in Copilot"), then `copilot logout` and `copilot login` before the next run.
   (reproduced on the host). `read_value` in `cmd/secrets.rs` now strips a
   leading UTF-8 BOM; `the_service_account_token_reaches_only_op` pipes a
   BOM and CRLF.
-- **FB-13 Cursor project servers need enabling (CUR-2).** Cursor lists
-  servers from `<P>/.cursor/mcp.json` under "Disabled" until each is turned
-  on in its MCP page; the toggle lives in Cursor's own storage, not in the
-  file (CUR-4). Loadout models no gate for Cursor (`trust_gate = None`), so
-  `status` and `effective` call a written project entry loaded when Cursor
-  does not run it. Give Cursor's project scope a gate that says each server
-  needs a one-time enable in Cursor (an `ApprovalPrompt`-like
-  `TrustGate` variant or the existing one, with a hint naming Customize >
-  MCPs), and show it on Cursor project rows of `effective` and in the
-  apply report. Loadout cannot read the enable state, so it is a hint, not
-  a status.
+- **FB-13 Cursor project servers need enabling (CUR-2). Done.** Cursor
+  lists servers from `<P>/.cursor/mcp.json` under "Disabled" until each is
+  turned on in its MCP page; the toggle lives in Cursor's own storage, not
+  in the file (CUR-4). Cursor now has the gate
+  `TrustGate::ClientEnable("Cursor > Customize > MCPs")`. A project target
+  of such a client with entries Loadout writes or owns carries the new
+  informational code `client_enable_required` (naming those entries) in
+  `status`, `apply --dry-run` and the apply report, and every loaded
+  Cursor `project` row of `effective` carries it too. It is a hint, not a
+  status: Loadout cannot read the enable state
+  (`cursor_project_entries_need_a_one_time_enable`). CUR-9: the detection
+  probes now match both uninstall `DisplayName`s, `Cursor` and
+  `Cursor (User)` (`cursor_uninstall_entries_per_installer`).
 - **FB-14 omp's timeout bounds startup (OMP-6).** omp applies an entry's
   `timeout` (ms) to the connection and startup too: with `1000`, a server
   that starts more slowly lost all its tools for the run. Loadout writes the
@@ -243,9 +245,15 @@ in Copilot"), then `copilot logout` and `copilot login` before the next run.
   entry shadowed. Rerun VSL-3 in a project to confirm which entry VS Code
   runs, then order compat layers for `copilot` accordingly (or say in the
   warning that VS Code may run the compat entry).
-- **FB-16 Restart hint for Claude Desktop (AP-6), opportunity.** A server
-  added while Claude Desktop runs starts only after a full restart, and
-  Loadout prints nothing: `Caps::restart_required` is set for
-  claude-desktop but no command reads it. `apply` and the instant-apply
-  commands should print a hint (for example "restart Claude Desktop to
-  load the change") when a target with `restart_required` changed.
+- **FB-16 Restart hint for Claude Desktop (AP-6). Done.** A server added
+  while Claude Desktop runs starts only after a full restart. A target
+  whose file an apply actually wrote now gets the new informational code
+  `restart_required` for each of its clients with
+  `Caps::restart_required` (claude-desktop): "fully quit Claude Desktop
+  (also from the system tray or menu bar) and start it again". The apply
+  report shows target warnings now, both as `warning[...]` lines under the
+  file in text and as `targets[].warnings` in JSON, so `apply`, `rollback`,
+  `adopt`, `import` and the instant-apply `server` commands all print it;
+  runs that leave the file as it is do not
+  (`writing_claude_desktop_asks_for_a_restart`,
+  `writing_claude_desktop_prints_a_restart_hint`).

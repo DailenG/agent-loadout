@@ -30,7 +30,7 @@ use crate::apply::exec::PlanInputs;
 use crate::apply::ledger::{EntryKind, container_pointer};
 use crate::apply::plan::{
     self, Action, EntryPlan, EntryState, Plan, PlanOptions, ProjectSelection, ScopeFilter,
-    TargetPlan, list_members, read_target, unset_not_expressible,
+    TargetPlan, client_enable_required, list_members, read_target, unset_not_expressible,
 };
 use crate::apply::render::{Detected, RenderCx, server_transport, writable};
 use crate::apply::{ApplyEnv, placeholder_path};
@@ -115,8 +115,8 @@ pub struct EffectiveEntry {
     pub status: Option<EntryState>,
     /// `duplicate_via_compat`, `cannot_suppress_in_project`,
     /// `unset_not_expressible`, `trust_required`,
-    /// `client_mcp_replaced_by_extension` and the problems the plan has
-    /// with this name's entries.
+    /// `client_mcp_replaced_by_extension`, `client_enable_required` and the
+    /// problems the plan has with this name's entries.
     #[serde(serialize_with = "warnings_json")]
     pub warnings: Vec<CoreError>,
 }
@@ -429,6 +429,16 @@ impl<'a> View<'a> {
             }
             if let Some(extension) = &extension {
                 push_unique(&mut warnings, extension.clone());
+            }
+            // Loadout's own project entry of a client that lists new project
+            // servers as disabled (Cursor): "loaded" assumes the user enabled
+            // it there once.
+            if loaded
+                && !winner.compat
+                && matches!(winner.layer, Layer::Project | Layer::ProjectLocal)
+                && let Some(hint) = client_enable_required(spec, &[name.as_str()], &winner.file)
+            {
+                push_unique(&mut warnings, hint);
             }
 
             let shadowed = live

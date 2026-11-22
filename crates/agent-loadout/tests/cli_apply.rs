@@ -106,6 +106,50 @@ fn server_add_applies_in_the_same_commit() {
     assert_eq!(cli.claude_entry("notes"), None);
 }
 
+/// Gate V2 FB-16 (AP-6): an apply that writes Claude Desktop's file says to
+/// restart it, in the JSON target and in the text report; a run that writes
+/// nothing says nothing.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn writing_claude_desktop_prints_a_restart_hint() {
+    let cli = Cli::new();
+    let added = cli.ok(&[
+        "server",
+        "add",
+        "notes",
+        "--client",
+        "claude-desktop",
+        "--",
+        "npx",
+    ]);
+    let target = &added["apply"]["targets"][0];
+    assert_eq!(target["clients"], json!(["claude-desktop"]), "{added:#}");
+    assert_eq!(target["written"], true);
+    assert_eq!(
+        target["warnings"][0]["code"], "restart_required",
+        "{added:#}"
+    );
+
+    let output = cli.run(&[
+        "server",
+        "add",
+        "docs",
+        "--client",
+        "claude-desktop",
+        "--",
+        "docs",
+    ]);
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("warning[restart_required]: "), "{text}");
+    assert!(text.contains("fully quit Claude Desktop"), "{text}");
+
+    let again = cli.ok(&["apply"]);
+    assert_eq!(again["written"], 0);
+    let codes = again["targets"].to_string();
+    assert!(!codes.contains("restart_required"), "{again:#}");
+}
+
 #[test]
 fn review_mode_status_diff_and_apply() {
     let cli = Cli::new();

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::adapters::adapter;
 use crate::apply::backup;
 use crate::apply::journal::{FileRecord, Journal, RecordedError};
 use crate::apply::ledger::{EntryKind, Ledger, LedgerEntry, LedgerKey, LedgerSlot, Origin};
@@ -431,9 +432,11 @@ impl Executor<'_> {
                 Err(err) => return failed(plan, err),
             }
             if let Err(err) = self.update_ledger(&plan, ledger) {
+                let restart = restart_required(&plan.clients, &plan.file);
                 let mut result = failed(plan, err);
                 result.written = true;
                 result.backup = backup;
+                result.warnings.extend(restart);
                 return result;
             }
             let outcome = entry_outcome(&plan, true);
@@ -629,12 +632,16 @@ fn entry_outcome(plan: &TargetPlan, wrote: bool) -> ApplyOutcome {
 }
 
 fn finished(
-    plan: TargetPlan,
+    mut plan: TargetPlan,
     outcome: ApplyOutcome,
     error: Option<CoreError>,
     written: bool,
     backup: Option<PathBuf>,
 ) -> TargetResult {
+    if written {
+        plan.warnings
+            .extend(restart_required(&plan.clients, &plan.file));
+    }
     TargetResult {
         counts: if written {
             plan.counts()
@@ -653,6 +660,31 @@ fn finished(
         backup,
         warnings: plan.warnings,
     }
+}
+
+/// `restart_required` for each client of a written file that reads it only
+/// at launch (Claude Desktop, gate V2 AP-6).
+fn restart_required(clients: &[&'static str], file: &Path) -> Vec<CoreError> {
+    clients
+        .iter()
+        .filter_map(|&client| adapter(client))
+        .filter(|spec| {
+            spec.mcp
+                .as_ref()
+                .is_some_and(|mcp| mcp.caps.restart_required)
+        })
+        .map(|spec| {
+            CoreError::new(
+                ErrorCode::RestartRequired,
+                format!(
+                    "{0} reads this file only at launch: fully quit {0} (also from the system \
+                     tray or menu bar) and start it again to load the change",
+                    spec.display_name
+                ),
+            )
+            .with_path(file)
+        })
+        .collect()
 }
 
 fn failed(plan: TargetPlan, err: CoreError) -> TargetResult {

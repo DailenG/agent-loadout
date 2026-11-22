@@ -246,6 +246,7 @@ fn target_result_json(target: &TargetResult) -> Value {
         "error": target.error.as_ref().map(error_json),
         "backup": target.backup.as_deref().map(path_json),
         "entries": target.entries.iter().map(entry_json).collect::<Vec<_>>(),
+        "warnings": target.warnings.iter().map(error_json).collect::<Vec<_>>(),
     })
 }
 
@@ -305,6 +306,13 @@ pub fn print_report(report: &ApplyReport, commit: Option<&CommitId>) {
                     entry.name
                 );
             }
+        }
+        for warning in &target.warnings {
+            println!(
+                "         warning[{}]: {}",
+                warning.code(),
+                warning.message()
+            );
         }
     }
     for warning in &report.warnings {

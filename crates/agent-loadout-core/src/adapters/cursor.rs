@@ -9,16 +9,24 @@
 //! - Variables: Cursor expands `${env:NAME}` (and its own `${userHome}`,
 //!   `${workspaceFolder}`) in `command`, `args`, `env`, `url` and
 //!   `headers`; Loadout writes `${env:NAME}` for `env` delivery.
+//! - Project servers: Cursor lists each new server of a project file as
+//!   Disabled until it is enabled once in Customize > MCPs (gate V2 CUR-2);
+//!   that toggle is Cursor's own state, so plans and `effective` carry a
+//!   `client_enable_required` hint ([`TrustGate::ClientEnable`]).
 //!
-//! Assumptions left for gate V2 (`scripts/verify-clients.md`, CUR-*):
-//! `[verify]` that there is no native disable field (CUR-4) and no way to
-//! hide a user server in a project (CUR-5), that a project entry replaces
-//! a same-named user entry (CUR-5), the fields Cursor expands `${env:NAME}`
-//! in (CUR-3), that `"type": "sse"` is accepted for SSE (CUR-6), that any
-//! non-empty name loads (CUR-7), that Windows starts `npx` without `cmd /c`
-//! (CUR-8) and the detection probes (CUR-9).
+//! Verified at gate V2 (Windows Sandbox, Cursor 3.31; `docs/verify/cursor.md`):
+//! `"disabled": true` is ignored and the UI toggle lives in Cursor's own
+//! storage, so there is no native disable field (CUR-4); a project entry
+//! cannot hide a user server, and a same-named user and project entry both
+//! run as separate servers (CUR-5); `${env:NAME}` expands in command, args,
+//! env, url and headers (CUR-3); SSE with `"type": "sse"`, bare-url SSE and
+//! bare-url Streamable HTTP all load (CUR-6); dotted and spaced names load
+//! (CUR-7); plain `npx` starts without `cmd /c` (CUR-8); the per-user
+//! installer's uninstall entry is `Cursor (User)` (CUR-9).
 
-use crate::adapters::caps::{Caps, EnvRefSyntax, FieldSet, ProjectSemantics, Source, TransportSet};
+use crate::adapters::caps::{
+    Caps, EnvRefSyntax, FieldSet, ProjectSemantics, Source, TransportSet, TrustGate,
+};
 use crate::adapters::detect::Probe;
 use crate::adapters::location::Location;
 use crate::adapters::mapper::McpServersJson;
@@ -43,7 +51,7 @@ const CAPS: Caps = Caps {
     project_semantics: ProjectSemantics::Replace,
     precedence: &[Source::Project, Source::User],
     compat_reads: &[],
-    trust_gate: None,
+    trust_gate: Some(TrustGate::ClientEnable("Cursor > Customize > MCPs")),
     rewrites_file_at_runtime: false,
     restart_required: false,
     tool_filter: None,
@@ -70,8 +78,10 @@ pub static SPEC: AdapterSpec = AdapterSpec {
         Probe::Path(Location::Home(".cursor")),
         Probe::Path(Location::AppData("Cursor")),
         Probe::Executable("cursor"),
-        // `[verify]` the uninstall `DisplayName` of the Windows installer.
+        // The uninstall `DisplayName`: "Cursor (User)" for the per-user
+        // installer (gate V2 CUR-9), "Cursor" for a machine-wide install.
         Probe::UninstallEntry("Cursor"),
+        Probe::UninstallEntry("Cursor (User)"),
     ],
     mcp: Some(McpSpec {
         oses: &[Os::Windows, Os::Linux, Os::MacOs],

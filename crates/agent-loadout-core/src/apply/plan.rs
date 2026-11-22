@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use similar::TextDiff;
 
 use crate::adapters::caps::{
-    DisableMech, ProjectDisable, ProjectSemantics, TimeUnit, TimeoutField,
+    DisableMech, ProjectDisable, ProjectSemantics, TimeUnit, TimeoutField, TrustGate,
 };
 use crate::adapters::detect::replacing_extension;
 use crate::adapters::mapper::{Canonical, EntryMapper, WriteCx};
@@ -1344,6 +1344,61 @@ pub(crate) fn unset_not_expressible(
     )
 }
 
+/// `client_enable_required` for `names` in a project file of `spec`, when
+/// the client lists new project servers as disabled until each is enabled
+/// once in its UI (Cursor, gate V2 CUR-2). `None` for any other client or
+/// no names.
+pub(crate) fn client_enable_required(
+    spec: &AdapterSpec,
+    names: &[&str],
+    file: &Path,
+) -> Option<CoreError> {
+    let TrustGate::ClientEnable(place) = spec.mcp.as_ref()?.caps.trust_gate? else {
+        return None;
+    };
+    if names.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = names.iter().map(|name| format!("{name:?}")).collect();
+    Some(
+        CoreError::new(
+            ErrorCode::ClientEnableRequired,
+            format!(
+                "{} lists new servers of this project file as Disabled until each is enabled \
+                 in {place} (once per server; Loadout cannot read that toggle): {}",
+                spec.display_name,
+                names.join(", ")
+            ),
+        )
+        .with_path(file),
+    )
+}
+
+/// [`client_enable_required`] for each client of a project target, naming
+/// the entries Loadout writes or keeps owning there.
+fn client_enable_hints(plan: &TargetPlan) -> Vec<CoreError> {
+    if plan.scope == Scope::User {
+        return Vec::new();
+    }
+    plan.clients
+        .iter()
+        .filter_map(|&client| {
+            let names: Vec<&str> = plan
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry.client == Some(client)
+                        && entry.desired.is_some()
+                        && entry.state != EntryState::Blocked
+                        && !matches!(entry.action, Action::Skip | Action::Import)
+                })
+                .map(|entry| entry.name.as_str())
+                .collect();
+            client_enable_required(adapter(client)?, &names, &plan.file)
+        })
+        .collect()
+}
+
 /// The keys of an RFC 6901 JSON pointer ([`container_pointer`] reversed).
 fn pointer_keys(pointer: &str) -> Vec<String> {
     pointer
@@ -1528,6 +1583,7 @@ pub(crate) fn plan_target(
             plan.after = Some(after);
         }
     }
+    plan.warnings.extend(client_enable_hints(&plan));
     plan
 }
 

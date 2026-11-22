@@ -726,6 +726,27 @@ fn tier_b_detection_per_os() {
     assert!(evidence(LEGACY, &env).contains(&Evidence::Executable(home.bin().join("code.cmd"))));
 }
 
+/// Gate V2 CUR-9: the per-user installer registers "Cursor (User)"; an
+/// exact `DisplayName` match finds it as well as a machine-wide "Cursor".
+#[test]
+fn cursor_uninstall_entries_per_installer() {
+    struct Names(Vec<&'static str>);
+    impl detect::RegistryProbe for Names {
+        fn has_uninstall_entry(&self, display_name: &str) -> bool {
+            self.0.contains(&display_name)
+        }
+    }
+    let home = TempHome::new();
+    let fs = home.fs();
+    let env = home.env(Os::Windows);
+    for name in ["Cursor", "Cursor (User)"] {
+        let found = detect::detect(CURSOR, &env, &fs, &Names(vec![name]));
+        assert_eq!(found.evidence, [Evidence::UninstallEntry(name)]);
+    }
+    let found = detect::detect(CURSOR, &env, &fs, &Names(vec!["Cursor Helper"]));
+    assert!(!found.detected());
+}
+
 // ---------------------------------------------------------------------------
 // Through the apply engine
 
