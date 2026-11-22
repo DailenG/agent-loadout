@@ -6,7 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::apply::render::DesiredState;
 use crate::error::{CoreError, ErrorCode};
+use crate::model::clients::ClientSelection;
 use crate::model::ids::{self, IdKind};
 use crate::model::machine::MachineOverlay;
 use crate::model::secrets::{SecretCatalog, SecretEntry};
@@ -392,6 +394,30 @@ pub fn check(
                 resolution,
                 servers,
             }
+        })
+        .collect()
+}
+
+/// Each server using the alias, with the clients it is enabled for in
+/// `desired` (`all-detected` for a server enabled for every detected
+/// client; none when it is not enabled), for the missing-secret checklist
+/// (SPEC 11.9).
+pub fn needed_by(status: &AliasStatus, desired: &DesiredState) -> Vec<(String, Vec<String>)> {
+    status
+        .servers
+        .iter()
+        .map(|id| {
+            let clients = match desired
+                .servers
+                .get(id)
+                .and_then(|server| server.enable.as_ref())
+                .and_then(|enable| enable.clients.as_ref())
+            {
+                Some(ClientSelection::List(ids)) => ids.clone(),
+                Some(ClientSelection::AllDetected) => vec!["all-detected".to_owned()],
+                None => Vec::new(),
+            };
+            (id.clone(), clients)
         })
         .collect()
 }

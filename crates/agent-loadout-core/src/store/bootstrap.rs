@@ -140,6 +140,30 @@ pub fn bare_store_id(path: &Path, head: &str) -> Option<String> {
         .map(|identity| identity.store_id)
 }
 
+impl Store<'_> {
+    /// How many commits reachable from `head` in the bare repository at
+    /// `path` are not in HEAD's history (at most `limit`); `None` when the
+    /// repository or a commit cannot be read (a sync tool may still be
+    /// copying). Reads the bare repository only.
+    pub fn bare_incoming(&self, path: &Path, head: &str, limit: usize) -> Option<usize> {
+        let repo = Repository::open_bare(path).ok()?;
+        let mut pending = vec![Oid::from_str(head).ok()?];
+        let mut seen = HashSet::new();
+        let mut count = 0;
+        while let Some(oid) = pending.pop() {
+            if count >= limit {
+                break;
+            }
+            if !seen.insert(oid) || self.contains(&CommitId::from_oid(oid)) {
+                continue;
+            }
+            count += 1;
+            pending.extend(repo.find_commit(oid).ok()?.parent_ids());
+        }
+        Some(count)
+    }
+}
+
 /// The store id in an exported tree's `loadout.toml`.
 pub fn export_store_id(files: &Files) -> Option<String> {
     let text = std::str::from_utf8(files.get(IDENTITY_FILE)?).ok()?;

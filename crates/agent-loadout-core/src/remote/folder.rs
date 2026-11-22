@@ -265,6 +265,22 @@ fn zip_bytes(files: &Files) -> Result<Vec<u8>, CoreError> {
     Ok(writer.finish().map_err(zip_error)?.into_inner())
 }
 
+/// The store at `rev` as a zip with `EXPORT.json` (what `restore --from`
+/// reads, SPEC 10 item 5), and its name `loadout-<ts>-<shortsha>.zip`.
+pub fn export_zip(
+    store: &Store<'_>,
+    rev: &CommitId,
+    machine_id: &str,
+) -> Result<(String, Vec<u8>), CoreError> {
+    let stamp = crate::apply::backup::timestamp(store.env().now());
+    // 20260101T000000Z -> 20260101-000000
+    let stamp = format!("{}-{}", &stamp[..8], &stamp[9..15]);
+    let name = format!("loadout-{stamp}-{}.zip", &rev.as_str()[..12]);
+    let mut files = store.files_at(rev)?;
+    files.insert(EXPORT_FILE.to_owned(), export_info(store, rev, machine_id)?);
+    Ok((name, zip_bytes(&files)?))
+}
+
 /// `archives/loadout-<ts>-<shortsha>.zip`, then the oldest archives beyond
 /// `keep` are deleted. Returns the new name and the archives kept.
 fn write_archive(
@@ -278,16 +294,7 @@ fn write_archive(
     let archives = dir.join(ARCHIVES);
     fs.create_dir_all(&archives)
         .map_err(|err| io("cannot create directory", &archives, &err))?;
-    let stamp = crate::apply::backup::timestamp(store.env().now());
-    // 20260101T000000Z -> 20260101-000000
-    let stamp = format!("{}-{}", &stamp[..8], &stamp[9..15]);
-    let name = format!("loadout-{stamp}-{}.zip", &head.as_str()[..12]);
-    let mut files = store.files_at(head)?;
-    files.insert(
-        EXPORT_FILE.to_owned(),
-        export_info(store, head, machine_id)?,
-    );
-    let bytes = zip_bytes(&files)?;
+    let (name, bytes) = export_zip(store, head, machine_id)?;
     let temp = archives.join(format!(".{name}.loadout-{}.tmp", suffix()?));
     fs.write_new(&temp, &bytes, None)
         .map_err(|err| io("cannot write the archive", &temp, &err))?;

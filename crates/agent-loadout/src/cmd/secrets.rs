@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::brand;
-use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::secrets::catalog::{
@@ -267,7 +266,7 @@ fn check(ctx: &Context, only: &[String]) -> Result<u8, CoreError> {
                 status.resolution.status.as_str(),
                 status.alias
             );
-            for (server, clients) in needed_by(status, &desired) {
+            for (server, clients) in catalog::needed_by(status, &desired) {
                 let clients = if clients.is_empty() {
                     "not enabled".to_owned()
                 } else {
@@ -281,27 +280,6 @@ fn check(ctx: &Context, only: &[String]) -> Result<u8, CoreError> {
         }
     }
     Ok(if blocked { EXIT_MISSING_SECRETS } else { 0 })
-}
-
-/// Each server using the alias, with the clients it is enabled for.
-fn needed_by(status: &AliasStatus, desired: &DesiredState) -> Vec<(String, Vec<String>)> {
-    status
-        .servers
-        .iter()
-        .map(|id| {
-            let clients = match desired
-                .servers
-                .get(id)
-                .and_then(|server| server.enable.as_ref())
-                .and_then(|enable| enable.clients.as_ref())
-            {
-                Some(ClientSelection::List(ids)) => ids.clone(),
-                Some(ClientSelection::AllDetected) => vec!["all-detected".to_owned()],
-                None => Vec::new(),
-            };
-            (id.clone(), clients)
-        })
-        .collect()
 }
 
 /// The quick fixes of SPEC 11.9 for an alias that is not resolved; "skip
@@ -332,7 +310,7 @@ fn fixes(status: &AliasStatus) -> Vec<String> {
 }
 
 fn status_json(status: &AliasStatus, desired: &DesiredState) -> Value {
-    let clients: BTreeSet<String> = needed_by(status, desired)
+    let clients: BTreeSet<String> = catalog::needed_by(status, desired)
         .into_iter()
         .flat_map(|(_, clients)| clients)
         .collect();

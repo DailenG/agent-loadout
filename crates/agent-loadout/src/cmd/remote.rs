@@ -13,15 +13,13 @@ use agent_loadout_core::remote::config::{
     FolderMode, RemoteConfig, RemoteKind, RemotesFile, check_name,
 };
 use agent_loadout_core::remote::credential::token_account;
-use agent_loadout_core::remote::folder::{
-    self, MachineEntry, PullReport, PushOutcome, SiblingPull,
-};
+use agent_loadout_core::remote::folder::{self, MachineEntry, PullReport, SiblingPull};
 use agent_loadout_core::remote::gh;
-use agent_loadout_core::remote::git::{self, GitAuth, GitCli, GitPush, SystemRunner};
+use agent_loadout_core::remote::git::{self, GitAuth, SystemRunner};
+use agent_loadout_core::remote::sync::{self, PushResult, Pushed, SyncEnv};
 use agent_loadout_core::remote::sync_artifacts::Artifact;
 use agent_loadout_core::remote::unc::SystemUnc;
 use agent_loadout_core::store::Store;
-use agent_loadout_core::store::diff::{ChangeKind, EntityChange};
 use agent_loadout_core::store::merge::MergeOutcome;
 use agent_loadout_core::{CoreError, ErrorCode, brand};
 use clap::{Args, Subcommand};
@@ -399,15 +397,6 @@ fn create_github(ctx: &Context, repo: &str, name: &str) -> Result<(), CoreError>
     Ok(())
 }
 
-/// What one push did.
-pub enum Pushed {
-    Folder(PushOutcome),
-    Git(GitPush),
-}
-
-/// One push: the remote's name and how it went.
-pub type PushResult = (String, Result<Pushed, CoreError>);
-
 /// Git's progress, shown on a terminal only, on one line that ends when
 /// the guard drops.
 struct Progress {
@@ -439,37 +428,26 @@ impl Drop for Progress {
     }
 }
 
-fn git_cli(store: &Store<'_>) -> Result<GitCli<'static>, CoreError> {
-    GitCli::from_env(
-        store.env(),
-        store.fs(),
-        &RUNNER,
-        std::env::current_exe().ok(),
-    )
+fn sync_env() -> SyncEnv<'static> {
+    SyncEnv {
+        unc: &UNC,
+        runner: &RUNNER,
+        helper: std::env::current_exe().ok(),
+        app_version: env!("CARGO_PKG_VERSION"),
+    }
 }
 
-/// Pushes to the selected remotes; one result per remote.
+/// Pushes to the selected remotes; one result per remote, recorded in
+/// `state/remote-status.toml`.
 pub fn push_to(
     store: &Store<'_>,
     file: &RemotesFile,
     name: Option<&str>,
 ) -> Result<Vec<PushResult>, CoreError> {
-    Ok(file
-        .select(name)?
-        .into_iter()
-        .map(|remote| {
-            let result = match remote.kind {
-                RemoteKind::Folder => {
-                    folder::push(store, remote, &UNC, env!("CARGO_PKG_VERSION")).map(Pushed::Folder)
-                }
-                RemoteKind::Git => git_cli(store).and_then(|cli| {
-                    let mut progress = Progress::new();
-                    git::push(store, &cli, remote, &mut |line| progress.line(line)).map(Pushed::Git)
-                }),
-            };
-            (remote.name.clone(), result)
-        })
-        .collect())
+    let mut progress = Progress::new();
+    sync::push_to(store, file, name, &sync_env(), &mut |line| {
+        progress.line(line)
+    })
 }
 
 pub fn push_json(store: &Store<'_>, results: &[PushResult]) -> Value {
@@ -566,17 +544,11 @@ fn pull(ctx: &Context, name: Option<&str>) -> Result<u8, CoreError> {
     if file.remotes.is_empty() {
         return Err(no_remote());
     }
-    let mut reports = Vec::new();
-    for remote in file.select(name)? {
-        let report = match remote.kind {
-            RemoteKind::Folder => folder::pull(&store, remote, &UNC),
-            RemoteKind::Git => git_cli(&store).and_then(|cli| {
-                let mut progress = Progress::new();
-                git::pull(&store, &cli, remote, &mut |line| progress.line(line))
-            }),
-        };
-        reports.push((remote.name.clone(), report));
-    }
+    let mut progress = Progress::new();
+    let reports = sync::pull_from(&store, &file, name, &sync_env(), &mut |line| {
+        progress.line(line)
+    })?;
+    drop(progress);
     let conflicts = reports
         .iter()
         .any(|(_, r)| r.as_ref().is_ok_and(|r| r.conflicts() > 0));
@@ -648,36 +620,8 @@ fn artifacts_json(artifacts: &[Artifact]) -> Value {
     )
 }
 
-/// Servers and skills a pull changed.
-fn changed(store: &Store<'_>, report: &PullReport) -> (usize, usize) {
-    if report.head_before == report.head_after {
-        return (0, 0);
-    }
-    let changes: Vec<EntityChange> = store
-        .semantic_diff(Some(&report.head_before), &report.head_after)
-        .unwrap_or_default();
-    let mut servers: Vec<&str> = Vec::new();
-    let mut skills: Vec<&str> = Vec::new();
-    for change in &changes {
-        if change.kind == ChangeKind::Changed && change.fields.is_empty() && change.text.is_none() {
-            continue;
-        }
-        let list = if change.entity.starts_with("server/") {
-            &mut servers
-        } else if change.entity.starts_with("skill/") {
-            &mut skills
-        } else {
-            continue;
-        };
-        if !list.contains(&change.entity.as_str()) {
-            list.push(&change.entity);
-        }
-    }
-    (servers.len(), skills.len())
-}
-
 fn pull_json(store: &Store<'_>, report: &PullReport) -> Value {
-    let (servers, skills) = changed(store, report);
+    let (servers, skills) = sync::changed_by_pull(store, report);
     json!({
         "remote": report.remote,
         "ok": true,
@@ -724,7 +668,7 @@ fn print_pull(store: &Store<'_>, report: &PullReport) {
             artifact.tool
         );
     }
-    let (servers, skills) = changed(store, report);
+    let (servers, skills) = sync::changed_by_pull(store, report);
     if report.head_before != report.head_after {
         println!(
             "{servers} server(s), {skills} skill(s) changed by pull. Review with `{bin} diff` and \

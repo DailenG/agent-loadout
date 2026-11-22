@@ -21,10 +21,10 @@ use super::{
     tools,
 };
 
-struct Fx {
-    th: TempHome,
-    core: Core,
-    keyring: Arc<MemKeyring>,
+pub(super) struct Fx {
+    pub(super) th: TempHome,
+    pub(super) core: Core,
+    pub(super) keyring: Arc<MemKeyring>,
 }
 
 fn host_os() -> Os {
@@ -38,9 +38,14 @@ fn host_os() -> Os {
 }
 
 impl Fx {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
+        Self::on_host("test-desk")
+    }
+
+    /// A machine whose host name (its default label) is `host`.
+    pub(super) fn on_host(host: &str) -> Self {
         let th = TempHome::new();
-        let env = th.env_builder(host_os()).hostname("test-desk").build();
+        let env = th.env_builder(host_os()).hostname(host).build();
         let fs = th.fs();
         let home = loadout_home(&env, &fs, Some(&th.root().join("lh"))).unwrap();
         let keyring = Arc::new(MemKeyring::new());
@@ -57,19 +62,19 @@ impl Fx {
         Self { th, core, keyring }
     }
 
-    fn claude(&self) -> PathBuf {
+    pub(super) fn claude(&self) -> PathBuf {
         self.th.home().join(".claude.json")
     }
 
-    fn read(&self, path: &Path) -> String {
+    pub(super) fn read(&self, path: &Path) -> String {
         std::fs::read_to_string(path).unwrap_or_default()
     }
 
-    fn store(&self) -> Store<'_> {
+    pub(super) fn store(&self) -> Store<'_> {
         self.core.open_store_for_change().unwrap()
     }
 
-    fn commits(&self) -> usize {
+    pub(super) fn commits(&self) -> usize {
         match self.core.open_store().unwrap() {
             Some(store) => store.log(&LogFilter::default()).unwrap().len(),
             None => 0,
@@ -77,7 +82,7 @@ impl Fx {
     }
 
     /// Commits store files without applying (a hand edit, or review mode).
-    fn stage(&self, files: &[(&str, &str)]) {
+    pub(super) fn stage(&self, files: &[(&str, &str)]) {
         let store = self.store();
         store
             .transaction(Operation::new("test.edit", "test: edit"), |tx| {
@@ -89,7 +94,7 @@ impl Fx {
     }
 }
 
-fn draft(id: &str, clients: &[&str]) -> ServerDraft {
+pub(super) fn draft(id: &str, clients: &[&str]) -> ServerDraft {
     ServerDraft {
         id: id.to_owned(),
         display_name: Some("Fake server".to_owned()),

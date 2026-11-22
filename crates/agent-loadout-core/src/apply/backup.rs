@@ -146,6 +146,64 @@ pub fn prune(fs: &dyn Fs, home: &LoadoutHome, now: SystemTime) -> Result<(), Cor
     Ok(())
 }
 
+/// One apply run's client file backups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupRun {
+    /// The apply id, or `restore-<apply id>` for the bytes a client file
+    /// restore replaced.
+    pub apply_id: String,
+    pub time: SystemTime,
+    /// The original paths of the files backed up, sorted.
+    pub files: Vec<PathBuf>,
+}
+
+/// Every apply run with file backups on this machine, newest first.
+/// Directories that do not look like runs are skipped.
+pub fn list_runs(fs: &dyn Fs, home: &LoadoutHome) -> Result<Vec<BackupRun>, CoreError> {
+    let root = home.backups_dir().join(FILES_DIR);
+    if !fs.is_dir(&root) {
+        return Ok(Vec::new());
+    }
+    let list = |dir: &Path| {
+        fs.read_dir(dir).map_err(|err| {
+            CoreError::new(ErrorCode::IoError, format!("cannot list backups: {err}")).with_path(dir)
+        })
+    };
+    let mut runs = Vec::new();
+    for dir in list(&root)? {
+        let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let (Some(time), Some(apply_id)) = (
+            name.get(..16).and_then(parse_timestamp),
+            name.get(17..)
+                .filter(|_| name.as_bytes().get(16) == Some(&b'-')),
+        ) else {
+            continue;
+        };
+        if !fs.is_dir(&dir) {
+            continue;
+        }
+        let mut files: Vec<PathBuf> = list(&dir)?
+            .iter()
+            .filter_map(|file| decode_path(file.file_name()?.to_str()?))
+            .map(PathBuf::from)
+            .collect();
+        files.sort();
+        runs.push(BackupRun {
+            apply_id: apply_id.to_owned(),
+            time,
+            files,
+        });
+    }
+    runs.sort_by(|a, b| {
+        b.time
+            .cmp(&a.time)
+            .then_with(|| b.apply_id.cmp(&a.apply_id))
+    });
+    Ok(runs)
+}
+
 /// Reads a [`timestamp`].
 pub fn parse_timestamp(text: &str) -> Option<SystemTime> {
     let bytes = text.as_bytes();

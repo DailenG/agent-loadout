@@ -10,11 +10,16 @@
 
 pub mod apply;
 pub mod effective;
+pub mod history;
 pub mod projects;
+pub mod remotes;
 pub mod resolve;
+pub mod secrets;
 pub mod servers;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_versioning;
 pub mod tools;
 
 use std::collections::HashMap;

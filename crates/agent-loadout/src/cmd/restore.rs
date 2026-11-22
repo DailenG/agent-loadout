@@ -13,16 +13,12 @@
 
 use std::path::{Path, PathBuf};
 
-use agent_loadout_core::apply::{self, ApplyRequest, PlanOptions};
-use agent_loadout_core::model::applied::ApplyTrigger;
-use agent_loadout_core::remote::folder::{self, Source, SourceChoice};
-use agent_loadout_core::store::merge::{
-    MergeOutcome, PendingMerge, RecordedConflict, write_merge_state,
-};
+use agent_loadout_core::remote::folder::{self, SourceChoice};
+use agent_loadout_core::remote::restore::{FromOutcome, restore_from};
+use agent_loadout_core::store::merge::MergeOutcome;
 use agent_loadout_core::store::restore::{
     self, FileOutcome, FileRestore, RestoreReport, RestoreRequest,
 };
-use agent_loadout_core::store::{CommitId, Store, bare_store_id, export_store_id};
 use agent_loadout_core::{CoreError, ErrorCode, brand};
 use clap::Args;
 use serde_json::{Value, json};
@@ -119,108 +115,60 @@ fn from(ctx: &Context, path: &Path, machine: Option<&str>, apply: bool) -> Resul
         || path.display().to_string(),
         |e| format!("{} ({})", e.manifest.label, e.machine_id),
     );
-    let existing = ctx.open_store()?;
-    // The store the source holds.
-    let (source_store_id, files) = match &source {
-        Source::Repo { bare, head, .. } => (bare_store_id(bare, head), None),
-        export => {
-            let export = folder::export_files(fs, export)?;
-            for artifact in &export.artifacts {
-                eprintln!(
-                    "info[sync_artifact_ignored]: {} ({}); not restored",
-                    artifact.path.display(),
-                    artifact.tool
-                );
-            }
-            (export_store_id(&export.files), Some(export.files))
-        }
-    };
-    let Some(store) = existing else {
-        let store = match (&source, files) {
-            (Source::Repo { bare, head, tags }, _) => {
-                Store::init_from_bare(&ctx.env, fs, &ctx.home, &client_name(), bare, head, tags)?
-            }
-            (_, Some(files)) => Store::init_from_files(
-                &ctx.env,
-                fs,
-                &ctx.home,
-                &client_name(),
-                files,
-                &format!("restore: from {label}"),
-            )?,
-            (_, None) => unreachable!("exports have files"),
-        };
-        let head = store.head()?;
-        let report = apply.then(|| run_apply(ctx, &store)).transpose()?;
-        if ctx.json {
-            print_json(&json!({
-                "schema": JSON_SCHEMA,
-                "created": true,
-                "from": label,
-                "store_id": store.store_id(),
-                "head": head.as_str(),
-                "apply": report.as_ref().map(|(r, c)| report_json(r, c.as_ref())),
-            }));
-        } else {
-            println!("Restored the store from {label} at {}.", head.short());
-            match &report {
-                Some((report, commit)) => print_report(report, commit.as_ref()),
-                None => println!(
-                    "Next: `{bin} secrets check` for this machine, then `{bin} apply`.",
-                    bin = brand::BIN_NAME
-                ),
-            }
-        }
-        return Ok(report.as_ref().map_or(0, |(r, _)| apply_exit_code(r)));
-    };
-
-    if source_store_id.as_deref() != Some(store.store_id()) {
-        return Err(CoreError::new(
-            ErrorCode::InvalidValue,
-            format!(
-                "the source holds another store ({}) than this machine's ({}); restore into a \
-                 fresh {} instead",
-                source_store_id.as_deref().unwrap_or("unknown"),
-                store.store_id(),
-                brand::HOME_ENV_VAR
-            ),
-        ));
+    let report = restore_from(
+        &ctx.apply_env(),
+        &client_name(),
+        &source,
+        entry.as_deref(),
+        &label,
+        apply,
+    )?;
+    for artifact in &report.artifacts {
+        eprintln!(
+            "info[sync_artifact_ignored]: {} ({}); not restored",
+            artifact.path.display(),
+            artifact.tool
+        );
     }
-    match (&source, files) {
-        (Source::Repo { bare, head, tags }, _) => {
-            let mut ids = vec![head.clone()];
-            ids.extend(tags.values().cloned());
-            store.import_history(bare, &ids, tags)?;
-            let incoming = CommitId::from_text(head)?;
-            let tag = (!store.contains(&incoming))
-                .then(|| store.create_auto_tag("pre-restore"))
-                .transpose()?;
-            let outcome = store.merge_incoming(&incoming, &format!("restore from {label}"))?;
-            // Recorded like a pull's (SPEC 9.9), so the conflicts survive.
-            let source_name = format!(
-                "restore/{}",
-                entry
-                    .as_ref()
-                    .map_or(label.as_str(), |e| e.machine_id.as_str())
-            );
-            let pending: Vec<PendingMerge> = match &outcome {
-                MergeOutcome::Conflicts { base, conflicts } => vec![PendingMerge {
-                    source: source_name.clone(),
-                    incoming: head.clone(),
-                    base: base.as_ref().map(ToString::to_string),
-                    conflicts: conflicts.iter().map(RecordedConflict::from).collect(),
-                }],
-                _ => Vec::new(),
-            };
-            write_merge_state(fs, store.state_dir(), &[source_name], &pending)?;
-            let report = (apply && !matches!(outcome, MergeOutcome::Conflicts { .. }))
-                .then(|| run_apply(ctx, &store))
-                .transpose()?;
-            let (name, conflicts) = match &outcome {
-                MergeOutcome::UpToDate => ("up_to_date", 0),
-                MergeOutcome::FastForward(_) => ("fast_forward", 0),
-                MergeOutcome::Merged(_) => ("merged", 0),
-                MergeOutcome::Conflicts { conflicts, .. } => ("conflicts", conflicts.len()),
+    match &report.outcome {
+        FromOutcome::Created {
+            store_id,
+            head,
+            apply,
+        } => {
+            if ctx.json {
+                print_json(&json!({
+                    "schema": JSON_SCHEMA,
+                    "created": true,
+                    "from": label,
+                    "store_id": store_id,
+                    "head": head.as_str(),
+                    "apply": apply.as_ref().map(|(r, c)| report_json(r, c.as_ref())),
+                }));
+            } else {
+                println!("Restored the store from {label} at {}.", head.short());
+                match apply {
+                    Some((report, commit)) => print_report(report, commit.as_ref()),
+                    None => println!(
+                        "Next: `{bin} secrets check` for this machine, then `{bin} apply`.",
+                        bin = brand::BIN_NAME
+                    ),
+                }
+            }
+            Ok(apply.as_ref().map_or(0, |(r, _)| apply_exit_code(r)))
+        }
+        FromOutcome::Merged {
+            outcome,
+            tag,
+            head,
+            apply,
+        } => {
+            let conflicts = report.conflicts();
+            let name = match outcome {
+                MergeOutcome::UpToDate => "up_to_date",
+                MergeOutcome::FastForward(_) => "fast_forward",
+                MergeOutcome::Merged(_) => "merged",
+                MergeOutcome::Conflicts { .. } => "conflicts",
             };
             if ctx.json {
                 print_json(&json!({
@@ -230,42 +178,29 @@ fn from(ctx: &Context, path: &Path, machine: Option<&str>, apply: bool) -> Resul
                     "outcome": name,
                     "conflicts": conflicts,
                     "tag": tag,
-                    "head": store.head()?.as_str(),
-                    "apply": report.as_ref().map(|(r, c)| report_json(r, c.as_ref())),
+                    "head": head.as_str(),
+                    "apply": apply.as_ref().map(|(r, c)| report_json(r, c.as_ref())),
                 }));
             } else {
                 println!("Restore from {label}: {}.", name.replace('_', " "));
                 if conflicts > 0 {
                     println!("{conflicts} conflicting field(s); nothing merged.");
                 }
-                if let Some((report, commit)) = &report {
+                if let Some((report, commit)) = apply {
                     print_report(report, commit.as_ref());
                 }
             }
             Ok(if conflicts > 0 {
                 EXIT_UNRESOLVED
             } else {
-                report.as_ref().map_or(0, |(r, _)| apply_exit_code(r))
+                apply.as_ref().map_or(0, |(r, _)| apply_exit_code(r))
             })
         }
-        (_, Some(files)) => {
-            let report = restore::restore_tree(&store, &ctx.apply_env(), &files, &label, apply)?;
-            print(ctx, &report);
-            Ok(report.apply.as_ref().map_or(0, apply_exit_code))
+        FromOutcome::Restored(restored) => {
+            print(ctx, restored);
+            Ok(restored.apply.as_ref().map_or(0, apply_exit_code))
         }
-        (_, None) => unreachable!("exports have files"),
     }
-}
-
-fn run_apply(
-    ctx: &Context,
-    store: &Store<'_>,
-) -> Result<(apply::ApplyReport, Option<CommitId>), CoreError> {
-    let request = ApplyRequest {
-        options: PlanOptions::default(),
-        trigger: ApplyTrigger::Restore,
-    };
-    apply::run(store, &ctx.apply_env(), &request)
 }
 
 fn print(ctx: &Context, report: &RestoreReport) {

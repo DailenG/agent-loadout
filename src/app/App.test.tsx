@@ -9,7 +9,9 @@ import { tauriTransport } from "@/ipc/transport";
 import {
   createMockTransport,
   MOCK_DATA_HOME,
+  MOCK_REMOTES,
   mockIpcError,
+  ok,
   type MockTransportOptions,
 } from "@/test/mockTransport";
 
@@ -107,6 +109,31 @@ describe("App shell", () => {
     await user.click(within(primaryNav()).getByRole("button", { name: "History" }));
     expect(within(header()).getByRole("heading", { level: 1 })).toHaveTextContent("History");
     expect(screen.getByText(t("page.empty.history"))).toBeInTheDocument();
+  });
+
+  it("first run: Not now leaves no remote and Settings shows No backup remote", async () => {
+    let answered = false;
+    const { user, transport } = renderApp({
+      commands: {
+        remotesOverview: async () => ok({ ...MOCK_REMOTES, offerBackupRemote: !answered }),
+        dismissBackupRemoteOffer: async () => {
+          answered = true;
+          return ok(null);
+        },
+      },
+    });
+
+    const step = await screen.findByRole("dialog", { name: "Add a backup remote" });
+    expect(within(step).getByRole("button", { name: "Git URL" })).toBeInTheDocument();
+    expect(within(step).getByRole("button", { name: "Folder" })).toBeInTheDocument();
+    await user.click(within(step).getByRole("button", { name: "Not now" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(transport.calls).toContain("dismissBackupRemoteOffer");
+    expect(transport.calls).not.toContain("addFolderRemote");
+    expect(transport.calls).not.toContain("addGitRemote");
+
+    await user.click(within(primaryNav()).getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText("No backup remote")).toBeInTheDocument();
   });
 
   it("renders page toolbars in the header slot", async () => {

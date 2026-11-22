@@ -29,8 +29,12 @@ import { NotificationProvider, useNotifications } from "@/app/components/notific
 import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/SettingsGroup";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
+import { HistoryPage } from "@/app/routes/history/HistoryPage";
 import { McpPage } from "@/app/routes/mcp/McpPage";
 import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
+import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
+import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRemoteStep";
+import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import {
   dataHomeSourceLabels,
@@ -612,6 +616,7 @@ function ScopeSwitcher() {
 function SettingsPage(props: {
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
+  onOpenPending: () => void;
 }) {
   return (
     <div className="placeholder-grid settings-page">
@@ -620,6 +625,8 @@ function SettingsPage(props: {
           <ThemePicker value={props.theme} onChange={props.onThemeChange} />
         </SettingsItem>
       </SettingsGroup>
+      <VersioningSection onOpenPending={props.onOpenPending} />
+      <SecretsSection onOpenPending={props.onOpenPending} />
     </div>
   );
 }
@@ -671,7 +678,13 @@ function RoutePage(props: {
 }) {
   const { route } = props;
   if (route.key === "settings") {
-    return <SettingsPage theme={props.theme} onThemeChange={props.onThemeChange} />;
+    return (
+      <SettingsPage
+        theme={props.theme}
+        onThemeChange={props.onThemeChange}
+        onOpenPending={props.onOpenPending}
+      />
+    );
   }
   if (route.key === "about") {
     return <AboutPage />;
@@ -686,6 +699,14 @@ function RoutePage(props: {
   }
   if (route.key === "tools") {
     return <ToolsPage />;
+  }
+  if (route.key === "history") {
+    return (
+      <HistoryPage
+        onOpenPending={props.onOpenPending}
+        onOpenSettings={() => props.onNavigate("settings")}
+      />
+    );
   }
   if (route.key === "projects") {
     return <ProjectsPage />;
@@ -883,6 +904,7 @@ function AppContent(props: { features: FeatureFlags }) {
         </section>
       </main>
       <ApplyDrawer open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+      <FirstRunBackupRemote />
     </div>
   );
 }

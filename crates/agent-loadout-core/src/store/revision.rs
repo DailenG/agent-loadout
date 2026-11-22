@@ -174,6 +174,21 @@ impl Store<'_> {
         }
     }
 
+    /// Commits reachable from `local` but not `upstream`, and from
+    /// `upstream` but not `local` (`ahead`, `behind`). Both must be in the
+    /// store.
+    pub fn ahead_behind(
+        &self,
+        local: &CommitId,
+        upstream: &CommitId,
+    ) -> Result<(usize, usize), CoreError> {
+        let local = Oid::from_str(local.as_str()).map_err(git_error)?;
+        let upstream = Oid::from_str(upstream.as_str()).map_err(git_error)?;
+        self.repo
+            .graph_ahead_behind(local, upstream)
+            .map_err(git_error)
+    }
+
     fn find_commit(&self, id: &CommitId) -> Result<git2::Commit<'_>, CoreError> {
         let oid = Oid::from_str(id.as_str()).map_err(git_error)?;
         self.repo.find_commit(oid).map_err(git_error)

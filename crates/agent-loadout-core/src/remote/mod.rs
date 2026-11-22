@@ -9,6 +9,8 @@
 //!   the `auth = token` helper; [`gh`] the optional GitHub CLI
 //!   conveniences.
 //! - [`manifest`]: `machine.json` and `EXPORT.json`.
+//! - [`sync`]: push, pull and status of every remote alike, recorded in
+//!   `state/remote-status.toml`; [`restore`] is `restore --from`.
 //! - [`sync_artifacts`]: sync tool conflict and temp names, reported and
 //!   left alone.
 //! - [`unc`]: mapped drive letters resolved to UNC paths on Windows.
@@ -19,5 +21,7 @@ pub mod folder;
 pub mod gh;
 pub mod git;
 pub mod manifest;
+pub mod restore;
+pub mod sync;
 pub mod sync_artifacts;
 pub mod unc;

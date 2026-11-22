@@ -18,6 +18,14 @@ export const storeQueryKeys = {
   projects: ["list_projects"],
   /** Prefix of every project's matrix (`["effective_matrix", id]`). */
   effective: ["effective_matrix"],
+  history: ["list_history"],
+  tags: ["list_tags"],
+  /** Prefix of `["commit_detail", id]`. */
+  commitDetail: ["commit_detail"],
+  fileBackups: ["list_file_backups"],
+  mergeConflicts: ["list_merge_conflicts"],
+  remotes: ["remotes_overview"],
+  secrets: ["secrets_overview"],
 } as const;
 
 const STATUS_KEYS = {

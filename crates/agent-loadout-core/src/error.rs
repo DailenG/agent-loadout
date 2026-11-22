@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 /// Stable error code, serialized as `snake_case` (the same string as
 /// [`ErrorCode::as_str`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

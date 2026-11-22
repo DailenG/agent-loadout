@@ -52,6 +52,51 @@ export const commands = {
 	effectiveMatrix: (projectId: string, options?: InvokeOptions) => typedError<EffectiveMatrix, IpcError>(__TAURI_INVOKE("effective_matrix", { projectId }, options)),
 	resolverDetail: (entry: EntryRef, options?: InvokeOptions) => typedError<ResolverDetail, IpcError>(__TAURI_INVOKE("resolver_detail", { entry }, options)),
 	resolveEntry: (entry: EntryRef, action: ResolveAction, fingerprint: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("resolve_entry", { entry, action, fingerprint }, options)),
+	listHistory: (filter: HistoryFilter, options?: InvokeOptions) => typedError<HistoryEntry[], IpcError>(__TAURI_INVOKE("list_history", { filter }, options)),
+	commitDetail: (id: string, options?: InvokeOptions) => typedError<CommitDetail, IpcError>(__TAURI_INVOKE("commit_detail", { id }, options)),
+	listTags: (options?: InvokeOptions) => typedError<TagEntry[], IpcError>(__TAURI_INVOKE("list_tags", undefined, options)),
+	createTag: (name: string, commit: string | null, message: string | null, options?: InvokeOptions) => typedError<TagEntry, IpcError>(__TAURI_INVOKE("create_tag", { name, commit, message }, options)),
+	deleteTag: (name: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("delete_tag", { name }, options)),
+	restorePreview: (rev: string, entities: string[], options?: InvokeOptions) => typedError<RestorePreview, IpcError>(__TAURI_INVOKE("restore_preview", { rev, entities }, options)),
+	restoreStoreVersion: (rev: string, entities: string[], confirmed: boolean, options?: InvokeOptions) => typedError<RestoreResult, IpcError>(__TAURI_INVOKE("restore_store_version", { rev, entities, confirmed }, options)),
+	listFileBackups: (options?: InvokeOptions) => typedError<BackupRunEntry[], IpcError>(__TAURI_INVOKE("list_file_backups", undefined, options)),
+	restoreClientFiles: (applyId: string, file: string | null, options?: InvokeOptions) => typedError<FileRestoreEntry[], IpcError>(__TAURI_INVOKE("restore_client_files", { applyId, file }, options)),
+	listMergeConflicts: (options?: InvokeOptions) => typedError<MergeConflictEntry[], IpcError>(__TAURI_INVOKE("list_merge_conflicts", undefined, options)),
+	/**
+	 *  "Download zip": the version as a zip, saved where the user picks in
+	 *  the OS dialog (run from Rust; the path never crosses IPC). `false` when
+	 *  the dialog was cancelled.
+	 */
+	saveVersionZip: (rev: string | null, options?: InvokeOptions) => typedError<boolean, IpcError>(__TAURI_INVOKE("save_version_zip", { rev }, options)),
+	remotesOverview: (options?: InvokeOptions) => typedError<RemotesOverview, IpcError>(__TAURI_INVOKE("remotes_overview", undefined, options)),
+	dismissBackupRemoteOffer: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("dismiss_backup_remote_offer", undefined, options)),
+	/**
+	 *  The OS folder dialog (run from Rust; the path stays in the backend).
+	 *  `None` when cancelled.
+	 */
+	pickRemoteFolder: (options?: InvokeOptions) => typedError<PickedRemoteFolder | null, IpcError>(__TAURI_INVOKE("pick_remote_folder", undefined, options)),
+	addFolderRemote: (name: string, token: string, mode: FolderModeDto, firstRun: boolean, options?: InvokeOptions) => typedError<AddedRemote, IpcError>(__TAURI_INVOKE("add_folder_remote", { name, token, mode, firstRun }, options)),
+	addGitRemote: (name: string, url: string, auth: GitAuthDto, username: string | null, firstRun: boolean, options?: InvokeOptions) => typedError<AddedRemote, IpcError>(__TAURI_INVOKE("add_git_remote", { name, url, auth, username, firstRun }, options)),
+	removeRemote: (name: string, options?: InvokeOptions) => typedError<RemovedRemote, IpcError>(__TAURI_INVOKE("remove_remote", { name }, options)),
+	/**  The one-way token input of an `auth = token` remote. */
+	setRemoteToken: (name: string, token: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("set_remote_token", { name, token }, options)),
+	clearRemoteToken: (name: string, options?: InvokeOptions) => typedError<boolean, IpcError>(__TAURI_INVOKE("clear_remote_token", { name }, options)),
+	pushRemotes: (name: string | null, options?: InvokeOptions) => typedError<PushEntry[], IpcError>(__TAURI_INVOKE("push_remotes", { name }, options)),
+	pullRemotes: (name: string | null, options?: InvokeOptions) => typedError<PullEntry[], IpcError>(__TAURI_INVOKE("pull_remotes", { name }, options)),
+	listRestoreMachines: (source: RestoreSource, options?: InvokeOptions) => typedError<RestoreListing, IpcError>(__TAURI_INVOKE("list_restore_machines", { source }, options)),
+	restoreFromRemote: (source: RestoreSource, machineId: string | null, options?: InvokeOptions) => typedError<RestoreFromResult, IpcError>(__TAURI_INVOKE("restore_from_remote", { source, machineId }, options)),
+	secretProviders: (options?: InvokeOptions) => typedError<ProviderEntry[], IpcError>(__TAURI_INVOKE("secret_providers", undefined, options)),
+	secretsOverview: (options?: InvokeOptions) => typedError<SecretsOverview, IpcError>(__TAURI_INVOKE("secrets_overview", undefined, options)),
+	checkSecrets: (aliases: string[], options?: InvokeOptions) => typedError<AliasCheck[], IpcError>(__TAURI_INVOKE("check_secrets", { aliases }, options)),
+	setSecretReference: (alias: string, reference: string, scope: SecretScope, envName: string | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_secret_reference", { alias, reference, scope, envName }, options)),
+	/**  The one-way "set keyring value" input (SPEC 11.1 item 1). */
+	setSecretKeyringValue: (alias: string, value: string, scope: SecretScope, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_secret_keyring_value", { alias, value, scope }, options)),
+	clearSecretKeyringValue: (alias: string, options?: InvokeOptions) => typedError<boolean, IpcError>(__TAURI_INVOKE("clear_secret_keyring_value", { alias }, options)),
+	setOpServiceAccount: (token: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("set_op_service_account", { token }, options)),
+	clearOpServiceAccount: (options?: InvokeOptions) => typedError<boolean, IpcError>(__TAURI_INVOKE("clear_op_service_account", undefined, options)),
+	listOpEnvironment: (id: string, options?: InvokeOptions) => typedError<OpEnvironmentNames, IpcError>(__TAURI_INVOKE("list_op_environment", { id }, options)),
+	mapOpEnvironment: (id: string, names: string[], account: string | null, options?: InvokeOptions) => typedError<MapResult, IpcError>(__TAURI_INVOKE("map_op_environment", { id, names, account }, options)),
+	setOpAccount: (account: string | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_op_account", { account }, options)),
 };
 
 /* Constants */
@@ -69,10 +114,51 @@ export const REPO = "DailenG/agent-loadout" as const;
 /**  What the executor does with an entry (SPEC 8.3). */
 export type ActionKind = "none" | "create" | "update" | "remove" | "disable" | "adopt" | "adopt_overwrite" | "refresh" | "forget" | "release" | "import" | "skip";
 
+export type AddedRemote = {
+	remote: RemoteEntry,
+	/**  `tool_not_found` (git or gh missing), `remote_unreachable`. */
+	warnings: IpcError[],
+};
+
+/**  One row of the missing-secret checklist (SPEC 11.9). */
+export type AliasCheck = {
+	alias: string,
+	reference: string | null,
+	source: RefSourceDto | null,
+	status: SecretStatusKind,
+	/**  English detail; never a value. */
+	message: string | null,
+	neededBy: NeededBy[],
+	/**
+	 *  Used by a server enabled for at least one client: apply blocks those
+	 *  entries while the alias is missing.
+	 */
+	blocking: boolean,
+};
+
+/**  An alias as the list shows it, without resolving it. */
+export type AliasEntry = {
+	alias: string,
+	/**  The reference in force here (`op://...`, `keyring://...`, `env:X`). */
+	reference: string,
+	source: RefSourceDto,
+	/**  The shared reference, when this machine overrides it. */
+	storeReference: string | null,
+	description: string | null,
+	envName: string,
+	servers: string[],
+};
+
 export type AppInfo = {
 	/**  The app crate's version (`CARGO_PKG_VERSION`). */
 	version: string,
 	platform: Platform,
+};
+
+export type AppliedDetail = {
+	trigger: ApplyTriggerKind,
+	outcome: OutcomeKind,
+	targets: AppliedTargetEntry[],
 };
 
 /**  One client file of an apply run. */
@@ -97,6 +183,27 @@ export type AppliedRun = {
 	time: string,
 	summary: string,
 	/**  The newest run: undoing it never asks (SPEC 8.7). */
+	latest: boolean,
+};
+
+/**  One client file an apply commit recorded. */
+export type AppliedTargetEntry = {
+	client: string,
+	scope: FileScope,
+	projectId: string | null,
+	/**  Under its placeholder root, as recorded. */
+	file: string,
+	counts: OpCounts,
+	outcome: OutcomeKind,
+};
+
+/**  The apply a commit recorded (`Loadout-Apply`). */
+export type ApplyMark = {
+	applyId: string,
+	outcome: OutcomeKind,
+	/**  An apply of this machine: "Undo this apply" is offered. */
+	undoable: boolean,
+	/**  This machine's newest apply: undoing it never asks (SPEC 8.7). */
 	latest: boolean,
 };
 
@@ -125,6 +232,19 @@ export type ApplyRun = {
 
 /**  What an apply run left for the user (the CLI's exit codes 0, 1, 4, 5, 7). */
 export type ApplyStatusKind = "done" | "file_failed" | "needs_decision" | "missing_secrets" | "trust_required";
+
+export type ApplyTriggerKind = "instant" | "review" | "restore" | "rollback" | "pull";
+
+/**  One apply run's client file backups. */
+export type BackupRunEntry = {
+	applyId: string,
+	/**  RFC 3339, UTC. */
+	time: string,
+	/**  The bytes a client file restore replaced (`restore-<apply id>`). */
+	undoOfRestore: boolean,
+	/**  Under their placeholder roots. */
+	files: string[],
+};
 
 /**
  *  A store change and the apply that went with it: instant mode applies in
@@ -181,6 +301,18 @@ export type ClientPreview = {
 	warnings: IpcError[],
 };
 
+/**  One commit with its diff against its first parent. */
+export type CommitDetail = {
+	entry: HistoryEntry,
+	/**  The message without its `Loadout-*` trailers. */
+	body: string,
+	changes: EntityDiff[],
+	/**  The unified git diff, masked. */
+	raw: string,
+	/**  The files an apply commit touched and their outcomes (SPEC 13.5). */
+	applied: AppliedDetail | null,
+};
+
 /**  One server found in a pasted snippet. */
 export type ConvertedServer = {
 	name: string,
@@ -225,6 +357,17 @@ export type EffectiveMatrix = {
 	rows: MatrixRow[],
 	/**  Files that could not be read and other problems outside any entry. */
 	warnings: IpcError[],
+};
+
+export type EntityChangeKind = "added" | "removed" | "changed";
+
+export type EntityDiff = {
+	entity: string,
+	file: string,
+	change: EntityChangeKind,
+	fields: FieldDiff[],
+	/**  Unified diff of a file that is not TOML (skill files), masked. */
+	text: string | null,
 };
 
 /**  One entry of a client file that needs attention or changed. */
@@ -565,7 +708,22 @@ export type ErrorCode =
  *  AP-6), and the file was written; the change loads after a full quit
  *  and restart of the client.
  */
-"restart_required";
+"restart_required" | 
+/**
+ *  A skill's source (git repository or folder) cannot be reached or no
+ *  longer holds the skill (SPEC 12.4). The store copy is left intact.
+ */
+"source_unreachable";
+
+/**
+ *  `env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`; refs stay refs,
+ *  anything that may be a secret is masked.
+ */
+export type FieldDiff = {
+	field: string,
+	before: string | null,
+	after: string | null,
+};
 
 /**
  *  One drawer file, as "Apply selected" names it: the same project, scope
@@ -577,8 +735,18 @@ export type FileRef = {
 	file: string,
 };
 
+export type FileRestoreEntry = {
+	file: string,
+	outcome: FileRestoreOutcome,
+	error: IpcError | null,
+};
+
+export type FileRestoreOutcome = "restored" | "unchanged" | "failed";
+
 /**  Which layer a client file belongs to (SPEC 6.1). */
 export type FileScope = "user" | "project" | "project_local";
+
+export type FolderModeDto = "repo_per_machine" | "mirror" | "archive";
 
 /**  A manifest the folder holds already (Add binds it). */
 export type FoundManifest = {
@@ -588,6 +756,50 @@ export type FoundManifest = {
 	/**  This machine knows the project already. */
 	known: boolean,
 };
+
+/**  How a git remote authenticates (SPEC 9.6). */
+export type GitAuthDto = 
+/**  The user's own git credentials (GCM, SSH agent, any helper). */
+"system" | 
+/**  The GitHub CLI, for github.com URLs. */
+"gh" | 
+/**  A token in the OS keyring. */
+"token";
+
+/**  One commit of the list, newest first. */
+export type HistoryEntry = {
+	id: string,
+	shortId: string,
+	/**  RFC 3339, UTC. */
+	time: string,
+	summary: string,
+	op: string | null,
+	entities: string[],
+	/**  `system` or `project/<id>`. */
+	scope: string | null,
+	/**
+	 *  The machine's label (`desktop`), or the author name of a commit
+	 *  made outside Loadout.
+	 */
+	machine: string,
+	thisMachine: boolean,
+	apply: ApplyMark | null,
+	/**  Tags on this commit, user tags first. */
+	tags: string[],
+};
+
+export type HistoryFilter = {
+	scope: HistoryScope,
+	/**
+	 *  `server/github`, `secrets`, `project/<id>`: commits naming it or
+	 *  changing its files.
+	 */
+	entity: string | null,
+	limit: number | null,
+};
+
+/**  Which commits the list shows. */
+export type HistoryScope = "all" | "system" | "projects";
 
 /**
  *  A failed command: the stable code the frontend localizes from, plus
@@ -605,6 +817,13 @@ export type IpcError = {
 export type KeyValue = {
 	key: string,
 	value: string,
+};
+
+/**  A failure recorded for a remote's last push or pull. */
+export type LastError = {
+	error: IpcError,
+	/**  RFC 3339, UTC. */
+	at: string,
 };
 
 /**  The layer an entry comes from (SPEC 6.4); the legend's S, P, L, F, C. */
@@ -631,6 +850,15 @@ export type ManifestLayout =
 "shared" | 
 /**  Both files. */
 "shared_and_local";
+
+export type MapResult = {
+	mapped: string[],
+	/**  Aliases that point elsewhere already; left as they are. */
+	kept: string[],
+	/**  The Environment this one replaced. */
+	replaced: string | null,
+	change: ChangeResult,
+};
 
 /**
  *  One client's entry of a server name: the matrix cell and its
@@ -668,6 +896,30 @@ export type MatrixRow = {
 	cells: MatrixCell[],
 };
 
+/**
+ *  A field two machines changed differently (SPEC 9.9), waiting in
+ *  `state/merge/MERGE_STATE.json`.
+ */
+export type MergeConflictEntry = {
+	/**  `<remote>/<machine-id>`, `<remote>` or `restore/<source>`. */
+	source: string,
+	entity: string,
+	file: string,
+	field: string | null,
+};
+
+export type MergeKind = "up_to_date" | "fast_forward" | "merged" | "conflicts";
+
+/**  A server that needs an alias, with the clients it is enabled for. */
+export type NeededBy = {
+	server: string,
+	/**
+	 *  Client ids; `all-detected` for every detected client; empty when
+	 *  the server is not enabled.
+	 */
+	clients: string[],
+};
+
 /**  Planned or done create, update, remove and disable operations. */
 export type OpCounts = {
 	create: number,
@@ -675,6 +927,13 @@ export type OpCounts = {
 	remove: number,
 	disable: number,
 };
+
+export type OpEnvironmentNames = {
+	/**  `None` below 1Password CLI 2.42.0: the user types the names. */
+	names: string[] | null,
+};
+
+export type OpFeatureDto = "item_read" | "environments" | "environment_listing";
 
 /**  Result of an apply run or of one file (SPEC 8.7). */
 export type OutcomeKind = "ok" | "partial" | "blocked" | "failed";
@@ -703,6 +962,14 @@ export type PickedFolder = {
 	name: string,
 	/**  `None`: no manifest; the page offers Init (Private preselected). */
 	manifest: FoundManifest | null,
+};
+
+/**  A folder picked for a remote or a restore. */
+export type PickedRemoteFolder = {
+	token: string,
+	/**  With the home folder as `~`. */
+	path: string,
+	syncTool: SyncTool | null,
 };
 
 /**  A pill's state (SPEC 13.2). */
@@ -794,6 +1061,148 @@ export type ProjectTrust = "trusted" |
 /**  No usable manifest (see the row's error). */
 "invalid";
 
+/**  One secret provider of this machine. Detection only: nothing signs in. */
+export type ProviderEntry = {
+	kind: ProviderKindDto,
+	state: ProviderStateDto,
+	version: string | null,
+	/**  The keyring backend's name ("Windows Credential Manager"). */
+	backend: string | null,
+	features: ProviderFeature[],
+};
+
+export type ProviderFeature = {
+	feature: OpFeatureDto,
+	available: boolean,
+};
+
+export type ProviderKindDto = "env" | "keyring" | "onepassword";
+
+export type ProviderStateDto = "available" | 
+/**  "1Password CLI not found" (SPEC 11.11). */
+"unavailable" | 
+/**  Installed, but its version could not be read. */
+"error";
+
+export type PullEntry = {
+	remote: string,
+	ok: boolean,
+	heads: PulledHead[],
+	conflicts: number,
+	/**  "N servers, M skills changed by pull. Review and apply?" (SPEC 9.9). */
+	changedServers: number,
+	changedSkills: number,
+	/**  Sync tool artifacts skipped and left in place. */
+	artifactsIgnored: number,
+	error: IpcError | null,
+};
+
+/**
+ *  One incoming head of a pull: a machine of a folder remote, or a git
+ *  remote's `main`.
+ */
+export type PulledHead = {
+	machineId: string | null,
+	label: string,
+	merge: MergeKind | null,
+	conflicts: number,
+	/**  `remote_incomplete` (objects still on their way) or another failure. */
+	error: IpcError | null,
+};
+
+export type PushEntry = {
+	remote: string,
+	ok: boolean,
+	head: string | null,
+	/**  A git push that was rejected pulled first. */
+	pulled: boolean,
+	error: IpcError | null,
+};
+
+export type RefSourceDto = 
+/**  `secrets.toml`, shared by every machine. */
+"store" | 
+/**  This machine's overlay. */
+"machine";
+
+export type RemoteEntry = {
+	name: string,
+	kind: RemoteKindDto,
+	/**
+	 *  The folder with the home folder as `~`, or the URL with any
+	 *  credentials masked.
+	 */
+	location: string,
+	mode: FolderModeDto | null,
+	auth: GitAuthDto | null,
+	username: string | null,
+	/**  `manual`, `on-commit` or `interval:15m`. */
+	push: string | null,
+	pull: string | null,
+	/**  `auth = token`: whether the keyring holds the token. */
+	tokenStored: boolean | null,
+	/**  The folder lies inside a sync tool's folder. */
+	syncTool: SyncTool | null,
+	status: RemoteStatusDto,
+};
+
+export type RemoteKindDto = "git" | "folder";
+
+/**  One machine of a folder remote (SPEC 9.6 "Restore lists machines"). */
+export type RemoteMachine = {
+	storeId: string,
+	/**  The store this machine uses. */
+	sameStore: boolean,
+	machineId: string,
+	label: string,
+	os: string,
+	/**  RFC 3339, UTC. */
+	pushedAt: string,
+	head: string | null,
+	/**  The head commit's subject (repo-per-machine pushes). */
+	subject: string | null,
+	thisMachine: boolean,
+};
+
+/**
+ *  `ahead N`, `behind N`, last error (SPEC 9.8), without contacting a git
+ *  remote.
+ */
+export type RemoteStatusDto = {
+	/**  Folder remotes: whether the folder is there now; `None` for git. */
+	reachable: boolean | null,
+	pushedAt: string | null,
+	pulledAt: string | null,
+	/**  `None`: never pushed from this machine (or unknown). */
+	ahead: number | null,
+	/**
+	 *  Other machines' commits this store lacks; `None`: unknown (a git
+	 *  remote never fetched).
+	 */
+	behind: number | null,
+	lastError: LastError | null,
+};
+
+export type RemotesOverview = {
+	/**  In the order they were added; none is ranked. */
+	remotes: RemoteEntry[],
+	/**
+	 *  The first run's "Add a backup remote" step is still to be shown: no
+	 *  remote, and the user has not answered it on this machine.
+	 */
+	offerBackupRemote: boolean,
+	gitFound: boolean,
+	ghFound: boolean,
+	/**  Automatic tags are pruned after this many days (SPEC 9.4). */
+	autoTagRetentionDays: number,
+};
+
+export type RemovedRemote = {
+	name: string,
+	/**  The git remote's token was deleted from the keyring. */
+	tokenDeleted: boolean,
+};
+
 /**  A resolver action (SPEC 8.2 default actions, 13.4 buttons). */
 export type ResolveAction = 
 /**  Write the desired entry over the file's (adopting a collision). */
@@ -847,6 +1256,73 @@ export type ResolverDetail = {
 	fingerprint: string,
 };
 
+export type RestoreFromKind = 
+/**  No store here before: created from the source. */
+"created" | 
+/**  The source's history merged into this store. */
+"merged" | 
+/**  An exported tree restored as one commit. */
+"restored";
+
+export type RestoreFromResult = {
+	kind: RestoreFromKind,
+	/**  `label (machine id)` of the source machine, or the folder's name. */
+	from: string,
+	merge: MergeKind | null,
+	conflicts: number,
+	tag: string | null,
+	head: string | null,
+	apply: ApplyRun | null,
+};
+
+export type RestoreListing = {
+	/**
+	 *  The source is one store already (a machine folder, a bare
+	 *  repository, a mirror): restore it without picking.
+	 */
+	direct: boolean,
+	machines: RemoteMachine[],
+	/**  Sync tool artifacts skipped and left in place. */
+	artifactsIgnored: number,
+};
+
+/**  What restoring a version would change. Read-only. */
+export type RestorePreview = {
+	target: string,
+	shortId: string,
+	added: string[],
+	changed: string[],
+	removed: string[],
+	/**  Store files restored. */
+	files: string[],
+	/**
+	 *  Shared project manifests written back to their folders (`<P>/...`);
+	 *  the restore needs a confirmation for them.
+	 */
+	sharedManifests: string[],
+	/**  Restored manifests of projects this machine has no folder for. */
+	unplaced: string[],
+};
+
+export type RestoreResult = {
+	/**  The `auto/pre-restore/<ts>` tag; `None` when nothing changed. */
+	tag: string | null,
+	commit: string | null,
+	files: string[],
+	/**  Manifests written back (`<P>/.loadout/...`). */
+	manifests: string[],
+};
+
+/**  Where "Restore from remote..." reads. */
+export type RestoreSource = 
+/**  A configured folder remote, by name. */
+{ kind: "remote"; name: string } | 
+/**
+ *  A folder picked with `pick_remote_folder`: a folder remote, a
+ *  machine folder, a bare repository or a mirror.
+ */
+{ kind: "folder"; token: string };
+
 /**  One manifest file of the trust review. */
 export type ReviewedFile = {
 	/**  `project.toml` or `project.local.toml`. */
@@ -867,6 +1343,26 @@ export type ReviewedFile = {
 export type Scope = 
 /**  User-wide configuration of every client. */
 { kind: "system" };
+
+/**  Where a fix writes the reference. */
+export type SecretScope = 
+/**  `secrets.toml`: every machine. */
+"store" | 
+/**  This machine's overlay (SPEC 5.6), e.g. "Use keyring on this machine". */
+"this_machine";
+
+export type SecretStatusKind = "resolved" | "missing" | "locked" | "provider_unavailable" | "provider_too_old" | "unverifiable" | "error";
+
+export type SecretsOverview = {
+	aliases: AliasEntry[],
+	/**  Aliases servers use that no catalog defines. */
+	undefined: string[],
+	/**  `[onepassword] environment`. */
+	environment: string | null,
+	/**  `[onepassword] account`. */
+	opAccount: string | null,
+	serviceAccountSet: boolean,
+};
 
 export type ServerDetail = {
 	/**
@@ -932,6 +1428,23 @@ export type ServerRow = {
 	 */
 	invalid: IpcError | null,
 };
+
+/**
+ *  A sync tool whose folder holds a folder remote: supported, since each
+ *  machine writes only its own subfolder (SPEC 9.6).
+ */
+export type SyncTool = "resilio" | "syncthing" | "one_drive" | "dropbox" | "google_drive";
+
+export type TagEntry = {
+	name: string,
+	kind: TagKindDto,
+	commit: string,
+	message: string | null,
+	/**  RFC 3339, UTC. */
+	time: string | null,
+};
+
+export type TagKindDto = "user" | "auto";
 
 export type TierKind = "a" | "b" | "c" | "d";
 

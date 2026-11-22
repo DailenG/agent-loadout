@@ -12,6 +12,8 @@ import type {
   DataHome,
   IpcError,
   PendingPlan,
+  ProviderEntry,
+  RemotesOverview,
   Scope,
   ServerList,
   ToolInfo,
@@ -96,6 +98,31 @@ export const MOCK_TOOLS: ToolInfo[] = [
   },
 ];
 
+/** No remote and the first run's step answered: Settings shows "No backup remote". */
+export const MOCK_REMOTES: RemotesOverview = {
+  remotes: [],
+  offerBackupRemote: false,
+  gitFound: true,
+  ghFound: false,
+  autoTagRetentionDays: 90,
+};
+
+export const MOCK_PROVIDERS: ProviderEntry[] = [
+  { kind: "env", state: "available", version: null, backend: null, features: [] },
+  { kind: "keyring", state: "available", version: null, backend: "Mock keyring", features: [] },
+  {
+    kind: "onepassword",
+    state: "unavailable",
+    version: null,
+    backend: null,
+    features: [
+      { feature: "item_read", available: false },
+      { feature: "environments", available: false },
+      { feature: "environment_listing", available: false },
+    ],
+  },
+];
+
 export function ok<T>(data: T): CommandResult<T> {
   return { status: "ok", data };
 }
@@ -145,6 +172,44 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     effectiveMatrix: async (id) => mockIpcError({ code: "not_found", message: `project ${id} is not mocked` }),
     resolverDetail: async () => mockIpcError({ code: "not_found", message: "entry not mocked" }),
     resolveEntry: async () => ok(MOCK_CHANGE),
+    listHistory: async () => ok([]),
+    commitDetail: async (id) => mockIpcError({ code: "not_found", message: `commit ${id} is not mocked` }),
+    listTags: async () => ok([]),
+    createTag: async (name, commit) =>
+      ok({ name, kind: "user", commit: commit ?? MOCK_CHANGE.commit!, message: null, time: null }),
+    deleteTag: async () => ok(null),
+    restorePreview: async (rev) =>
+      ok({ target: rev, shortId: rev.slice(0, 7), added: [], changed: [], removed: [], files: [], sharedManifests: [], unplaced: [] }),
+    restoreStoreVersion: async () =>
+      ok({ tag: "auto/pre-restore/mock", commit: MOCK_CHANGE.commit, files: [], manifests: [] }),
+    listFileBackups: async () => ok([]),
+    restoreClientFiles: async () => ok([]),
+    listMergeConflicts: async () => ok([]),
+    saveVersionZip: async () => ok(false),
+    remotesOverview: async () => ok(MOCK_REMOTES),
+    dismissBackupRemoteOffer: async () => ok(null),
+    pickRemoteFolder: async () => ok(null),
+    addFolderRemote: async () => mockIpcError({ code: "not_found", message: "not mocked" }),
+    addGitRemote: async () => mockIpcError({ code: "not_found", message: "not mocked" }),
+    removeRemote: async (name) => ok({ name, tokenDeleted: false }),
+    setRemoteToken: async () => ok(null),
+    clearRemoteToken: async () => ok(false),
+    pushRemotes: async () => ok([]),
+    pullRemotes: async () => ok([]),
+    listRestoreMachines: async () => ok({ direct: false, machines: [], artifactsIgnored: 0 }),
+    restoreFromRemote: async () => mockIpcError({ code: "not_found", message: "not mocked" }),
+    secretProviders: async () => ok(MOCK_PROVIDERS),
+    secretsOverview: async () =>
+      ok({ aliases: [], undefined: [], environment: null, opAccount: null, serviceAccountSet: false }),
+    checkSecrets: async () => ok([]),
+    setSecretReference: async () => ok(MOCK_CHANGE),
+    setSecretKeyringValue: async () => ok(MOCK_CHANGE),
+    clearSecretKeyringValue: async () => ok(false),
+    setOpServiceAccount: async () => ok(null),
+    clearOpServiceAccount: async () => ok(false),
+    listOpEnvironment: async () => ok({ names: null }),
+    mapOpEnvironment: async () => ok({ mapped: [], kept: [], replaced: null, change: MOCK_CHANGE }),
+    setOpAccount: async () => ok(MOCK_CHANGE),
   };
   const merged = { ...defaults, ...options.commands } as Commands;
 
