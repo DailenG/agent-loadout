@@ -44,8 +44,23 @@ impl Fx {
 
     /// A machine whose host name (its default label) is `host`.
     pub(super) fn on_host(host: &str) -> Self {
+        Self::build(host, None)
+    }
+
+    /// [`Fx::on_host`] with the system git on `PATH`, isolated from the
+    /// user's git configuration (testkit `git_env`).
+    pub(super) fn with_git(host: &str, git: &Path) -> Self {
+        Self::build(host, Some(git))
+    }
+
+    fn build(host: &str, git: Option<&Path>) -> Self {
         let th = TempHome::new();
-        let env = th.env_builder(host_os()).hostname(host).build();
+        let mut builder = th.env_builder(host_os()).hostname(host);
+        if let Some(git) = git {
+            let git = Self::link_git(&th, git);
+            builder = agent_loadout_testkit::git_env::with_git_vars(&th, &git, builder);
+        }
+        let env = builder.build();
         let fs = th.fs();
         let home = loadout_home(&env, &fs, Some(&th.root().join("lh"))).unwrap();
         let keyring = Arc::new(MemKeyring::new());
@@ -60,6 +75,33 @@ impl Fx {
             delivery,
         };
         Self { th, core, keyring }
+    }
+
+    /// `git` reached through a link inside the temp root (a junction on
+    /// Windows), so `RootedFs` lets the app find it on `PATH`; git itself runs
+    /// from its real install through the link.
+    fn link_git(th: &TempHome, git: &Path) -> PathBuf {
+        let install = git
+            .parent()
+            .and_then(Path::parent)
+            .expect("git's install folder");
+        let link = th.root().join("git-install");
+        if !link.exists() {
+            #[cfg(windows)]
+            {
+                let status = std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J"])
+                    .arg(&link)
+                    .arg(install)
+                    .stdout(std::process::Stdio::null())
+                    .status()
+                    .expect("run mklink");
+                assert!(status.success(), "mklink /J failed");
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(install, &link).expect("link git");
+        }
+        link.join(git.strip_prefix(install).expect("inside the install"))
     }
 
     pub(super) fn claude(&self) -> PathBuf {

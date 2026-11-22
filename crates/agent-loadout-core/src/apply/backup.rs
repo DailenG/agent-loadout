@@ -149,8 +149,10 @@ pub fn prune(fs: &dyn Fs, home: &LoadoutHome, now: SystemTime) -> Result<(), Cor
 /// One apply run's client file backups.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupRun {
-    /// The apply id, or `restore-<apply id>` for the bytes a client file
-    /// restore replaced.
+    /// The run's directory name (`<ts>-<apply-id>`), unique per run.
+    pub dir: String,
+    /// The apply id, or `restore-<run id>-<ulid>` for the bytes a client
+    /// file restore replaced.
     pub apply_id: String,
     pub time: SystemTime,
     /// The original paths of the files backed up, sorted.
@@ -191,6 +193,7 @@ pub fn list_runs(fs: &dyn Fs, home: &LoadoutHome) -> Result<Vec<BackupRun>, Core
             .collect();
         files.sort();
         runs.push(BackupRun {
+            dir: name.to_owned(),
             apply_id: apply_id.to_owned(),
             time,
             files,

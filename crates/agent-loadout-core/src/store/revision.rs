@@ -189,6 +189,37 @@ impl Store<'_> {
             .map_err(git_error)
     }
 
+    /// Commits reachable from `head` and from none of `hide`; ids this
+    /// store does not have are ignored. `None` when every id is unknown.
+    pub fn count_not_in(
+        &self,
+        head: &CommitId,
+        hide: &[CommitId],
+    ) -> Result<Option<usize>, CoreError> {
+        let mut walk = self.repo.revwalk().map_err(git_error)?;
+        walk.push(Oid::from_str(head.as_str()).map_err(git_error)?)
+            .map_err(git_error)?;
+        let mut known = false;
+        for id in hide {
+            let Ok(oid) = Oid::from_str(id.as_str()) else {
+                continue;
+            };
+            if self.repo.find_commit(oid).is_ok() {
+                walk.hide(oid).map_err(git_error)?;
+                known = true;
+            }
+        }
+        if !known {
+            return Ok(None);
+        }
+        let mut count = 0;
+        for oid in walk {
+            oid.map_err(git_error)?;
+            count += 1;
+        }
+        Ok(Some(count))
+    }
+
     fn find_commit(&self, id: &CommitId) -> Result<git2::Commit<'_>, CoreError> {
         let oid = Oid::from_str(id.as_str()).map_err(git_error)?;
         self.repo.find_commit(oid).map_err(git_error)

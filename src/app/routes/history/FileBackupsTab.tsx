@@ -30,12 +30,12 @@ export function FileBackupsTab() {
   const [outcomes, setOutcomes] = useState<Record<string, Record<string, FileRestoreEntry>>>({});
 
   const restore = useMutation({
-    mutationFn: async ({ run, file }: RestoreRequest) => unwrap(await commands.restoreClientFiles(run.applyId, file)),
+    mutationFn: async ({ run, file }: RestoreRequest) => unwrap(await commands.restoreClientFiles(run.run, file)),
     onSuccess: (entries, { run }) => {
       setOutcomes((current) => ({
         ...current,
-        [run.applyId]: {
-          ...current[run.applyId],
+        [run.run]: {
+          ...current[run.run],
           ...Object.fromEntries(entries.map((entry) => [entry.file, entry])),
         },
       }));
@@ -77,7 +77,7 @@ export function FileBackupsTab() {
       {runs.data.map((run) => {
         const label = t("history.backups.run", { id: run.applyId, time: formatTime(run.time) });
         return (
-          <article key={run.applyId} className="panel-card history-backup-run" aria-label={label}>
+          <article key={run.run} className="panel-card history-backup-run" aria-label={label}>
             <div className="history-backup-run__head">
               <strong>{label}</strong>
               {run.undoOfRestore ? (
@@ -94,7 +94,7 @@ export function FileBackupsTab() {
             </div>
             <ul className="history-backup-run__files">
               {run.files.map((file) => {
-                const outcome = outcomes[run.applyId]?.[file];
+                const outcome = outcomes[run.run]?.[file];
                 return (
                   <li key={file} className="history-backup-file">
                     <span className="history-mono history-backup-file__path" title={file}>

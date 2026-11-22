@@ -394,19 +394,23 @@ pub struct FileRestore {
     pub outcome: FileOutcome,
 }
 
-/// Restores the client files an apply run backed up
-/// (`backups/files/<ts>-<apply-id>/`), all of them or only `only`. Each
-/// file's current bytes go to a new backup run `<ts>-restore-<apply-id>`
-/// first, so this is undoable the same way. Holds the store lock.
+/// Restores the client files a backup run holds
+/// (`backups/files/<ts>-<apply-id>/`), all of them or only `only`. `run`
+/// is the run's exact directory name (`<ts>-<apply-id>`, what the app
+/// lists), or an apply id, which names that apply's newest run. Each
+/// file's current bytes go to a new run `<ts>-restore-<apply-id>-<ulid>`
+/// first (unique, so restoring twice never makes two runs of one id), so
+/// this is undoable the same way. Holds the store lock.
 pub fn restore_files(
     ax: &ApplyEnv<'_>,
-    apply_id: &str,
+    run: &str,
     only: Option<&Path>,
 ) -> Result<Vec<FileRestore>, CoreError> {
     let fs = ax.fs;
     let state_dir = ax.home.state_dir();
     let _lock = StoreLock::acquire(fs, &state_dir, LOCK_TIMEOUT)?;
-    let run = find_run(ax, apply_id)?;
+    let apply_id = run;
+    let run = find_run(ax, run)?;
     let entries = fs.read_dir(&run).map_err(|err| {
         CoreError::new(ErrorCode::IoError, format!("cannot list backups: {err}")).with_path(&run)
     })?;
@@ -430,7 +434,23 @@ pub fn restore_files(
         ));
     }
 
-    let undo_dir = backup::run_dir(ax.home, ax.env.now(), &format!("restore-{apply_id}"));
+    // `restore-<apply id>-<ulid>`, with the apply id the run goes back to
+    // (a restore of a restore names the original apply), so names never
+    // grow.
+    let run_id = run
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.split_once('-'))
+        .map_or(apply_id, |(_, id)| id);
+    let base = run_id
+        .strip_prefix("restore-")
+        .and_then(|rest| rest.split('-').next())
+        .unwrap_or(run_id);
+    let undo_id = format!(
+        "restore-{base}-{}",
+        crate::model::ids::new_ulid(ax.env.now())?
+    );
+    let undo_dir = backup::run_dir(ax.home, ax.env.now(), &undo_id);
     let mut ledger = Ledger::load(fs, &state_dir)?;
     let mut results = Vec::new();
     for (file, saved) in files {
@@ -449,8 +469,9 @@ pub fn restore_files(
     Ok(results)
 }
 
-/// The backup run directory of `apply_id`.
-fn find_run(ax: &ApplyEnv<'_>, apply_id: &str) -> Result<PathBuf, CoreError> {
+/// The backup run directory named `run` exactly, else the newest run of
+/// apply id `run`.
+fn find_run(ax: &ApplyEnv<'_>, run: &str) -> Result<PathBuf, CoreError> {
     let root = ax.home.backups_dir().join(backup::FILES_DIR);
     let runs = if ax.fs.is_dir(&root) {
         ax.fs.read_dir(&root).map_err(|err| {
@@ -460,18 +481,27 @@ fn find_run(ax: &ApplyEnv<'_>, apply_id: &str) -> Result<PathBuf, CoreError> {
     } else {
         Vec::new()
     };
-    runs.into_iter()
+    let runs: Vec<(String, PathBuf)> = runs
+        .into_iter()
         .filter(|dir| ax.fs.is_dir(dir))
-        .find(|dir| {
-            dir.file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| name.split_once('-'))
-                .is_some_and(|(_, id)| id.eq_ignore_ascii_case(apply_id))
+        .filter_map(|dir| Some((dir.file_name()?.to_str()?.to_owned(), dir)))
+        .collect();
+    if let Some((_, dir)) = runs.iter().find(|(name, _)| name == run) {
+        return Ok(dir.clone());
+    }
+    // Directory names start with a sortable timestamp: the greatest is the
+    // newest.
+    runs.into_iter()
+        .filter(|(name, _)| {
+            name.split_once('-')
+                .is_some_and(|(_, id)| id.eq_ignore_ascii_case(run))
         })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, dir)| dir)
         .ok_or_else(|| {
             CoreError::new(
                 ErrorCode::NotFound,
-                format!("no file backups of apply {apply_id:?} on this machine"),
+                format!("no file backups of {run:?} on this machine"),
             )
         })
 }

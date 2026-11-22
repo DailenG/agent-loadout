@@ -154,18 +154,22 @@ fn save_records(store: &Store<'_>, remotes: &RemotesFile, update: impl FnOnce(&m
 }
 
 /// Pushes to the selected remotes (every remote when `name` is `None`);
-/// one result per remote, each recorded.
+/// one result per remote, each recorded. `progress` gets git's progress
+/// lines with the remote's name.
 pub fn push_to(
     store: &Store<'_>,
     remotes: &RemotesFile,
     name: Option<&str>,
     sx: &SyncEnv<'_>,
-    progress: &mut dyn FnMut(&str),
+    progress: &mut dyn FnMut(&str, &str),
 ) -> Result<Vec<PushResult>, CoreError> {
     let results: Vec<PushResult> = remotes
         .select(name)?
         .into_iter()
-        .map(|remote| (remote.name.clone(), push_one(store, remote, sx, progress)))
+        .map(|remote| {
+            let result = push_one(store, remote, sx, &mut |line| progress(&remote.name, line));
+            (remote.name.clone(), result)
+        })
         .collect();
     let env = store.env();
     save_records(store, remotes, |file| {
@@ -208,21 +212,23 @@ fn push_one(
 }
 
 /// Pulls from the selected remotes and merges (SPEC 9.9); one result per
-/// remote, each recorded.
+/// remote, each recorded. `progress` as for [`push_to`].
 pub fn pull_from(
     store: &Store<'_>,
     remotes: &RemotesFile,
     name: Option<&str>,
     sx: &SyncEnv<'_>,
-    progress: &mut dyn FnMut(&str),
+    progress: &mut dyn FnMut(&str, &str),
 ) -> Result<Vec<PullResult>, CoreError> {
     let mut results = Vec::new();
     for remote in remotes.select(name)? {
         let report = match remote.kind {
             RemoteKind::Folder => folder::pull(store, remote, sx.unc),
-            RemoteKind::Git => sx
-                .git(store)
-                .and_then(|cli| git::pull(store, &cli, remote, progress)),
+            RemoteKind::Git => sx.git(store).and_then(|cli| {
+                git::pull(store, &cli, remote, &mut |line| {
+                    progress(&remote.name, line)
+                })
+            }),
         };
         results.push((remote.name.clone(), report));
     }
@@ -382,22 +388,24 @@ fn git_status(store: Option<&Store<'_>>, remote: &RemoteConfig, status: &mut Rem
         .reference_target(&format!("refs/remotes/{}/main", remote.name))
         .ok()
         .flatten();
-    // The newer of what was pushed and what was fetched.
-    let upstream = match (&status.pushed_head, &tracking) {
-        (Some(pushed), Some(fetched)) if store.contains(fetched) && !store.contains(pushed) => {
-            Some(fetched.clone())
-        }
-        (Some(pushed), _) => Some(pushed.clone()),
-        (None, fetched) => fetched.clone(),
-    };
-    status.ahead = ahead(store, upstream.as_ref());
-    status.behind = match &tracking {
-        Some(fetched) => store
-            .head()
+    // What the remote has, as far as is known: what this machine pushed and
+    // what the last fetch brought. HEAD's commits reachable from neither
+    // are ahead (after a pull that fast-forwarded past the pushed head,
+    // nothing is; after a merge pull, the local commits and the merge).
+    let known: Vec<CommitId> = [status.pushed_head.clone(), tracking.clone()]
+        .into_iter()
+        .flatten()
+        .collect();
+    let head = store.head().ok();
+    status.ahead = head
+        .as_ref()
+        .and_then(|head| store.count_not_in(head, &known).ok().flatten());
+    status.behind = match (&tracking, &head) {
+        (Some(fetched), Some(head)) => store
+            .ahead_behind(head, fetched)
             .ok()
-            .and_then(|head| store.ahead_behind(&head, fetched).ok())
             .map(|(_, behind)| behind),
-        None => upstream.as_ref().map(|_| 0),
+        _ => status.ahead.map(|_| 0),
     };
 }
 

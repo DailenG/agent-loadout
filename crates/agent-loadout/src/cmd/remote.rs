@@ -397,32 +397,38 @@ fn create_github(ctx: &Context, repo: &str, name: &str) -> Result<(), CoreError>
     Ok(())
 }
 
-/// Git's progress, shown on a terminal only, on one line that ends when
-/// the guard drops.
+/// Git's progress, shown on a terminal only, on one line per remote: the
+/// line ends when the next remote starts and when the guard drops (as one
+/// guard per remote did before the push and pull moved into core).
 struct Progress {
     show: bool,
-    shown: bool,
+    /// The remote whose line is on screen.
+    shown: Option<String>,
 }
 
 impl Progress {
     fn new() -> Self {
         Self {
             show: std::io::stderr().is_terminal(),
-            shown: false,
+            shown: None,
         }
     }
 
-    fn line(&mut self, line: &str) {
-        if self.show {
-            eprint!("\r{line}\x1b[K");
-            self.shown = true;
+    fn line(&mut self, remote: &str, line: &str) {
+        if !self.show {
+            return;
         }
+        if self.shown.as_deref().is_some_and(|shown| shown != remote) {
+            eprintln!();
+        }
+        eprint!("\r{line}\x1b[K");
+        self.shown = Some(remote.to_owned());
     }
 }
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        if self.shown {
+        if self.shown.is_some() {
             eprintln!();
         }
     }
@@ -445,8 +451,8 @@ pub fn push_to(
     name: Option<&str>,
 ) -> Result<Vec<PushResult>, CoreError> {
     let mut progress = Progress::new();
-    sync::push_to(store, file, name, &sync_env(), &mut |line| {
-        progress.line(line)
+    sync::push_to(store, file, name, &sync_env(), &mut |remote, line| {
+        progress.line(remote, line)
     })
 }
 
@@ -545,8 +551,8 @@ fn pull(ctx: &Context, name: Option<&str>) -> Result<u8, CoreError> {
         return Err(no_remote());
     }
     let mut progress = Progress::new();
-    let reports = sync::pull_from(&store, &file, name, &sync_env(), &mut |line| {
-        progress.line(line)
+    let reports = sync::pull_from(&store, &file, name, &sync_env(), &mut |remote, line| {
+        progress.line(remote, line)
     })?;
     drop(progress);
     let conflicts = reports

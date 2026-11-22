@@ -60,7 +60,7 @@ export const commands = {
 	restorePreview: (rev: string, entities: string[], options?: InvokeOptions) => typedError<RestorePreview, IpcError>(__TAURI_INVOKE("restore_preview", { rev, entities }, options)),
 	restoreStoreVersion: (rev: string, entities: string[], confirmed: boolean, options?: InvokeOptions) => typedError<RestoreResult, IpcError>(__TAURI_INVOKE("restore_store_version", { rev, entities, confirmed }, options)),
 	listFileBackups: (options?: InvokeOptions) => typedError<BackupRunEntry[], IpcError>(__TAURI_INVOKE("list_file_backups", undefined, options)),
-	restoreClientFiles: (applyId: string, file: string | null, options?: InvokeOptions) => typedError<FileRestoreEntry[], IpcError>(__TAURI_INVOKE("restore_client_files", { applyId, file }, options)),
+	restoreClientFiles: (run: string, file: string | null, options?: InvokeOptions) => typedError<FileRestoreEntry[], IpcError>(__TAURI_INVOKE("restore_client_files", { run, file }, options)),
 	listMergeConflicts: (options?: InvokeOptions) => typedError<MergeConflictEntry[], IpcError>(__TAURI_INVOKE("list_merge_conflicts", undefined, options)),
 	/**
 	 *  "Download zip": the version as a zip, saved where the user picks in
@@ -237,10 +237,15 @@ export type ApplyTriggerKind = "instant" | "review" | "restore" | "rollback" | "
 
 /**  One apply run's client file backups. */
 export type BackupRunEntry = {
+	/**
+	 *  Names the run in `restore_client_files`: its directory name
+	 *  (`<ts>-<apply id>`), unique per run.
+	 */
+	run: string,
 	applyId: string,
 	/**  RFC 3339, UTC. */
 	time: string,
-	/**  The bytes a client file restore replaced (`restore-<apply id>`). */
+	/**  The bytes a client file restore replaced (`restore-...`). */
 	undoOfRestore: boolean,
 	/**  Under their placeholder roots. */
 	files: string[],

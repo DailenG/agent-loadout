@@ -230,10 +230,13 @@ pub struct RestoreResult {
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupRunEntry {
+    /// Names the run in `restore_client_files`: its directory name
+    /// (`<ts>-<apply id>`), unique per run.
+    pub run: String,
     pub apply_id: String,
     /// RFC 3339, UTC.
     pub time: String,
-    /// The bytes a client file restore replaced (`restore-<apply id>`).
+    /// The bytes a client file restore replaced (`restore-...`).
     pub undo_of_restore: bool,
     /// Under their placeholder roots.
     pub files: Vec<String>,
@@ -640,6 +643,7 @@ pub fn file_backups(core: &Core) -> CmdResult<Vec<BackupRunEntry>> {
         .into_iter()
         .map(|run| BackupRunEntry {
             undo_of_restore: run.apply_id.starts_with("restore-"),
+            run: run.dir,
             apply_id: run.apply_id,
             time: utc_datetime(run.time).to_string(),
             files: run
@@ -651,26 +655,27 @@ pub fn file_backups(core: &Core) -> CmdResult<Vec<BackupRunEntry>> {
         .collect())
 }
 
-/// Writes back the client files an apply run backed up: all of them, or
-/// the one listed as `file` by [`file_backups`].
+/// Writes back the client files of the backup run `run` (its directory
+/// name, [`BackupRunEntry::run`]): all of them, or the one listed as `file`
+/// by [`file_backups`].
 pub fn restore_files(
     core: &Core,
-    apply_id: &str,
+    run: &str,
     file: Option<&str>,
 ) -> CmdResult<Vec<FileRestoreEntry>> {
+    let listed = backup::list_runs(core.fs.as_ref(), &core.home)?
+        .into_iter()
+        .find(|listed| listed.dir == run)
+        .ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::NotFound,
+                format!("no backup run {run:?} on this machine"),
+            )
+        })?;
     let only = match file {
         None => None,
         Some(wanted) => {
-            let run = backup::list_runs(core.fs.as_ref(), &core.home)?
-                .into_iter()
-                .find(|run| run.apply_id.eq_ignore_ascii_case(apply_id))
-                .ok_or_else(|| {
-                    CoreError::new(
-                        ErrorCode::NotFound,
-                        format!("no file backups of apply {apply_id:?} on this machine"),
-                    )
-                })?;
-            let matches: Vec<PathBuf> = run
+            let matches: Vec<PathBuf> = listed
                 .files
                 .into_iter()
                 .filter(|path| placeholder_path(&core.env, path, None) == wanted)
@@ -680,7 +685,7 @@ pub fn restore_files(
                 [] => {
                     return Err(CoreError::new(
                         ErrorCode::NotFound,
-                        format!("apply {apply_id} has no backup of {wanted}"),
+                        format!("backup run {run} has no backup of {wanted}"),
                     )
                     .into());
                 }
@@ -694,7 +699,8 @@ pub fn restore_files(
             }
         }
     };
-    let results = restore::restore_files(&core.apply_env(), apply_id, only.as_deref())?;
+    // The exact directory name: never another run of the same apply.
+    let results = restore::restore_files(&core.apply_env(), &listed.dir, only.as_deref())?;
     Ok(results
         .iter()
         .map(|result| {
@@ -825,11 +831,11 @@ pub async fn list_file_backups(
 #[specta::specta]
 pub async fn restore_client_files(
     state: tauri::State<'_, AppState>,
-    apply_id: String,
+    run: String,
     file: Option<String>,
 ) -> CmdResult<Vec<FileRestoreEntry>> {
     blocking(&state, move |core| {
-        restore_files(core, &apply_id, file.as_deref())
+        restore_files(core, &run, file.as_deref())
     })
     .await
 }

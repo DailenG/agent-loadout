@@ -455,7 +455,13 @@ fn entry(
             RemoteKind::Folder => {
                 folder_text(core, Path::new(remote.path.as_deref().unwrap_or("")))
             }
-            RemoteKind::Git => mask_url(remote.url.as_deref().unwrap_or("")),
+            // Git URLs may be local paths (`C:\Users\...\store.git`,
+            // `file:///...`): the home folder goes out as `~` there too.
+            RemoteKind::Git => scrub(
+                &core.env,
+                &mask_url(remote.url.as_deref().unwrap_or("")),
+                None,
+            ),
         },
         mode: (remote.kind == RemoteKind::Folder).then(|| remote.folder_mode().into()),
         auth: auth.map(Into::into),
@@ -698,7 +704,7 @@ fn require_store(core: &Core) -> Result<agent_loadout_core::store::Store<'_>, Co
 pub fn push(core: &Core, name: Option<&str>) -> CmdResult<Vec<PushEntry>> {
     let store = require_store(core)?;
     let file = require_remotes(core)?;
-    let results = sync::push_to(&store, &file, name, &sync_env(), &mut |_| {})?;
+    let results = sync::push_to(&store, &file, name, &sync_env(), &mut |_, _| {})?;
     Ok(results
         .into_iter()
         .map(|(remote, result)| match result {
@@ -731,7 +737,7 @@ pub fn push(core: &Core, name: Option<&str>) -> CmdResult<Vec<PushEntry>> {
 pub fn pull(core: &Core, name: Option<&str>) -> CmdResult<Vec<PullEntry>> {
     let store = require_store(core)?;
     let file = require_remotes(core)?;
-    let results = sync::pull_from(&store, &file, name, &sync_env(), &mut |_| {})?;
+    let results = sync::pull_from(&store, &file, name, &sync_env(), &mut |_, _| {})?;
     Ok(results
         .into_iter()
         .map(|(remote, result)| match result {

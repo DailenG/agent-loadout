@@ -182,7 +182,9 @@ fn undo_this_apply_from_history_is_one_click_for_the_latest() {
 #[test]
 fn client_file_backups_restore_one_file() {
     let fx = Fx::new();
-    std::fs::write(fx.claude(), "{\n  \"theme\": \"dark\"\n}\n").unwrap();
+    const ORIGINAL: &str = "{\n  \"theme\": \"dark\"\n}\n";
+    const EDITED: &str = "{\n  \"theme\": \"light\"\n}\n";
+    std::fs::write(fx.claude(), ORIGINAL).unwrap();
     let saved = servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
     let apply_id = saved.apply.unwrap().apply_id;
 
@@ -193,11 +195,55 @@ fn client_file_backups_restore_one_file() {
         .expect("the run");
     assert_eq!(run.files, vec!["~/.claude.json".to_owned()]);
 
-    let results = history::restore_files(&fx.core, &apply_id, Some("~/.claude.json")).unwrap();
+    let results = history::restore_files(&fx.core, &run.run, Some("~/.claude.json")).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].outcome, history::FileRestoreOutcome::Restored);
-    assert_eq!(fx.read(&fx.claude()), "{\n  \"theme\": \"dark\"\n}\n");
-    assert!(history::restore_files(&fx.core, &apply_id, Some("~/other.json")).is_err());
+    assert_eq!(fx.read(&fx.claude()), ORIGINAL);
+    assert!(history::restore_files(&fx.core, &run.run, Some("~/other.json")).is_err());
+    // An apply id is not a run name.
+    assert!(history::restore_files(&fx.core, &apply_id, None).is_err());
+
+    // A second restore of the same apply: its undo run is a run of its own.
+    std::fs::write(fx.claude(), EDITED).unwrap();
+    history::restore_files(&fx.core, &run.run, None).unwrap();
+    assert_eq!(fx.read(&fx.claude()), ORIGINAL);
+    let undo: Vec<_> = history::file_backups(&fx.core)
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.undo_of_restore)
+        .collect();
+    assert_eq!(undo.len(), 2, "{undo:?}");
+    assert_ne!(undo[0].run, undo[1].run);
+    assert_ne!(undo[0].apply_id, undo[1].apply_id, "unique undo run ids");
+    // Each run gives back its own bytes: the newer holds the hand edit,
+    // the older what the apply wrote.
+    let holds = |name: &str| {
+        let dir = fx.core.home.backups_dir().join("files").join(name);
+        std::fs::read_to_string(
+            dir.join(agent_loadout_core::apply::backup::encode_path(&fx.claude())),
+        )
+        .unwrap()
+    };
+    let (newer, older) = if holds(&undo[0].run) == EDITED {
+        (&undo[0], &undo[1])
+    } else {
+        (&undo[1], &undo[0])
+    };
+    assert_eq!(holds(&newer.run), EDITED);
+    let results = history::restore_files(&fx.core, &newer.run, Some("~/.claude.json")).unwrap();
+    assert_eq!(
+        results[0].outcome,
+        history::FileRestoreOutcome::Restored,
+        "{results:?} {undo:?}"
+    );
+    assert_eq!(fx.read(&fx.claude()), EDITED);
+    history::restore_files(&fx.core, &older.run, None).unwrap();
+    assert!(
+        fx.read(&fx.claude()).contains("\"fake\""),
+        "the apply's bytes"
+    );
+    history::restore_files(&fx.core, &newer.run, None).unwrap();
+    assert_eq!(fx.read(&fx.claude()), EDITED);
 }
 
 #[test]
@@ -602,4 +648,109 @@ fn git_remote_urls_are_masked_and_tokens_go_one_way() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn git_remote_urls_that_are_local_paths_show_the_home_as_tilde() {
+    let fx = Fx::new();
+    let repo = fx.th.home().join("repos").join("store.git");
+    let home = fx.th.home().to_string_lossy().into_owned();
+    let plain = repo.to_string_lossy().into_owned();
+    let file_url = format!("file:///{}", plain.replace('\\', "/"));
+    for (name, url) in [("plain", plain.as_str()), ("fileurl", file_url.as_str())] {
+        let added = remotes::add_git(
+            &fx.core,
+            name,
+            url,
+            remotes::GitAuthDto::System,
+            None,
+            false,
+        )
+        .unwrap();
+        let location = &added.remote.location;
+        assert!(
+            location.contains("~/repos/store.git") || location.contains("~\\repos\\store.git"),
+            "{location}"
+        );
+        assert!(
+            !location.contains(&home) && !location.contains(&home.replace('\\', "/")),
+            "{location}"
+        );
+    }
+    let json = serde_json::to_string(&remotes::overview(&fx.core).unwrap()).unwrap();
+    assert!(
+        !json.contains(&home.replace('\\', "\\\\")) && !json.contains(&home.replace('\\', "/"))
+    );
+}
+
+/// Status of a git remote between two machines through a local bare
+/// repository and the system git (skipped with a notice without git).
+#[test]
+fn git_remote_status_is_in_sync_after_a_pull_past_the_pushed_head() {
+    let Some(git) = agent_loadout_testkit::git_env::system_git_or_skip(
+        "git_remote_status_is_in_sync_after_a_pull_past_the_pushed_head",
+    ) else {
+        return;
+    };
+    let a = Fx::with_git("desk", &git);
+    let bare = a.th.root().join("shared.git");
+    agent_loadout_testkit::git_env::init_bare(&a.th, &git, &bare);
+    let url = bare.to_string_lossy().into_owned();
+    let status = |fx: &Fx| {
+        remotes::overview(&fx.core).unwrap().remotes[0]
+            .status
+            .clone()
+    };
+
+    // A pushes X.
+    servers::save(&a.core, &draft("one", &["claude-code"]), true).unwrap();
+    remotes::add_git(
+        &a.core,
+        "origin",
+        &url,
+        remotes::GitAuthDto::System,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(status(&a).ahead, None, "never pushed");
+    let pushed = remotes::push(&a.core, None).unwrap();
+    assert!(pushed[0].ok, "{:?}", pushed[0].error);
+    assert_eq!((status(&a).ahead, status(&a).behind), (Some(0), Some(0)));
+
+    // B starts from the repository and pushes Y.
+    let b = Fx::with_git("laptop", &git);
+    // A copy of the repository in B's own root (a clone would do the same).
+    let copy = b.th.root().join("clone.git");
+    copy_dir(&bare, &copy);
+    remotes::restore(&b.core, &SourceRef::Folder(copy), None).unwrap();
+    remotes::add_git(
+        &b.core,
+        "origin",
+        &url,
+        remotes::GitAuthDto::System,
+        None,
+        false,
+    )
+    .unwrap();
+    servers::save(&b.core, &draft("two", &["claude-code"]), true).unwrap();
+    let pushed = remotes::push(&b.core, None).unwrap();
+    assert!(pushed[0].ok, "{:?}", pushed[0].error);
+
+    // A pulls Y (a fast-forward past what A pushed): in sync, not ahead.
+    let pulled = remotes::pull(&a.core, None).unwrap();
+    assert!(pulled[0].ok, "{:?}", pulled[0].error);
+    assert_eq!((status(&a).ahead, status(&a).behind), (Some(0), Some(0)));
+
+    // A commits locally while B pushes again; the pull merges. Ahead counts
+    // only A's own commits: its change and the merge.
+    servers::save(&a.core, &draft("three", &["claude-code"]), true).unwrap();
+    remotes::pull(&b.core, None).unwrap();
+    servers::save(&b.core, &draft("four", &["claude-code"]), true).unwrap();
+    assert!(remotes::push(&b.core, None).unwrap()[0].ok);
+    let pulled = remotes::pull(&a.core, None).unwrap();
+    assert_eq!(pulled[0].heads[0].merge, Some(remotes::MergeKind::Merged));
+    assert_eq!((status(&a).ahead, status(&a).behind), (Some(2), Some(0)));
+    assert!(remotes::push(&a.core, None).unwrap()[0].ok);
+    assert_eq!((status(&a).ahead, status(&a).behind), (Some(0), Some(0)));
 }

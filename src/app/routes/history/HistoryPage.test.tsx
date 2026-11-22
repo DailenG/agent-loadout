@@ -364,6 +364,7 @@ describe("HistoryPage", () => {
 
   it("restores client files from a backup run, one file or all", async () => {
     const run: BackupRunEntry = {
+      run: "20261120T100500Z-apply-2",
       applyId: "apply-2",
       time: "2026-11-20T10:05:00Z",
       undoOfRestore: false,
@@ -394,11 +395,15 @@ describe("HistoryPage", () => {
     await user.click(
       within(card).getByRole("button", { name: t("history.backups.restoreFileAria", { file: "~/.claude.json" }) }),
     );
-    await waitFor(() => expect(argsOf(transport, "restoreClientFiles")).toEqual([["apply-2", "~/.claude.json"]]));
+    await waitFor(() =>
+      expect(argsOf(transport, "restoreClientFiles")).toEqual([["20261120T100500Z-apply-2", "~/.claude.json"]]),
+    );
     expect(await within(card).findByText(t("history.backups.outcome.restored"))).toBeInTheDocument();
 
     await user.click(within(card).getByRole("button", { name: t("history.backups.restoreAll") }));
-    await waitFor(() => expect(argsOf(transport, "restoreClientFiles")[1]).toEqual(["apply-2", null]));
+    await waitFor(() =>
+      expect(argsOf(transport, "restoreClientFiles")[1]).toEqual(["20261120T100500Z-apply-2", null]),
+    );
     expect(await within(card).findByText(errorMessage("io_error"))).toBeInTheDocument();
     expect(within(card).getByText(t("history.backups.outcome.unchanged"))).toBeInTheDocument();
   });
