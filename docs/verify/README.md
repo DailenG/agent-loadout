@@ -46,14 +46,18 @@ not happened yet.
 
 ## Fix briefs (before M9)
 
-- **FB-1 Claude Code project keys (CC-3).** Claude Code keys `projects` by
-  the working directory exactly as given, with `\` turned into `/`: same
-  case, no trailing separator. `C:/x/App` and `c:/x/app` are two different
-  projects to it, and a backslash key is never read. `location::project_key`
-  reuses any key that matches loosely and copies the backslash style of
-  existing keys, so it can write where Claude Code never looks. Change: new
-  keys use `/` and the folder's on-disk case; existing loose matches are
-  reported (or written alongside), not silently reused. Needed for M9.
+- **FB-1 Claude Code project keys (CC-3). Done.** Claude Code keys
+  `projects` by the working directory exactly as given, with `\` turned
+  into `/`: same case, no trailing separator. `C:/x/App` and `c:/x/app` are
+  two different projects to it, and a backslash key is never read.
+  `location::project_key` used to reuse any key that matched loosely and
+  copy the backslash style of existing keys. It now always uses the exact
+  form Claude Code uses (the project path, `/` separators, its own case, no
+  trailing separator) and leaves keys of other spellings alone
+  (`windows_project_keys_are_claude_codes_exact_spelling`). Left for M9:
+  the project path's case must be the one Claude Code is started with; the
+  M9 planner should warn when the file holds the same folder under another
+  spelling.
 - **FB-2 Dotted server names (CC-7, CX-6).** Claude Code and Codex both load
   `verify.dotted`. Loadout blocks such names for these clients
   (`invalid_id`). Decide whether to allow them as native names; low impact,

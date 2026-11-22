@@ -572,7 +572,7 @@ pub(crate) fn plan_target(
         Ok(doc) => doc,
         Err(err) => return blocked_target(plan, err.with_path(&target.file)),
     };
-    let keys = match target.container_keys(&doc) {
+    let keys = match target.container_keys() {
         Ok(keys) => keys,
         Err(err) => return blocked_target(plan, err.with_path(&target.file)),
     };

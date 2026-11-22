@@ -505,9 +505,7 @@ fn claude_code_targets_per_scope() {
             .mcp_targets(&env, &fs, Scope::ProjectLocal, Some(&project), &NO_PREFS)
             .unwrap();
         assert_eq!(local[0].file, home.home().join(".claude.json"));
-        let keys = local[0]
-            .container_keys(&Document::empty(Format::Json))
-            .unwrap();
+        let keys = local[0].container_keys().unwrap();
         assert_eq!(keys.len(), 3);
         assert_eq!(
             (keys[0].as_str(), keys[2].as_str()),
@@ -634,59 +632,31 @@ fn claude_desktop_targets_per_os() {
 }
 
 #[test]
-fn windows_project_keys_follow_the_file() {
+fn windows_project_keys_are_claude_codes_exact_spelling() {
     let local = CODE.mcp.as_ref().unwrap().project_local_container;
-    let keys = |doc: &Document, project: &str| {
-        local
-            .keys(Os::Windows, doc, Some(Path::new(project)))
-            .unwrap()[1]
-            .clone()
-    };
+    let key = |os: Os, project: &str| local.keys(os, Some(Path::new(project))).unwrap()[1].clone();
 
-    // Forward-slash file: an existing key is found with either slash style,
-    // any case and a trailing separator, and reused as written.
-    let slash = parse(&fixture("claude-code/user/.claude.json"));
-    for project in [
-        r"C:\work\other-app",
-        "C:/work/other-app",
-        r"c:\WORK\Other-App\",
-    ] {
-        assert_eq!(keys(&slash, project), "C:/work/other-app");
-    }
-    // A new key copies the file's style.
-    assert_eq!(keys(&slash, r"E:\new\proj"), "E:/new/proj");
-
-    let backslash = parse(&fixture("claude-code/windows-backslash-keys/.claude.json"));
+    // Claude Code writes the working directory with `/`, as given, and
+    // reads only that spelling (gate V1, CC-2 and CC-3).
+    assert_eq!(key(Os::Windows, r"C:\work\other-app"), "C:/work/other-app");
+    assert_eq!(key(Os::Windows, "C:/work/other-app/"), "C:/work/other-app");
+    assert_eq!(key(Os::Windows, r"c:\WORK\Other-App\"), "c:/WORK/Other-App");
+    assert_eq!(key(Os::Windows, r"E:\"), "E:/");
     assert_eq!(
-        keys(&backslash, "C:/work/sample-app"),
-        r"C:\Work\Sample-App"
-    );
-    assert_eq!(keys(&backslash, "E:/new/proj"), r"E:\new\proj");
-
-    // No drive-letter keys yet: `/` (`[verify]` against Claude Code).
-    assert_eq!(
-        keys(&Document::empty(Format::Json), r"E:\new\proj"),
-        "E:/new/proj"
-    );
-
-    // Linux keys compare exactly.
-    assert_eq!(
-        local
-            .keys(
-                Os::Linux,
-                &slash,
-                Some(Path::new("/home/demo/work/linux-app/"))
-            )
-            .unwrap()[1],
+        key(Os::Linux, "/home/demo/work/linux-app/"),
         "/home/demo/work/linux-app"
     );
+    assert_eq!(key(Os::Linux, "/"), "/");
 
-    // An edit through the reused key lands in the existing project entry.
-    let mut doc = backslash.clone();
+    // A file keyed with backslashes (which Claude Code never reads): the
+    // edit goes under the forward-slash key and the old key is left alone.
+    let mut doc = parse(&fixture("claude-code/windows-backslash-keys/.claude.json"));
+    let before = doc.list(&["projects"]).unwrap();
     let container = local
-        .keys(Os::Windows, &doc, Some(Path::new("c:/work/sample-app")))
+        .keys(Os::Windows, Some(Path::new(r"C:\Work\Sample-App")))
         .unwrap();
     let container: Vec<&str> = container.iter().map(String::as_str).collect();
+    assert_eq!(container[1], "C:/Work/Sample-App");
     let native = write(
         CODE,
         Os::Windows,
@@ -694,7 +664,9 @@ fn windows_project_keys_follow_the_file() {
     )
     .unwrap();
     assert!(doc.upsert(&container, "lint", &native).unwrap());
-    assert_eq!(doc.list(&["projects"]).unwrap().len(), 2);
+    let after = doc.list(&["projects"]).unwrap();
+    assert_eq!(after.len(), before.len() + 1);
+    assert!(before.iter().all(|key| after.contains(key)));
     insta::assert_snapshot!("claude_code_backslash_key_upsert", text(&doc));
 }
 
@@ -726,7 +698,7 @@ fn claude_code_suppresses_user_servers_through_disabled_mcp_servers() {
     let mut doc = parse(&original);
     let list = target
         .container
-        .keys(Os::Windows, &doc, Some(Path::new(r"C:\work\sample-app")))
+        .keys(Os::Windows, Some(Path::new(r"C:\work\sample-app")))
         .unwrap();
     let list: Vec<&str> = list.iter().map(String::as_str).collect();
     assert_eq!(
@@ -742,7 +714,7 @@ fn claude_code_suppresses_user_servers_through_disabled_mcp_servers() {
     // A project without an entry gets one, removed again with its member.
     let list = target
         .container
-        .keys(Os::Windows, &doc, Some(Path::new(r"E:\fresh")))
+        .keys(Os::Windows, Some(Path::new(r"E:\fresh")))
         .unwrap();
     let list: Vec<&str> = list.iter().map(String::as_str).collect();
     assert!(doc.set_list_member(&list, "notes", true).unwrap());
@@ -772,7 +744,7 @@ fn a_target_round_trips_through_the_file_it_names() {
         target.format,
     )
     .unwrap();
-    let keys = target.container_keys(&doc).unwrap();
+    let keys = target.container_keys().unwrap();
     let container: Vec<&str> = keys.iter().map(String::as_str).collect();
     let server = stdio("docs", "npx", &["-y", "example-docs-mcp"], &[]);
     let native = write(DESKTOP, env.os(), &server).unwrap();

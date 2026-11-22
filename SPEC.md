@@ -1404,7 +1404,7 @@ Paths are relative to the repo root; `core/` abbreviates `crates/agent-loadout-c
 
 - Spec: §7.1, §7.3 and §7.4 rows `claude-code` and `claude-desktop`, §7.7.
 - Create: `core/src/adapters/{mod,spec,caps,location,detect,mapper,claude_code,claude_desktop}.rs`; `fixtures/clients/claude-code/**`, `fixtures/clients/claude-desktop/**`; `core/tests/adapters_claude.rs`; `scripts/verify-clients.md` (Claude sections).
-- Build: the declarative table with `Tier`; Claude Code user, project and local scopes, `disabledMcpServers` list membership, `CLAUDE_CONFIG_DIR`; Windows `projects` key lookup that accepts both slash styles on read and writes the style already present (default style is `[verify]`); Claude Desktop on Windows (Roaming path plus MSIX copy, `windows_shell_shim`, `restart_required`, stdio only), `not_supported_on_os` on Linux. (V1, 2026-11-21: Claude Code writes `/` and reads only the exact key; the loose lookup is fix brief FB-1 in `docs/verify/README.md`.)
+- Build: the declarative table with `Tier`; Claude Code user, project and local scopes, `disabledMcpServers` list membership, `CLAUDE_CONFIG_DIR`; Windows `projects` keys in Claude Code's own exact form: the project path with `/` separators, its own case, no trailing separator (gate V1: Claude Code writes that and reads nothing else; keys of other spellings are left alone); Claude Desktop on Windows (Roaming path plus MSIX copy, `windows_shell_shim`, `restart_required`, stdio only), `not_supported_on_os` on Linux.
 - Tests: goldens `to_native`/`from_native` per transport; http on Claude Desktop is `blocked: unsupported_transport`; detection per OS through a fake `Env` and a fake registry probe; MSIX dual write is planned as two targets.
 
 #### M5 Codex, omp, Pi

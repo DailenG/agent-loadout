@@ -110,15 +110,9 @@ impl ContainerPath {
         self.0
     }
 
-    /// The keys of this path in `doc`. A project key segment is resolved
-    /// against the keys already in the map that holds it, so an existing
-    /// key for `project` is reused as written.
-    pub fn keys(
-        self,
-        os: Os,
-        doc: &Document,
-        project: Option<&Path>,
-    ) -> Result<Vec<String>, CoreError> {
+    /// The keys of this path. A project key segment is the key Claude Code
+    /// uses for `project` (see [`project_key`]).
+    pub fn keys(self, os: Os, project: Option<&Path>) -> Result<Vec<String>, CoreError> {
         let mut keys: Vec<String> = Vec::with_capacity(self.0.len());
         for segment in self.0 {
             if *segment != Self::PROJECT_KEY {
@@ -131,9 +125,7 @@ impl ContainerPath {
                     "this container is keyed by project and needs a project folder",
                 )
             })?;
-            let map: Vec<&str> = keys.iter().map(String::as_str).collect();
-            let existing = doc.list(&map)?;
-            keys.push(project_key(os, project, &existing));
+            keys.push(project_key(os, project));
         }
         Ok(keys)
     }
@@ -160,9 +152,9 @@ pub struct Target {
 }
 
 impl Target {
-    /// The container keys in `doc`, the parsed text of [`Target::file`].
-    pub fn container_keys(&self, doc: &Document) -> Result<Vec<String>, CoreError> {
-        self.container.keys(self.os, doc, self.project.as_deref())
+    /// The keys of the container entries go in.
+    pub fn container_keys(&self) -> Result<Vec<String>, CoreError> {
+        self.container.keys(self.os, self.project.as_deref())
     }
 
     /// The document to edit when [`Target::file`] does not exist: the

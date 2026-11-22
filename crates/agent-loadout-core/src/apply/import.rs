@@ -227,7 +227,7 @@ pub fn scan(
                     continue;
                 }
             };
-            let keys = target.container_keys(&doc)?;
+            let keys = target.container_keys()?;
             let container: Vec<&str> = keys.iter().map(String::as_str).collect();
             let pointer = crate::apply::ledger::container_pointer(&keys);
             let file = target.file.to_string_lossy().into_owned();

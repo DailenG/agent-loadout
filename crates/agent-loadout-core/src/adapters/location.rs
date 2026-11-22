@@ -205,57 +205,33 @@ fn wildcard_match(os: Os, pattern: &str, name: &str) -> bool {
 }
 
 /// The key of project `project` in a map keyed by project path (Claude Code
-/// `projects` in `~/.claude.json`), given the keys already there.
+/// `projects` in `~/.claude.json`).
 ///
-/// An existing key naming the same folder is reused as written. On Windows
-/// that comparison ignores case, the slash style and a trailing separator.
-/// A new Windows key copies the slash style of the first drive-letter key
-/// in the map, and uses `/` when there is none (`[verify]` which style
-/// Claude Code writes).
-pub fn project_key(os: Os, project: &Path, existing: &[String]) -> String {
+/// Claude Code keys a project by its working directory as given, with `\`
+/// turned into `/`, and reads only that exact spelling: a key differing in
+/// case, slash style or a trailing separator is another project to it (gate
+/// V1, `docs/verify/claude-code.md` CC-2, CC-3). So on Windows the key is
+/// the project path with `/` separators and no trailing separator (a drive
+/// root keeps it: `C:/`), in the path's own case; keys of other spellings
+/// in the file are left alone. On Linux and macOS the key is the path
+/// without a trailing `/`.
+pub fn project_key(os: Os, project: &Path) -> String {
     let path = project.to_string_lossy();
     match os {
         Os::Windows => {
-            let wanted = windows_key_form(&path);
-            if let Some(found) = existing.iter().find(|key| windows_key_form(key) == wanted) {
-                return found.clone();
-            }
-            let backslash = existing
-                .iter()
-                .find(|key| is_drive_path(key) && key[2..].contains(['/', '\\']))
-                .is_some_and(|key| key[2..].starts_with('\\'));
-            let trimmed = path.trim_end_matches(['/', '\\']);
-            // Keep a drive root's separator (`C:/`).
-            let trimmed = if trimmed.len() == 2 && is_drive_path(trimmed) {
-                &path[..3.min(path.len())]
+            let slashed = path.replace('\\', "/");
+            let trimmed = slashed.trim_end_matches('/');
+            if trimmed.len() == 2 && is_drive_path(trimmed) {
+                format!("{trimmed}/")
             } else {
-                trimmed
-            };
-            if backslash {
-                trimmed.replace('/', "\\")
-            } else {
-                trimmed.replace('\\', "/")
+                trimmed.to_owned()
             }
         }
-        Os::Linux | Os::MacOs => {
-            let trimmed = match path.trim_end_matches('/') {
-                "" => "/",
-                trimmed => trimmed,
-            };
-            existing
-                .iter()
-                .find(|key| match key.trim_end_matches('/') {
-                    "" => *key == "/" && trimmed == "/",
-                    key => key == trimmed,
-                })
-                .cloned()
-                .unwrap_or_else(|| trimmed.to_owned())
-        }
+        Os::Linux | Os::MacOs => match path.trim_end_matches('/') {
+            "" => "/".to_owned(),
+            trimmed => trimmed.to_owned(),
+        },
     }
-}
-
-fn windows_key_form(key: &str) -> String {
-    key.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 
 fn is_drive_path(key: &str) -> bool {

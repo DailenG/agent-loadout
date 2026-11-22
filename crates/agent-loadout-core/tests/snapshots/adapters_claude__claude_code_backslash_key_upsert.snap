@@ -13,17 +13,21 @@ expression: text(&doc)
           "type": "stdio",
           "command": "npx",
           "args": ["-y", "example-notes-mcp"]
-        },
-        "lint": {
-          "type": "stdio",
-          "command": "npx",
-          "args": ["example-lint-mcp"]
         }
       },
       "hasTrustDialogAccepted": true
     },
     "D:\\src\\tools": {
       "allowedTools": []
+    },
+    "C:/Work/Sample-App": {
+      "mcpServers": {
+        "lint": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["example-lint-mcp"]
+        }
+      }
     }
   }
 }

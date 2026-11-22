@@ -1199,7 +1199,7 @@ fn project_suppression_per_client() {
             .unwrap()
             .unwrap();
         let mut doc = target.new_document();
-        let keys = target.container_keys(&doc).unwrap();
+        let keys = target.container_keys().unwrap();
         let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
         assert!(doc.upsert(&keys, &server.name, &entry).unwrap());
         out.push_str(&format!("## {}\n{}\n", spec.id, text(&doc)));
