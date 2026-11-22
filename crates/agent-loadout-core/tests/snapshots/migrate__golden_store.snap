@@ -21,6 +21,22 @@ origin = "migrated:skilldock"
 
 [enable]
 clients = ["claude-code", "codex"]
+== servers/docs-search.toml ==
+schema = 1
+id = "docs-search"
+display_name = "Docs-Search"
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-docs-search"]
+
+[client.copilot]
+native_name = "Docs-Search"
+
+[meta]
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["copilot"]
 == servers/fetch.toml ==
 schema = 1
 id = "fetch"
@@ -33,6 +49,20 @@ origin = "migrated:skilldock"
 
 [enable]
 clients = ["claude-code"]
+== servers/linear.toml ==
+schema = 1
+id = "linear"
+transport = "sse"
+url = "https://mcp.example.invalid/sse"
+
+[headers]
+Authorization = "Bearer ${secret:LINEAR_AUTHORIZATION}"
+
+[meta]
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["cursor"]
 == servers/notes.toml ==
 schema = 1
 id = "notes"
@@ -91,6 +121,24 @@ theme = "dark"
 new_server_enable = "all-detected"
 new_skill_enable = "none"
 agents_cli_compat = true
+== skill-meta/gh-tree-skill.toml ==
+schema = 1
+id = "gh-tree-skill"
+name = "gh-tree-skill"
+
+[source]
+kind = "git"
+url = "https://github.com/example-org/skills"
+path = "skills/gh-tree-skill"
+ref = "main"
+== skill-meta/market-helper.toml ==
+schema = 1
+id = "market-helper"
+name = "Market Helper"
+tags = ["tools"]
+
+[source]
+kind = "local"
 == skill-meta/repo-notes.toml ==
 schema = 1
 id = "repo-notes"
@@ -114,6 +162,20 @@ kind = "git"
 url = "https://example.invalid/team/team-review.git"
 ref = "main"
 commit = "<team-review-head>"
+== skills/gh-tree-skill/SKILL.md ==
+---
+name: gh-tree-skill
+description: Installed from a GitHub tree URL.
+---
+
+# GitHub tree skill
+== skills/market-helper/SKILL.md ==
+---
+name: Market Helper
+description: Installed from the SkillHub marketplace.
+---
+
+# Market helper
 == skills/repo-notes/SKILL.md ==
 ---
 name: repo-notes

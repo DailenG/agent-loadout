@@ -116,6 +116,9 @@ pub struct Record {
     /// `plugin` for records a SkillDock plugin installed.
     pub lifecycle_source: String,
     pub owner_plugin_name: String,
+    /// SkillDock app ids that were renamed to Loadout client ids
+    /// ([`APP_RENAMES`]), as `(skilldock, loadout)`.
+    pub renamed: Vec<(String, String)>,
 }
 
 impl Record {
@@ -141,6 +144,35 @@ fn texts(map: &Map<String, Value>, key: &str) -> Vec<String> {
             && !out.iter().any(|known| known == item)
         {
             out.push(item.to_owned());
+        }
+    }
+    out
+}
+
+/// SkillDock app ids that name a Loadout client differently: SkillDock's
+/// `github-copilot` writes `~/.copilot/mcp-config.json`, Loadout's
+/// `copilot` user file (`mcp_manager.rs` `APP_GITHUB_COPILOT`).
+pub const APP_RENAMES: [(&str, &str); 1] = [("github-copilot", "copilot")];
+
+/// An app id list with [`APP_RENAMES`] applied (deduplicated, in order).
+fn app_ids(
+    map: &Map<String, Value>,
+    key: &str,
+    renamed: &mut Vec<(String, String)>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in texts(map, key) {
+        let id = match APP_RENAMES.iter().find(|(from, _)| *from == id) {
+            Some((from, to)) => {
+                if !renamed.iter().any(|(known, _)| known == from) {
+                    renamed.push(((*from).to_owned(), (*to).to_owned()));
+                }
+                (*to).to_owned()
+            }
+            None => id,
+        };
+        if !out.contains(&id) {
+            out.push(id);
         }
     }
     out
@@ -203,51 +235,122 @@ pub fn parse_records(doc: &Value) -> Result<Vec<Result<Record, CoreError>>, Core
                     (!name.is_empty()).then_some((name, enabled))
                 })
                 .collect();
+            let mut renamed = Vec::new();
             Ok(Record {
                 name: if name.is_empty() { id.clone() } else { name },
                 id,
                 server: map.get("server").cloned().unwrap_or(Value::Null),
                 description: text(map, "description"),
                 source_url: text(map, "sourceUrl"),
-                enabled_app_ids: texts(map, "enabledAppIds"),
-                imported_from_app_ids: texts(map, "importedFromAppIds"),
-                managed_app_ids: texts(map, "managedAppIds"),
+                enabled_app_ids: app_ids(map, "enabledAppIds", &mut renamed),
+                imported_from_app_ids: app_ids(map, "importedFromAppIds", &mut renamed),
+                managed_app_ids: app_ids(map, "managedAppIds", &mut renamed),
                 tools,
                 lifecycle_source: text(map, "lifecycleSource"),
                 owner_plugin_name: text(map, "ownerPluginName"),
+                renamed,
             })
         })
         .collect())
 }
 
-/// Skill tags: `skillTags` maps a skill name to its one tag (SkillDock
-/// allowed one). Both `skill-tags.json` and `state.json` hold the map.
-pub fn parse_tags(doc: &Value, into: &mut BTreeMap<String, Vec<String>>) {
+/// The last component of a path SkillDock recorded (`/` or `\`
+/// separators): the skill folder it names.
+fn folder_of(path: &str) -> Option<String> {
+    path.trim()
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}
+
+/// Whether a SkillDock skill reference (lower-cased `name`, optional skill
+/// `folder`) names the skill in `folder_name` whose names are `names`:
+/// by folder when SkillDock recorded a path, else by lower-cased name.
+fn names_skill(name: &str, folder: Option<&str>, folder_name: &str, names: &[&str]) -> bool {
+    match folder {
+        Some(folder) => folder.eq_ignore_ascii_case(folder_name),
+        None => names.iter().any(|n| n.trim().to_lowercase() == name),
+    }
+}
+
+/// One SkillDock skill tag. SkillDock allowed one tag per skill; its keys
+/// are `"<lower-cased name>\n<normalized skill path>"` (`state.rs`
+/// `skill_tag_key`), older ones the lower-cased name alone, and
+/// `installedSkills[].tag` repeats it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagEntry {
+    /// The lower-cased skill name.
+    pub name: String,
+    /// The skill folder from the key's path, if the key has one.
+    pub folder: Option<String>,
+    pub tag: String,
+}
+
+impl TagEntry {
+    /// Whether the tag belongs to the skill in `folder_name` named `names`.
+    pub fn matches(&self, folder_name: &str, names: &[&str]) -> bool {
+        names_skill(&self.name, self.folder.as_deref(), folder_name, names)
+    }
+}
+
+/// The `skillTags` map of `skill-tags.json` or `state.json`.
+pub fn parse_tags(doc: &Value, into: &mut Vec<TagEntry>) {
     let Some(tags) = doc.get("skillTags").and_then(Value::as_object) else {
         return;
     };
-    for (name, tag) in tags {
+    for (key, tag) in tags {
         let Some(tag) = tag.as_str().map(str::trim).filter(|tag| !tag.is_empty()) else {
             continue;
         };
-        let list = into.entry(name.clone()).or_default();
-        if !list.iter().any(|known| known == tag) {
-            list.push(tag.to_owned());
-        }
+        let (name, folder) = match key.split_once('\n') {
+            Some((name, path)) => (name, folder_of(path)),
+            None => (key.as_str(), None),
+        };
+        push_tag(
+            into,
+            TagEntry {
+                name: name.trim().to_lowercase(),
+                folder,
+                tag: tag.to_owned(),
+            },
+        );
+    }
+}
+
+fn push_tag(into: &mut Vec<TagEntry>, entry: TagEntry) {
+    if !into.contains(&entry) {
+        into.push(entry);
     }
 }
 
 /// What `state.json` recorded about an installed skill.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledSkill {
+    /// The lower-cased skill name.
+    pub name: String,
+    /// The skill folder (`canonicalPath`, else `localPath`).
+    pub folder: Option<String>,
     pub source_type: String,
     pub source_url: String,
     pub branch: String,
+    /// `tag`, flattened from SkillDock's `SkillInstanceMetadata`.
+    pub tag: String,
 }
 
-/// `installedSkills` of `state.json`, by skill name.
-pub fn parse_installed(doc: &Value) -> BTreeMap<String, InstalledSkill> {
-    let mut out = BTreeMap::new();
+impl InstalledSkill {
+    /// Whether this is the skill in `folder_name` named `names`.
+    pub fn matches(&self, folder_name: &str, names: &[&str]) -> bool {
+        names_skill(&self.name, self.folder.as_deref(), folder_name, names)
+    }
+}
+
+/// `installedSkills` of `state.json`; their embedded tags are added to
+/// `tags`.
+pub fn parse_installed(doc: &Value, tags: &mut Vec<TagEntry>) -> Vec<InstalledSkill> {
+    let mut out = Vec::new();
     for item in doc
         .get("installedSkills")
         .and_then(Value::as_array)
@@ -257,18 +360,35 @@ pub fn parse_installed(doc: &Value) -> BTreeMap<String, InstalledSkill> {
         let Some(map) = item.as_object() else {
             continue;
         };
-        let name = text(map, "name");
+        let name = text(map, "name").to_lowercase();
         if name.is_empty() {
             continue;
         }
-        out.insert(
+        let canonical = text(map, "canonicalPath");
+        let path = if canonical.is_empty() {
+            text(map, "localPath")
+        } else {
+            canonical
+        };
+        let skill = InstalledSkill {
             name,
-            InstalledSkill {
-                source_type: text(map, "sourceType"),
-                source_url: text(map, "sourceUrl"),
-                branch: text(map, "branch"),
-            },
-        );
+            folder: folder_of(&path),
+            source_type: text(map, "sourceType"),
+            source_url: text(map, "sourceUrl"),
+            branch: text(map, "branch"),
+            tag: text(map, "tag"),
+        };
+        if !skill.tag.is_empty() {
+            push_tag(
+                tags,
+                TagEntry {
+                    name: skill.name.clone(),
+                    folder: skill.folder.clone(),
+                    tag: skill.tag.clone(),
+                },
+            );
+        }
+        out.push(skill);
     }
     out
 }
@@ -303,6 +423,10 @@ pub struct Mapped {
     pub dropped: Vec<String>,
     /// Client ids Loadout has no adapter for (kept in the enable list).
     pub unknown_clients: Vec<String>,
+    /// Informational notes (renamed client ids).
+    pub notes: Vec<String>,
+    /// What needs a look (dropped wrapper env keys, a homepage left out).
+    pub review: Vec<String>,
 }
 
 /// The parts of a SkillDock server definition.
@@ -319,6 +443,35 @@ struct Raw {
     allow: Vec<String>,
     /// From `mcp-remote --ignore-tool`.
     deny: Vec<String>,
+    /// `env` keys of an `mcp-remote` wrapper its headers and URL did not
+    /// use (dropped: a remote server has no environment).
+    unused_env: Vec<String>,
+}
+
+/// `text` with each `${NAME}` that `env` defines replaced by its value;
+/// the names used go to `used`. The wrapper's shell expanded them inside
+/// its own process, so they are not variables of this machine.
+fn substitute(text: &str, env: &BTreeMap<String, String>, used: &mut BTreeSet<String>) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("${") {
+        let after = &rest[start + 2..];
+        match after.find('}') {
+            Some(end) if env.contains_key(&after[..end]) => {
+                let name = &after[..end];
+                out.push_str(&rest[..start]);
+                out.push_str(&env[name]);
+                used.insert(name.to_owned());
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..start + 2]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn is_filter(arg: &str) -> bool {
@@ -400,7 +553,6 @@ fn unwrap(raw: &Raw) -> Option<(Raw, &'static str)> {
             let mut inner = Raw {
                 transport: Some(Transport::Http),
                 url: Some(url.to_owned()),
-                env: raw.env.clone(),
                 ..Raw::default()
             };
             let mut index = start + 1;
@@ -431,6 +583,19 @@ fn unwrap(raw: &Raw) -> Option<(Raw, &'static str)> {
                     _ => return None,
                 }
             }
+            // The wrapper's `env` fed its own `${NAME}` expansion; a remote
+            // server has no environment.
+            let mut used = BTreeSet::new();
+            inner.url = inner.url.map(|url| substitute(&url, &raw.env, &mut used));
+            for value in inner.headers.values_mut() {
+                *value = substitute(value, &raw.env, &mut used);
+            }
+            inner.unused_env = raw
+                .env
+                .keys()
+                .filter(|k| !used.contains(*k))
+                .cloned()
+                .collect();
             Some((inner, kind))
         }
     }
@@ -518,6 +683,7 @@ fn read_raw(server: &Value, dropped: &mut Vec<String>) -> Result<Raw, CoreError>
         headers: string_map("headers")?,
         allow: Vec::new(),
         deny: Vec::new(),
+        unused_env: Vec::new(),
     })
 }
 
@@ -697,8 +863,31 @@ pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Ma
     if !record.description.is_empty() {
         body.description = Some(record.description.clone());
     }
+    let mut notes = Vec::new();
+    let mut review = Vec::new();
+    for (from, to) in &record.renamed {
+        notes.push(format!("SkillDock's {from} is {to}"));
+    }
+    if !raw.unused_env.is_empty() {
+        review.push(format!(
+            "the wrapper's env keys its headers did not use were dropped: {}",
+            raw.unused_env.join(", ")
+        ));
+    }
+    // SkillDock kept `sourceUrl` as given; one with credentials would fail
+    // the store's leak scan and with it the whole migration.
+    let homepage = (!record.source_url.is_empty()).then(|| record.source_url.clone());
+    let homepage = match homepage {
+        Some(url) if classify_import(None, &url).is_some() || !find_in_text(&url).is_empty() => {
+            review.push(
+                "the source URL may hold a credential and was left out of meta.homepage".to_owned(),
+            );
+            None
+        }
+        other => other,
+    };
     body.meta = Some(Meta {
-        homepage: (!record.source_url.is_empty()).then(|| record.source_url.clone()),
+        homepage,
         origin: Some(ORIGIN.to_owned()),
         extra: toml::Table::new(),
     });
@@ -745,6 +934,8 @@ pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Ma
         machine_path,
         dropped,
         unknown_clients,
+        notes,
+        review,
     })
 }
 

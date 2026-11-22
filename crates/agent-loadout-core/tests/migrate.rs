@@ -26,11 +26,14 @@ static RUNNER: SystemRunner = SystemRunner {
 static NO_REGISTRY: NoRegistry = NoRegistry;
 
 /// Values written in plain text in the fixture; none may reach the store.
-const PLAINTEXT: [&str; 4] = [
+const PLAINTEXT: [&str; 7] = [
     "fixture-env-value",
     "fixture-arg-value",
     "fixture-header-value",
     "fixture-placeholder",
+    "fixture-remote-env-value",
+    "fixture-unused",
+    "fixture-url-pass",
 ];
 
 struct Setup {
@@ -78,8 +81,10 @@ fn dir_link(target: &Path, link: &Path) {
 }
 
 /// The fixture home, plus what a repository cannot hold: the git
-/// repositories, a link from Claude Code's skill folder into SkillDock's
-/// library, and a skill holding a token-shaped value (assembled here).
+/// repositories, links from Claude Code's skill folder into SkillDock's
+/// library (one named like the skill, one not), a skill holding a
+/// token-shaped value and one whose TOML file holds a random value under a
+/// credential key (both assembled here).
 fn setup() -> Setup {
     let fx = Fx::new();
     copy_dir(&fixtures().join("skilldock-home"), &fx.th.home());
@@ -104,13 +109,29 @@ fn setup() -> Setup {
         format!("---\nname: leaky\n---\n\nexport GH={token}\n"),
     )
     .unwrap();
+    // Not a token format: only the store's TOML rule (a high-entropy value
+    // under a credential key) catches it.
+    let toml_secret = sd.join("skills").join("toml-secret");
+    std::fs::create_dir_all(&toml_secret).unwrap();
+    std::fs::write(
+        toml_secret.join("SKILL.md"),
+        "---\nname: toml-secret\n---\n\nReads config.toml.\n",
+    )
+    .unwrap();
+    let random = ["Xq7vR2pL9m", "K4tW8zN3bY", "6cH1jF5dG0sA"].concat();
+    std::fs::write(
+        toml_secret.join("config.toml"),
+        format!("api_token = \"{random}\"\n"),
+    )
+    .unwrap();
+    let claude_skills = fx.th.home().join(".claude").join("skills");
     dir_link(
         &sd.join("skills").join("repo-notes"),
-        &fx.th
-            .home()
-            .join(".claude")
-            .join("skills")
-            .join("repo-notes"),
+        &claude_skills.join("repo-notes"),
+    );
+    dir_link(
+        &sd.join("skills").join("team-review"),
+        &claude_skills.join("old-review"),
     );
     Setup {
         fx,
@@ -270,6 +291,8 @@ fn the_dry_run_creates_nothing_and_lists_every_item() {
         "Remote-Docs",
         "notes",
         "time",
+        "Docs-Search",
+        "linear",
         "plugin-helper",
         "broken",
     ] {
@@ -278,7 +301,15 @@ fn the_dry_run_creates_nothing_and_lists_every_item() {
             "no item for record {record:?}: {names:?}"
         );
     }
-    for skill in ["repo-notes", "team-review", "leaky", "retired-skill"] {
+    for skill in [
+        "repo-notes",
+        "team-review",
+        "market-helper",
+        "gh-tree-skill",
+        "leaky",
+        "toml-secret",
+        "retired-skill",
+    ] {
         assert!(
             names.contains(&skill),
             "no item for skill {skill:?}: {names:?}"
@@ -333,6 +364,83 @@ fn the_dry_run_creates_nothing_and_lists_every_item() {
         server: "notes".to_owned()
     }));
     assert!(notes.detail.contains("legacy-ide"), "{}", notes.detail);
+    // A file the store's TOML rule refuses is caught before the commit.
+    let toml_secret = item(report, ItemKind::Skill, "toml-secret");
+    assert_eq!(
+        toml_secret.code,
+        Some("leak_detected"),
+        "{}",
+        toml_secret.detail
+    );
+    // SkillDock's tag keys: `<name>\n<path>`, an older bare lower-cased
+    // name, and `installedSkills[].tag`.
+    for (folder, tag) in [
+        ("repo-notes", "tags: docs"),
+        ("team-review", "tags: team"),
+        ("market-helper", "tags: tools"),
+    ] {
+        let skill = item(report, ItemKind::Skill, folder);
+        assert!(skill.detail.contains(tag), "{folder}: {}", skill.detail);
+    }
+    assert!(!names.iter().any(|name| name.contains('\n')));
+    // `github-copilot` is Loadout's `copilot`.
+    let docs = item(report, ItemKind::Server, "Docs-Search");
+    assert!(
+        docs.detail.contains("enabled for copilot"),
+        "{}",
+        docs.detail
+    );
+    assert!(
+        !docs.detail.contains("no Loadout adapter"),
+        "{}",
+        docs.detail
+    );
+    // mcp-remote with env: the header takes the env value (then a secret
+    // reference), env is dropped, the unused key is named; the source URL
+    // with a password is left out of the homepage.
+    let linear = item(report, ItemKind::Server, "linear");
+    assert_eq!(linear.status, ItemStatus::NeedsReview);
+    assert!(
+        linear
+            .detail
+            .contains("headers.Authorization may be a secret"),
+        "{}",
+        linear.detail
+    );
+    assert!(
+        linear
+            .detail
+            .contains("did not use were dropped: UNUSED_KEY"),
+        "{}",
+        linear.detail
+    );
+    assert!(
+        linear.detail.contains("left out of meta.homepage"),
+        "{}",
+        linear.detail
+    );
+    // Non-git sources stay local, with a note; a GitHub tree URL is split.
+    let market = item(report, ItemKind::Skill, "market-helper");
+    assert_eq!(market.status, ItemStatus::NeedsReview);
+    assert!(
+        market
+            .detail
+            .contains("marketplace source has no update path"),
+        "{}",
+        market.detail
+    );
+    assert!(market.detail.contains("source: local"), "{}", market.detail);
+    let tree = item(report, ItemKind::Skill, "gh-tree-skill");
+    assert!(
+        tree.detail
+            .contains("source: https://github.com/example-org/skills;"),
+        "{}",
+        tree.detail
+    );
+    // A link not named like the skill id is listed, not recorded.
+    let old = item(report, ItemKind::SkillLink, "claude-code/old-review");
+    assert_eq!(old.status, ItemStatus::NeedsReview);
+    assert_eq!(old.id.as_deref(), Some("team-review"));
     // No report text holds a plaintext value or an absolute temp path.
     let text = report_text(report);
     for value in PLAINTEXT {
@@ -363,7 +471,7 @@ fn the_fixture_migrates_to_a_golden_store() {
     let commit = applied.commit.clone().unwrap();
     let log = fx.log();
     assert_eq!(log[0].id, commit);
-    assert_eq!(log[0].summary, "migrate: skilldock (5 servers, 2 skills)");
+    assert_eq!(log[0].summary, "migrate: skilldock (7 servers, 4 skills)");
     let tag = store.tag(&applied.tag).unwrap().unwrap();
     assert!(
         applied.tag.starts_with("auto/pre-migrate/"),
@@ -380,9 +488,25 @@ fn the_fixture_migrates_to_a_golden_store() {
     assert_eq!(post.target, commit);
     assert_eq!(
         applied.report.servers,
-        ["context7", "fetch", "remote-docs", "notes", "time"]
+        [
+            "context7",
+            "fetch",
+            "remote-docs",
+            "notes",
+            "time",
+            "docs-search",
+            "linear"
+        ]
     );
-    assert_eq!(applied.report.skills, ["repo-notes", "team-review"]);
+    assert_eq!(
+        applied.report.skills,
+        [
+            "gh-tree-skill",
+            "market-helper",
+            "repo-notes",
+            "team-review"
+        ]
+    );
 
     // The golden store: servers, skills without `.git`, metadata, settings.
     let tree = store_tree(fx, &[(&s.team_review_head, "<team-review-head>")]);
@@ -451,6 +575,23 @@ fn the_fixture_migrates_to_a_golden_store() {
     assert_eq!(
         target,
         std::fs::canonicalize(fx.home.store_dir().join("skills").join("repo-notes")).unwrap()
+    );
+    // The link not named like the skill was neither owned nor moved.
+    let old = fx
+        .th
+        .home()
+        .join(".claude")
+        .join("skills")
+        .join("old-review");
+    assert!(
+        SkillLedger::load(&fx.fs, &fx.home.state_dir())
+            .unwrap()
+            .get(&old)
+            .is_none()
+    );
+    assert_eq!(
+        std::fs::canonicalize(&old).unwrap(),
+        std::fs::canonicalize(skilldock(fx).join("skills").join("team-review")).unwrap()
     );
     assert_eq!(
         tree_hash(&skilldock(fx)),
@@ -574,6 +715,7 @@ fn plaintext_values_go_to_the_extraction_wizard() {
             ),
             ("notes", "args[2]", "NOTES_TOKEN"),
             ("notes", "env.NOTES_API_KEY", "NOTES_NOTES_API_KEY"),
+            ("linear", "headers.Authorization", "LINEAR_AUTHORIZATION"),
         ]
     );
     for extraction in &report.extractions {
@@ -600,6 +742,18 @@ fn plaintext_values_go_to_the_extraction_wizard() {
     assert!(
         remote.contains("Authorization = \"Bearer ${secret:REMOTE_DOCS_AUTHORIZATION}\""),
         "{remote}"
+    );
+    // mcp-remote with env: the env value reached the header, then became a
+    // reference; the server has no env and no homepage.
+    let linear = fx.read(&fx.home.store_dir().join("servers").join("linear.toml"));
+    assert!(
+        linear.contains("Authorization = \"Bearer ${secret:LINEAR_AUTHORIZATION}\""),
+        "{linear}"
+    );
+    assert!(linear.contains("transport = \"sse\""), "{linear}");
+    assert!(
+        !linear.contains("[env]") && !linear.contains("homepage"),
+        "{linear}"
     );
     // No secret was stored anywhere (catalog or keyring): the alias is
     // missing until `secrets set`, so the entry is blocked, not written.
@@ -632,6 +786,68 @@ fn a_second_migration_changes_nothing() {
     let backup = item(&again.report, ItemKind::Backup, "~/.skilldock/backup/repo");
     assert_eq!(backup.status, ItemStatus::Skipped);
     assert_eq!(again.backup_import, None);
+}
+
+/// A migration whose commit landed but whose link recording did not (the
+/// lock timed out, the ledger did not save): running it again records the
+/// links of the skills already in the store.
+#[test]
+fn a_second_run_repairs_links_lost_after_the_commit() {
+    let s = setup();
+    let fx = &s.fx;
+    let store = fx.store();
+    migrate::apply(&store, &fx.ax()).unwrap();
+    let link_path = fx
+        .th
+        .home()
+        .join(".claude")
+        .join("skills")
+        .join("repo-notes");
+    let state = fx.home.state_dir();
+    let mut ledger = SkillLedger::load(&fx.fs, &state).unwrap();
+    assert!(ledger.forget(&link_path));
+    ledger.save(&fx.fs, &state).unwrap();
+
+    let again = migrate::apply(&store, &fx.ax()).unwrap();
+    assert_eq!(again.commit, None);
+    let skill = item(&again.report, ItemKind::Skill, "repo-notes");
+    assert_eq!(skill.status, ItemStatus::Skipped);
+    assert!(skill.detail.contains("1 link recorded"), "{}", skill.detail);
+    let link = item(&again.report, ItemKind::SkillLink, "claude-code/repo-notes");
+    assert_eq!(link.status, ItemStatus::Migrated);
+    let ledger = SkillLedger::load(&fx.fs, &state).unwrap();
+    assert_eq!(ledger.get(&link_path).unwrap().skill_id, "repo-notes");
+    // A third run finds it owned and records nothing more.
+    let third = migrate::apply(&store, &fx.ax()).unwrap();
+    assert!(
+        !third
+            .report
+            .items
+            .iter()
+            .any(|i| i.kind == ItemKind::SkillLink && i.name == "claude-code/repo-notes")
+    );
+}
+
+/// SkillDock omits `agentSkillsCompatibilityEnabled` when unset and treats
+/// the `agent-skills` library provider as compatibility on.
+#[test]
+fn the_agent_skills_provider_turns_compatibility_on() {
+    let s = setup();
+    let fx = &s.fx;
+    let settings = skilldock(fx).join("config").join("settings.json");
+    std::fs::write(
+        &settings,
+        "{\n  \"skillLibraryProvider\": \"agent-skills\",\n  \"theme\": \"light\"\n}\n",
+    )
+    .unwrap();
+    let migration = migrate::plan(None, &fx.ax()).unwrap();
+    let provider = item(&migration.report, ItemKind::Setting, "skillLibraryProvider");
+    assert_eq!(provider.status, ItemStatus::Migrated, "{}", provider.detail);
+    assert_eq!(provider.detail, "agents_cli_compat = true");
+    let store = fx.store();
+    migrate::apply(&store, &fx.ax()).unwrap();
+    let text = fx.read(&fx.home.store_dir().join("settings.toml"));
+    assert!(text.contains("agents_cli_compat = true"), "{text}");
 }
 
 #[test]

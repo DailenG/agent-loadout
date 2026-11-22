@@ -52,9 +52,10 @@ use crate::model::skill_meta::{
     DistributionMethod, SkillEnable, SkillMeta, SkillSource, SkillSourceKind,
 };
 use crate::secrets::classify::{classify_import, find_in_text};
-use crate::secrets::scanner::SecretMemory;
+use crate::secrets::scanner::{ALLOWLIST_FILE, Allowlist, SecretMemory, scan_text};
+use crate::skills::install::Source;
 use crate::skills::link::{SkillLedger, SkillLink};
-use crate::skills::store::{SKILLS_DIR, meta_path};
+use crate::skills::store::{SKILLS_DIR, meta_path, read_meta};
 use crate::skills::{SKILL_FILE, frontmatter, read_folder, slug};
 use crate::store::{
     CommitId, LOCK_TIMEOUT, Machine, Operation, Store, StoreLock, StoreRead, server_path,
@@ -62,7 +63,7 @@ use crate::store::{
 };
 
 use scan::{FoundLink, MigratedServer};
-use skilldock::{Aliases, Extraction, Record, SkillDockSettings};
+use skilldock::{Aliases, Extraction, InstalledSkill, Record, SkillDockSettings, TagEntry};
 
 /// `auto/<kind>/<ts>` tag made before a migration.
 pub const TAG_KIND: &str = "pre-migrate";
@@ -521,8 +522,8 @@ fn build(
     }
 
     // Skills.
-    let mut tags: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut installed = BTreeMap::new();
+    let mut tags: Vec<TagEntry> = Vec::new();
+    let mut installed: Vec<InstalledSkill> = Vec::new();
     for (list, is_state) in [
         (&skilldock::TAG_FILES[..], false),
         (&skilldock::STATE_FILES[..], true),
@@ -557,7 +558,7 @@ fn build(
                     ));
                     skilldock::parse_tags(&doc, &mut tags);
                     if is_state {
-                        installed = skilldock::parse_installed(&doc);
+                        installed = skilldock::parse_installed(&doc, &mut tags);
                     }
                 }
                 Err(err) => report.items.push(Item::error(
@@ -572,6 +573,7 @@ fn build(
     let library = skilldock::resolve(home, skilldock::SKILLS_DIR);
     let mut links: Vec<SkillLink> = Vec::new();
     let mut skill_ids: Vec<String> = Vec::new();
+    let mut tag_used = vec![false; tags.len()];
     if fs.is_dir(&library) {
         consumed.insert(skilldock::SKILLS_DIR.to_owned());
         let found = scan::library_links(ax, &library)?;
@@ -582,31 +584,44 @@ fn build(
             )
         })?;
         dirs.sort();
-        let now = utc_datetime(ax.env.now()).to_string();
+        let cx = SkillCx {
+            ax,
+            base,
+            now: utc_datetime(ax.env.now()).to_string(),
+            memory: &memory,
+            allow: Allowlist::parse(&read_base(base, ALLOWLIST_FILE)?.unwrap_or_default()),
+            ledger: SkillLedger::load(fs, &ax.home.state_dir())?,
+            tags: &tags,
+            installed: &installed,
+        };
+        let mut out = SkillOut {
+            report: &mut report,
+            files: &mut files,
+            links: &mut links,
+            skill_ids: &mut skill_ids,
+            tag_used: &mut tag_used,
+        };
         for dir in dirs {
-            let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            let name = file_name(&dir);
+            if name.is_empty() {
                 continue;
-            };
-            let skill = SkillInput {
-                name: &name,
-                dir: &dir,
-                tags: tags.remove(&name).unwrap_or_default(),
-                installed: installed.get(&name),
-                links: found.get(&name).map(Vec::as_slice).unwrap_or_default(),
-            };
-            map_skill(
-                ax,
-                base,
-                &skill,
-                &now,
-                &mut report,
-                &mut files,
-                &mut links,
-                &mut skill_ids,
-            )?;
+            }
+            let found = found.get(&name).map(Vec::as_slice).unwrap_or_default();
+            map_skill(&cx, &name, &dir, found, &mut out)?;
         }
     }
-    for (name, list) in &tags {
+    // Tags of skills that are not in the library (the item names the
+    // skill, never SkillDock's key, which holds an absolute path).
+    let mut unmatched: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (entry, used) in tags.iter().zip(&tag_used) {
+        if !used {
+            let list = unmatched.entry(entry.name.clone()).or_default();
+            if !list.contains(&entry.tag) {
+                list.push(entry.tag.clone());
+            }
+        }
+    }
+    for (name, list) in &unmatched {
         report.items.push(Item::skipped(
             ItemKind::Skill,
             name.clone(),
@@ -864,6 +879,11 @@ fn map_server(
             mapped.dropped.join(", ")
         ));
     }
+    notes.extend(mapped.notes.iter().cloned());
+    if !mapped.review.is_empty() {
+        review = true;
+        notes.extend(mapped.review.iter().cloned());
+    }
     let mut item = Item::new(
         ItemKind::Server,
         name,
@@ -890,29 +910,79 @@ fn map_server(
     Ok(())
 }
 
-struct SkillInput<'a> {
-    name: &'a str,
-    dir: &'a Path,
-    tags: Vec<String>,
-    installed: Option<&'a skilldock::InstalledSkill>,
-    links: &'a [FoundLink],
+/// What every skill folder is mapped against.
+struct SkillCx<'a> {
+    ax: &'a ApplyEnv<'a>,
+    base: Option<&'a dyn StoreRead>,
+    now: String,
+    /// The store's secret memory and allowlist: skill files get the same
+    /// leak scan as the commit (SPEC 11.8), so one file cannot fail the
+    /// whole migration.
+    memory: &'a SecretMemory,
+    allow: Allowlist,
+    /// Skill links this machine owns already.
+    ledger: SkillLedger,
+    tags: &'a [TagEntry],
+    installed: &'a [InstalledSkill],
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What the skill mapping adds to.
+struct SkillOut<'a> {
+    report: &'a mut Report,
+    files: &'a mut BTreeMap<String, Vec<u8>>,
+    links: &'a mut Vec<SkillLink>,
+    skill_ids: &'a mut Vec<String>,
+    /// Per [`SkillCx::tags`] entry: matched a skill folder.
+    tag_used: &'a mut Vec<bool>,
+}
+
+fn skill_link(cx: &SkillCx<'_>, link: &FoundLink, id: &str) -> SkillLink {
+    SkillLink {
+        kind: "skill_link".to_owned(),
+        client: link.client.to_owned(),
+        scope: crate::model::applied::Scope::User,
+        project_id: None,
+        skill_id: id.to_owned(),
+        path: link.path.to_string_lossy().into_owned(),
+        method: link.method,
+        target: link.target.to_string_lossy().into_owned(),
+        written_hash: None,
+        written_at: Some(cx.now.clone()),
+        extra: serde_json::Map::new(),
+    }
+}
+
+/// A link the sync could not re-point: its name is not the skill id, so
+/// the sync would add a second link at `<id>` and remove this one.
+fn misnamed_link(link: &FoundLink, id: &str) -> Item {
+    Item {
+        id: Some(id.to_owned()),
+        ..Item::new(
+            ItemKind::SkillLink,
+            format!("{}/{}", link.client, file_name(&link.path)),
+            ItemStatus::NeedsReview,
+            format!(
+                "{} points into ~/.skilldock/skills but is not named {id:?}, the skill's id; left \
+                 as it is and not enabled for {} (rename it to {id:?} or remove it, then enable \
+                 the skill)",
+                link.display, link.client
+            ),
+            None,
+        )
+    }
+}
+
 fn map_skill(
-    ax: &ApplyEnv<'_>,
-    base: Option<&dyn StoreRead>,
-    skill: &SkillInput<'_>,
-    now: &str,
-    report: &mut Report,
-    files: &mut BTreeMap<String, Vec<u8>>,
-    links: &mut Vec<SkillLink>,
-    skill_ids: &mut Vec<String>,
+    cx: &SkillCx<'_>,
+    name: &str,
+    dir: &Path,
+    found: &[FoundLink],
+    out: &mut SkillOut<'_>,
 ) -> Result<(), CoreError> {
-    let fs = ax.fs;
-    let name = skill.name;
+    let fs = cx.ax.fs;
+    let report = &mut *out.report;
     let display = format!("{}/{name}", skilldock::SKILLS_DIR);
-    match crate::skills::entry(fs, skill.dir)? {
+    match crate::skills::entry(fs, dir)? {
         crate::skills::Entry::Dir => {}
         crate::skills::Entry::Link(_) => {
             report.items.push(Item::new(
@@ -931,7 +1001,7 @@ fn map_skill(
             return Ok(());
         }
     }
-    let content = match read_folder(fs, skill.dir) {
+    let content = match read_folder(fs, dir) {
         Ok(content) => content,
         Err(err) => {
             report.items.push(Item::error(
@@ -953,24 +1023,6 @@ fn map_skill(
         ));
         return Ok(());
     };
-    if let Some(file) = content.iter().find_map(|(relative, bytes)| {
-        std::str::from_utf8(bytes)
-            .ok()
-            .filter(|text| !find_in_text(text).is_empty())
-            .map(|_| relative)
-    }) {
-        report.items.push(Item::new(
-            ItemKind::Skill,
-            name,
-            ItemStatus::NeedsReview,
-            format!(
-                "{file} looks like it holds a secret, which the store refuses; remove it, then \
-                 install the folder with `skills add`"
-            ),
-            Some(ErrorCode::LeakDetected.as_str()),
-        ));
-        return Ok(());
-    }
     let mut notes = Vec::new();
     let parsed = match frontmatter::parse(&String::from_utf8_lossy(skill_md)) {
         Ok(parsed) => parsed,
@@ -984,6 +1036,41 @@ fn map_skill(
         .and_then(|fm| fm.name())
         .unwrap_or(name)
         .to_owned();
+    // SkillDock's tags and install records name the skill by folder (its
+    // path) or by name.
+    let names = [name, skill_name.as_str()];
+    let mut tags: Vec<String> = Vec::new();
+    for (index, entry) in cx.tags.iter().enumerate() {
+        if entry.matches(name, &names) {
+            out.tag_used[index] = true;
+            if !tags.contains(&entry.tag) {
+                tags.push(entry.tag.clone());
+            }
+        }
+    }
+    let installed = cx.installed.iter().find(|s| s.matches(name, &names));
+    if let Some(file) = content.iter().find_map(|(relative, bytes)| {
+        let findings = scan_text(
+            relative,
+            bytes,
+            relative.ends_with(".toml"),
+            cx.memory,
+            &cx.allow,
+        );
+        (!findings.is_empty()).then_some(relative)
+    }) {
+        report.items.push(Item::new(
+            ItemKind::Skill,
+            name,
+            ItemStatus::NeedsReview,
+            format!(
+                "{file} looks like it holds a secret, which the store refuses; remove it, then \
+                 install the folder with `skills add`"
+            ),
+            Some(ErrorCode::LeakDetected.as_str()),
+        ));
+        return Ok(());
+    }
     let Some(id) = slug(&skill_name).or_else(|| slug(name)) else {
         report.items.push(Item::new(
             ItemKind::Skill,
@@ -994,27 +1081,99 @@ fn map_skill(
         ));
         return Ok(());
     };
-    let taken = skill_ids.contains(&id)
-        || read_base(base, &meta_path(&id)?)?.is_some()
-        || read_base(base, &format!("{SKILLS_DIR}/{id}/{SKILL_FILE}"))?.is_some();
-    if taken {
+    // Only a link named like the id is the entry the sync re-points.
+    let (named, misnamed): (Vec<&FoundLink>, Vec<&FoundLink>) =
+        found.iter().partition(|link| file_name(&link.path) == id);
+    for link in &misnamed {
+        report.items.push(misnamed_link(link, &id));
+    }
+    if out.skill_ids.contains(&id) {
         report.items.push(Item::new(
             ItemKind::Skill,
             name,
-            ItemStatus::Skipped,
-            format!("the store already has skill {id:?}; left as it is"),
+            ItemStatus::NeedsReview,
+            format!("another SkillDock skill already became {id:?}; install this one by hand"),
             Some(ErrorCode::AlreadyExists.as_str()),
         ));
+        for link in &named {
+            report.items.push(misnamed_link(link, &id));
+        }
+        return Ok(());
+    }
+    let existing = match cx.base {
+        Some(base) => read_meta(base, &id)?
+            .map(|meta| meta.enable.and_then(|e| e.clients))
+            .or_else(|| {
+                read_base(Some(base), &format!("{SKILLS_DIR}/{id}/{SKILL_FILE}"))
+                    .ok()
+                    .flatten()
+                    .map(|_| None)
+            }),
+        None => None,
+    };
+    if let Some(enabled) = existing {
+        // Already in the store (an earlier run, or the user's own skill):
+        // its links are still owned now, so a run after a failed
+        // post-commit step repairs them. A client the store copy is not
+        // enabled for is left to the user (the sync would remove it).
+        let mut recorded = 0;
+        for link in &named {
+            if cx.ledger.get(&link.path).is_some() {
+                continue;
+            }
+            let wanted = match &enabled {
+                Some(ClientSelection::AllDetected) => true,
+                Some(ClientSelection::List(ids)) => ids.iter().any(|c| c == link.client),
+                None => false,
+            };
+            if wanted {
+                out.links.push(skill_link(cx, link, &id));
+                recorded += 1;
+            } else {
+                report.items.push(Item {
+                    id: Some(id.clone()),
+                    ..Item::new(
+                        ItemKind::SkillLink,
+                        format!("{}/{}", link.client, file_name(&link.path)),
+                        ItemStatus::NeedsReview,
+                        format!(
+                            "{} points into ~/.skilldock/skills; the store's skill {id:?} is not \
+                             enabled for {}, so it is left as it is",
+                            link.display, link.client
+                        ),
+                        None,
+                    )
+                });
+            }
+        }
+        report.items.push(Item {
+            id: Some(id.clone()),
+            ..Item::new(
+                ItemKind::Skill,
+                name,
+                ItemStatus::Skipped,
+                if recorded == 0 {
+                    format!("the store already has skill {id:?}; left as it is")
+                } else {
+                    format!(
+                        "the store already has skill {id:?}; left as it is, its {recorded} \
+                         link{} recorded",
+                        if recorded == 1 { "" } else { "s" }
+                    )
+                },
+                Some(ErrorCode::AlreadyExists.as_str()),
+            )
+        });
         return Ok(());
     }
     let mut review = false;
     let mut meta = SkillMeta::new(&id);
     meta.name = Some(skill_name);
-    if !skill.tags.is_empty() {
-        notes.push(format!("tags: {}", skill.tags.join(", ")));
-        meta.tags = Some(skill.tags.clone());
+    if !tags.is_empty() {
+        notes.push(format!("tags: {}", tags.join(", ")));
+        meta.tags = Some(tags);
     }
-    let (source, source_note) = skill_source(skill.dir, skill.installed);
+    let (source, source_note) = skill_source(fs, dir, installed);
     if let Some(note) = source_note {
         review = true;
         notes.push(note);
@@ -1029,23 +1188,12 @@ fn map_skill(
     }
     meta.source = Some(source);
     let mut clients: Vec<String> = Vec::new();
-    for link in skill.links {
+    let mut new_links = Vec::new();
+    for link in &named {
         if !clients.iter().any(|known| known == link.client) {
             clients.push(link.client.to_owned());
         }
-        links.push(SkillLink {
-            kind: "skill_link".to_owned(),
-            client: link.client.to_owned(),
-            scope: crate::model::applied::Scope::User,
-            project_id: None,
-            skill_id: id.clone(),
-            path: link.path.to_string_lossy().into_owned(),
-            method: link.method,
-            target: link.target.to_string_lossy().into_owned(),
-            written_hash: None,
-            written_at: Some(now.to_owned()),
-            extra: serde_json::Map::new(),
-        });
+        new_links.push(skill_link(cx, link, &id));
     }
     if clients.is_empty() {
         notes.push("not linked into any client".to_owned());
@@ -1060,6 +1208,9 @@ fn map_skill(
             extra: toml::Table::new(),
         });
     }
+    if !misnamed.is_empty() {
+        review = true;
+    }
     if let Some(err) = meta.validate(Some(&id)).first_error(None) {
         report.items.push(Item::error(
             ItemKind::Skill,
@@ -1070,12 +1221,14 @@ fn map_skill(
         return Ok(());
     }
     for (relative, bytes) in &content {
-        files.insert(format!("{SKILLS_DIR}/{id}/{relative}"), bytes.clone());
+        out.files
+            .insert(format!("{SKILLS_DIR}/{id}/{relative}"), bytes.clone());
     }
-    files.insert(
+    out.files.insert(
         meta_path(&id)?,
         TomlDocument::new(meta).to_text()?.into_bytes(),
     );
+    out.links.extend(new_links);
     let mut item = Item::new(
         ItemKind::Skill,
         name,
@@ -1089,16 +1242,20 @@ fn map_skill(
     );
     item.id = Some(id.clone());
     report.items.push(item);
-    skill_ids.push(id);
+    out.skill_ids.push(id);
     Ok(())
 }
 
 /// `[source]` from the skill folder's git repository (remote `origin` and
-/// HEAD, read only), else from `state.json`, else `local`. A URL that may
-/// hold a credential is left out (with a note).
+/// HEAD, read only), else from `state.json` (`git`, and `github` with a
+/// `/tree/<ref>/<path>` URL split into repository, ref and path), else
+/// `local`. Other SkillDock sources (`marketplace`, `well-known`) have no
+/// update path here and stay local, with a note. A URL that may hold a
+/// credential is left out (with a note).
 fn skill_source(
+    fs: &dyn Fs,
     dir: &Path,
-    installed: Option<&skilldock::InstalledSkill>,
+    installed: Option<&InstalledSkill>,
 ) -> (SkillSource, Option<String>) {
     let mut source = SkillSource {
         kind: SkillSourceKind::Local,
@@ -1127,19 +1284,42 @@ fn skill_source(
             }
         }
     }
+    let mut note = None;
     if url.is_none()
         && let Some(installed) = installed
         && !installed.source_url.is_empty()
-        && installed.source_type != "local"
     {
-        url = Some(installed.source_url.clone());
-        if source.git_ref.is_none() && !installed.branch.is_empty() {
-            source.git_ref = Some(installed.branch.clone());
+        match installed.source_type.as_str() {
+            "" | "local" => {}
+            "git" | "github" => {
+                if let Source::Git {
+                    url: repo,
+                    git_ref,
+                    path,
+                } = Source::parse(&installed.source_url, fs)
+                {
+                    url = Some(repo);
+                    source.path = path;
+                    source.git_ref = git_ref.filter(|r| r != "HEAD").or_else(|| {
+                        (!installed.branch.is_empty()).then(|| installed.branch.clone())
+                    });
+                } else {
+                    note = Some(
+                        "SkillDock's git source is not a repository URL; kept as a local skill"
+                            .to_owned(),
+                    );
+                }
+            }
+            other => {
+                note = Some(format!(
+                    "SkillDock's {other} source has no update path in Loadout; kept as a local \
+                     skill (reinstall it from its repository for updates)"
+                ));
+            }
         }
     }
-    let mut note = None;
     match url {
-        Some(url) if classify_import(None, &url).is_some() => {
+        Some(url) if classify_import(None, &url).is_some() || !find_in_text(&url).is_empty() => {
             note = Some(
                 "the source URL may hold a credential and was left out; reinstall from a clean URL \
                  for updates"
@@ -1147,6 +1327,7 @@ fn skill_source(
             );
             source.git_ref = None;
             source.commit = None;
+            source.path = None;
         }
         Some(url) => {
             source.kind = SkillSourceKind::Git;
@@ -1155,6 +1336,7 @@ fn skill_source(
         None => {
             source.git_ref = None;
             source.commit = None;
+            source.path = None;
         }
     }
     (source, note)
@@ -1219,15 +1401,30 @@ fn map_settings(
                     }),
                 });
             }
-            "skillLibraryProvider" => report.items.push(item(
-                ItemStatus::Skipped,
-                match parsed.text(key) {
-                    Some("agent-skills") => {
-                        "the library was the agents CLI folder; it is scanned read-only with agents CLI compatibility".to_owned()
-                    }
-                    _ => "SkillDock's own library is migrated from ~/.skilldock/skills".to_owned(),
-                },
-            )),
+            "skillLibraryProvider" => match parsed.text(key) {
+                // SkillDock computes compatibility as the field or this
+                // provider (`state.rs` `load_app_settings`) and omits the
+                // field when unset.
+                Some("agent-skills")
+                    if !parsed.fields.contains_key("agentSkillsCompatibilityEnabled") =>
+                {
+                    report.items.push(set(
+                        key,
+                        &mut settings.agents_cli_compat,
+                        true,
+                        "agents_cli_compat",
+                        |v| v.to_string(),
+                    ));
+                }
+                Some("agent-skills") => report.items.push(item(
+                    ItemStatus::Skipped,
+                    "the library was the agents CLI folder; it is scanned read-only with agents CLI compatibility".to_owned(),
+                )),
+                _ => report.items.push(item(
+                    ItemStatus::Skipped,
+                    "SkillDock's own library is migrated from ~/.skilldock/skills".to_owned(),
+                )),
+            },
             "defaultOpenToolId" => report.items.push(item(
                 ItemStatus::Skipped,
                 "no portable setting; the default editor is chosen per machine".to_owned(),

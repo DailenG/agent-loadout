@@ -6,22 +6,55 @@
       "sourceType": "local",
       "sourceUrl": "",
       "description": "Notes",
-      "localPath": "",
+      "localPath": "/home/demo/.skilldock/skills/repo-notes",
       "branch": "",
       "collabStatus": "",
       "statusText": "",
       "lastCheckedAt": "",
       "syncedToolCount": 1,
       "lastEditor": "",
+      "commitLabel": "",
+      "canonicalPath": "/home/demo/.skilldock/skills/repo-notes",
+      "tag": ""
+    },
+    {
+      "name": "Team Review",
+      "sourceLabel": "Git",
+      "sourceType": "github",
+      "sourceUrl": "https://example.invalid/team/team-review.git",
+      "description": "Review checklist",
+      "localPath": "/home/demo/.skilldock/skills/team-review",
+      "branch": "main",
+      "collabStatus": "",
+      "statusText": "",
+      "lastCheckedAt": "",
+      "syncedToolCount": 0,
+      "lastEditor": "",
       "commitLabel": ""
     },
     {
-      "name": "team-review",
-      "sourceLabel": "Git",
-      "sourceType": "git",
-      "sourceUrl": "https://example.invalid/team/team-review.git",
-      "description": "Review checklist",
-      "localPath": "",
+      "name": "Market Helper",
+      "sourceLabel": "SkillHub",
+      "sourceType": "marketplace",
+      "sourceUrl": "https://skillhub.example.invalid/skills/market-helper",
+      "description": "From the marketplace",
+      "localPath": "C:\\Users\\demo\\.skilldock\\skills\\market-helper",
+      "branch": "stable",
+      "collabStatus": "clean",
+      "statusText": "",
+      "lastCheckedAt": "",
+      "syncedToolCount": 0,
+      "lastEditor": "",
+      "commitLabel": "",
+      "tag": "tools"
+    },
+    {
+      "name": "gh-tree-skill",
+      "sourceLabel": "GitHub",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/example-org/skills/tree/HEAD/skills/gh-tree-skill",
+      "description": "A skill inside a repository",
+      "localPath": "/home/demo/.skilldock/skills/gh-tree-skill",
       "branch": "main",
       "collabStatus": "",
       "statusText": "",
@@ -32,6 +65,6 @@
     }
   ],
   "skillTags": {
-    "repo-notes": "docs"
+    "team review": "team"
   }
 }

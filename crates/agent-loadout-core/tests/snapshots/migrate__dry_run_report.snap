@@ -2,7 +2,7 @@
 source: crates/agent-loadout-core/tests/migrate.rs
 expression: text
 ---
-[migrated] file ~/.skilldock/config/mcp-servers.json: the MCP registry: 7 records
+[migrated] file ~/.skilldock/config/mcp-servers.json: the MCP registry: 9 records
 [migrated] server context7 -> context7: tools denied: get-library-docs; enabled for claude-code, codex
 [migrated] server fetch -> fetch: enabled for claude-code
 [needs_review] server Remote-Docs -> remote-docs: unwrapped from SkillDock's mcp-remote wrapper; tools denied: admin_reset; enabled for cursor, windsurf; headers.Authorization may be a secret; replaced by ${secret:REMOTE_DOCS_AUTHORIZATION}
@@ -12,14 +12,21 @@ expression: text
     offer: {"kind":"set_secret","alias":"NOTES_TOKEN","command":"loadout secrets set NOTES_TOKEN --keyring"}
     offer: {"kind":"set_secret","alias":"NOTES_NOTES_API_KEY","command":"loadout secrets set NOTES_NOTES_API_KEY --keyring"}
 [migrated] server time -> time: SkillDock enabled it for no client; enabled for codex (identical entry found)
+[migrated] server Docs-Search -> docs-search: enabled for copilot; SkillDock's github-copilot is copilot
+[needs_review] server linear -> linear: unwrapped from SkillDock's mcp-remote wrapper; enabled for cursor; headers.Authorization may be a secret; replaced by ${secret:LINEAR_AUTHORIZATION}; the wrapper's env keys its headers did not use were dropped: UNUSED_KEY; the source URL may hold a credential and was left out of meta.homepage
+    offer: {"kind":"set_secret","alias":"LINEAR_AUTHORIZATION","command":"loadout secrets set LINEAR_AUTHORIZATION --keyring"}
 [skipped] server plugin-helper: installed by a SkillDock plugin; plugins are not migrated
 [needs_review] server broken: the server definition is not an object (unexpected_shape)
 [migrated] file ~/.skilldock/data/skill-tags.json: skill tags
 [migrated] file ~/.skilldock/data/state.json: installed skills (sources) and skill tags
 [skipped] file ~/.skilldock/skills/README.txt: not a skill folder
+[migrated] skill gh-tree-skill -> gh-tree-skill: source: https://github.com/example-org/skills; not linked into any client
 [needs_review] skill leaky: SKILL.md looks like it holds a secret, which the store refuses; remove it, then install the folder with `skills add` (leak_detected)
+[needs_review] skill market-helper -> market-helper: tags: tools; SkillDock's marketplace source has no update path in Loadout; kept as a local skill (reinstall it from its repository for updates); source: local; not linked into any client
 [migrated] skill repo-notes -> repo-notes: tags: docs; source: local; enabled for claude-code (links on disk)
-[migrated] skill team-review -> team-review: tags: team; source: https://example.invalid/team/team-review.git; not linked into any client
+[needs_review] skill_link claude-code/old-review -> team-review: ~/.claude/skills/old-review points into ~/.skilldock/skills but is not named "team-review", the skill's id; left as it is and not enabled for claude-code (rename it to "team-review" or remove it, then enable the skill)
+[needs_review] skill team-review -> team-review: tags: team; source: https://example.invalid/team/team-review.git; not linked into any client
+[needs_review] skill toml-secret: config.toml looks like it holds a secret, which the store refuses; remove it, then install the folder with `skills add` (leak_detected)
 [skipped] skill retired-skill: tag old for a skill that is not in ~/.skilldock/skills
 [migrated] file ~/.skilldock/config/settings.json: settings; one item per field below
 [migrated] setting agentSkillsCompatibilityEnabled: agents_cli_compat = true
@@ -51,9 +58,12 @@ expression: text
 [needs_review] client_entry codex/context7: ~/.codex/config.toml holds SkillDock's mcp-filter wrapper; replace it with the native definition (collision)
     offer: {"kind":"replace_wrapper","client":"codex","name":"context7","command":"loadout adopt codex/context7"}
 [needs_review] client_entry codex/notes: not applied to ~/.codex/config.toml yet: NOTES_TOKEN is not defined in secrets.toml; set it with `loadout secrets set NOTES_TOKEN ...` (missing_secret)
+[migrated] client_entry copilot/Docs-Search: written to ~/.copilot/mcp-config.json on the first apply
+[needs_review] client_entry cursor/linear: not applied to ~/.cursor/mcp.json yet: LINEAR_AUTHORIZATION is not defined in secrets.toml; set it with `loadout secrets set LINEAR_AUTHORIZATION ...` (missing_secret)
 [needs_review] client_entry cursor/Remote-Docs: not applied to ~/.cursor/mcp.json yet: REMOTE_DOCS_AUTHORIZATION is not defined in secrets.toml; set it with `loadout secrets set REMOTE_DOCS_AUTHORIZATION ...` (missing_secret)
 [needs_review] client_entry windsurf/Remote-Docs: not applied to ~/.codeium/windsurf/mcp_config.json yet: REMOTE_DOCS_AUTHORIZATION is not defined in secrets.toml; set it with `loadout secrets set REMOTE_DOCS_AUTHORIZATION ...` (missing_secret)
 [migrated] skill_link claude-code/repo-notes -> repo-notes: ~/.claude/skills/repo-notes points into ~/.skilldock/skills; re-pointed to the store copy by the next skills sync (planned as an update)
 extract remote-docs headers.Authorization -> ${secret:REMOTE_DOCS_AUTHORIZATION} (sensitive_key, default keyring://loadout/REMOTE_DOCS_AUTHORIZATION)
 extract notes args[2] -> ${secret:NOTES_TOKEN} (sensitive_key, default keyring://loadout/NOTES_TOKEN)
 extract notes env.NOTES_API_KEY -> ${secret:NOTES_NOTES_API_KEY} (sensitive_key, default keyring://loadout/NOTES_NOTES_API_KEY)
+extract linear headers.Authorization -> ${secret:LINEAR_AUTHORIZATION} (sensitive_key, default keyring://loadout/LINEAR_AUTHORIZATION)

@@ -102,7 +102,7 @@ fn migrate_dry_run_confirmation_and_apply() {
         items.iter().any(|item| item["name"] == "codex/context7"
             && item["offers"][0]["kind"] == "replace_wrapper")
     );
-    assert_eq!(doc["report"]["extractions"].as_array().unwrap().len(), 3);
+    assert_eq!(doc["report"]["extractions"].as_array().unwrap().len(), 4);
     assert!(!cli.home.exists(), "the dry run created the data directory");
     let text = cli.run(&["migrate", "skilldock"]);
     let stdout = String::from_utf8_lossy(&text.stdout);
@@ -128,11 +128,24 @@ fn migrate_dry_run_confirmation_and_apply() {
     assert!(doc["commit"].is_string());
     assert_eq!(
         doc["report"]["servers"],
-        serde_json::json!(["context7", "fetch", "remote-docs", "notes", "time"])
+        serde_json::json!([
+            "context7",
+            "fetch",
+            "remote-docs",
+            "notes",
+            "time",
+            "docs-search",
+            "linear"
+        ])
     );
     assert_eq!(
         doc["report"]["skills"],
-        serde_json::json!(["repo-notes", "team-review"])
+        serde_json::json!([
+            "gh-tree-skill",
+            "market-helper",
+            "repo-notes",
+            "team-review"
+        ])
     );
     assert!(
         cli.home
@@ -150,7 +163,7 @@ fn migrate_dry_run_confirmation_and_apply() {
         .filter_map(|c| c["summary"].as_str())
         .collect();
     assert_eq!(
-        subjects[0], "migrate: skilldock (5 servers, 2 skills)",
+        subjects[0], "migrate: skilldock (7 servers, 4 skills)",
         "{history:#}"
     );
 

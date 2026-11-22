@@ -133,6 +133,54 @@
       "updatedAt": "2026-05-05T10:00:00Z"
     },
     {
+      "id": "Docs-Search",
+      "name": "Docs-Search",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "example-docs-search"
+        ]
+      },
+      "enabledAppIds": [
+        "github-copilot"
+      ],
+      "importedFromAppIds": [],
+      "managedAppIds": [
+        "github-copilot"
+      ],
+      "updatedAt": "2026-05-06T09:00:00Z"
+    },
+    {
+      "id": "linear",
+      "name": "linear",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "mcp-remote",
+          "https://mcp.example.invalid/sse",
+          "--transport",
+          "sse-only",
+          "--header",
+          "Authorization:${AUTH_HEADER}"
+        ],
+        "env": {
+          "AUTH_HEADER": "Bearer fixture-remote-env-value",
+          "UNUSED_KEY": "fixture-unused"
+        }
+      },
+      "sourceUrl": "https://reader:fixture-url-pass@example.invalid/linear-mcp",
+      "enabledAppIds": [
+        "cursor"
+      ],
+      "importedFromAppIds": [],
+      "managedAppIds": [],
+      "updatedAt": "2026-05-06T09:30:00Z"
+    },
+    {
       "id": "plugin-helper",
       "name": "plugin-helper",
       "server": {
