@@ -453,3 +453,72 @@ fn clients_without_an_adapter_or_excluded_are_reported_not_written() {
     assert_eq!(plan.targets.len(), 1);
     assert_eq!(plan.targets[0].file, fx.omp());
 }
+
+/// Gate V2 FB-11 (OMP-10): with `PI_CODING_AGENT_DIR` set, omp and Pi read
+/// one `mcp.json`. A server enabled for both is written once (Pi takes
+/// omp's `type`), and an entry with a `timeout` is blocked, since omp reads
+/// it as milliseconds and Pi as seconds.
+#[test]
+fn omp_and_pi_share_their_agent_dir_file() {
+    let mut fx = Fx::new();
+    let agent_dir = fx.th.root().join("shared-agent");
+    fx.env = fx
+        .th
+        .env_builder(support::host_os())
+        .hostname("test-desk")
+        .var("PI_CODING_AGENT_DIR", &agent_dir)
+        .build();
+    let shared = agent_dir.join("mcp.json");
+    let timed = |id: &str, clients: &str| {
+        format!(
+            "schema = 1\nid = \"{id}\"\ntransport = \"stdio\"\ncommand = \"{id}-mcp\"\n\
+             [client.omp]\ntimeout = 5000\n[enable]\nclients = [{clients}]\n"
+        )
+    };
+    fx.put_server(stdio("both", &["omp", "pi"], &NOTES_ARGS));
+    fx.edit("timed servers", |tx| {
+        tx.write("servers/timed.toml", timed("timed", "\"omp\", \"pi\""))?;
+        tx.write("servers/omponly.toml", timed("omponly", "\"omp\""))
+    });
+
+    let plan = fx.plan();
+    assert_eq!(plan.targets.len(), 1, "{plan:#?}");
+    let mut clients = plan.targets[0].clients.clone();
+    clients.sort_unstable();
+    assert_eq!(clients, ["omp", "pi"]);
+    let both = entry(&plan, &shared, "both");
+    assert_eq!(
+        (both.state, both.action),
+        (EntryState::PendingCreate, Action::Create),
+        "{both:#?}"
+    );
+    for name in ["timed", "omponly"] {
+        let blocked = entry(&plan, &shared, name);
+        assert_eq!(blocked.state, EntryState::Blocked, "{blocked:#?}");
+        let problem = blocked.problem.as_ref().unwrap();
+        assert_eq!(problem.code(), ErrorCode::TimeoutUnitConflict);
+        assert_eq!(problem.code().as_str(), "timeout_unit_conflict");
+        assert!(
+            problem
+                .message()
+                .contains("omp in milliseconds, pi in seconds"),
+            "{problem}"
+        );
+    }
+
+    let (report, _) = fx.apply();
+    let written = json_entry(&fx.read(&shared), "both").unwrap();
+    assert_eq!(written["type"], "stdio", "{report:#?}");
+    let (again, _) = fx.apply();
+    assert_eq!(again.writes(), 0, "{again:#?}");
+
+    // Apart, each client has its own file and omp takes its timeout.
+    fx.env = fx
+        .th
+        .env_builder(support::host_os())
+        .hostname("test-desk")
+        .build();
+    let plan = fx.plan();
+    let omponly = entry(&plan, &fx.omp(), "omponly");
+    assert_eq!(omponly.state, EntryState::PendingCreate, "{omponly:#?}");
+}

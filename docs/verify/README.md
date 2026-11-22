@@ -131,31 +131,52 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
 
 ## Fix briefs (V2)
 
-- **FB-8 `~/` in `PI_CODING_AGENT_DIR` (PI-1).** Pi expands a leading `~/`
-  or `~\` in `PI_CODING_AGENT_DIR`; Loadout ignored such a value and wrote
+- **FB-8 `~/` in `PI_CODING_AGENT_DIR` (PI-1). Done.** Pi expands `~`, a
+  leading `~/`, and on Windows `~\` in `PI_CODING_AGENT_DIR` (its
+  `normalizePath`); Loadout ignored such a value and wrote
   `~/.pi/agent/mcp.json`, which Pi then does not read. `Location::EnvDir`
-  should expand `~/` and `~\` for the variables whose client does (Pi, and
-  omp if it does too).
-- **FB-9 Pi literal `$` and `!` (PI-7).** Pi expands `${NAME}` and bare
-  `$NAME` (an unset name stops the server from starting), reads `$$` as a
-  literal `$`, and runs a value that starts with `!` as a command unless
-  written `$!`. Loadout must write literal `$` as `$$` and a literal
-  leading `!` as `$!` for Pi, and read them back the same way on import
-  (`native_to_template`).
-- **FB-10 Project installs of `pi-mcp-adapter` (PI-8).** A project install
-  (`pi install -l`, `<P>/.pi/settings.json` `packages`) is never reported:
-  the planner only checks user scope. Project targets of Pi must check the
-  project settings too, and the effective view should show
-  `client_mcp_replaced_by_extension` like `status` does. The package lives
-  under `npm/`, not `extensions/`; `packages: ["npm:pi-mcp-adapter"]` is the
-  install shape.
+  now has a `tilde` flag, set for Pi's agent directory, so the MCP file,
+  detection and the `pi-mcp-adapter` probes all follow the expanded path
+  (`pi_agent_dir_expands_a_leading_tilde`). omp does not expand `~` (omp
+  19.1 resolves the variable with `path.resolve`, against its working
+  directory), so omp's `EnvDir` keeps `tilde: false` and still falls back to
+  its own file for such a value.
+- **FB-9 Pi literal `$` and `!` (PI-7). Done.** Pi expands `${NAME}` and
+  bare `$NAME` (an unset name stops the server from starting), reads `$$` as
+  a literal `$` and `$!` as a literal `!`, and runs a value that starts with
+  `!` as a command. Pi's reference syntax is now `EnvRefSyntax::Dollar`: in
+  `env` and `headers` (the fields Pi expands), every literal `$` is written
+  `$$` and a value starting with a literal `!` gets a leading `$`
+  (`--env LIT='a$b$$c'` is written `a$$b$$$$c`, `--env 'BANG=!echo x'` is
+  written `$!echo x`); inline values are escaped the same way, and a literal
+  `${` no longer blocks the entry. Loadout's own `command` delivery
+  (`!<loadout> secret get ...`) is not escaped and stays a command. Import
+  (`native_to_template`) reads Pi values the way Pi's `resolve-config-value`
+  does: `$$` and `$!` become literals, `${NAME}` and `$NAME` become
+  `${env:NAME}`, and a `!command` value (which the store cannot express) is
+  `unsupported_field` (`pi_literals_are_escaped_and_read_back`). Existing
+  entries Loadout wrote with a literal `$` or leading `!` plan as an update.
+- **FB-10 Project installs of `pi-mcp-adapter` (PI-8). Done.** A project
+  install (`pi install -l`, `<P>/.pi/settings.json` `packages`) was never
+  reported: the planner only checked user scope. Pi's project targets now
+  carry `client_mcp_replaced_by_extension` for a user or project install,
+  and every Pi row of the effective view shows it (user and project rows,
+  like `status`). The probes now include the package directory
+  `npm/node_modules/pi-mcp-adapter` (user and `<P>/.pi`) next to the
+  `extensions/` paths and the `packages` entries
+  (`a_project_install_of_pi_mcp_adapter_warns`, `pi_mcp_adapter_is_reported`).
 - **Note, Pi `-`/`_` equivalence (PI-4), no change.** `pi mcp list`
   rejects a second name that differs only in `-` and `_`; `pi mcp add`
   writes it anyway. Loadout's `collision` for such a pair stays right.
-- **FB-11 omp and Pi sharing one file (OMP-10).** With
+- **FB-11 omp and Pi sharing one file (OMP-10). Done.** With
   `PI_CODING_AGENT_DIR` set, omp and Pi read the same `mcp.json` (omp's
-  `timeout` is milliseconds, Pi's seconds). Loadout treats it as one shared
-  file, but omp writes `"type": "stdio"` and Pi omits `type`, so every
-  server enabled for both is a `collision`. Pi accepts `"type": "stdio"`,
-  so the two renderings can agree; `timeout` must then be refused (or
-  dropped with a warning) for that shared file because the units differ.
+  `timeout` is milliseconds, Pi's seconds). omp wrote `"type": "stdio"` and
+  Pi omitted `type`, so every server enabled for both was a `collision`. Pi
+  now writes `type` too (`stdio` or `http`, both of which Pi accepts), so the
+  two renderings agree; existing Pi entries without `type` stay `synced`,
+  since the canonical form drops a `type` the client would infer. An entry
+  that sets a timeout key in a user file read by clients with different
+  units for it is blocked with the new code `timeout_unit_conflict`
+  (whichever of the two it is enabled for, since both read the file); with
+  separate files each client keeps its own timeout
+  (`omp_and_pi_share_their_agent_dir_file`).

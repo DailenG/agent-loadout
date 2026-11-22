@@ -786,3 +786,65 @@ fn suppressions_of_a_server_that_does_not_load_stay() {
     assert_eq!(member.state, EntryState::Blocked, "{member:#?}");
     assert_eq!(member.action, agent_loadout_core::apply::Action::None);
 }
+
+/// Gate V2 FB-10 (PI-8): a project install of `pi-mcp-adapter` (`pi install
+/// -l`) is reported on that project's Pi target and on every Pi row of the
+/// project's effective view; the user file reports user installs only.
+#[test]
+fn a_project_install_of_pi_mcp_adapter_warns() {
+    use agent_loadout_core::CoreError;
+    use agent_loadout_core::layering::effective;
+
+    const INSTALLED: &str = r#"{"packages": ["npm:pi-mcp-adapter"]}"#;
+    let replaced = |warnings: &[CoreError]| {
+        warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::ClientMcpReplacedByExtension)
+    };
+    let fx = Fx::new();
+    fx.put_server(stdio("github", &["pi"], &["-y", "github-mcp"]));
+    let root = fx.th.projects().join("adapted");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"adapted-a1b2\"\n\n[defaults]\nclients = [\"pi\"]\n\n\
+         [servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\n",
+    );
+    fx.know_projects(&[("adapted-a1b2", &root)]);
+    fx.trust(&root);
+    fx.write(&root.join(".pi").join("settings.json"), INSTALLED);
+
+    let project_file = root.join(".pi").join("mcp.json");
+    let agent_dir = fx.th.home().join(".pi").join("agent");
+    let user_file = agent_dir.join("mcp.json");
+    let plan = fx.plan();
+    assert!(
+        replaced(&target(&plan, &project_file).warnings),
+        "{plan:#?}"
+    );
+    assert!(!replaced(&target(&plan, &user_file).warnings), "{plan:#?}");
+
+    let store = fx.store();
+    let pi = ["pi".to_owned()];
+    let view = effective(Some(&store), &fx.ax(), &root, Some(&pi)).unwrap();
+    let rows = &view.clients["pi"];
+    let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names, ["docs", "github"]);
+    assert!(rows.iter().all(|row| replaced(&row.warnings)), "{rows:#?}");
+    let elsewhere = fx.th.home().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let view = effective(Some(&store), &fx.ax(), &elsewhere, Some(&pi)).unwrap();
+    assert!(
+        view.clients["pi"]
+            .iter()
+            .all(|row| !replaced(&row.warnings))
+    );
+
+    // A user install shows on the user file and outside the project too.
+    fx.write(&agent_dir.join("settings.json"), INSTALLED);
+    let plan = fx.plan();
+    assert!(replaced(&target(&plan, &user_file).warnings), "{plan:#?}");
+    let view = effective(Some(&store), &fx.ax(), &elsewhere, Some(&pi)).unwrap();
+    let rows = &view.clients["pi"];
+    assert!(!rows.is_empty() && rows.iter().all(|row| replaced(&row.warnings)));
+}

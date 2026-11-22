@@ -713,6 +713,109 @@ fn inline_values_are_written_masked_in_diffs_and_never_stored() {
     assert!(!diff.contains(ROTATED), "{diff}");
 }
 
+/// Gate V2 FB-9 (PI-7): Pi expands bare `$NAME` and runs a value starting
+/// with `!` in `env` and `headers`, so literals are written with `$$` and
+/// `$!` there and read back the same way; Loadout's own `!command`
+/// delivery stays a command.
+#[test]
+fn pi_literals_are_escaped_and_read_back() {
+    use agent_loadout_core::adapters::caps::FieldSet;
+    use agent_loadout_core::apply::import::server_from_native;
+    use agent_loadout_core::apply::render::native_to_template;
+
+    let fx = Fx::new();
+    fx.edit("pi literals", |tx| {
+        tx.write("secrets.toml", SECRETS)?;
+        tx.write(
+            "servers/lit.toml",
+            "schema = 1\nid = \"lit\"\ntransport = \"stdio\"\ncommand = \"lit-mcp\"\n\
+             args = ['a$b', '!arg']\n[env]\nLIT = 'a$b$$c'\nBANG = '!echo literal'\n\
+             MIXED = 'x$${env:HOME}-${env:HOME}'\n[enable]\nclients = [\"pi\"]\n",
+        )?;
+        tx.write(
+            "servers/hook.toml",
+            "schema = 1\nid = \"hook\"\ntransport = \"http\"\n\
+             url = \"https://hook.example.test/mcp\"\n[headers]\n\
+             X-Key = \"${secret:LINEAR_TOKEN}\"\nX-Lit = '!lit'\n\
+             [enable]\nclients = [\"pi\"]\n",
+        )
+    });
+    let desired = desired(&fx);
+    let pi: &AdapterSpec = adapter("pi").unwrap();
+    let mcp = pi.mcp.as_ref().unwrap();
+    let os = Os::Linux;
+    let delivery =
+        DeliveryEnv::new(Some(launcher(os)), keyring()).with_op(op(OpVersion::new(2, 42, 0)));
+    let env = synthetic_env(os);
+    let native = |id: &str| {
+        let out = render_one(&fx, &desired, &delivery, &env, "pi", id, Sharing::Private).unwrap();
+        mcp.mapper
+            .to_native(&out.server, &WriteCx { os, existing: None })
+            .unwrap()
+    };
+    let string = |value: &agent_loadout_core::formats::NativeValue, path: &[&str]| {
+        let mut value = value;
+        for key in path {
+            value = value.as_object().unwrap().get(key).unwrap();
+        }
+        value.as_str().unwrap().to_owned()
+    };
+
+    let lit = native("lit");
+    assert_eq!(string(&lit, &["env", "LIT"]), "a$$b$$$$c");
+    assert_eq!(string(&lit, &["env", "BANG"]), "$!echo literal");
+    assert_eq!(string(&lit, &["env", "MIXED"]), "x$${env:HOME}-${HOME}");
+    // Pi expands nothing in `args`.
+    let args = lit
+        .as_object()
+        .unwrap()
+        .get("args")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(args[0].as_str(), Some("a$b"));
+    assert_eq!(args[1].as_str(), Some("!arg"));
+
+    // Read back: the store values come out unchanged.
+    let imported = server_from_native(pi, "lit", &lit).unwrap();
+    let stored = &desired.servers["lit"].body;
+    assert_eq!(imported.fields.env, stored.env);
+    assert_eq!(imported.fields.args, stored.args);
+
+    // A keyring header is Loadout's own `!command`; a literal `!` is not.
+    let hook = native("hook");
+    let key = string(&hook, &["headers", "X-Key"]);
+    assert!(
+        key.starts_with("!'/opt/loadout/bin/loadout' secret get"),
+        "{key}"
+    );
+    assert_eq!(string(&hook, &["headers", "X-Lit"]), "$!lit");
+    // A `!command` has no store form.
+    let err = server_from_native(pi, "hook", &hook).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::UnsupportedField);
+
+    // Pi's reading of `$` (its `resolve-config-value`).
+    let read = |text: &str| native_to_template(text, &mcp.caps, FieldSet::ENV);
+    for (native, template) in [
+        ("a$HOMEDRIVE-b$$c", Some("a${env:HOMEDRIVE}-b$c")),
+        ("${TOKEN}", Some("${env:TOKEN}")),
+        ("$!x and $!", Some("!x and !")),
+        ("${A:-b}", Some("$${A:-b}")),
+        ("${}", Some("$${}")),
+        ("$1 and a$", Some("$1 and a$")),
+        ("open ${ only", Some("open $${ only")),
+        ("$${X}", Some("$${X}")),
+        ("$$$X", None),
+        ("!echo hi", None),
+    ] {
+        assert_eq!(read(native).as_deref(), template, "{native}");
+    }
+    assert_eq!(
+        native_to_template("a$$b", &mcp.caps, FieldSet::ARGS).as_deref(),
+        Some("a$$b")
+    );
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![dir.to_path_buf()];

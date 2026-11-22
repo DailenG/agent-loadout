@@ -5,6 +5,7 @@ expression: "golden(PI, Os::Windows, &files)"
 {
   "mcpServers": {
     "filesystem": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "example-fs-mcp", "."],
       "env": {

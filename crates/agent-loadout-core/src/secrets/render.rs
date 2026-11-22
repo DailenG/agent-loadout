@@ -346,16 +346,16 @@ impl<'a> Renderer<'a> {
         Ok(pieces)
     }
 
-    /// Literal text; refused where the client would expand a `${` in it.
+    /// Literal text; escaped where the client has an escape (Pi), refused
+    /// where it would expand a `${` in it otherwise.
     fn literal(&self, pieces: &[Piece], field: FieldSet) -> Result<String, CoreError> {
         let mut out = String::new();
         for piece in pieces {
             if let Piece::Text(text) = piece {
-                self.check_literal(text, field)?;
-                out.push_str(text);
+                self.push_literal(&mut out, text, field)?;
             }
         }
-        Ok(out)
+        Ok(self.guard_command(out, field))
     }
 
     fn check_literal(&self, text: &str, field: FieldSet) -> Result<(), CoreError> {
@@ -371,20 +371,45 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
+    /// Whether the client reads `$$` as a literal `$` and `$!` as a literal
+    /// `!` in `field` (Pi), so literal text is written escaped.
+    fn escapes(&self, field: FieldSet) -> bool {
+        self.policy.env_syntax(field) == Some(EnvRefSyntax::Dollar)
+    }
+
+    /// Appends literal text the way the client reads it back unchanged.
+    fn push_literal(&self, out: &mut String, text: &str, field: FieldSet) -> Result<(), CoreError> {
+        if self.escapes(field) {
+            out.push_str(&text.replace('$', "$$"));
+        } else {
+            self.check_literal(text, field)?;
+            out.push_str(text);
+        }
+        Ok(())
+    }
+
+    /// `value` with a leading literal `!` written as `$!` where the client
+    /// would otherwise run the value as a command (Pi). References are
+    /// spelled with a leading `$`, so a leading `!` is always literal text;
+    /// Loadout's own commands come from [`Renderer::bang`], never from here.
+    fn guard_command(&self, mut value: String, field: FieldSet) -> String {
+        if self.escapes(field) && value.starts_with('!') {
+            value.insert(0, '$');
+        }
+        value
+    }
+
     /// `env` delivery in the client's syntax.
     fn spell(&self, pieces: &[Piece], field: FieldSet) -> Result<String, CoreError> {
         let syntax = self.policy.env_syntax(field);
         let mut out = String::new();
         for piece in pieces {
             match piece {
-                Piece::Text(text) => {
-                    self.check_literal(text, field)?;
-                    out.push_str(text);
-                }
+                Piece::Text(text) => self.push_literal(&mut out, text, field)?,
                 Piece::Ref(source) => {
                     let name = source.variable();
                     match syntax {
-                        Some(EnvRefSyntax::DollarBrace { .. }) => {
+                        Some(EnvRefSyntax::DollarBrace { .. } | EnvRefSyntax::Dollar) => {
                             out.push_str(&format!("${{{name}}}"))
                         }
                         Some(EnvRefSyntax::DollarBraceEnv) => {
@@ -405,26 +430,32 @@ impl<'a> Renderer<'a> {
                 }
             }
         }
-        Ok(out)
+        Ok(self.guard_command(out, field))
     }
 
-    /// `inline` delivery: values resolved now.
+    /// `inline` delivery: values resolved now. A resolved value is literal
+    /// text too, escaped like any other; the escaped spelling is kept for
+    /// masking as well when it differs.
     fn inline_value(&mut self, pieces: &[Piece], field: FieldSet) -> Result<String, CoreError> {
         let mut out = String::new();
         for piece in pieces {
             match piece {
-                Piece::Text(text) => {
-                    self.check_literal(text, field)?;
-                    out.push_str(text);
-                }
+                Piece::Text(text) => self.push_literal(&mut out, text, field)?,
                 Piece::Ref(source) => {
                     let value = self.resolve(source)?;
-                    out.push_str(value.expose());
+                    if self.escapes(field) && value.expose().contains('$') {
+                        let escaped = value.expose().replace('$', "$$");
+                        self.rx.memory.record(&escaped);
+                        out.push_str(&escaped);
+                        self.inline.push(SecretValue::new(escaped));
+                    } else {
+                        out.push_str(value.expose());
+                    }
                     self.inline.push(value);
                 }
             }
         }
-        Ok(out)
+        Ok(self.guard_command(out, field))
     }
 
     fn resolve(&self, source: &Source) -> Result<SecretValue, CoreError> {

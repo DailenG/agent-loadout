@@ -38,6 +38,7 @@ const CODEX_DIR: Location = Location::EnvDir {
     var: "CODEX_HOME",
     fallback: &Location::Home(".codex"),
     rel: "",
+    tilde: false,
 };
 
 /// `~/.codex/config.toml`, or `$CODEX_HOME/config.toml`.
@@ -45,6 +46,7 @@ const USER_FILE: Location = Location::EnvDir {
     var: "CODEX_HOME",
     fallback: &Location::Home(".codex"),
     rel: "config.toml",
+    tilde: false,
 };
 
 const CAPS: Caps = Caps {

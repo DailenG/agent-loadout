@@ -55,6 +55,7 @@ const fn copilot_home(rel: &'static str) -> Location {
         var: "COPILOT_HOME",
         fallback: &Location::Home(".copilot"),
         rel,
+        tilde: false,
     }
 }
 

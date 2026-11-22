@@ -26,6 +26,7 @@ const USER_FILE: Location = Location::EnvDir {
     var: "CLAUDE_CONFIG_DIR",
     fallback: &Location::Home(""),
     rel: ".claude.json",
+    tilde: false,
 };
 
 /// `~/.claude`, or `$CLAUDE_CONFIG_DIR`.
@@ -33,6 +34,7 @@ const CONFIG_DIR: Location = Location::EnvDir {
     var: "CLAUDE_CONFIG_DIR",
     fallback: &Location::Home(".claude"),
     rel: "",
+    tilde: false,
 };
 
 const CAPS: Caps = Caps {

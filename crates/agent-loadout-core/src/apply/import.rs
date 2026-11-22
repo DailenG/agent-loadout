@@ -76,7 +76,7 @@ pub fn server_from_native(
             CoreError::new(
                 ErrorCode::UnsupportedField,
                 format!(
-                    "{text:?} uses a {} variable form the store cannot express",
+                    "{text:?} uses a {} variable or command form the store cannot express",
                     spec.display_name
                 ),
             )

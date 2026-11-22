@@ -46,6 +46,10 @@ impl TransportSet {
 pub enum EnvRefSyntax {
     /// `${NAME}`; `default` when `${NAME:-default}` is understood too.
     DollarBrace { default: bool },
+    /// `${NAME}` and bare `$NAME`, no default; `$$` is a literal `$` and
+    /// `$!` a literal `!`, so literal text is written with every `$`
+    /// doubled and a leading `!` as `$!` (Pi; gate V2 PI-7).
+    Dollar,
     /// `${env:NAME}` (Cursor, Windsurf, Devin).
     DollarBraceEnv,
     /// `{env:NAME}` (OpenCode).
@@ -176,6 +180,16 @@ pub enum ToolFilterMech {
 pub enum TimeUnit {
     Seconds,
     Milliseconds,
+}
+
+impl TimeUnit {
+    /// The unit in messages.
+    pub const fn name(self) -> &'static str {
+        match self {
+            TimeUnit::Seconds => "seconds",
+            TimeUnit::Milliseconds => "milliseconds",
+        }
+    }
 }
 
 /// A native timeout field and its unit (omp `timeout` in milliseconds, Pi

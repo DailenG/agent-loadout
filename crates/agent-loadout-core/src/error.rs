@@ -68,6 +68,11 @@ pub enum ErrorCode {
     /// counts names that differ only in `-` and `_` as one), so writing the
     /// entry would clash with it.
     Collision,
+    /// Clients with different units for the same timeout key read one file
+    /// (omp `timeout` in milliseconds and Pi `timeout` in seconds, both in
+    /// `$PI_CODING_AGENT_DIR/mcp.json`; gate V2 OMP-10), and the entry sets
+    /// that key. The entry is blocked; no unit is guessed.
+    TimeoutUnitConflict,
     /// Warning: an installed extension takes over the client's MCP support
     /// (Pi with `pi-mcp-adapter`), so the client's own MCP config may not be
     /// what loads.
@@ -221,6 +226,7 @@ impl ErrorCode {
             ErrorCode::UnsupportedField => "unsupported_field",
             ErrorCode::MsixDualWrite => "msix_dual_write",
             ErrorCode::Collision => "collision",
+            ErrorCode::TimeoutUnitConflict => "timeout_unit_conflict",
             ErrorCode::ClientMcpReplacedByExtension => "client_mcp_replaced_by_extension",
             ErrorCode::FileChangedDuringApply => "file_changed_during_apply",
             ErrorCode::SelfCheckFailed => "self_check_failed",

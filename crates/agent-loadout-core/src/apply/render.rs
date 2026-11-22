@@ -701,7 +701,7 @@ fn native(r: &mut Renderer<'_>, value: &toml::Value) -> Result<NativeValue, Core
 /// A native string value as a store template (SPEC 11.2): the client's own
 /// variable references become `${env:NAME}`, any other `${` becomes the
 /// literal `$${`. `None` when the value uses a client feature the store
-/// cannot express (`${NAME:-default}`, `${userHome}`).
+/// cannot express (`${NAME:-default}`, `${userHome}`, a Pi `!command`).
 pub fn native_to_template(text: &str, caps: &Caps, field: FieldSet) -> Option<String> {
     let syntax = caps
         .env_ref
@@ -710,6 +710,7 @@ pub fn native_to_template(text: &str, caps: &Caps, field: FieldSet) -> Option<St
         Some(EnvRefSyntax::DollarBrace { .. }) => convert_refs(text, "${", |token| {
             env_name(token).then(|| format!("${{env:{token}}}"))
         }),
+        Some(EnvRefSyntax::Dollar) => dollar_to_template(text),
         Some(EnvRefSyntax::DollarBraceEnv) => convert_refs(text, "${", |token| {
             token
                 .strip_prefix("env:")
@@ -739,6 +740,81 @@ pub fn native_to_template(text: &str, caps: &Caps, field: FieldSet) -> Option<St
 
 fn env_name(token: &str) -> bool {
     crate::model::ids::is_valid(crate::model::ids::IdKind::EnvVar, token)
+}
+
+/// A Pi `env` or `headers` value as a store template, read the way Pi reads
+/// it (`resolve-config-value`): `$$` and `$!` are a literal `$` and `!`,
+/// `${NAME}` and a bare `$NAME` are references, and any other `$` is
+/// literal. `None` for a value starting with `!` (Pi runs it as a command),
+/// and for a literal `$` right before a reference, which the store cannot
+/// spell (`$${` is a literal `${`).
+fn dollar_to_template(text: &str) -> Option<String> {
+    fn pi_name_len(text: &str) -> usize {
+        match text.as_bytes().first() {
+            Some(first) if first.is_ascii_alphabetic() || *first == b'_' => text
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(text.len()),
+            _ => 0,
+        }
+    }
+    if text.starts_with('!') {
+        return None;
+    }
+    let mut out = String::new();
+    let mut literal = String::new();
+    let reference = |out: &mut String, literal: &mut String, name: &str| {
+        if literal.ends_with('$') || !env_name(name) {
+            return false;
+        }
+        out.push_str(&literal.replace("${", "$${"));
+        literal.clear();
+        out.push_str(&format!("${{env:{name}}}"));
+        true
+    };
+    let mut rest = text;
+    while let Some(at) = rest.find('$') {
+        literal.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        match after.as_bytes().first() {
+            Some(b'$' | b'!') => {
+                literal.push_str(&after[..1]);
+                rest = &after[1..];
+            }
+            Some(b'{') => match after[1..].find('}') {
+                Some(end) => {
+                    let name = &after[1..1 + end];
+                    if !name.is_empty() && pi_name_len(name) == name.len() {
+                        if !reference(&mut out, &mut literal, name) {
+                            return None;
+                        }
+                    } else {
+                        literal.push('$');
+                        literal.push_str(&after[..end + 2]);
+                    }
+                    rest = &after[end + 2..];
+                }
+                None => {
+                    literal.push('$');
+                    rest = after;
+                }
+            },
+            _ => match pi_name_len(after) {
+                0 => {
+                    literal.push('$');
+                    rest = after;
+                }
+                len => {
+                    if !reference(&mut out, &mut literal, &after[..len]) {
+                        return None;
+                    }
+                    rest = &after[len..];
+                }
+            },
+        }
+    }
+    literal.push_str(rest);
+    out.push_str(&literal.replace("${", "$${"));
+    Some(out)
 }
 
 /// Replaces every `<open>TOKEN}` in `text` through `convert`; `None` when a

@@ -36,7 +36,9 @@ const ROOT: Location = Location::HomeNamedDir {
 };
 
 /// The default profile's user file: `<root>/agent/mcp.json`, or
-/// `$PI_CODING_AGENT_DIR/mcp.json`.
+/// `$PI_CODING_AGENT_DIR/mcp.json`. Unlike Pi, omp does not expand a
+/// leading `~` in the variable (omp 19.1 resolves it with `path.resolve`,
+/// relative to the working directory), so no `tilde` here.
 const USER_FILE: Location = Location::EnvDir {
     var: "PI_CODING_AGENT_DIR",
     fallback: &Location::HomeNamedDir {
@@ -45,6 +47,7 @@ const USER_FILE: Location = Location::EnvDir {
         rel: "agent",
     },
     rel: "mcp.json",
+    tilde: false,
 };
 
 /// What omp writes at the top of a new MCP file.

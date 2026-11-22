@@ -20,11 +20,14 @@ pub enum Location {
     /// `$XDG_CONFIG_HOME` (default `~/.config`) on every OS, Windows included.
     XdgConfigAllOs(&'static str),
     /// `$<var>/<rel>` when the variable holds an absolute path, else
-    /// `<fallback>/<rel>`.
+    /// `<fallback>/<rel>`. With `tilde`, a value of `~`, or one starting
+    /// with `~/` (or `~\` on Windows), is first expanded against home, the
+    /// way Pi reads `PI_CODING_AGENT_DIR` (gate V2 PI-1).
     EnvDir {
         var: &'static str,
         fallback: &'static Location,
         rel: &'static str,
+        tilde: bool,
     },
     /// `~/<name>/<rel>`, where `name` is the value of `var` when it is a
     /// relative path without `..`, else `default` (omp `PI_CONFIG_DIR`, a
@@ -54,10 +57,21 @@ impl Location {
             Location::AppData(rel) => (app_data(env), rel),
             Location::LocalAppData(rel) => (local_app_data(env)?, rel),
             Location::XdgConfigAllOs(rel) => (xdg_config(env), rel),
-            Location::EnvDir { var, fallback, rel } => {
+            Location::EnvDir {
+                var,
+                fallback,
+                rel,
+                tilde,
+            } => {
                 let base = env
                     .var(var)
-                    .map(PathBuf::from)
+                    .map(|value| {
+                        if tilde {
+                            expand_tilde(env, value)
+                        } else {
+                            PathBuf::from(value)
+                        }
+                    })
                     .filter(|path| path.is_absolute());
                 match base {
                     Some(base) => (base, rel),
@@ -102,6 +116,24 @@ impl Location {
                 .into_iter()
                 .collect(),
         }
+    }
+}
+
+/// `value` with a leading `~` expanded against home: `~` alone, `~/...`,
+/// and on Windows `~\...` (Pi's `normalizePath`). Anything else unchanged.
+fn expand_tilde(env: &Env, value: &std::ffi::OsStr) -> PathBuf {
+    let Some(text) = value.to_str() else {
+        return PathBuf::from(value);
+    };
+    if text == "~" {
+        return env.home().to_path_buf();
+    }
+    let rest = text
+        .strip_prefix("~/")
+        .or_else(|| text.strip_prefix("~\\").filter(|_| env.os() == Os::Windows));
+    match rest {
+        Some(rest) => env.home().join(rest),
+        None => PathBuf::from(value),
     }
 }
 

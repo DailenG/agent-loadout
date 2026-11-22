@@ -24,6 +24,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use crate::adapters::caps::{ProjectDisable, ProjectSemantics, Source};
+use crate::adapters::detect::replacing_extension;
 use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
 use crate::apply::exec::PlanInputs;
 use crate::apply::ledger::{EntryKind, container_pointer};
@@ -113,8 +114,9 @@ pub struct EffectiveEntry {
     #[serde(serialize_with = "state_json")]
     pub status: Option<EntryState>,
     /// `duplicate_via_compat`, `cannot_suppress_in_project`,
-    /// `unset_not_expressible`, `trust_required` and the problems the plan
-    /// has with this name's entries.
+    /// `unset_not_expressible`, `trust_required`,
+    /// `client_mcp_replaced_by_extension` and the problems the plan has
+    /// with this name's entries.
     #[serde(serialize_with = "warnings_json")]
     pub warnings: Vec<CoreError>,
 }
@@ -368,6 +370,9 @@ impl<'a> View<'a> {
         let (suppressed, member_problems) = self.suppressed(spec);
         let has_project_files = !mcp.project.is_empty() || !mcp.project_local.is_empty();
         let project_warnings = self.project_warnings(spec, has_project_files);
+        // An extension replacing the client's MCP support (Pi
+        // `pi-mcp-adapter`), installed for the user or for this project.
+        let extension = replacing_extension(spec, self.cx.env, self.cx.fs, self.root);
 
         let mut out = Vec::with_capacity(rows.len());
         for (name, candidates) in rows {
@@ -421,6 +426,9 @@ impl<'a> View<'a> {
                 if *entry == name {
                     push_unique(&mut warnings, warning.clone());
                 }
+            }
+            if let Some(extension) = &extension {
+                push_unique(&mut warnings, extension.clone());
             }
 
             let shadowed = live

@@ -252,6 +252,7 @@ envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `he
 {
   "mcpServers": {
     "github": {
+      "type": "stdio",
       "command": "/opt/loadout/bin/loadout",
       "args": ["exec", "--ref", "GITHUB_PERSONAL_ACCESS_TOKEN=op://Example Vault/Fake PAT/credential", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
       "env": {
@@ -259,10 +260,12 @@ envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `he
       }
     },
     "envtoken": {
+      "type": "stdio",
       "command": "/opt/loadout/bin/loadout",
       "args": ["exec", "--ref", "PAT=op://Example Vault/Fake PAT/credential", "--op-env", "fakeenvironment0001", "--map", "MCP_TOKEN=MCP_TOKEN", "--", "example-mcp"]
     },
     "hass": {
+      "type": "stdio",
       "command": "hass-mcp",
       "args": [],
       "env": {
@@ -270,6 +273,7 @@ envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `he
       }
     },
     "renamed": {
+      "type": "stdio",
       "command": "hass-mcp",
       "args": [],
       "env": {
@@ -277,6 +281,7 @@ envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `he
       }
     },
     "linear": {
+      "type": "http",
       "url": "https://mcp.example.test/mcp",
       "headers": {
         "Authorization": "!'/opt/loadout/bin/loadout' secret get --ref 'LINEAR_TOKEN=keyring://loadout/LINEAR_TOKEN' --template 'Bearer {secret:LINEAR_TOKEN}'",
@@ -284,6 +289,7 @@ envheader: blocked no_secret_free_delivery: oh-my-pi cannot get MCP_TOKEN in `he
       }
     },
     "stored": {
+      "type": "stdio",
       "command": "stored-mcp",
       "args": [],
       "env": {

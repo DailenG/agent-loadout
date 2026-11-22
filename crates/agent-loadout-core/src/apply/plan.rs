@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use similar::TextDiff;
 
-use crate::adapters::caps::{DisableMech, ProjectDisable, ProjectSemantics};
+use crate::adapters::caps::{
+    DisableMech, ProjectDisable, ProjectSemantics, TimeUnit, TimeoutField,
+};
 use crate::adapters::detect::replacing_extension;
 use crate::adapters::mapper::{Canonical, EntryMapper, WriteCx};
 use crate::adapters::spec::{ContainerPath, McpSpec};
@@ -19,7 +21,7 @@ use crate::apply::render::{
     DesiredEntry, DesiredState, Detected, RenderCx, RenderTarget, Rendering, native_name,
     render_for, server_transport, system_entries, writable,
 };
-use crate::env::Os;
+use crate::env::{Env, Os};
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
 use crate::layering::manifest::normalize_path_text;
@@ -938,7 +940,18 @@ impl ProjectPlanner<'_, '_> {
         };
         let prefs = self.desired.prefs(spec.id);
         match spec.mcp_targets(self.cx.env, self.cx.fs, scope, Some(pcx.root), &prefs) {
-            Ok(mut targets) if !targets.is_empty() => Some((targets.swap_remove(0), sharing)),
+            Ok(mut targets) if !targets.is_empty() => {
+                let mut target = targets.swap_remove(0);
+                // A user or project install of an extension replacing the
+                // client's MCP support (Pi `pi-mcp-adapter`, gate V2 PI-8).
+                target.warnings.extend(replacing_extension(
+                    spec,
+                    self.cx.env,
+                    self.cx.fs,
+                    Some(pcx.root),
+                ));
+                Some((target, sharing))
+            }
             Ok(_) => None,
             Err(err) => {
                 self.warnings.push(err);
@@ -1505,6 +1518,65 @@ pub(crate) fn plan_target(
     plan
 }
 
+/// `timeout_unit_conflict` when `native` sets a timeout key that the
+/// clients reading `target`'s user file take in different units: with
+/// `PI_CODING_AGENT_DIR` set, omp and Pi read one `mcp.json`, omp's
+/// `timeout` in milliseconds and Pi's in seconds (gate V2 OMP-10).
+fn timeout_unit_conflict(env: &Env, target: &Target, native: &NativeValue) -> Option<CoreError> {
+    let entry = native.as_object()?;
+    if target.scope != Scope::User {
+        return None;
+    }
+    let readers: Vec<(&'static str, &'static [TimeoutField])> = ADAPTERS
+        .iter()
+        .filter_map(|spec| {
+            let mcp = spec.mcp.as_ref()?;
+            let reads = mcp.oses.contains(&env.os())
+                && mcp
+                    .user
+                    .iter()
+                    .filter_map(|location| location.resolve(env, None))
+                    .any(|file| layering::same_path(&file, &target.file));
+            reads.then_some((spec.id, mcp.caps.timeouts))
+        })
+        .collect();
+    let mut keys = readers
+        .iter()
+        .flat_map(|(_, timeouts)| timeouts.iter())
+        .map(|timeout| timeout.key)
+        .filter(|key| entry.contains_key(key));
+    keys.find_map(|key| {
+        let units: Vec<(&str, TimeUnit)> = readers
+            .iter()
+            .filter_map(|(client, timeouts)| {
+                let field = timeouts.iter().find(|timeout| timeout.key == key)?;
+                Some((*client, field.unit))
+            })
+            .collect();
+        if units.iter().all(|(_, unit)| *unit == units[0].1) {
+            return None;
+        }
+        let clients: Vec<&str> = units.iter().map(|(client, _)| *client).collect();
+        let described: Vec<String> = units
+            .iter()
+            .map(|(client, unit)| format!("{client} in {}", unit.name()))
+            .collect();
+        Some(
+            CoreError::new(
+                ErrorCode::TimeoutUnitConflict,
+                format!(
+                    "clients {} read this file and take `{key}` in different units ({}); \
+                     remove `{key}` from this server's `[client.<id>]` tables, or give the \
+                     clients separate files",
+                    clients.join(" and "),
+                    described.join(", ")
+                ),
+            )
+            .with_path(&target.file),
+        )
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn plan_entry(
     cx: &RenderCx<'_>,
@@ -1565,6 +1637,14 @@ fn plan_entry(
                     return Some(entry);
                 }
             }
+        }
+        if let Some(problem) = natives
+            .iter()
+            .find_map(|(_, native)| timeout_unit_conflict(cx.env, &input.target, native))
+        {
+            entry.state = EntryState::Blocked;
+            entry.problem = Some(problem);
+            return Some(entry);
         }
         let (client, native) = natives.remove(0);
         if natives.iter().any(|(_, other)| *other != native) {

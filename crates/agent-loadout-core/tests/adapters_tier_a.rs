@@ -382,8 +382,8 @@ fn pi_goldens_per_transport() {
         golden(PI, Os::Linux, &files)
     );
 
-    // Streamable HTTP: a bare `url`, no `type`; a `!command` header value
-    // is written as it is.
+    // Streamable HTTP: `type: "http"`, as omp writes it (gate V2 OMP-10); a
+    // rendered `!command` header value is written as it is.
     let mut docs = remote(
         "docs",
         Transport::Http,
@@ -953,6 +953,71 @@ fn codex_and_pi_targets_follow_their_home_variables() {
     );
 }
 
+/// Gate V2 FB-8 (PI-1): Pi expands a leading `~` in `PI_CODING_AGENT_DIR`;
+/// omp does not (it resolves the value against its working directory), so
+/// omp keeps its own file.
+#[test]
+fn pi_agent_dir_expands_a_leading_tilde() {
+    let home = TempHome::new();
+    let fs = home.fs();
+    let user = |spec: &AdapterSpec, env: &Env| {
+        files(
+            &spec
+                .mcp_targets(env, &fs, Scope::User, None, &NO_PREFS)
+                .unwrap(),
+        )
+    };
+    let moved = home.home().join("piagent");
+    let omp_default = home.home().join(".omp").join("agent").join("mcp.json");
+    for (os, value) in [
+        (Os::Windows, "~/piagent"),
+        (Os::Windows, r"~\piagent"),
+        (Os::Linux, "~/piagent"),
+    ] {
+        let env = home
+            .env_builder(os)
+            .var("PI_CODING_AGENT_DIR", value)
+            .build();
+        assert_eq!(user(PI, &env), [moved.join("mcp.json")], "{value}");
+        assert_eq!(
+            user(OMP, &env),
+            std::slice::from_ref(&omp_default),
+            "{value}"
+        );
+    }
+    // `~` alone is home; `~\` is no home prefix off Windows.
+    let env = home
+        .env_builder(Os::Linux)
+        .var("PI_CODING_AGENT_DIR", "~")
+        .build();
+    assert_eq!(user(PI, &env), [home.home().join("mcp.json")]);
+    let env = home
+        .env_builder(Os::Linux)
+        .var("PI_CODING_AGENT_DIR", r"~\piagent")
+        .build();
+    assert_eq!(
+        user(PI, &env),
+        [home.home().join(".pi").join("agent").join("mcp.json")]
+    );
+
+    // Everything else in the agent dir follows: detection and the
+    // `pi-mcp-adapter` settings.
+    put(
+        &moved.join("settings.json"),
+        r#"{"packages": ["npm:pi-mcp-adapter"]}"#,
+    );
+    let env = home
+        .env_builder(Os::Windows)
+        .var("PI_CODING_AGENT_DIR", "~/piagent")
+        .build();
+    let detection = detect::detect(PI, &env, &fs, &detect::NoRegistry);
+    assert!(detection.evidence.contains(&Evidence::Path(moved.clone())));
+    assert_eq!(
+        detection.warnings[0].path(),
+        Some(moved.join("settings.json").as_path())
+    );
+}
+
 #[test]
 fn omp_targets_follow_its_config_dirs() {
     let home = TempHome::new();
@@ -1457,6 +1522,16 @@ fn pi_mcp_adapter_is_reported() {
     assert_eq!(warnings(&env)[0].path(), Some(extension.as_path()));
     std::fs::remove_dir_all(&extension).unwrap();
 
+    // Installed by `pi install npm:pi-mcp-adapter` (gate V2 PI-8): the
+    // package under `npm/node_modules`.
+    let package = agent
+        .join("npm")
+        .join("node_modules")
+        .join("pi-mcp-adapter");
+    std::fs::create_dir_all(&package).unwrap();
+    assert_eq!(warnings(&env)[0].path(), Some(package.as_path()));
+    std::fs::remove_dir_all(agent.join("npm")).unwrap();
+
     // PI_CODING_AGENT_DIR moves where Pi looks.
     let moved = home.root().join("pi-agent");
     put(
@@ -1470,16 +1545,30 @@ fn pi_mcp_adapter_is_reported() {
     assert_eq!(warnings(&moved_env).len(), 1);
     assert!(warnings(&home.env(Os::Windows)).is_empty());
 
-    // A project install shows only when the project is given.
+    // A project install (`pi install -l`: the `packages` entry in
+    // `<P>/.pi/settings.json`, the package under `<P>/.pi/npm`) shows only
+    // when the project is given.
     let project = home.projects().join("app");
-    put(
-        &project.join(".pi").join("settings.json"),
+    let project_settings = project.join(".pi").join("settings.json");
+    for contents in [
+        r#"{"packages": ["npm:pi-mcp-adapter"]}"#,
         r#"{"packages": [{"source": "npm:pi-mcp-adapter"}]}"#,
-    );
-    assert!(warnings(&env).is_empty());
+    ] {
+        put(&project_settings, contents);
+        assert!(warnings(&env).is_empty());
+        let found = detect::replacing_extension(PI, &env, &fs, Some(&project)).unwrap();
+        assert_eq!(found.code(), ErrorCode::ClientMcpReplacedByExtension);
+        assert_eq!(found.path(), Some(project_settings.as_path()));
+        assert!(detect::replacing_extension(PI, &env, &fs, None).is_none());
+    }
+    let project_package = project
+        .join(".pi")
+        .join("npm")
+        .join("node_modules")
+        .join("pi-mcp-adapter");
+    std::fs::create_dir_all(&project_package).unwrap();
     let found = detect::replacing_extension(PI, &env, &fs, Some(&project)).unwrap();
-    assert_eq!(found.code(), ErrorCode::ClientMcpReplacedByExtension);
-    assert!(detect::replacing_extension(PI, &env, &fs, None).is_none());
+    assert_eq!(found.path(), Some(project_package.as_path()));
 
     // Other clients have no such extension, whatever is on disk.
     for spec in [CODEX, OMP, CODE] {

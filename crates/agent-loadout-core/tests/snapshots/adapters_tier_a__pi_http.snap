@@ -5,6 +5,7 @@ expression: "golden(PI, Os::Linux, &docs)"
 {
   "mcpServers": {
     "docs": {
+      "type": "http",
       "url": "https://docs.example.com/mcp",
       "headers": {
         "Authorization": "!example-secret-cli read docs"
