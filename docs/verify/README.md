@@ -121,3 +121,41 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
   the maintainer's request (no more approval prompts).
 - **Tool-call checks (CX-9, CX-10, OMP-6) and a full Claude Code session
   (AP-1 beyond onboarding):** a model login inside the throwaway profile.
+
+# Gate V2 (Tier B), in progress
+
+| Area | Run | Pass | Finding | Not run |
+|---|---|---|---|---|
+| [Pi](pi.md) | PI-1 to PI-12 (Windows) | 12 | FB-8 to FB-10 | PI-6 tool-call timeout, PI-8 `/mcp`, PI-11 reachability (need a model) |
+| [omp](omp.md) OMP-10 | Windows | 1 | FB-11 | |
+
+## Fix briefs (V2)
+
+- **FB-8 `~/` in `PI_CODING_AGENT_DIR` (PI-1).** Pi expands a leading `~/`
+  or `~\` in `PI_CODING_AGENT_DIR`; Loadout ignored such a value and wrote
+  `~/.pi/agent/mcp.json`, which Pi then does not read. `Location::EnvDir`
+  should expand `~/` and `~\` for the variables whose client does (Pi, and
+  omp if it does too).
+- **FB-9 Pi literal `$` and `!` (PI-7).** Pi expands `${NAME}` and bare
+  `$NAME` (an unset name stops the server from starting), reads `$$` as a
+  literal `$`, and runs a value that starts with `!` as a command unless
+  written `$!`. Loadout must write literal `$` as `$$` and a literal
+  leading `!` as `$!` for Pi, and read them back the same way on import
+  (`native_to_template`).
+- **FB-10 Project installs of `pi-mcp-adapter` (PI-8).** A project install
+  (`pi install -l`, `<P>/.pi/settings.json` `packages`) is never reported:
+  the planner only checks user scope. Project targets of Pi must check the
+  project settings too, and the effective view should show
+  `client_mcp_replaced_by_extension` like `status` does. The package lives
+  under `npm/`, not `extensions/`; `packages: ["npm:pi-mcp-adapter"]` is the
+  install shape.
+- **Note, Pi `-`/`_` equivalence (PI-4), no change.** `pi mcp list`
+  rejects a second name that differs only in `-` and `_`; `pi mcp add`
+  writes it anyway. Loadout's `collision` for such a pair stays right.
+- **FB-11 omp and Pi sharing one file (OMP-10).** With
+  `PI_CODING_AGENT_DIR` set, omp and Pi read the same `mcp.json` (omp's
+  `timeout` is milliseconds, Pi's seconds). Loadout treats it as one shared
+  file, but omp writes `"type": "stdio"` and Pi omits `type`, so every
+  server enabled for both is a `collision`. Pi accepts `"type": "stdio"`,
+  so the two renderings can agree; `timeout` must then be refused (or
+  dropped with a warning) for that shared file because the units differ.
