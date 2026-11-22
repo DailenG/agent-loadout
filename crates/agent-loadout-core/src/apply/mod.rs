@@ -10,8 +10,8 @@
 //! - [`import`]: native entries into the store (8.6).
 //! - [`rollback`]: one-click rollback of an apply run (8.7).
 //!
-//! This milestone covers the system scope (user files); project scopes
-//! arrive with project manifests.
+//! Project scopes come from project manifests through [`crate::layering`];
+//! the planner turns them into project and project-local targets.
 
 pub mod backup;
 pub mod exec;
@@ -37,7 +37,8 @@ use crate::secrets::scanner::SecretMemory;
 
 pub use exec::{ApplyReport, ApplyRequest, TargetResult, apply_in, preview, run};
 pub use plan::{
-    Action, Decision, EntryPlan, EntryState, OnConflict, Plan, PlanOptions, TargetPlan,
+    Action, Decision, EntryPlan, EntryState, OnConflict, Plan, PlanOptions, ProjectSelection,
+    ScopeFilter, TargetPlan,
 };
 
 /// What an apply runs against.
@@ -105,11 +106,12 @@ pub(crate) fn write_atomic(fs: &dyn Fs, path: &Path, bytes: &[u8]) -> Result<(),
 }
 
 /// `file` with a placeholder root for the store (`machines/*.applied.toml`
-/// must not hold personal paths): the longest of the client override
-/// variables in force (`$CODEX_HOME/config.toml`), the Windows app data
-/// folders (`%APPDATA%/Claude/...`), `$XDG_CONFIG_HOME` and `~`. A file
-/// under none of them is `$EXTERNAL/<file name>`.
-pub fn placeholder_path(env: &Env, file: &Path) -> String {
+/// must not hold personal paths): the longest of the project folder
+/// (`<P>/.mcp.json`), the client override variables in force
+/// (`$CODEX_HOME/config.toml`), the Windows app data folders
+/// (`%APPDATA%/Claude/...`), `$XDG_CONFIG_HOME` and `~`. A file under none
+/// of them is `$EXTERNAL/<file name>`.
+pub fn placeholder_path(env: &Env, file: &Path, project: Option<&Path>) -> String {
     let windows = env.os() == Os::Windows;
     let spell = |name: &str| {
         if windows {
@@ -119,6 +121,9 @@ pub fn placeholder_path(env: &Env, file: &Path) -> String {
         }
     };
     let mut bases: Vec<(String, PathBuf)> = vec![("~".to_owned(), env.home().to_path_buf())];
+    if let Some(project) = project {
+        bases.push(("<P>".to_owned(), project.to_path_buf()));
+    }
     if windows {
         for (name, folder) in [
             ("APPDATA", KnownFolder::RoamingAppData),

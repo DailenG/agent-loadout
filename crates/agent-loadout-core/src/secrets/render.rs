@@ -45,6 +45,8 @@ pub struct RenderEnv<'a> {
     pub catalog: &'a Catalog,
     pub delivery: &'a DeliveryEnv,
     pub memory: &'a Arc<SecretMemory>,
+    /// The project folder `${project}` stands for; `None` at system scope.
+    pub project: Option<&'a Path>,
 }
 
 /// A stdio `env` value as written.
@@ -209,15 +211,9 @@ impl<'a> Renderer<'a> {
         let mut args = vec!["exec".to_owned()];
         let mut environment: Option<String> = None;
         let mut maps = Vec::new();
-        let uses_op = self.launch.iter().any(|(_, source)| {
-            matches!(
-                source.reference(),
-                SecretRef::OnePassword { .. } | SecretRef::OnePasswordEnvironment { .. }
-            )
-        });
-        if uses_op && let Some(account) = &self.rx.catalog.op_account {
+        if let Some(account) = self.op_account(self.launch.iter().map(|(_, s)| s)) {
             args.push("--op-account".to_owned());
-            args.push(account.clone());
+            args.push(account.to_owned());
         }
         for (key, source) in &self.launch {
             match source.reference() {
@@ -267,6 +263,10 @@ impl<'a> Renderer<'a> {
             shell_quote(os, &self.rx.delivery.launcher(self.policy.sharing)?)?,
             "secret-header".to_owned(),
         ];
+        if let Some(account) = self.op_account(self.helper_refs.iter().map(|(_, s)| s)) {
+            command.push("--op-account".to_owned());
+            command.push(shell_quote(os, account)?);
+        }
         for (key, source) in &self.helper_refs {
             command.push("--ref".to_owned());
             command.push(shell_quote(os, &format!("{key}={}", source.reference()))?);
@@ -327,12 +327,15 @@ impl<'a> Renderer<'a> {
                 TemplatePart::Var(PathVar::LoadoutHome) => {
                     push_text(&mut pieces, &self.rx.loadout_home.to_string_lossy());
                 }
-                TemplatePart::Var(PathVar::Project) => {
-                    return Err(CoreError::new(
-                        ErrorCode::InvalidRef,
-                        format!("`${{project}}` in {text:?} has no value at system scope"),
-                    ));
-                }
+                TemplatePart::Var(PathVar::Project) => match self.rx.project {
+                    Some(project) => push_text(&mut pieces, &project.to_string_lossy()),
+                    None => {
+                        return Err(CoreError::new(
+                            ErrorCode::InvalidRef,
+                            format!("`${{project}}` in {text:?} has no value at system scope"),
+                        ));
+                    }
+                },
                 TemplatePart::Env(name) => pieces.push(Piece::Ref(Source::Env { name })),
                 TemplatePart::Secret(alias) => {
                     pieces.push(Piece::Ref(source_of_alias(self.rx.catalog, &alias)?));
@@ -466,6 +469,21 @@ impl<'a> Renderer<'a> {
         )
     }
 
+    /// `--op-account` for a `loadout` command resolving `sources`: the
+    /// configured 1Password account when any of them is a 1Password
+    /// reference (gate V1 FB-7).
+    fn op_account<'s>(&self, mut sources: impl Iterator<Item = &'s Source>) -> Option<&'a str> {
+        let account = self.rx.catalog.op_account.as_deref()?;
+        sources
+            .any(|source| {
+                matches!(
+                    source.reference(),
+                    SecretRef::OnePassword { .. } | SecretRef::OnePasswordEnvironment { .. }
+                )
+            })
+            .then_some(account)
+    }
+
     /// `!<loadout> secret get --ref REF` (omp, Pi), with a template when the
     /// value has text around the reference.
     fn bang(&mut self, pieces: &[Piece]) -> Result<String, CoreError> {
@@ -474,6 +492,9 @@ impl<'a> Renderer<'a> {
         let mut command = format!("!{launcher} secret get");
         if let [Piece::Ref(source)] = pieces {
             self.available(source)?;
+            if let Some(account) = self.op_account(std::iter::once(source)) {
+                command.push_str(&format!(" --op-account {}", shell_quote(os, account)?));
+            }
             command.push_str(&format!(
                 " --ref {}",
                 shell_quote(os, &source.reference().to_string())?
@@ -483,6 +504,9 @@ impl<'a> Renderer<'a> {
         let start = self.helper_refs.len();
         let template = self.template(pieces, false)?;
         let bound: Vec<(String, Source)> = self.helper_refs.drain(start..).collect();
+        if let Some(account) = self.op_account(bound.iter().map(|(_, s)| s)) {
+            command.push_str(&format!(" --op-account {}", shell_quote(os, account)?));
+        }
         for (key, source) in &bound {
             command.push_str(&format!(
                 " --ref {}",

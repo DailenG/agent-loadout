@@ -71,6 +71,7 @@ pub fn run(ctx: &Context, args: &AdoptArgs) -> Result<u8, CoreError> {
                 clients: None,
                 on_conflict: OnConflict::Ask,
                 decisions: decisions.clone(),
+                ..PlanOptions::default()
             },
             trigger: ApplyTrigger::Review,
         };

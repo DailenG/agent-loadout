@@ -157,6 +157,30 @@ pub enum ErrorCode {
     /// Warning: a foreign client entry that the client itself skips (gate
     /// V1 CC-5); importing it starts a server the client never ran.
     ClientSkipsEntry,
+    /// A project entry's `from` names no store server (SPEC 6.2); that
+    /// entry is blocked, the rest of the project applies.
+    UnknownTemplate,
+    /// Warning: a project suppresses a system server for a client that has
+    /// no way to hide a user server in a project (SPEC 6.3).
+    CannotSuppressInProject,
+    /// Warning: a project entry uses `unset`, but the client merges project
+    /// entries over user ones field by field (Codex), so the inherited key
+    /// still reaches it. The entry is written anyway.
+    UnsetNotExpressible,
+    /// A project's manifests are not trusted on this machine, or changed
+    /// since they were trusted (SPEC 17); nothing in that project is
+    /// written until `loadout project trust <P>`.
+    TrustRequired,
+    /// Warning: a client loads the same server twice, once through another
+    /// tool's file it also reads (SPEC 6.4 `client-compat:`).
+    DuplicateViaCompat,
+    /// A private (local-layer) entry would go to a project file that the
+    /// project's git repository tracks (SPEC 6.5); the entry is blocked.
+    PrivateInTrackedFile,
+    /// Warning: Claude Code's `projects` map already holds this folder
+    /// under another spelling of its path (case or separators), so the
+    /// client may read the other key (gate V1 FB-1).
+    ProjectKeySpelling,
 }
 
 impl ErrorCode {
@@ -214,6 +238,13 @@ impl ErrorCode {
             ErrorCode::RemoteAuthFailed => "remote_auth_failed",
             ErrorCode::ToolNotFound => "tool_not_found",
             ErrorCode::ClientSkipsEntry => "client_skips_entry",
+            ErrorCode::UnknownTemplate => "unknown_template",
+            ErrorCode::CannotSuppressInProject => "cannot_suppress_in_project",
+            ErrorCode::UnsetNotExpressible => "unset_not_expressible",
+            ErrorCode::TrustRequired => "trust_required",
+            ErrorCode::DuplicateViaCompat => "duplicate_via_compat",
+            ErrorCode::PrivateInTrackedFile => "private_in_tracked_file",
+            ErrorCode::ProjectKeySpelling => "project_key_spelling",
         }
     }
 }

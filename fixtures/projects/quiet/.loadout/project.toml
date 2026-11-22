@@ -1,0 +1,7 @@
+# Hides the system server `slack` in this folder.
+schema = 1
+id = "quiet-c3d4"
+
+[servers.slack]
+enabled = false
+clients = ["claude-code", "omp", "codex"]

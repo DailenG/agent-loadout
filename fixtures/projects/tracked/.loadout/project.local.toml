@@ -1,0 +1,9 @@
+# A private-only project whose omp and Codex project files are tracked by
+# git: private entries must not go there.
+schema = 1
+id = "tracked-e5f6"
+
+[servers.notes]
+transport = "stdio"
+command = "notes-mcp"
+clients = ["omp", "codex"]

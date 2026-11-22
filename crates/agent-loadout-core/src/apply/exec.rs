@@ -25,6 +25,7 @@ use crate::apply::render::{DesiredState, RenderCx};
 use crate::apply::{ApplyEnv, import, placeholder_path, temp_path};
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeMap, NativeValue};
+use crate::layering::ProjectRepo;
 use crate::model::applied::{AppliedRecord, AppliedTarget, ApplyOutcome, ApplyTrigger};
 use crate::model::ids;
 use crate::model::{SCHEMA_VERSION, TomlDocument};
@@ -47,6 +48,10 @@ pub struct ApplyRequest {
 pub struct TargetResult {
     pub clients: Vec<&'static str>,
     pub scope: crate::model::applied::Scope,
+    /// The project of a project or project-local target.
+    pub project_id: Option<String>,
+    /// The project folder `<P>`, when known.
+    pub project: Option<PathBuf>,
     pub file: PathBuf,
     /// Operations done (zero when the file was not written).
     pub counts: OpCounts,
@@ -230,8 +235,8 @@ pub fn apply_in(
                 .map(|target| AppliedTarget {
                     client: target.clients[0].to_owned(),
                     scope: target.scope,
-                    project_id: None,
-                    file: placeholder_path(ax.env, &target.file),
+                    project_id: target.project_id.clone(),
+                    file: placeholder_path(ax.env, &target.file, target.project.as_deref()),
                     create: target.counts.create,
                     update: target.counts.update,
                     remove: target.counts.remove,
@@ -396,8 +401,11 @@ impl Executor<'_> {
                 result.backup = backup;
                 return result;
             }
+            let exclude = self.exclude(&plan);
             let outcome = entry_outcome(&plan, true);
-            return finished(plan, outcome, None, true, backup);
+            let mut result = finished(plan, outcome, None, true, backup);
+            result.warnings.extend(exclude);
+            return result;
         }
     }
 
@@ -409,6 +417,17 @@ impl Executor<'_> {
     /// longer holds the planned bytes; the temp file is removed then.
     fn write(&self, plan: &TargetPlan, after: &[u8]) -> Result<bool, CoreError> {
         swap_file(self.ax.fs, &plan.file, plan.before.as_deref(), after)
+    }
+
+    /// SPEC 6.5: a project file written with private entries and not
+    /// tracked by the project's repository is hidden through its
+    /// `info/exclude`. A failure is a warning: the file is written.
+    fn exclude(&self, plan: &TargetPlan) -> Option<CoreError> {
+        if !plan.input.exclude {
+            return None;
+        }
+        let repo = ProjectRepo::discover(plan.project.as_deref()?)?;
+        repo.exclude(self.ax.fs, &plan.file).err()
     }
 }
 
@@ -503,20 +522,25 @@ impl Executor<'_> {
             let (Some(client), Some(value)) = (entry.client, &entry.written) else {
                 continue;
             };
-            let Some(canonical) = plan::canonical(client, value) else {
-                continue;
+            let written_hash = match plan.kind {
+                EntryKind::McpEntry => match plan::canonical(client, value) {
+                    Some(canonical) => Some(self.key.hash(&canonical)),
+                    None => continue,
+                },
+                // A list member is its own value.
+                EntryKind::ListMember => None,
             };
             ledger.upsert(LedgerEntry {
-                kind: EntryKind::McpEntry,
+                kind: plan.kind,
                 client: client.to_owned(),
                 scope: plan.scope,
-                project_id: None,
+                project_id: plan.project_id.clone(),
                 file: file.clone(),
                 container: plan.pointer.clone(),
                 key: entry.name.clone(),
                 server_id: entry.server_id.clone(),
                 origin: Some(origin),
-                written_hash: Some(self.key.hash(&canonical)),
+                written_hash,
                 written_at: Some(self.written_at.clone()),
                 store_commit: Some(self.store_commit.clone()),
                 delivery: entry.delivery.map(str::to_owned),
@@ -577,6 +601,8 @@ fn finished(
         },
         clients: plan.clients,
         scope: plan.scope,
+        project_id: plan.project_id,
+        project: plan.project,
         file: plan.file,
         outcome,
         error,
@@ -611,6 +637,9 @@ fn self_check(plan: &TargetPlan, after: &[u8]) -> Result<(), CoreError> {
         Err(CoreError::new(ErrorCode::SelfCheckFailed, detail).with_path(&plan.file))
     };
     let format = plan.input.target.format;
+    if plan.kind == EntryKind::ListMember {
+        return self_check_list(plan, after);
+    }
     let after_doc = match Document::parse(after, format) {
         Ok(doc) => doc,
         Err(err) => return fail(format!("the edited file does not parse: {err}")),
@@ -652,6 +681,54 @@ fn self_check(plan: &TargetPlan, after: &[u8]) -> Result<(), CoreError> {
     }
     if outside(&before_doc, &container)? != outside(&after_doc, &container)? {
         return fail("something outside the server container changed".to_owned());
+    }
+    Ok(())
+}
+
+/// [`self_check`] of a list target: planned members are present or absent
+/// as planned, every other member and everything outside the list is
+/// unchanged.
+fn self_check_list(plan: &TargetPlan, after: &[u8]) -> Result<(), CoreError> {
+    let fail = |detail: String| {
+        Err(CoreError::new(ErrorCode::SelfCheckFailed, detail).with_path(&plan.file))
+    };
+    let format = plan.input.target.format;
+    let after_doc = match Document::parse(after, format) {
+        Ok(doc) => doc,
+        Err(err) => return fail(format!("the edited file does not parse: {err}")),
+    };
+    let before_doc = match &plan.before {
+        Some(bytes) => Document::parse(bytes, format)?,
+        None => plan.input.target.new_document(),
+    };
+    let list: Vec<&str> = plan.container.iter().map(String::as_str).collect();
+    let before = plan::list_members(&before_doc, &list)?;
+    let after_members = plan::list_members(&after_doc, &list)?;
+    for entry in &plan.entries {
+        let want = match entry.action {
+            Action::Create => true,
+            Action::Remove => false,
+            _ => before.contains(&entry.name),
+        };
+        if after_members.contains(&entry.name) != want {
+            return fail(format!(
+                "list member {:?} does not read back as planned",
+                entry.name
+            ));
+        }
+    }
+    let others = |members: &[String]| -> Vec<String> {
+        members
+            .iter()
+            .filter(|member| !plan.entries.iter().any(|entry| entry.name == **member))
+            .cloned()
+            .collect()
+    };
+    if others(&before) != others(&after_members) {
+        return fail("a list member that is not owned changed".to_owned());
+    }
+    if outside(&before_doc, &list)? != outside(&after_doc, &list)? {
+        return fail("something outside the list changed".to_owned());
     }
     Ok(())
 }

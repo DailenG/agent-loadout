@@ -50,6 +50,7 @@ pub fn run(ctx: &Context, args: &ApplyArgs) -> Result<u8, CoreError> {
         clients: (!args.clients.is_empty()).then(|| args.clients.clone()),
         on_conflict: args.on_conflict.into(),
         decisions: Vec::new(),
+        ..PlanOptions::default()
     };
     if args.dry_run {
         let store = ctx.open_store()?;

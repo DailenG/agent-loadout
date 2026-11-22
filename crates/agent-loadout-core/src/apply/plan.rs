@@ -3,20 +3,32 @@
 //! Planning reads files and never writes anything.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use similar::TextDiff;
 
-use crate::adapters::caps::DisableMech;
+use crate::adapters::caps::{DisableMech, ProjectDisable, ProjectSemantics};
 use crate::adapters::detect::replacing_extension;
 use crate::adapters::mapper::{Canonical, EntryMapper, WriteCx};
+use crate::adapters::spec::{ContainerPath, McpSpec};
 use crate::adapters::{ADAPTERS, AdapterSpec, Target, adapter};
 use crate::apply::ledger::{EntryKind, Ledger, LedgerEntry, LedgerKey, container_pointer};
-use crate::apply::render::{DesiredEntry, DesiredState, RenderCx, system_entries};
+use crate::apply::render::{
+    DesiredEntry, DesiredState, Detected, RenderCx, RenderTarget, Rendering, native_name,
+    render_for, server_transport, system_entries, writable,
+};
+use crate::env::Os;
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
+use crate::layering::{
+    self, EntryBody, EntryLayer, KnownProject, Project, ProjectEntry, ProjectRepo, ProjectStatus,
+    TrustStore,
+};
 use crate::model::applied::Scope;
+use crate::model::server::Server;
+use crate::paths::STATE_DIR;
 use crate::secrets::SecretValue;
+use crate::secrets::delivery::Sharing;
 
 /// What an entry is, compared with what is desired and what was written
 /// (SPEC 8.2).
@@ -163,6 +175,46 @@ pub struct Decision {
     pub resolution: OnConflict,
 }
 
+/// Which scopes a plan covers (CLI `--scope`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ScopeFilter {
+    /// User files only.
+    System,
+    /// Project and project-local targets only.
+    Project,
+    #[default]
+    All,
+}
+
+impl ScopeFilter {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ScopeFilter::System => "system",
+            ScopeFilter::Project => "project",
+            ScopeFilter::All => "all",
+        }
+    }
+
+    const fn system(self) -> bool {
+        matches!(self, ScopeFilter::System | ScopeFilter::All)
+    }
+
+    const fn project(self) -> bool {
+        matches!(self, ScopeFilter::Project | ScopeFilter::All)
+    }
+}
+
+/// Which projects a plan covers (CLI `apply [PATH]`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ProjectSelection {
+    /// User scope and every known project whose folder exists here; owned
+    /// entries of projects this machine no longer knows are removed.
+    #[default]
+    All,
+    /// Only the targets of the known project rooted at this folder.
+    Only(PathBuf),
+}
+
 /// Inputs that select and steer a plan.
 #[derive(Debug, Clone, Default)]
 pub struct PlanOptions {
@@ -171,6 +223,8 @@ pub struct PlanOptions {
     pub on_conflict: OnConflict,
     /// Per-entry resolutions; they win over [`PlanOptions::on_conflict`].
     pub decisions: Vec<Decision>,
+    pub scope: ScopeFilter,
+    pub projects: ProjectSelection,
 }
 
 impl PlanOptions {
@@ -185,6 +239,20 @@ impl PlanOptions {
         self.clients
             .as_ref()
             .is_none_or(|clients| clients.iter().any(|id| id == client))
+    }
+
+    /// Whether user files are planned.
+    fn plans_user(&self) -> bool {
+        self.scope.system() && self.projects == ProjectSelection::All
+    }
+
+    /// Whether the known project `project` is planned.
+    fn plans_project(&self, project: &KnownProject) -> bool {
+        self.scope.project()
+            && match &self.projects {
+                ProjectSelection::All => !matches!(project.status, ProjectStatus::Missing),
+                ProjectSelection::Only(root) => project.root == *root,
+            }
     }
 }
 
@@ -218,6 +286,13 @@ pub struct TargetPlan {
     /// Every client whose entries go to this container, in table order.
     pub clients: Vec<&'static str>,
     pub scope: Scope,
+    /// The project of a project or project-local target.
+    pub project_id: Option<String>,
+    /// The project folder `<P>`, when known.
+    pub project: Option<PathBuf>,
+    /// Server entries of a container, or members of a list (Claude Code
+    /// `disabledMcpServers`).
+    pub kind: EntryKind,
     pub file: PathBuf,
     /// Container keys in the file.
     pub container: Vec<String>,
@@ -228,7 +303,8 @@ pub struct TargetPlan {
     /// The bytes to write; `None` when the file stays as it is.
     pub after: Option<Vec<u8>>,
     pub entries: Vec<EntryPlan>,
-    /// The whole target is blocked (`parse_error`, `unexpected_shape`).
+    /// The whole target is blocked (`parse_error`, `unexpected_shape`,
+    /// `trust_required`).
     pub problem: Option<CoreError>,
     pub warnings: Vec<CoreError>,
     /// Values the file holds now in entries written inline, masked in
@@ -244,8 +320,74 @@ pub(crate) struct TargetInput {
     pub(crate) target: Target,
     pub(crate) clients: Vec<&'static str>,
     pub(crate) desired: Vec<DesiredEntry>,
+    /// Desired list members, for a [`EntryKind::ListMember`] target.
+    pub(crate) members: Vec<DesiredMember>,
     pub(crate) native_disable: BTreeMap<&'static str, bool>,
     pub(crate) invalid_servers: Vec<String>,
+    pub(crate) project_id: Option<String>,
+    pub(crate) kind: EntryKind,
+    /// Container keys recorded in the ledger, for a target planned only to
+    /// clean up owned entries; `None` resolves [`Target::container_keys`].
+    pub(crate) keys: Option<Vec<String>>,
+    /// Blocks the whole target (`trust_required`).
+    pub(crate) blocked: Option<CoreError>,
+    /// Hide the file through the project repository's `info/exclude` once
+    /// it is written (a private entry in an untracked project file, SPEC
+    /// 6.5).
+    pub(crate) exclude: bool,
+}
+
+/// A string a list target should hold (a server name in Claude Code's
+/// `disabledMcpServers`).
+#[derive(Debug, Clone)]
+pub(crate) struct DesiredMember {
+    pub(crate) client: &'static str,
+    pub(crate) server_id: String,
+    pub(crate) name: String,
+}
+
+impl TargetInput {
+    fn new(target: Target, client: &'static str, native_disable: bool) -> Self {
+        Self {
+            target,
+            clients: vec![client],
+            desired: Vec::new(),
+            members: Vec::new(),
+            native_disable: BTreeMap::from([(client, native_disable)]),
+            invalid_servers: Vec::new(),
+            project_id: None,
+            kind: EntryKind::McpEntry,
+            keys: None,
+            blocked: None,
+            exclude: false,
+        }
+    }
+
+    /// The container keys entries go in.
+    fn container_keys(&self) -> Result<Vec<String>, CoreError> {
+        match &self.keys {
+            Some(keys) => Ok(keys.clone()),
+            None => self.target.container_keys(),
+        }
+    }
+
+    /// Whether `target` is the same file and container (for the same
+    /// project and kind).
+    fn same(&self, target: &Target, kind: EntryKind) -> bool {
+        self.kind == kind
+            && self.target.file == target.file
+            && self.target.container == target.container
+            && self.target.project == target.project
+    }
+
+    /// Adds `client`'s share of a target that `same` matched.
+    fn join(&mut self, client: &'static str, native_disable: bool, warnings: Vec<CoreError>) {
+        if !self.clients.contains(&client) {
+            self.clients.push(client);
+            self.target.warnings.extend(warnings);
+        }
+        self.native_disable.insert(client, native_disable);
+    }
 }
 
 impl TargetPlan {
@@ -435,8 +577,9 @@ impl Plan {
     }
 }
 
-/// Plans the system scope (user files) of every selected client that has
-/// desired entries or owned entries on this machine.
+/// Plans the selected scopes: the user files of every selected client that
+/// has desired or owned entries on this machine, and the project and
+/// project-local targets of the selected known projects (SPEC 6).
 pub fn plan(
     cx: &RenderCx<'_>,
     desired: &DesiredState,
@@ -455,6 +598,51 @@ pub fn plan(
             format!("server {id:?} is not applied, and entries it owns are left alone: {err}"),
         ));
     }
+    let mut inputs: Vec<TargetInput> = Vec::new();
+    if options.plans_user() {
+        user_inputs(
+            cx,
+            desired,
+            &rendering,
+            ledger,
+            options,
+            &mut plan,
+            &mut inputs,
+        );
+    }
+    if options.scope.project() {
+        let mut planner = ProjectPlanner {
+            cx,
+            desired,
+            rendering: &rendering,
+            ledger,
+            options,
+            detected: Detected::default(),
+            warnings: Vec::new(),
+            inputs: Vec::new(),
+        };
+        planner.plan_projects();
+        plan.warnings.append(&mut planner.warnings);
+        inputs.append(&mut planner.inputs);
+    }
+    for input in inputs {
+        let bytes = read_target(cx.fs, &input.target.file)?;
+        plan.targets
+            .push(plan_target(cx, input, bytes, ledger, key, options));
+    }
+    Ok(plan)
+}
+
+/// The user-file targets (SPEC 6.1 system layer).
+fn user_inputs(
+    cx: &RenderCx<'_>,
+    desired: &DesiredState,
+    rendering: &Rendering,
+    ledger: &Ledger,
+    options: &PlanOptions,
+    plan: &mut Plan,
+    inputs: &mut Vec<TargetInput>,
+) {
     let owned: Vec<&str> = ledger
         .entries
         .iter()
@@ -468,7 +656,6 @@ pub fn plan(
         .filter(|spec| options.selects(spec.id))
         .collect();
 
-    let mut inputs: Vec<TargetInput> = Vec::new();
     for spec in clients {
         let prefs = desired.prefs(spec.id);
         let targets = match spec.mcp_targets(cx.env, cx.fs, Scope::User, None, &prefs) {
@@ -488,32 +675,545 @@ pub fn plan(
         let extension = replacing_extension(spec, cx.env, cx.fs, None);
         for mut target in targets {
             target.warnings.extend(extension.clone());
-            let same = inputs.iter_mut().find(|input| {
-                input.target.file == target.file && input.target.container == target.container
-            });
-            match same {
+            match inputs
+                .iter_mut()
+                .find(|input| input.same(&target, EntryKind::McpEntry))
+            {
                 Some(input) => {
-                    input.clients.push(spec.id);
+                    input.join(spec.id, native_disable, target.warnings);
                     input.desired.extend(desired_here.iter().cloned());
-                    input.native_disable.insert(spec.id, native_disable);
-                    input.target.warnings.extend(target.warnings);
                 }
-                None => inputs.push(TargetInput {
-                    target,
-                    clients: vec![spec.id],
-                    desired: desired_here.clone(),
-                    native_disable: BTreeMap::from([(spec.id, native_disable)]),
-                    invalid_servers: desired.invalid.keys().cloned().collect(),
-                }),
+                None => {
+                    let mut input = TargetInput::new(target, spec.id, native_disable);
+                    input.desired = desired_here.clone();
+                    input.invalid_servers = desired.invalid.keys().cloned().collect();
+                    inputs.push(input);
+                }
             }
         }
     }
-    for input in inputs {
-        let bytes = read_target(cx.fs, &input.target.file)?;
-        plan.targets
-            .push(plan_target(cx, input, bytes, ledger, key, options));
+}
+
+/// Builds the project and project-local targets of the selected known
+/// projects, and the clean-up targets of projects this machine no longer
+/// knows.
+struct ProjectPlanner<'a, 'c> {
+    cx: &'a RenderCx<'c>,
+    desired: &'a DesiredState,
+    /// The system layer, for suppressions (only of servers enabled at
+    /// system scope) and their renderings.
+    rendering: &'a Rendering,
+    ledger: &'a Ledger,
+    options: &'a PlanOptions,
+    detected: Detected,
+    warnings: Vec<CoreError>,
+    inputs: Vec<TargetInput>,
+}
+
+/// One project being planned.
+struct ProjectCx<'p> {
+    root: &'p Path,
+    /// `trust_required` when the manifests are not trusted as they are.
+    blocked: Option<CoreError>,
+}
+
+impl ProjectPlanner<'_, '_> {
+    fn plan_projects(&mut self) {
+        let state_dir = self.cx.loadout_home.join(STATE_DIR);
+        let trust = TrustStore::load(self.cx.fs, &state_dir).unwrap_or_else(|err| {
+            // Nothing is trusted then: every project is blocked, user files
+            // still apply.
+            self.warnings.push(err);
+            TrustStore::default()
+        });
+        let known = layering::known_projects(self.cx.fs, self.desired.overlay.as_ref(), &trust);
+        if let ProjectSelection::Only(root) = &self.options.projects {
+            match known.iter().find(|project| project.root == *root) {
+                None => self.warnings.push(
+                    CoreError::new(
+                        ErrorCode::NotFound,
+                        "this folder is not a project known on this machine",
+                    )
+                    .with_path(root),
+                ),
+                Some(project) if matches!(project.status, ProjectStatus::Missing) => {
+                    self.warnings.push(
+                        CoreError::new(ErrorCode::NotFound, "the project folder does not exist")
+                            .with_path(root),
+                    );
+                }
+                Some(_) => {}
+            }
+        }
+        let options = self.options;
+        for project in known
+            .iter()
+            .filter(|project| options.plans_project(project))
+        {
+            match &project.status {
+                ProjectStatus::Missing => {}
+                ProjectStatus::Failed(err) => self.warnings.push(err.clone()),
+                ProjectStatus::Loaded {
+                    project: loaded, ..
+                } => {
+                    self.warnings.extend(loaded.warnings.iter().cloned());
+                    let pcx = ProjectCx {
+                        root: &project.root,
+                        blocked: project.trust_error(),
+                    };
+                    let start = self.inputs.len();
+                    self.plan_project(&pcx, loaded);
+                    for input in &mut self.inputs[start..] {
+                        input.project_id = Some(project.id.clone());
+                        input.blocked.clone_from(&pcx.blocked);
+                    }
+                    self.cleanup(
+                        |id| id == project.id,
+                        Some(&project.root),
+                        pcx.blocked.as_ref(),
+                    );
+                }
+            }
+        }
+        if self.options.projects == ProjectSelection::All {
+            let known_ids: Vec<&str> = known.iter().map(|project| project.id.as_str()).collect();
+            self.cleanup(|id| !known_ids.contains(&id), None, None);
+        }
     }
-    Ok(plan)
+
+    /// The targets of a loaded project's entries.
+    fn plan_project(&mut self, pcx: &ProjectCx<'_>, project: &Project) {
+        let entries = layering::project_entries(
+            project,
+            &self.desired.servers,
+            self.cx.env,
+            self.desired.overlay.as_ref(),
+        );
+        let mut warned: Vec<String> = Vec::new();
+        for entry in &entries {
+            let transport = match &entry.body {
+                EntryBody::Server(Ok(server)) => server_transport(server, self.cx.env),
+                EntryBody::Server(Err(_)) => None,
+                EntryBody::Suppression => self
+                    .desired
+                    .servers
+                    .get(&entry.name)
+                    .and_then(|server| server_transport(server, self.cx.env)),
+            };
+            let clients = self
+                .detected
+                .select(self.cx, self.desired, &entry.clients, transport);
+            for client in clients {
+                if !self.options.selects(&client) || self.desired.excluded(&client) {
+                    continue;
+                }
+                let spec = match writable(&client, self.cx.env) {
+                    Ok(spec) => spec,
+                    Err(err) => {
+                        if !warned.contains(&client) {
+                            warned.push(client);
+                            self.warnings.push(err);
+                        }
+                        continue;
+                    }
+                };
+                match &entry.body {
+                    EntryBody::Server(server) => self.server_entry(pcx, entry, server, spec),
+                    EntryBody::Suppression => self.suppression(pcx, entry, spec),
+                }
+            }
+        }
+    }
+
+    /// The target file of an entry from `layer` for `spec` (SPEC 6.1, 6.5):
+    /// the shared project file for a shared entry; the private target for
+    /// a local one, else the project file written privately. `None` (with
+    /// a warning) when the client has no such file.
+    fn placement(
+        &mut self,
+        pcx: &ProjectCx<'_>,
+        spec: &'static AdapterSpec,
+        mcp: &McpSpec,
+        layer: EntryLayer,
+    ) -> Option<(Target, Sharing)> {
+        let (scope, sharing) = match layer {
+            EntryLayer::Shared => (Scope::Project, Sharing::Shared),
+            EntryLayer::Local if mcp.project_local.is_empty() => (Scope::Project, Sharing::Private),
+            EntryLayer::Local => (Scope::ProjectLocal, Sharing::Private),
+        };
+        let prefs = self.desired.prefs(spec.id);
+        match spec.mcp_targets(self.cx.env, self.cx.fs, scope, Some(pcx.root), &prefs) {
+            Ok(mut targets) if !targets.is_empty() => Some((targets.swap_remove(0), sharing)),
+            Ok(_) => None,
+            Err(err) => {
+                self.warnings.push(err);
+                None
+            }
+        }
+    }
+
+    /// SPEC 6.5 for a private entry in `target`, a project file: blocked
+    /// with `private_in_tracked_file` when the project's repository tracks
+    /// the file; otherwise whether to hide it through `info/exclude`.
+    fn private_file(
+        pcx: &ProjectCx<'_>,
+        spec: &AdapterSpec,
+        target: &Target,
+    ) -> Result<bool, CoreError> {
+        if target.scope != Scope::Project {
+            return Ok(false);
+        }
+        let Some(repo) = ProjectRepo::discover(pcx.root) else {
+            return Ok(false);
+        };
+        if repo.is_tracked(&target.file)? {
+            let file = repo
+                .relative(&target.file)
+                .unwrap_or_else(|| target.file.to_string_lossy().into_owned());
+            return Err(CoreError::new(
+                ErrorCode::PrivateInTrackedFile,
+                format!(
+                    "a project.local.toml entry would go to {file}, which git tracks; remove {} \
+                     from this entry's clients, or untrack {file}",
+                    spec.id
+                ),
+            )
+            .with_path(&target.file));
+        }
+        Ok(!repo.is_ignored(&target.file)?)
+    }
+
+    fn server_entry(
+        &mut self,
+        pcx: &ProjectCx<'_>,
+        entry: &ProjectEntry,
+        server: &Result<Box<Server>, CoreError>,
+        spec: &'static AdapterSpec,
+    ) {
+        let mcp = spec
+            .mcp
+            .as_ref()
+            .expect("writable clients have MCP support");
+        // Claude Desktop has no project files: it never gets project
+        // entries.
+        if mcp.project.is_empty() && mcp.project_local.is_empty() {
+            return;
+        }
+        let Some((target, sharing)) = self.placement(pcx, spec, mcp, entry.layer) else {
+            return;
+        };
+        let mut exclude = false;
+        let mut want = DesiredEntry {
+            client: spec.id,
+            server_id: entry.name.clone(),
+            name: server.as_ref().map_or_else(
+                |_| entry.name.clone(),
+                |server| native_name(server, spec.id),
+            ),
+            server: Err(CoreError::new(ErrorCode::InvalidValue, "not rendered")),
+            delivery: None,
+            inline: Vec::new(),
+            warnings: Vec::new(),
+            native: None,
+        };
+        let ready = match (&pcx.blocked, server) {
+            (Some(err), _) | (None, Err(err)) => Err(err.clone()),
+            (None, Ok(server)) => match entry.layer {
+                EntryLayer::Local => Self::private_file(pcx, spec, &target).map(|hide| {
+                    exclude = hide;
+                    server
+                }),
+                EntryLayer::Shared => Ok(server),
+            },
+        };
+        want.server = ready.and_then(|server| {
+            let out = render_for(
+                self.cx,
+                self.desired,
+                server,
+                spec,
+                RenderTarget {
+                    sharing,
+                    project: Some(pcx.root),
+                    overlay: false,
+                },
+            )?;
+            want.delivery = out.delivery.map(|mode| mode.as_str());
+            want.inline = out.inline;
+            want.warnings = out.warnings;
+            let mut rendered = out.server;
+            rendered.enabled = entry.enabled;
+            Ok(rendered)
+        });
+        if want.server.is_ok()
+            && !entry.unset.is_empty()
+            && mcp.caps.project_semantics == ProjectSemantics::DeepMerge
+        {
+            want.warnings.push(
+                CoreError::new(
+                    ErrorCode::UnsetNotExpressible,
+                    format!(
+                        "{} merges project entries over user entries field by field, so `unset` \
+                         ({}) of {:?} cannot remove what the user entry sets; the entry is \
+                         written anyway",
+                        spec.display_name,
+                        entry.unset.join(", "),
+                        entry.name
+                    ),
+                )
+                .with_path(&target.file),
+            );
+        }
+        let native_disable = self.desired.prefs(spec.id).native_disable == Some(true);
+        let input = self.input_for(target, spec.id, native_disable, EntryKind::McpEntry);
+        input.exclude |= exclude;
+        input.desired.push(want);
+    }
+
+    /// SPEC 6.3: hides system server `entry.name` from `spec` in this
+    /// project, when the server is enabled for it at system scope.
+    fn suppression(
+        &mut self,
+        pcx: &ProjectCx<'_>,
+        entry: &ProjectEntry,
+        spec: &'static AdapterSpec,
+    ) {
+        let Some(server) = self.desired.servers.get(&entry.name) else {
+            return;
+        };
+        let Some(system) = self
+            .rendering
+            .entries
+            .iter()
+            .find(|want| want.client == spec.id && want.server_id == entry.name)
+        else {
+            return;
+        };
+        let mechanism = match layering::suppression_mechanism(spec, &entry.name) {
+            Ok(mechanism) => mechanism,
+            Err(warning) => {
+                self.warnings.push(warning);
+                return;
+            }
+        };
+        let mcp = spec
+            .mcp
+            .as_ref()
+            .expect("writable clients have MCP support");
+        let native_disable = self.desired.prefs(spec.id).native_disable == Some(true);
+        let name = native_name(server, spec.id);
+        match mechanism {
+            ProjectDisable::ListMember(_) => {
+                let prefs = self.desired.prefs(spec.id);
+                let target =
+                    match spec.suppression_target(self.cx.env, self.cx.fs, pcx.root, &prefs) {
+                        Ok(Some(target)) => target,
+                        Ok(None) => return,
+                        Err(err) => {
+                            self.warnings.push(err);
+                            return;
+                        }
+                    };
+                let input = self.input_for(target, spec.id, native_disable, EntryKind::ListMember);
+                input.members.push(DesiredMember {
+                    client: spec.id,
+                    server_id: entry.name.clone(),
+                    name,
+                });
+            }
+            ProjectDisable::EnabledFalse { partial } => {
+                let Some((target, sharing)) = self.placement(pcx, spec, mcp, entry.layer) else {
+                    return;
+                };
+                let mut exclude = false;
+                let mut want = DesiredEntry {
+                    client: spec.id,
+                    server_id: entry.name.clone(),
+                    name,
+                    server: Err(CoreError::new(ErrorCode::InvalidValue, "not rendered")),
+                    delivery: None,
+                    inline: Vec::new(),
+                    warnings: Vec::new(),
+                    native: None,
+                };
+                let ready = match (&pcx.blocked, entry.layer) {
+                    (Some(err), _) => Err(err.clone()),
+                    (None, EntryLayer::Local) => {
+                        Self::private_file(pcx, spec, &target).map(|hide| exclude = hide)
+                    }
+                    (None, EntryLayer::Shared) => Ok(()),
+                };
+                want.server = ready.and_then(|()| match (&system.server, partial) {
+                    // A partial entry holds nothing of the server.
+                    (Ok(rendered), true) => Ok(rendered.clone()),
+                    _ => {
+                        let out = render_for(
+                            self.cx,
+                            self.desired,
+                            server,
+                            spec,
+                            RenderTarget {
+                                sharing,
+                                project: Some(pcx.root),
+                                overlay: true,
+                            },
+                        )?;
+                        want.delivery = out.delivery.map(|mode| mode.as_str());
+                        want.inline = out.inline;
+                        want.warnings = out.warnings;
+                        Ok(out.server)
+                    }
+                });
+                if let Ok(rendered) = &want.server {
+                    match mcp.suppression_entry(rendered, self.cx.env.os()) {
+                        Ok(native) => want.native = native,
+                        Err(err) => want.server = Err(err.into()),
+                    }
+                }
+                if partial {
+                    want.delivery = None;
+                    want.inline.clear();
+                }
+                let input = self.input_for(target, spec.id, native_disable, EntryKind::McpEntry);
+                input.exclude |= exclude;
+                input.desired.push(want);
+            }
+        }
+    }
+
+    /// The input of `target`, joining one planned already.
+    fn input_for(
+        &mut self,
+        target: Target,
+        client: &'static str,
+        native_disable: bool,
+        kind: EntryKind,
+    ) -> &mut TargetInput {
+        let index = match self
+            .inputs
+            .iter()
+            .position(|input| input.same(&target, kind))
+        {
+            Some(index) => {
+                self.inputs[index].join(client, native_disable, target.warnings);
+                index
+            }
+            None => {
+                let mut input = TargetInput::new(target, client, native_disable);
+                input.kind = kind;
+                self.inputs.push(input);
+                self.inputs.len() - 1
+            }
+        };
+        &mut self.inputs[index]
+    }
+
+    /// Targets for owned project entries that no planned target covers:
+    /// entries of a project this machine no longer knows (`root` is
+    /// `None`), or left in a file the project no longer uses. Unchanged
+    /// owned entries are removed there, like any entry no longer desired.
+    fn cleanup(
+        &mut self,
+        project: impl Fn(&str) -> bool,
+        root: Option<&Path>,
+        blocked: Option<&CoreError>,
+    ) {
+        let covered: Vec<(String, String, EntryKind)> = self
+            .inputs
+            .iter()
+            .filter_map(|input| {
+                let keys = input.container_keys().ok()?;
+                Some((
+                    input.target.file.to_string_lossy().into_owned(),
+                    container_pointer(&keys),
+                    input.kind,
+                ))
+            })
+            .collect();
+        let mut orphans: Vec<TargetInput> = Vec::new();
+        for row in &self.ledger.entries {
+            let Some(id) = row.project_id.as_deref() else {
+                continue;
+            };
+            if row.scope == Scope::User || !project(id) {
+                continue;
+            }
+            if covered.iter().any(|(file, pointer, kind)| {
+                *file == row.file && *pointer == row.container && *kind == row.kind
+            }) {
+                continue;
+            }
+            let Some(spec) = adapter(&row.client) else {
+                continue;
+            };
+            let Some(mcp) = spec.mcp.as_ref() else {
+                continue;
+            };
+            if !self.options.selects(spec.id) {
+                continue;
+            }
+            let native_disable = self.desired.prefs(spec.id).native_disable == Some(true);
+            let same = orphans.iter_mut().find(|input| {
+                input.target.file.to_string_lossy() == row.file
+                    && input.keys.as_deref().map(container_pointer).as_deref()
+                        == Some(row.container.as_str())
+                    && input.kind == row.kind
+            });
+            if let Some(input) = same {
+                input.join(spec.id, native_disable, Vec::new());
+                continue;
+            }
+            let target = Target {
+                client: spec.id,
+                scope: row.scope,
+                os: self.cx.env.os(),
+                file: PathBuf::from(&row.file),
+                format: mcp.format,
+                container: match row.scope {
+                    Scope::ProjectLocal => mcp.project_local_container,
+                    _ => mcp.container,
+                },
+                project: root.map(Path::to_path_buf),
+                profile: None,
+                skeleton: mcp.skeleton,
+                warnings: Vec::new(),
+            };
+            let mut input = TargetInput::new(target, spec.id, native_disable);
+            input.kind = row.kind;
+            input.keys = Some(pointer_keys(&row.container));
+            input.project_id = Some(id.to_owned());
+            input.blocked = blocked.cloned();
+            orphans.push(input);
+        }
+        self.inputs.append(&mut orphans);
+    }
+}
+
+/// The keys of an RFC 6901 JSON pointer ([`container_pointer`] reversed).
+fn pointer_keys(pointer: &str) -> Vec<String> {
+    pointer
+        .split('/')
+        .skip(1)
+        .map(|key| key.replace("~1", "/").replace("~0", "~"))
+        .collect()
+}
+
+/// Whether two Claude Code project keys name the same folder: equal after
+/// unifying separators, a trailing separator and, on Windows, case.
+fn same_folder(os: Os, a: &str, b: &str) -> bool {
+    let norm = |key: &str| {
+        let mut key = if os == Os::Windows {
+            key.replace('\\', "/").to_lowercase()
+        } else {
+            key.to_owned()
+        };
+        while key.len() > 1 && key.ends_with('/') && !(key.len() == 3 && key.as_bytes()[1] == b':')
+        {
+            key.pop();
+        }
+        key
+    };
+    norm(a) == norm(b)
 }
 
 /// The bytes of a target file; `None` when it does not exist.
@@ -548,6 +1248,9 @@ pub(crate) fn plan_target(
     let mut plan = TargetPlan {
         clients: input.clients.clone(),
         scope: target.scope,
+        project_id: input.project_id.clone(),
+        project: target.project.clone(),
+        kind: input.kind,
         file: target.file.clone(),
         container: Vec::new(),
         pointer: String::new(),
@@ -564,6 +1267,15 @@ pub(crate) fn plan_target(
         masked: Vec::new(),
         input: input.clone(),
     };
+    let keys = match input.container_keys() {
+        Ok(keys) => keys,
+        Err(err) => return blocked_target(plan, err.with_path(&target.file)),
+    };
+    plan.pointer = container_pointer(&keys);
+    plan.container = keys.clone();
+    if let Some(err) = &input.blocked {
+        return blocked_target(plan, err.clone());
+    }
     let parsed = match &bytes {
         Some(bytes) => Document::parse(bytes, target.format),
         None => Ok(target.new_document()),
@@ -572,17 +1284,17 @@ pub(crate) fn plan_target(
         Ok(doc) => doc,
         Err(err) => return blocked_target(plan, err.with_path(&target.file)),
     };
-    let keys = match target.container_keys() {
-        Ok(keys) => keys,
-        Err(err) => return blocked_target(plan, err.with_path(&target.file)),
-    };
+    if let Some(warning) = key_spelling(target, &doc, &keys) {
+        plan.warnings.push(warning);
+    }
+    if input.kind == EntryKind::ListMember {
+        return plan_list(plan, doc, bytes, ledger, options);
+    }
     let container: Vec<&str> = keys.iter().map(String::as_str).collect();
     let observed_names = match doc.list(&container) {
         Ok(names) => names,
         Err(err) => return blocked_target(plan, err.with_path(&target.file)),
     };
-    plan.pointer = container_pointer(&keys);
-    plan.container = keys.clone();
     let file = target.file.to_string_lossy().into_owned();
 
     // Names in file order, then new desired names, then ledger-only names.
@@ -703,8 +1415,9 @@ fn plan_entry(
         entry.delivery = first.delivery;
         let mut natives = Vec::new();
         for want in &wanted {
-            let native = match &want.server {
-                Ok(server) => mapper_of(want.client)
+            let native = match (&want.server, &want.native) {
+                (Ok(_), Some(native)) => Ok(native.clone()),
+                (Ok(server), None) => mapper_of(want.client)
                     .ok_or_else(|| CoreError::new(ErrorCode::NoAdapter, "no mapper"))
                     .and_then(|mapper| {
                         mapper
@@ -717,7 +1430,7 @@ fn plan_entry(
                             )
                             .map_err(CoreError::from)
                     }),
-                Err(err) => Err(err.clone()),
+                (Err(err), _) => Err(err.clone()),
             };
             match native {
                 Ok(native) => natives.push((want.client, native)),
@@ -926,9 +1639,174 @@ fn disabled_value(client: &str, value: &NativeValue) -> Option<NativeValue> {
     Some(NativeValue::Object(entry))
 }
 
+/// Plans a list target (Claude Code `disabledMcpServers`): desired members
+/// are added and owned, owned members no longer desired are removed.
+/// Members the user added are left alone and not reported.
+fn plan_list(
+    mut plan: TargetPlan,
+    mut doc: Document,
+    bytes: Option<Vec<u8>>,
+    ledger: &Ledger,
+    options: &PlanOptions,
+) -> TargetPlan {
+    let keys = plan.container.clone();
+    let list: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let observed = match list_members(&doc, &list) {
+        Ok(members) => members,
+        Err(err) => {
+            let err = err.with_path(&plan.file);
+            return blocked_target(plan, err);
+        }
+    };
+    let file = plan.file.to_string_lossy().into_owned();
+    let mut names: Vec<String> = Vec::new();
+    for member in &plan.input.members {
+        if !names.contains(&member.name) {
+            names.push(member.name.clone());
+        }
+    }
+    for row in ledger.in_container(&file, &plan.pointer) {
+        if row.kind == EntryKind::ListMember && !names.contains(&row.key) {
+            names.push(row.key.clone());
+        }
+    }
+    for name in names {
+        let want = plan.input.members.iter().find(|member| member.name == name);
+        let owned = ledger
+            .get(&file, &plan.pointer, &name)
+            .filter(|row| row.kind == EntryKind::ListMember);
+        let client = match (want, owned) {
+            (Some(member), _) => Some(member.client),
+            (None, Some(row)) => adapter(&row.client)
+                .map(|spec| spec.id)
+                .filter(|client| plan.input.clients.contains(client)),
+            (None, None) => None,
+        };
+        let Some(client) = client else {
+            continue;
+        };
+        let present = observed.contains(&name);
+        let member = NativeValue::String(name.clone());
+        let mut entry = EntryPlan {
+            name: name.clone(),
+            client: Some(client),
+            server_id: want
+                .map(|member| member.server_id.clone())
+                .or_else(|| owned.and_then(|row| row.server_id.clone())),
+            state: EntryState::Synced,
+            action: Action::None,
+            unresolved: false,
+            problem: None,
+            desired: want.map(|_| member.clone()),
+            observed: present.then(|| member.clone()),
+            written: None,
+            delivery: None,
+        };
+        match (want.is_some(), present, owned.is_some()) {
+            (true, true, false) => {
+                entry.action = Action::Adopt;
+                entry.written = Some(member);
+            }
+            (true, true, true) => {}
+            (true, false, false) => {
+                entry.state = EntryState::PendingCreate;
+                entry.action = Action::Create;
+                entry.written = Some(member);
+            }
+            (true, false, true) => {
+                entry.state = EntryState::Missing;
+                // A member has nothing to import: write it again unless
+                // the entry is skipped.
+                if options.resolution(Some(client), &name) == OnConflict::Skip {
+                    entry.action = Action::Skip;
+                } else {
+                    entry.action = Action::Create;
+                    entry.written = Some(member);
+                }
+            }
+            (false, true, true) => {
+                entry.state = EntryState::PendingRemove;
+                entry.action = Action::Remove;
+            }
+            (false, false, true) => entry.action = Action::Forget,
+            (false, _, false) => continue,
+        }
+        plan.entries.push(entry);
+    }
+    let mut changed = false;
+    for entry in &plan.entries {
+        let result = match entry.action {
+            Action::Create => doc.set_list_member(&list, &entry.name, true),
+            Action::Remove => doc.set_list_member(&list, &entry.name, false),
+            _ => Ok(false),
+        };
+        match result {
+            Ok(edited) => changed |= edited,
+            Err(err) => {
+                let err = err.with_path(&plan.file);
+                return blocked_target(plan, err);
+            }
+        }
+    }
+    if changed {
+        let after = doc.to_bytes();
+        if bytes.as_deref() != Some(after.as_slice()) {
+            plan.after = Some(after);
+        }
+    }
+    plan
+}
+
+/// The string members of the list at `list`; empty when it is absent.
+pub(crate) fn list_members(doc: &Document, list: &[&str]) -> Result<Vec<String>, CoreError> {
+    let Some((last, parent)) = list.split_last() else {
+        return Ok(Vec::new());
+    };
+    match doc.get(parent, last)? {
+        None => Ok(Vec::new()),
+        Some(NativeValue::Array(items)) => Ok(items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect()),
+        Some(_) => Err(CoreError::new(
+            ErrorCode::UnexpectedShape,
+            format!("`{}` is not a list", list.join(".")),
+        )),
+    }
+}
+
+/// Gate V1 FB-1: `project_key_spelling` when the map a project-keyed
+/// container lives in already holds the same folder under another key.
+fn key_spelling(target: &Target, doc: &Document, keys: &[String]) -> Option<CoreError> {
+    let index = target
+        .container
+        .segments()
+        .iter()
+        .position(|segment| *segment == ContainerPath::PROJECT_KEY)?;
+    let ours = keys.get(index)?;
+    let parent: Vec<&str> = keys[..index].iter().map(String::as_str).collect();
+    let other = doc
+        .list(&parent)
+        .ok()?
+        .into_iter()
+        .find(|key| key != ours && same_folder(target.os, key, ours))?;
+    Some(
+        CoreError::new(
+            ErrorCode::ProjectKeySpelling,
+            format!(
+                "`{}` holds this folder as {other:?} too; {} writes {ours:?}, and the client \
+                 may read the other key",
+                parent.join("."),
+                crate::brand::PRODUCT_NAME
+            ),
+        )
+        .with_path(&target.file),
+    )
+}
+
 fn blocked_target(mut plan: TargetPlan, err: CoreError) -> TargetPlan {
-    plan.entries = plan
-        .input
+    let input = &plan.input;
+    plan.entries = input
         .desired
         .iter()
         .map(|want| {
@@ -941,6 +1819,14 @@ fn blocked_target(mut plan: TargetPlan, err: CoreError) -> TargetPlan {
             entry.delivery = want.delivery;
             entry
         })
+        .chain(input.members.iter().map(|member| {
+            blocked_entry(
+                &member.name,
+                Some(member.client),
+                Some(&member.server_id),
+                err.clone(),
+            )
+        }))
         .collect();
     plan.problem = Some(err);
     plan.after = None;

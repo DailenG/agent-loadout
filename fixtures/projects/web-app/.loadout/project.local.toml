@@ -1,0 +1,11 @@
+# The private layer: never committed.
+schema = 1
+
+# Private: Claude Code gets it in ~/.claude.json under this project's key;
+# omp has no private target, so it goes to <P>/.omp/mcp.json, which is
+# then hidden through .git/info/exclude.
+[servers.notes]
+transport = "stdio"
+command = "notes-mcp"
+args = ["--root", "${project}"]
+clients = ["claude-code", "omp"]

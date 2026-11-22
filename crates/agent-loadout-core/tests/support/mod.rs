@@ -12,6 +12,7 @@ use agent_loadout_core::apply::ledger::Ledger;
 use agent_loadout_core::apply::{
     self, ApplyEnv, ApplyReport, ApplyRequest, EntryPlan, Plan, PlanOptions,
 };
+use agent_loadout_core::layering::{self, Project, TrustStore};
 use agent_loadout_core::model::TomlDocument;
 use agent_loadout_core::model::applied::ApplyTrigger;
 use agent_loadout_core::model::clients::ClientSelection;
@@ -214,6 +215,100 @@ impl Fx {
             .unwrap()
             .id
     }
+
+    /// A project folder `<root>/projects/<name>` holding a copy of
+    /// `fixtures/projects/<fixture>`.
+    pub fn project_from(&self, fixture: &str, name: &str) -> PathBuf {
+        let root = self.th.projects().join(name);
+        copy_dir(&fixtures().join("projects").join(fixture), &root);
+        root
+    }
+
+    /// Writes `<P>/.loadout/<file>`.
+    pub fn manifest(&self, root: &Path, file: &str, text: &str) {
+        self.write(&layering::manifest::manifest_dir(root).join(file), text);
+    }
+
+    /// Makes this machine know exactly `projects` (id, folder), without
+    /// applying.
+    pub fn know_projects(&self, projects: &[(&str, &Path)]) {
+        self.store();
+        let machine = self.machine_id();
+        let mut text = format!(
+            "schema = 1\nmachine_id = \"{machine}\"\nlabel = \"test-desk\"\nos = \"{}\"\n",
+            host_os().as_str()
+        );
+        for (id, root) in projects {
+            let path = toml::Value::String(root.to_string_lossy().into_owned());
+            text.push_str(&format!("\n[projects.{id}]\npath = {path}\n"));
+        }
+        self.edit("projects", |tx| {
+            tx.write(&format!("machines/{machine}.toml"), text)
+        });
+    }
+
+    /// Trusts the manifests `root` holds now.
+    pub fn trust(&self, root: &Path) {
+        let project = Project::load(&self.fs, root).unwrap().unwrap();
+        let state = self.home.state_dir();
+        let mut store = TrustStore::load(&self.fs, &state).unwrap();
+        store.trust(&project);
+        store.save(&self.fs, &state).unwrap();
+    }
+}
+
+/// The repository's `fixtures/` folder.
+pub fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fixtures")
+}
+
+/// Copies the tree `from` into `to`.
+pub fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// A git repository in `root` (no commits).
+pub fn git_init(root: &Path) -> git2::Repository {
+    git2::Repository::init(root).unwrap()
+}
+
+/// Stages `relative` (a `/`-separated path under the work tree) and commits
+/// the index.
+pub fn git_commit(repo: &git2::Repository, relative: &str) {
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(relative)).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let signature =
+        git2::Signature::new("test", "test@example.invalid", &git2::Time::new(0, 0)).unwrap();
+    let parents: Vec<git2::Commit<'_>> = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .into_iter()
+        .collect();
+    let parents: Vec<&git2::Commit<'_>> = parents.iter().collect();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "fixture",
+        &tree,
+        &parents,
+    )
+    .unwrap();
 }
 
 /// The plan of entry `name` in `file`.

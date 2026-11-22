@@ -12,6 +12,7 @@ pub mod env;
 pub mod error;
 pub mod formats;
 pub mod fs;
+pub mod layering;
 pub mod model;
 pub mod paths;
 pub mod remote;

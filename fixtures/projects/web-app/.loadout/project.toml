@@ -1,0 +1,16 @@
+# A shared project manifest: committed with the project.
+schema = 1
+id = "web-app-a1b2"
+name = "Web App"
+
+[defaults]
+clients = ["claude-code"]
+
+# Defined only here: written to <P>/.mcp.json for Claude Code, with the
+# bare `loadout` launcher because the file is shared.
+[servers.docs]
+transport = "stdio"
+command = "docs-mcp"
+args = ["--stdio"]
+[servers.docs.env]
+DOCS_TOKEN = "${secret:DOCS_TOKEN}"

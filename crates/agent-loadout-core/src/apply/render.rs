@@ -162,7 +162,9 @@ impl DesiredState {
             .unwrap_or_default()
     }
 
-    fn excluded(&self, client: &str) -> bool {
+    /// Whether this machine's overlay excludes `client` or `clients.toml`
+    /// opts it out.
+    pub(crate) fn excluded(&self, client: &str) -> bool {
         let by_machine = self
             .overlay
             .as_ref()
@@ -215,6 +217,10 @@ pub struct DesiredEntry {
     pub inline: Vec<SecretValue>,
     /// Delivery warnings (`inline_env_fallback`).
     pub warnings: Vec<CoreError>,
+    /// A native entry written as it is instead of mapping
+    /// [`DesiredEntry::server`] (a project suppression entry such as Codex
+    /// `{ enabled = false }`).
+    pub native: Option<NativeValue>,
 }
 
 /// The system layer for this machine.
@@ -247,30 +253,13 @@ pub struct RenderCx<'a> {
 pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
     let mut rendering = Rendering::default();
     let mut warned: BTreeSet<String> = BTreeSet::new();
-    let mut detected: BTreeMap<&'static str, bool> = BTreeMap::new();
+    let mut detected = Detected::default();
     for (id, server) in &desired.servers {
         let Some(selection) = server.enable.as_ref().and_then(|e| e.clients.as_ref()) else {
             continue;
         };
         let transport = server_transport(server, cx.env);
-        let clients: Vec<String> = match selection {
-            ClientSelection::List(ids) => ids.clone(),
-            ClientSelection::AllDetected => ADAPTERS
-                .iter()
-                .filter(|spec| {
-                    let forced = desired.prefs(spec.id).enabled == Some(true);
-                    let found = *detected
-                        .entry(spec.id)
-                        .or_insert_with(|| detect(spec, cx.env, cx.fs, cx.registry).detected());
-                    let fits = spec.mcp.as_ref().is_some_and(|mcp| {
-                        mcp.oses.contains(&cx.env.os())
-                            && transport.is_some_and(|t| mcp.caps.transports.contains(t))
-                    });
-                    (forced || found) && fits
-                })
-                .map(|spec| spec.id.to_owned())
-                .collect(),
-        };
+        let clients = detected.select(cx, desired, selection, transport);
         for client in clients {
             if desired.excluded(&client) {
                 continue;
@@ -301,6 +290,7 @@ pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
                     delivery: out.delivery.map(Mode::as_str),
                     inline: out.inline,
                     warnings: out.warnings,
+                    native: None,
                 },
                 Err(err) => DesiredEntry {
                     client: spec.id,
@@ -310,6 +300,7 @@ pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
                     delivery: None,
                     inline: Vec::new(),
                     warnings: Vec::new(),
+                    native: None,
                 },
             };
             rendering.entries.push(entry);
@@ -323,8 +314,45 @@ pub fn system_entries(cx: &RenderCx<'_>, desired: &DesiredState) -> Rendering {
     rendering
 }
 
+/// Detection results, probed once per client and run.
+#[derive(Default)]
+pub(crate) struct Detected(BTreeMap<&'static str, bool>);
+
+impl Detected {
+    /// The client ids `selection` names: the list as written, or for
+    /// `all-detected` every client forced on in `clients.toml` or detected
+    /// whose MCP support fits `transport` on this OS.
+    pub(crate) fn select(
+        &mut self,
+        cx: &RenderCx<'_>,
+        desired: &DesiredState,
+        selection: &ClientSelection,
+        transport: Option<Transport>,
+    ) -> Vec<String> {
+        match selection {
+            ClientSelection::List(ids) => ids.clone(),
+            ClientSelection::AllDetected => ADAPTERS
+                .iter()
+                .filter(|spec| {
+                    let forced = desired.prefs(spec.id).enabled == Some(true);
+                    let found = *self
+                        .0
+                        .entry(spec.id)
+                        .or_insert_with(|| detect(spec, cx.env, cx.fs, cx.registry).detected());
+                    let fits = spec.mcp.as_ref().is_some_and(|mcp| {
+                        mcp.oses.contains(&cx.env.os())
+                            && transport.is_some_and(|t| mcp.caps.transports.contains(t))
+                    });
+                    (forced || found) && fits
+                })
+                .map(|spec| spec.id.to_owned())
+                .collect(),
+        }
+    }
+}
+
 /// The adapter of `client`, if Loadout can write its user file here.
-fn writable(client: &str, env: &Env) -> Result<&'static AdapterSpec, CoreError> {
+pub(crate) fn writable(client: &str, env: &Env) -> Result<&'static AdapterSpec, CoreError> {
     let Some(spec) = adapter(client) else {
         let code = if known_client(client).is_some() {
             ErrorCode::NoAdapter
@@ -361,12 +389,16 @@ pub fn native_name(server: &Server, client: &str) -> String {
         .map_or_else(|| server.id.clone(), str::to_owned)
 }
 
-fn server_transport(server: &Server, env: &Env) -> Option<Transport> {
+pub(crate) fn server_transport(server: &Server, env: &Env) -> Option<Transport> {
     effective_fields(server, env, None).transport
 }
 
 /// The launch fields after `[os.<os>]` and the machine overlay.
-fn effective_fields(server: &Server, env: &Env, overlay: Option<&MachineOverlay>) -> ServerFields {
+pub(crate) fn effective_fields(
+    server: &Server,
+    env: &Env,
+    overlay: Option<&MachineOverlay>,
+) -> ServerFields {
     let mut fields = server.body.fields();
     if let Some(over) = server
         .body
@@ -396,6 +428,16 @@ pub struct RenderOutput {
     pub warnings: Vec<CoreError>,
 }
 
+/// How a server is rendered: the [`Sharing`] of the target file, the
+/// project folder `${project}` stands for, and whether the machine overlay
+/// still applies (a project entry was resolved with it already).
+#[derive(Debug, Clone, Copy)]
+pub struct RenderTarget<'a> {
+    pub sharing: Sharing,
+    pub project: Option<&'a Path>,
+    pub overlay: bool,
+}
+
 /// One server for one client and a target of the given [`Sharing`].
 pub fn render(
     cx: &RenderCx<'_>,
@@ -404,13 +446,36 @@ pub fn render(
     spec: &AdapterSpec,
     sharing: Sharing,
 ) -> Result<RenderOutput, CoreError> {
+    render_for(
+        cx,
+        desired,
+        server,
+        spec,
+        RenderTarget {
+            sharing,
+            project: None,
+            overlay: true,
+        },
+    )
+}
+
+/// One server for one client and `target`.
+pub fn render_for(
+    cx: &RenderCx<'_>,
+    desired: &DesiredState,
+    server: &Server,
+    spec: &AdapterSpec,
+    target: RenderTarget<'_>,
+) -> Result<RenderOutput, CoreError> {
+    let sharing = target.sharing;
     let mcp = spec.mcp.as_ref().ok_or_else(|| {
         CoreError::new(
             ErrorCode::ScopeNotSupported,
             format!("{} has no MCP config", spec.display_name),
         )
     })?;
-    let fields = effective_fields(server, cx.env, desired.overlay.as_ref());
+    let overlay = desired.overlay.as_ref().filter(|_| target.overlay);
+    let fields = effective_fields(server, cx.env, overlay);
     let transport = fields.transport.ok_or_else(|| {
         CoreError::new(
             ErrorCode::MissingField,
@@ -432,6 +497,7 @@ pub fn render(
         catalog: &desired.catalog,
         delivery: cx.delivery,
         memory: &cx.memory,
+        project: target.project,
     };
     let policy = Policy {
         requested: server

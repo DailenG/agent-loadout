@@ -484,6 +484,20 @@ pub fn stage_resolutions(
             let (Some(client), Some(id)) = (entry.client, entry.server_id.as_ref()) else {
                 continue;
             };
+            if target.project_id.is_some() {
+                // A project entry comes from the project's manifests, never
+                // from a store server.
+                result.failed.push((
+                    client.to_owned(),
+                    entry.name.clone(),
+                    CoreError::new(
+                        ErrorCode::ScopeNotSupported,
+                        "a project entry cannot be imported into the store; edit the project's \
+                         manifest instead",
+                    ),
+                ));
+                continue;
+            }
             let Some(spec) = adapter(client) else {
                 continue;
             };

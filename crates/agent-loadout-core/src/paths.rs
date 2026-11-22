@@ -9,6 +9,9 @@ use crate::env::{Env, KnownFolder, Os};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 
+/// The machine-local state directory inside `LOADOUT_HOME`.
+pub const STATE_DIR: &str = "state";
+
 /// Where the resolved `LOADOUT_HOME` came from, highest precedence first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HomeSource {
@@ -80,7 +83,7 @@ impl LoadoutHome {
 
     /// Machine-local, unversioned state.
     pub fn state_dir(&self) -> PathBuf {
-        self.path.join("state")
+        self.path.join(STATE_DIR)
     }
 
     /// Pre-write copies of client files and trash; never pushed.
