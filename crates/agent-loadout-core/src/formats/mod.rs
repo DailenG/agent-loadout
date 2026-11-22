@@ -353,8 +353,8 @@ impl Document {
 
     /// Removes `key` from the container at `container`, with the comment
     /// lines directly above it (no blank line between; in JSONC only when
-    /// other members remain); comments above a blank line stay. Returns
-    /// whether it was there.
+    /// other members remain; in YAML only those indented like the entry);
+    /// comments above a blank line stay. Returns whether it was there.
     pub fn remove(&mut self, container: &[&str], key: &str) -> Result<bool, CoreError> {
         let removed = match &mut self.body {
             Body::Json(body) => body.remove(container, key)?,

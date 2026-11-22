@@ -182,6 +182,43 @@ fn yaml_span_splice_keeps_unrelated_bytes() {
 }
 
 #[test]
+fn yaml_removal_takes_only_comments_indented_like_the_entry() {
+    // Deeper comments are commented-out members of the entry above, and a
+    // column-0 block belongs to the file: both stay.
+    let original = "extensions:\n  files:\n    cmd: npx\n    # envs:\n    #   ROOT: x\n# old:\n#   cmd: gone\n  # Remote search\n  search:\n    uri: https://x.example.com\n  last:\n    cmd: y\n";
+    let mut doc = yaml(original);
+    assert!(doc.remove(EXTENSIONS, "search").unwrap());
+    assert_eq!(
+        text(&doc),
+        "extensions:\n  files:\n    cmd: npx\n    # envs:\n    #   ROOT: x\n# old:\n#   cmd: gone\n  last:\n    cmd: y\n"
+    );
+    // A deeper comment right above the entry is not taken either.
+    let original = "extensions:\n  files:\n    cmd: npx\n    # envs: {}\n  search:\n    uri: https://x.example.com\n";
+    let mut doc = yaml(original);
+    assert!(doc.remove(EXTENSIONS, "files").unwrap());
+    assert_eq!(
+        text(&doc),
+        "extensions:\n  search:\n    uri: https://x.example.com\n"
+    );
+    let mut doc = yaml(original);
+    assert!(doc.remove(EXTENSIONS, "search").unwrap());
+    assert_eq!(
+        text(&doc),
+        "extensions:\n  files:\n    cmd: npx\n    # envs: {}\n"
+    );
+
+    // The same for items of a named list, by the dash line's indentation.
+    let servers: &[&str] = &["mcpServers", "[name]"];
+    let original = "mcpServers:\n  - name: files\n    command: npx\n    # args: [-y]\n# kept\n  # search, remote\n  - name: search\n    url: https://x.example.com\n";
+    let mut doc = yaml(original);
+    assert!(doc.remove(servers, "search").unwrap());
+    assert_eq!(
+        text(&doc),
+        "mcpServers:\n  - name: files\n    command: npx\n    # args: [-y]\n# kept\n"
+    );
+}
+
+#[test]
 fn yaml_no_op_edits_are_byte_identical() {
     let original = fixture("yaml/goose-config.yaml");
     let mut doc = yaml(&original);

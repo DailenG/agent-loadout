@@ -180,17 +180,11 @@ impl YamlBody {
                     .find(|(name, _)| key_of(name).as_deref() == Some(key))
                     .expect("listed above");
                 let span = member_span(&self.text, member);
-                (
-                    with_comments_above(&self.text, span.start, span.inline),
-                    span.end,
-                )
+                with_attached_comments(&self.text, span.start, span.end, span.inline)
             }
             Kind::Seq(_) => {
                 let span = item_span(&self.text, entry, container)?;
-                (
-                    with_comments_above(&self.text, span.start, span.inline),
-                    span.end,
-                )
+                with_attached_comments(&self.text, span.start, span.end, span.inline)
             }
             _ => unreachable!("entries come from a mapping or a sequence"),
         };
@@ -226,7 +220,8 @@ impl YamlBody {
                     let dash = item_span(&self.text, &items[0], list)?.dash_column;
                     let mut text = String::new();
                     emit_item(&mut text, dash, &NativeValue::from(member), style);
-                    self.insert_at(span.end, &text);
+                    let at = past_comments(&self.text, span.end, dash);
+                    self.insert_at(at, &text);
                 } else if hits.len() == items.len() {
                     let (last, parent_keys) = keys.split_last().expect("a list path has keys");
                     self.replace_member(&tree, parent_keys, last, &NativeValue::Array(Vec::new()))?;
@@ -325,10 +320,11 @@ impl YamlBody {
                         }
                         None => {
                             let (column, at) = match members.first() {
-                                Some((first, _)) => (
-                                    column(&self.text, first.start),
-                                    line_end(&self.text, node.end),
-                                ),
+                                Some((first, _)) => {
+                                    let column = column(&self.text, first.start);
+                                    let end = line_end(&self.text, node.end);
+                                    (column, past_comments(&self.text, end, column))
+                                }
                                 None => (0, self.text.len()),
                             };
                             let mut text = String::new();
@@ -350,7 +346,8 @@ impl YamlBody {
                                 )?;
                                 let mut text = String::new();
                                 emit_item(&mut text, first.dash_column, &named, style);
-                                self.insert_at(last.end, &text);
+                                let at = past_comments(&self.text, last.end, first.dash_column);
+                                self.insert_at(at, &text);
                                 Ok(())
                             }
                         }
@@ -427,7 +424,8 @@ impl YamlBody {
                     .map_or(0, |(first, _)| column(&self.text, first.start));
                 let mut text = String::new();
                 emit_member(&mut text, column, segment, nested, style);
-                let at = line_end(&self.text, map.end);
+                let end = line_end(&self.text, map.end);
+                let at = past_comments(&self.text, end, column);
                 self.insert_at(at, &text);
             }
             (None, None) => {
@@ -580,7 +578,8 @@ impl YamlBody {
         if !added.is_empty() {
             let tree = self.tree()?;
             let map = locator.locate(&tree)?;
-            let at = line_end(&self.text, map.end);
+            let end = line_end(&self.text, map.end);
+            let at = past_comments(&self.text, end, column);
             self.insert_at(at, &added);
         }
         Ok(true)
@@ -1251,22 +1250,54 @@ fn item_span(text: &str, item: &Node, path: &[&str]) -> Result<ItemSpan, CoreErr
     })
 }
 
-/// `start` moved up over the comment lines directly above it (no blank
-/// line between).
-fn with_comments_above(text: &str, start: usize, inline: bool) -> usize {
+/// The lines `start..end` of an entry (`start` a line start, `end` past a
+/// line break) widened over the comments that belong to it: comment lines
+/// directly above (no blank line between) indented exactly like its first
+/// line, and comment lines directly below indented deeper (commented-out
+/// members). Comments indented otherwise belong to a neighbor or to the
+/// file, and stay. An entry that starts after `- ` takes none.
+fn with_attached_comments(text: &str, start: usize, end: usize, inline: bool) -> (usize, usize) {
     if inline {
-        return start;
+        return (start, end);
     }
+    let own = indent(&text[start..]);
     let mut start = start;
     while start > 0 {
         let above = line_start(text, start - 1);
-        if text[above..start].trim_start().starts_with('#') {
+        let line = &text[above..start];
+        if is_comment(line) && indent(line) == own {
             start = above;
         } else {
             break;
         }
     }
-    start
+    (start, past_comments(text, end, own))
+}
+
+/// `end` (past a line break) moved down over the comment lines directly
+/// below it indented deeper than `column`: commented-out members of the
+/// entry that ends there. New text goes after them, and a removed entry
+/// takes them along.
+fn past_comments(text: &str, end: usize, column: usize) -> usize {
+    let mut end = end;
+    while end < text.len() {
+        let below = line_end(text, end + 1);
+        let line = &text[end..below];
+        if is_comment(line) && indent(line) > column {
+            end = below;
+        } else {
+            break;
+        }
+    }
+    end
+}
+
+fn indent(line: &str) -> usize {
+    line.bytes().take_while(|byte| *byte == b' ').count()
+}
+
+fn is_comment(line: &str) -> bool {
+    line.trim_start_matches(' ').starts_with('#')
 }
 
 fn line_start(text: &str, at: usize) -> usize {

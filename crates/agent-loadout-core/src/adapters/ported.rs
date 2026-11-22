@@ -32,7 +32,10 @@
 //! - `continue`: YAML list `mcpServers`, matched by `name` (the
 //!   `[name]` container segment): `{name, command, args, env, cwd}` or
 //!   `{name, type: "streamable-http"|"sse", url, requestOptions: {headers}}`.
-//!   SkillDock's `transport` key reads as `type`.
+//!   SkillDock's `transport` key reads as `type`. A new `config.yaml` gets
+//!   Continue's required `name`, `version` and `schema: v1`; while only a
+//!   `config.json` exists, the target is refused (`read_only_format`)
+//!   rather than created, since Continue would then drop the JSON setup.
 //! - `goose`: YAML `extensions.<name>`: `{enabled, name, type: "stdio",
 //!   cmd, args, envs}` or `{enabled, name, type: "streamable_http", uri,
 //!   headers}`. SSE is rejected; built-in extensions read as
@@ -55,8 +58,9 @@
 //! (TD-10), Continue's `type` spellings and `requestOptions.headers`
 //! (TD-11), Goose's `uri`, `headers` and required keys (TD-12), Hermes's
 //! `transport: sse` (TD-13), that none of these clients expands `${...}`
-//! references Loadout could rely on (TD-14), and the detection probes
-//! (TD-15).
+//! references Loadout could rely on (TD-14), the detection probes (TD-15),
+//! and what Continue does with `config.json` next to a `config.yaml`
+//! (TD-17).
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -1018,7 +1022,10 @@ unified_client!(
 
 /// Qwen Code is a Gemini CLI fork: Gemini's entry shape and filters.
 const QWEN_CODE_CAPS: Caps = Caps {
-    env_ref: Some(EnvRefSyntax::DollarBrace { default: false }),
+    env_ref: Some(EnvRefSyntax::DollarBrace {
+        default: false,
+        bare: true,
+    }),
     env_ref_fields: FieldSet::COMMAND
         .union(FieldSet::ARGS)
         .union(FieldSet::ENV)
@@ -1151,6 +1158,44 @@ const CONTINUE_CAPS: Caps = ported_caps("continue", TransportSet::ALL, None);
 static CONTINUE_MAPPER: ContinueYaml = ContinueYaml {
     caps: &CONTINUE_CAPS,
 };
+
+/// A new `config.yaml`: the top-level keys Continue's schema requires,
+/// with the values Continue itself writes.
+pub const CONTINUE_SKELETON: &str = "name: Local Assistant\nversion: 1.0.0\nschema: v1\n";
+
+/// `~/.continue/config.yaml`. While Continue still runs from a
+/// `config.json` and there is no `config.yaml`, creating the YAML file
+/// would make Continue drop the JSON setup, so the target is refused
+/// (`read_only_format`, naming `config.json`) until the user moves to
+/// `config.yaml` in Continue.
+fn continue_user_files(
+    env: &Env,
+    fs: &dyn Fs,
+    _prefs: &ClientPrefs,
+) -> Result<Vec<(PathBuf, Option<String>)>, CoreError> {
+    let missing = || {
+        CoreError::new(
+            ErrorCode::NotSupportedOnOs,
+            format!("Continue has no config path on {}", env.os().as_str()),
+        )
+    };
+    let yaml = Location::Home(".continue/config.yaml")
+        .resolve(env, None)
+        .ok_or_else(missing)?;
+    let json = Location::Home(".continue/config.json")
+        .resolve(env, None)
+        .ok_or_else(missing)?;
+    if !fs.exists(&yaml) && fs.exists(&json) {
+        return Err(CoreError::new(
+            ErrorCode::ReadOnlyFormat,
+            "Continue still uses config.json, which Loadout does not edit, and creating \
+             config.yaml would replace that setup; move to config.yaml in Continue first",
+        )
+        .with_path(&json));
+    }
+    Ok(vec![(yaml, None)])
+}
+
 pub static CONTINUE: AdapterSpec = AdapterSpec {
     id: "continue",
     display_name: "Continue",
@@ -1159,14 +1204,17 @@ pub static CONTINUE: AdapterSpec = AdapterSpec {
         Probe::Path(Location::Home(".continue")),
         Probe::Executable("cn"),
     ],
-    mcp: Some(user_only(
-        &[Location::Home(".continue/config.yaml")],
-        None,
-        Format::Yaml,
-        ContainerPath(&["mcpServers", "[name]"]),
-        &CONTINUE_MAPPER,
-        CONTINUE_CAPS,
-    )),
+    mcp: Some(McpSpec {
+        skeleton: CONTINUE_SKELETON,
+        ..user_only(
+            &[Location::Home(".continue/config.yaml")],
+            Some(continue_user_files),
+            Format::Yaml,
+            ContainerPath(&["mcpServers", "[name]"]),
+            &CONTINUE_MAPPER,
+            CONTINUE_CAPS,
+        )
+    }),
 };
 
 const GOOSE_CAPS: Caps = ported_caps(

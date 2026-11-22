@@ -55,7 +55,10 @@ const SKELETON: &str = "{\n  \"$schema\": \"https://raw.githubusercontent.com/ca
 
 const CAPS: Caps = Caps {
     transports: TransportSet::ALL,
-    env_ref: Some(EnvRefSyntax::DollarBrace { default: true }),
+    env_ref: Some(EnvRefSyntax::DollarBrace {
+        default: true,
+        bare: false,
+    }),
     env_ref_fields: FieldSet::COMMAND
         .union(FieldSet::ARGS)
         .union(FieldSet::ENV)

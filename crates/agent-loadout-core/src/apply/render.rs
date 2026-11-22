@@ -701,12 +701,14 @@ fn native(r: &mut Renderer<'_>, value: &toml::Value) -> Result<NativeValue, Core
 /// A native string value as a store template (SPEC 11.2): the client's own
 /// variable references become `${env:NAME}`, any other `${` becomes the
 /// literal `$${`. `None` when the value uses a client feature the store
-/// cannot express (`${NAME:-default}`, `${userHome}`, a Pi `!command`).
+/// cannot express (`${NAME:-default}`, `${userHome}`, OpenCode's
+/// `{file:path}`, a Pi `!command`).
 pub fn native_to_template(text: &str, caps: &Caps, field: FieldSet) -> Option<String> {
     let syntax = caps
         .env_ref
         .filter(|_| caps.env_ref_fields.contains(field) && field != FieldSet::NONE);
     match syntax {
+        Some(EnvRefSyntax::DollarBrace { bare: true, .. }) => bare_dollar_to_template(text),
         Some(EnvRefSyntax::DollarBrace { .. }) => convert_refs(text, "${", |token| {
             env_name(token).then(|| format!("${{env:{token}}}"))
         }),
@@ -717,12 +719,7 @@ pub fn native_to_template(text: &str, caps: &Caps, field: FieldSet) -> Option<St
                 .filter(|name| env_name(name))
                 .map(|name| format!("${{env:{name}}}"))
         }),
-        // A literal `${` next to OpenCode's `{env:..}` has no store spelling
-        // that reads back the same.
-        Some(EnvRefSyntax::BraceEnv) if text.contains("${") => None,
-        Some(EnvRefSyntax::BraceEnv) => convert_refs(text, "{env:", |token| {
-            env_name(token).then(|| format!("${{env:{token}}}"))
-        }),
+        Some(EnvRefSyntax::BraceEnv) => brace_env_to_template(text),
         // Codex reads forwarded variables back as `${env:NAME}` already.
         Some(EnvRefSyntax::CodexForward) => match parse_template(text) {
             Ok(parts)
@@ -740,6 +737,76 @@ pub fn native_to_template(text: &str, caps: &Caps, field: FieldSet) -> Option<St
 
 fn env_name(token: &str) -> bool {
     crate::model::ids::is_valid(crate::model::ids::IdKind::EnvVar, token)
+}
+
+/// A value of a client expanding `${NAME}` and a bare `$NAME` with no
+/// escape (Gemini, Qwen Code) as a store template: both are references,
+/// any other `$` is literal. `None` for a `${...}` that is not a variable
+/// name and for a literal `$` right before a reference, which the store
+/// cannot spell.
+fn bare_dollar_to_template(text: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut literal = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find('$') {
+        literal.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let (name, consumed) = if let Some(braced) = after.strip_prefix('{') {
+            match braced.find('}') {
+                Some(end) => (&braced[..end], end + 2),
+                // An unterminated `${` is literal text.
+                None => ("", 0),
+            }
+        } else {
+            let len = after
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(after.len());
+            (&after[..len], len)
+        };
+        if name.is_empty() || (!after.starts_with('{') && !env_name(name)) {
+            literal.push('$');
+            rest = after;
+            continue;
+        }
+        if !env_name(name) || literal.ends_with('$') {
+            return None;
+        }
+        out.push_str(&literal.replace("${", "$${"));
+        literal.clear();
+        out.push_str(&format!("${{env:{name}}}"));
+        rest = &after[consumed..];
+    }
+    literal.push_str(rest);
+    out.push_str(&literal.replace("${", "$${"));
+    Some(out)
+}
+
+/// An OpenCode value as a store template: `{env:NAME}` is a reference and
+/// `${` literal text. `None` for `{file:path}` (no store form) and for a
+/// literal `$` right before a reference.
+fn brace_env_to_template(text: &str) -> Option<String> {
+    if text.contains("{file:") {
+        return None;
+    }
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{env:") {
+        let literal = &rest[..start];
+        if literal.ends_with('$') {
+            return None;
+        }
+        out.push_str(&literal.replace("${", "$${"));
+        let after = &rest[start + "{env:".len()..];
+        let end = after.find('}')?;
+        let name = &after[..end];
+        if !env_name(name) {
+            return None;
+        }
+        out.push_str(&format!("${{env:{name}}}"));
+        rest = &after[end + 1..];
+    }
+    out.push_str(&rest.replace("${", "$${"));
+    Some(out)
 }
 
 /// A Pi `env` or `headers` value as a store template, read the way Pi reads

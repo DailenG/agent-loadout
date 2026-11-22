@@ -776,7 +776,11 @@ fn self_check_list(plan: &TargetPlan, after: &[u8]) -> Result<(), CoreError> {
 }
 
 /// The whole document without the container at `path` (and the empty
-/// objects that held only it).
+/// objects that held only it). For a list keyed by a `[field]` segment
+/// (Continue's `mcpServers`), only the items the container addresses by
+/// name are taken out: items without a scalar `field`, items that are not
+/// mappings and later items repeating a name stay, so a change to them
+/// fails the check.
 fn outside(doc: &Document, path: &[&str]) -> Result<NativeValue, CoreError> {
     let mut root = NativeMap::new();
     for key in doc.list(&[])? {
@@ -785,8 +789,46 @@ fn outside(doc: &Document, path: &[&str]) -> Result<NativeValue, CoreError> {
         }
     }
     let mut root = NativeValue::Object(root);
-    remove_path(&mut root, crate::formats::mapping_path(path));
+    let keys = crate::formats::mapping_path(path);
+    let Some(segment) = path.get(keys.len()) else {
+        remove_path(&mut root, keys);
+        return Ok(root);
+    };
+    let field = &segment[1..segment.len() - 1];
+    let empty = match value_at_mut(&mut root, keys) {
+        Some(NativeValue::Array(items)) => {
+            let mut seen: Vec<NativeValue> = Vec::new();
+            items.retain(|item| {
+                let name = item
+                    .as_object()
+                    .and_then(|entry| entry.get(field))
+                    .filter(|name| !matches!(name, NativeValue::Array(_) | NativeValue::Object(_)));
+                match name {
+                    Some(name) if !seen.contains(name) => {
+                        seen.push(name.clone());
+                        false
+                    }
+                    _ => true,
+                }
+            });
+            items.is_empty()
+        }
+        Some(NativeValue::Object(map)) => map.is_empty(),
+        Some(NativeValue::Null) => true,
+        _ => false,
+    };
+    if empty {
+        remove_path(&mut root, keys);
+    }
     Ok(root)
+}
+
+/// The value at `path` in nested objects.
+fn value_at_mut<'v>(value: &'v mut NativeValue, path: &[&str]) -> Option<&'v mut NativeValue> {
+    path.iter().try_fold(value, |value, key| match value {
+        NativeValue::Object(map) => map.get_mut(key),
+        _ => None,
+    })
 }
 
 /// Removes `path` from `value`, then each ancestor left empty.
@@ -809,5 +851,62 @@ fn remove_path(value: &mut NativeValue, path: &[&str]) -> bool {
             }
             map.is_empty()
         }
+    }
+}
+
+// The self-check rejects bad writes the editors never make, so its
+// container comparison is tested here rather than through an apply.
+#[cfg(test)]
+mod tests {
+    use super::outside;
+    use crate::formats::{Document, Format};
+
+    const CONTINUE: &[&str] = &["mcpServers", "[name]"];
+
+    const BEFORE: &str = "name: Local\nmcpServers:\n  - name: files\n    command: npx\n  - uses: owner/block\n  - just-text\n  - name: files\n    command: duplicate\n";
+
+    fn same_outside(before: &str, after: &str) -> bool {
+        let parse = |text: &str| Document::parse(text.as_bytes(), Format::Yaml).unwrap();
+        outside(&parse(before), CONTINUE).unwrap() == outside(&parse(after), CONTINUE).unwrap()
+    }
+
+    #[test]
+    fn named_list_items_are_the_only_ones_left_out() {
+        // Owned, named items may change, come and go.
+        assert!(same_outside(
+            BEFORE,
+            &BEFORE.replace("command: npx", "command: bunx")
+        ));
+        assert!(same_outside(
+            BEFORE,
+            &format!("{BEFORE}  - name: search\n    url: https://x.example.com\n")
+        ));
+        assert!(same_outside(
+            "name: Local\n",
+            "name: Local\nmcpServers:\n  - name: a\n"
+        ));
+        assert!(same_outside("mcpServers:\n", "mcpServers:\n  - name: a\n"));
+        // Items without a scalar name, non-mappings and later duplicates
+        // are compared like everything else outside the container.
+        assert!(!same_outside(
+            BEFORE,
+            &BEFORE.replace("owner/block", "owner/other")
+        ));
+        assert!(!same_outside(
+            BEFORE,
+            &BEFORE.replace("just-text", "other-text")
+        ));
+        assert!(!same_outside(
+            BEFORE,
+            &BEFORE.replace("duplicate", "changed")
+        ));
+        assert!(!same_outside(
+            BEFORE,
+            &BEFORE.replace("  - just-text\n", "")
+        ));
+        assert!(!same_outside(
+            BEFORE,
+            &BEFORE.replace("name: Local", "name: Other")
+        ));
     }
 }

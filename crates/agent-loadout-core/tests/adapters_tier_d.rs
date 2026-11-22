@@ -923,6 +923,58 @@ fn yaml_anchors_block_the_target_as_read_only_format() {
 }
 
 #[test]
+fn continue_never_replaces_a_config_json_setup() {
+    let home = TempHome::new();
+    let fs = home.fs();
+    let env = home.env(Os::Linux);
+    let json_file = join(home.home(), ".continue/config.json");
+    let yaml_file = join(home.home(), ".continue/config.yaml");
+    put(&json_file, "{ \"models\": [] }\n");
+    let err = ported::CONTINUE
+        .mcp_targets(&env, &fs, Scope::User, None, &NO_PREFS)
+        .unwrap_err();
+    assert_eq!(err.code(), ErrorCode::ReadOnlyFormat, "{err}");
+    assert_eq!(err.path(), Some(json_file.as_path()));
+    // Once Continue has moved to config.yaml, that file is the target.
+    put(
+        &yaml_file,
+        "name: Local Assistant\nversion: 1.0.0\nschema: v1\n",
+    );
+    assert_eq!(user_files(&ported::CONTINUE, &env, &fs), [yaml_file]);
+
+    // Through the engine: a warning, and neither file is touched.
+    let fx = Fx::new();
+    let json_file = join(fx.th.home(), ".continue/config.json");
+    let yaml_file = join(fx.th.home(), ".continue/config.yaml");
+    fx.write(&json_file, "{ \"models\": [] }\n");
+    fx.put_server(store_stdio(
+        "github",
+        &["continue"],
+        &["-y", "server-github"],
+    ));
+    let plan = fx.plan();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.code() == ErrorCode::ReadOnlyFormat),
+        "{plan:#?}"
+    );
+    assert!(!plan.targets.iter().any(|target| target.file == yaml_file));
+    fx.apply();
+    assert!(!yaml_file.exists());
+    assert_eq!(fx.read(&json_file), "{ \"models\": [] }\n");
+
+    // Without config.json, a new config.yaml gets Continue's required keys.
+    std::fs::remove_file(&json_file).unwrap();
+    let (report, commit) = fx.apply();
+    assert!(commit.is_some(), "{report:#?}");
+    assert_eq!(
+        fx.read(&yaml_file).replace("\r\n", "\n"),
+        "name: Local Assistant\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: github\n    command: npx\n    args:\n      - -y\n      - server-github\n"
+    );
+}
+
+#[test]
 fn json5_files_are_written_only_when_they_are_jsonc() {
     let fx = Fx::new();
     let openclaw = join(fx.th.home(), ".openclaw/openclaw.json");

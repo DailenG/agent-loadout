@@ -2,6 +2,9 @@
 source: crates/agent-loadout-core/tests/adapters_tier_d.rs
 expression: golden
 ---
+name: Local Assistant
+version: 1.0.0
+schema: v1
 mcpServers:
   - name: files
     command: npx

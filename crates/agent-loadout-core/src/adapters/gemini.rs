@@ -14,8 +14,10 @@
 //! - A project hides a user server by listing its name in the project
 //!   file's `mcp.excluded` ([`ProjectDisable::ListMember`] in the project
 //!   file, as Gemini has no private project file).
-//! - Variables: Gemini expands `${NAME}` (and a bare `$NAME`) in every
-//!   string value of its settings file; Loadout writes `${NAME}`.
+//! - Variables: Gemini expands `${NAME}` and a bare `$NAME` in every
+//!   string value of its settings file, with no escape; Loadout writes
+//!   `${NAME}` and refuses literal text (and inline secret values) holding
+//!   `${` or `$` before a name character (`DollarBrace { bare: true }`).
 //!
 //! Assumptions left for Tier C verification (`scripts/verify-clients.md`,
 //! GEM-*):
@@ -61,7 +63,10 @@ pub const EXCLUDED: ContainerPath = ContainerPath(&["mcp", "excluded"]);
 
 const CAPS: Caps = Caps {
     transports: TransportSet::ALL,
-    env_ref: Some(EnvRefSyntax::DollarBrace { default: false }),
+    env_ref: Some(EnvRefSyntax::DollarBrace {
+        default: false,
+        bare: true,
+    }),
     env_ref_fields: FieldSet::COMMAND
         .union(FieldSet::ARGS)
         .union(FieldSet::ENV)

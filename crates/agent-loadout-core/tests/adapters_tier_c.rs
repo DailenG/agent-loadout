@@ -1687,3 +1687,218 @@ fn opencode_project_entries_land_in_an_existing_jsonc_file() {
     let entry = support::entry(&fx.plan(), &file, "repo-tools").state;
     assert_eq!(entry, EntryState::Synced);
 }
+
+// ---------------------------------------------------------------------------
+// Literal text and each client's expansion (review follow-up)
+
+/// The user file of client `id` in the fixture.
+fn user_file(fx: &Fx, id: &str) -> PathBuf {
+    agent_loadout_core::adapters::adapter(id)
+        .unwrap()
+        .mcp_targets(&fx.env, &fx.fs, Scope::User, None, &NO_PREFS)
+        .unwrap()
+        .swap_remove(0)
+        .file
+}
+
+/// The plan problem of `name` in client `id`'s user file, or `None` when
+/// the entry is planned for writing.
+fn problem_of(fx: &Fx, plan: &Plan, id: &str, name: &str) -> Option<ErrorCode> {
+    let entry = support::entry(plan, &user_file(fx, id), name);
+    match entry.state {
+        EntryState::Blocked => Some(entry.problem.as_ref().unwrap().code()),
+        _ => None,
+    }
+}
+
+/// The value an entry is planned with in client `id`'s user file.
+fn planned(fx: &Fx, plan: &Plan, id: &str, name: &str) -> Value {
+    native_json(
+        support::entry(plan, &user_file(fx, id), name)
+            .desired
+            .as_ref()
+            .unwrap(),
+    )
+}
+
+#[test]
+fn literal_text_is_refused_where_the_client_would_expand_it() {
+    let fx = Fx::new();
+    fx.edit("literals", |tx| {
+        // OpenCode and MiMo Code substitute `{env:..}` and `{file:..}`.
+        tx.write(
+            "servers/brace.toml",
+            "schema = 1\nid = \"brace\"\ntransport = \"stdio\"\ncommand = \"brace-mcp\"\n\
+             args = ['--token={env:X}']\n[enable]\nclients = [\"opencode\", \"mimo-code\", \"gemini\"]\n",
+        )?;
+        tx.write(
+            "servers/file.toml",
+            "schema = 1\nid = \"file\"\ntransport = \"stdio\"\ncommand = \"file-mcp\"\n\
+             [env]\nKEY = '{file:~/.ssh/id_rsa}'\n[enable]\nclients = [\"opencode\", \"claude-code\"]\n",
+        )?;
+        // A literal `${` (store `$${`): left alone by OpenCode, expanded by
+        // the `${NAME}` clients.
+        tx.write(
+            "servers/dollar.toml",
+            "schema = 1\nid = \"dollar\"\ntransport = \"stdio\"\ncommand = \"dollar-mcp\"\n\
+             args = ['$${HOME}/x']\n[enable]\nclients = [\"opencode\", \"mimo-code\", \"claude-code\", \"gemini\"]\n",
+        )?;
+        // A bare `$NAME`: expanded by Gemini and Qwen Code only.
+        tx.write(
+            "servers/bare.toml",
+            "schema = 1\nid = \"bare\"\ntransport = \"stdio\"\ncommand = \"bare-mcp\"\n\
+             args = ['p$ss']\n[enable]\nclients = [\"gemini\", \"qwen-code\", \"claude-code\", \"opencode\"]\n",
+        )?;
+        tx.write(
+            "servers/digit.toml",
+            "schema = 1\nid = \"digit\"\ntransport = \"stdio\"\ncommand = \"digit-mcp\"\n\
+             [env]\nPRICE = 'costs $5'\n[enable]\nclients = [\"gemini\"]\n",
+        )?;
+        tx.write(
+            "servers/lone.toml",
+            "schema = 1\nid = \"lone\"\ntransport = \"stdio\"\ncommand = \"lone-mcp\"\n\
+             args = ['a $ b', 'end$']\n[enable]\nclients = [\"gemini\", \"qwen-code\"]\n",
+        )
+    });
+    let plan = fx.plan();
+    let unavailable = Some(ErrorCode::DeliveryUnavailable);
+
+    for id in ["opencode", "mimo-code"] {
+        assert_eq!(problem_of(&fx, &plan, id, "brace"), unavailable, "{id}");
+        // `${` reaches OpenCode and MiMo Code as written.
+        assert_eq!(problem_of(&fx, &plan, id, "dollar"), None, "{id}");
+    }
+    let dollar = planned(&fx, &plan, "opencode", "dollar");
+    assert_eq!(dollar["command"][1], "${HOME}/x");
+    assert_eq!(problem_of(&fx, &plan, "opencode", "file"), unavailable);
+    let message = support::entry(&plan, &user_file(&fx, "opencode"), "file")
+        .problem
+        .as_ref()
+        .unwrap()
+        .message()
+        .to_owned();
+    assert!(message.contains("`{file:`"), "{message}");
+    // Clients without `{..}` substitution take the same text unchanged.
+    assert_eq!(problem_of(&fx, &plan, "gemini", "brace"), None);
+    assert_eq!(problem_of(&fx, &plan, "claude-code", "file"), None);
+    // The `${NAME}` clients keep refusing a literal `${`.
+    for id in ["claude-code", "gemini"] {
+        assert_eq!(problem_of(&fx, &plan, id, "dollar"), unavailable, "{id}");
+    }
+
+    // Bare `$NAME`: refused for Gemini and Qwen Code (`[verify]` GEM-6).
+    for id in ["gemini", "qwen-code"] {
+        assert_eq!(problem_of(&fx, &plan, id, "bare"), unavailable, "{id}");
+        // A `$` before anything but a name character stays literal.
+        assert_eq!(problem_of(&fx, &plan, id, "lone"), None, "{id}");
+    }
+    assert_eq!(problem_of(&fx, &plan, "gemini", "digit"), unavailable);
+    for id in ["claude-code", "opencode"] {
+        assert_eq!(problem_of(&fx, &plan, id, "bare"), None, "{id}");
+    }
+    let bare = planned(&fx, &plan, "claude-code", "bare");
+    assert_eq!(bare["args"][0], "p$ss");
+    let lone = planned(&fx, &plan, "gemini", "lone");
+    assert_eq!(lone["args"], serde_json::json!(["a $ b", "end$"]));
+}
+
+#[test]
+fn inline_values_are_refused_where_the_client_would_expand_them() {
+    const BRACE: &str = "fake-token{env:HOME}";
+    const BARE: &str = "fake-p$ss-0001";
+    let fx = Fx::new();
+    fx.keyring.insert("loadout", "BRACE_TOKEN", BRACE);
+    fx.keyring.insert("loadout", "BARE_TOKEN", BARE);
+    fx.edit("inline", |tx| {
+        tx.write(
+            "secrets.toml",
+            "schema = 1\n\n[secrets.BRACE_TOKEN]\nref = \"keyring://loadout/BRACE_TOKEN\"\n\n\
+             [secrets.BARE_TOKEN]\nref = \"keyring://loadout/BARE_TOKEN\"\n",
+        )?;
+        for (id, alias) in [("brace", "BRACE_TOKEN"), ("bare", "BARE_TOKEN")] {
+            tx.write(
+                &format!("servers/{id}.toml"),
+                format!(
+                    "schema = 1\nid = \"{id}\"\ntransport = \"stdio\"\ncommand = \"{id}-mcp\"\n\
+                     [env]\nTOKEN = \"${{secret:{alias}}}\"\n[delivery]\nmode = \"inline\"\n\
+                     [enable]\nclients = [\"opencode\", \"gemini\", \"claude-code\"]\n"
+                ),
+            )?;
+        }
+        Ok(())
+    });
+    let plan = fx.plan();
+    let unavailable = Some(ErrorCode::DeliveryUnavailable);
+    assert_eq!(problem_of(&fx, &plan, "opencode", "brace"), unavailable);
+    assert_eq!(problem_of(&fx, &plan, "gemini", "bare"), unavailable);
+    // The message names the reference, never the value.
+    for (id, name) in [("opencode", "brace"), ("gemini", "bare")] {
+        let message = support::entry(&plan, &user_file(&fx, id), name)
+            .problem
+            .as_ref()
+            .unwrap()
+            .message()
+            .to_owned();
+        assert!(
+            !message.contains(BRACE) && !message.contains(BARE),
+            "{message}"
+        );
+    }
+    // Elsewhere the values are written inline.
+    assert_eq!(
+        planned(&fx, &plan, "gemini", "brace")["env"]["TOKEN"],
+        BRACE
+    );
+    assert_eq!(
+        planned(&fx, &plan, "opencode", "bare")["environment"]["TOKEN"],
+        BARE
+    );
+    assert_eq!(
+        planned(&fx, &plan, "claude-code", "bare")["env"]["TOKEN"],
+        BARE
+    );
+}
+
+#[test]
+fn imports_read_bare_dollar_and_brace_env_values_as_the_client_does() {
+    use agent_loadout_core::adapters::caps::FieldSet;
+    use agent_loadout_core::apply::render::native_to_template;
+
+    let caps_of = |id: &str| {
+        &agent_loadout_core::adapters::adapter(id)
+            .unwrap()
+            .mcp
+            .as_ref()
+            .unwrap()
+            .caps
+    };
+    // Gemini and Qwen Code: `$NAME` and `${NAME}` are references.
+    for id in ["gemini", "qwen-code"] {
+        let read = |text: &str| native_to_template(text, caps_of(id), FieldSet::ENV);
+        for (native, template) in [
+            ("$HOME/x", Some("${env:HOME}/x")),
+            ("${HOME}-$USER_2", Some("${env:HOME}-${env:USER_2}")),
+            ("a $ b, end$", Some("a $ b, end$")),
+            ("open ${ only", Some("open $${ only")),
+            ("${}", Some("$${}")),
+            ("$1", Some("$1")),
+            ("$$HOME", None),
+            ("${A:-b}", None),
+        ] {
+            assert_eq!(read(native).as_deref(), template, "{id}: {native}");
+        }
+    }
+    // OpenCode and MiMo Code: `{env:NAME}` is a reference, `${` literal.
+    for id in ["opencode", "mimo-code"] {
+        let read = |text: &str| native_to_template(text, caps_of(id), FieldSet::ENV);
+        for (native, template) in [
+            ("{env:X}-${Y}", Some("${env:X}-$${Y}")),
+            ("plain $HOME", Some("plain $HOME")),
+            ("{file:/etc/key}", None),
+            ("${env:X}", None),
+            ("{env:not a name}", None),
+        ] {
+            assert_eq!(read(native).as_deref(), template, "{id}: {native}");
+        }
+    }
+}

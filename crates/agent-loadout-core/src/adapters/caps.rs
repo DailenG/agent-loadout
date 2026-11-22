@@ -44,15 +44,20 @@ impl TransportSet {
 /// How a client spells an environment variable reference it expands itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnvRefSyntax {
-    /// `${NAME}`; `default` when `${NAME:-default}` is understood too.
-    DollarBrace { default: bool },
+    /// `${NAME}`; `default` when `${NAME:-default}` is understood too;
+    /// `bare` when a bare `$NAME` is expanded as well, with no escape
+    /// (Gemini, Qwen Code; `[verify]` GEM-6), so literal text holding `$`
+    /// before a name character cannot be written for the client.
+    DollarBrace { default: bool, bare: bool },
     /// `${NAME}` and bare `$NAME`, no default; `$$` is a literal `$` and
     /// `$!` a literal `!`, so literal text is written with every `$`
     /// doubled and a leading `!` as `$!` (Pi; gate V2 PI-7).
     Dollar,
     /// `${env:NAME}` (Cursor, Windsurf, Devin).
     DollarBraceEnv,
-    /// `{env:NAME}` (OpenCode).
+    /// `{env:NAME}` (OpenCode, MiMo Code). The client also substitutes
+    /// `{file:path}`, so literal text holding `{env:` or `{file:` cannot
+    /// be written for it; a literal `${` is left alone.
     BraceEnv,
     /// No expansion; a parent variable is forwarded by name (Codex
     /// `env_vars`, `bearer_token_env_var`, `env_http_headers`).

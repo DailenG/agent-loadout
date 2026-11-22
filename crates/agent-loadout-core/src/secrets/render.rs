@@ -347,7 +347,8 @@ impl<'a> Renderer<'a> {
     }
 
     /// Literal text; escaped where the client has an escape (Pi), refused
-    /// where it would expand a `${` in it otherwise.
+    /// where the client would expand part of it otherwise
+    /// ([`expanded_token`]).
     fn literal(&self, pieces: &[Piece], field: FieldSet) -> Result<String, CoreError> {
         let mut out = String::new();
         for piece in pieces {
@@ -359,11 +360,11 @@ impl<'a> Renderer<'a> {
     }
 
     fn check_literal(&self, text: &str, field: FieldSet) -> Result<(), CoreError> {
-        if self.policy.env_syntax(field).is_some() && text.contains("${") {
+        if let Some(token) = expanded_token(self.policy.env_syntax(field), text) {
             return Err(CoreError::new(
                 ErrorCode::DeliveryUnavailable,
                 format!(
-                    "{} would expand the literal `${{` in {text:?}; it has no escape for it",
+                    "{} would expand the literal `{token}` in {text:?}; it has no escape for it",
                     self.policy.client
                 ),
             ));
@@ -449,6 +450,21 @@ impl<'a> Renderer<'a> {
                         out.push_str(&escaped);
                         self.inline.push(SecretValue::new(escaped));
                     } else {
+                        // The value is secret: the message names the
+                        // reference, never the value.
+                        if let Some(token) =
+                            expanded_token(self.policy.env_syntax(field), value.expose())
+                        {
+                            return Err(CoreError::new(
+                                ErrorCode::DeliveryUnavailable,
+                                format!(
+                                    "{} would expand `{token}` in the value of `{}` written \
+                                     inline; it has no escape for it (use another delivery mode)",
+                                    self.policy.client,
+                                    source.variable()
+                                ),
+                            ));
+                        }
                         out.push_str(value.expose());
                     }
                     self.inline.push(value);
@@ -607,6 +623,34 @@ fn sources(pieces: &[Piece]) -> Vec<Source> {
 
 fn is_whole(pieces: &[Piece]) -> bool {
     matches!(pieces, [Piece::Ref(_)])
+}
+
+/// The part of literal `text` a client expanding `syntax` would replace,
+/// when the client has no escape for it: `${` (`DollarBrace`,
+/// `DollarBraceEnv`), also `$` before a name character (`DollarBrace` with
+/// `bare`), `{env:` or `{file:` (`BraceEnv`). `None` for text the client
+/// reads as written, and for Pi (`Dollar`), whose literals are escaped.
+fn expanded_token(syntax: Option<EnvRefSyntax>, text: &str) -> Option<&'static str> {
+    match syntax? {
+        EnvRefSyntax::DollarBrace { bare, .. } => {
+            if text.contains("${") {
+                Some("${")
+            } else if bare
+                && text.as_bytes().windows(2).any(|pair| {
+                    pair[0] == b'$' && (pair[1].is_ascii_alphanumeric() || pair[1] == b'_')
+                })
+            {
+                Some("$NAME")
+            } else {
+                None
+            }
+        }
+        EnvRefSyntax::DollarBraceEnv => text.contains("${").then_some("${"),
+        EnvRefSyntax::BraceEnv => ["{env:", "{file:"]
+            .into_iter()
+            .find(|token| text.contains(token)),
+        EnvRefSyntax::Dollar | EnvRefSyntax::CodexForward => None,
+    }
 }
 
 /// One argument of a command line run through the client's shell: single
