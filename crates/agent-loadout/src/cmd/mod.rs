@@ -18,6 +18,7 @@ pub mod rollback;
 pub mod secrets;
 pub mod server;
 pub mod show;
+pub mod skills;
 pub mod status;
 pub mod tag;
 

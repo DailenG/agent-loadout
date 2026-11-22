@@ -17,6 +17,7 @@ pub mod model;
 pub mod paths;
 pub mod remote;
 pub mod secrets;
+pub mod skills;
 pub mod store;
 
 pub use env::{Clock, Env, EnvBuilder, FixedClock, KnownFolder, Os, SystemClock};

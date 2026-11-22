@@ -220,6 +220,9 @@ pub enum ErrorCode {
     /// AP-6), and the file was written; the change loads after a full quit
     /// and restart of the client.
     RestartRequired,
+    /// A skill's source (git repository or folder) cannot be reached or no
+    /// longer holds the skill (SPEC 12.4). The store copy is left intact.
+    SourceUnreachable,
 }
 
 impl ErrorCode {
@@ -293,6 +296,7 @@ impl ErrorCode {
             ErrorCode::ReadOnlyFormat => "read_only_format",
             ErrorCode::ClientEnableRequired => "client_enable_required",
             ErrorCode::RestartRequired => "restart_required",
+            ErrorCode::SourceUnreachable => "source_unreachable",
         }
     }
 }

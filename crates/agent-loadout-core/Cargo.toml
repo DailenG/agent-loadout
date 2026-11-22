@@ -35,6 +35,8 @@ specta = { workspace = true, optional = true }
 # on replaced client files (SPEC 8.4), without `unsafe` in this crate.
 [target.'cfg(windows)'.dependencies]
 windows-permissions.workspace = true
+# Skill links (SPEC 12.2): directory junctions without admin rights.
+junction.workspace = true
 
 # Lock state of Secret Service entries (SPEC 11.3 `locked`, gate V1 FB-6).
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -44,6 +46,11 @@ secret-service.workspace = true
 agent-loadout-testkit.workspace = true
 insta.workspace = true
 proptest.workspace = true
+
+# Skill tests make junctions inside their temp root (link escapes, tool
+# folder classification).
+[target.'cfg(windows)'.dev-dependencies]
+junction.workspace = true
 
 [lints]
 workspace = true

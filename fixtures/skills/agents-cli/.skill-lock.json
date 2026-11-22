@@ -1,0 +1,13 @@
+{
+  "version": 3,
+  "skills": {
+    "pdf-tools": {
+      "source": "example-org/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/example-org/agent-skills.git",
+      "skillPath": "skills/pdf-tools/SKILL.md",
+      "installedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}

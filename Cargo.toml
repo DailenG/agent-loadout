@@ -26,6 +26,10 @@ insta = { version = "1", default-features = false }
 # CST, and only for files that also parse as JSONC.
 json5 = "1"
 jsonc-parser = { version = "0.34", features = ["cst"] }
+# Windows directory junctions for skill links (SPEC 12.2): created through
+# Win32 APIs, no Developer Mode or admin needed. The `unstable_admin`
+# default feature (privilege adjustment) is left out.
+junction = { version = "2", default-features = false }
 # OS keyring (SPEC 11.2): Windows Credential Manager, macOS Keychain,
 # Secret Service on Linux (pure Rust zbus client, no libdbus).
 keyring = "4"

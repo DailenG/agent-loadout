@@ -29,6 +29,9 @@ views, tags and restore: `loadout show|tag|restore|backup`,
 app shell: Tauri 2 with typed IPC, the SkillDock shell port, empty pages),
 M15 (desktop MCP page with per-client pills, Form/TOML/Preview editor and
 paste-anything, Tools page, pending-changes drawer with "Undo this apply"),
+M18 (skills store and CLI: `loadout skills ls|add|rm|enable|disable|update|scan`,
+installs from git, folders and `.zip`/`.skill` archives, junction links on
+Windows, project links hidden through `.git/info/exclude`),
 M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and
 M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
 editors, and the ported user-scope clients) are in place. Gates V1 (Tier A)
