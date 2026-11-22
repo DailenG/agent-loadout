@@ -14,7 +14,10 @@ struct Cli {
 
 impl Cli {
     fn new() -> Self {
-        let th = TempHome::new();
+        Self::with(TempHome::new())
+    }
+
+    fn with(th: TempHome) -> Self {
         let home = th.root().join("lh");
         Self { th, home }
     }
@@ -348,4 +351,51 @@ fn restore_files_brings_back_client_bytes() {
     // The next apply re-creates the entry.
     cli.ok(&["apply"]);
     assert!(cli.claude().contains("\"notes\""));
+}
+
+/// SPEC 16.1: a backup copy is named after the whole client path, so a deep
+/// profile pushes it past `MAX_PATH`; apply and restore still work.
+#[cfg(windows)]
+#[test]
+fn restore_files_works_past_max_path() {
+    let outer = TempHome::new();
+    let deep = outer
+        .root()
+        .join("a-deep-folder-that-stands-in-for-a-long-profile")
+        .join("and-another-one-so-the-backup-name-gets-long");
+    std::fs::create_dir_all(&deep).unwrap();
+    let cli = Cli::with(TempHome::new_in(&deep));
+    let before = "{\n  \"theme\": \"dark\"\n}\n";
+    std::fs::write(cli.th.home().join(".claude.json"), before).unwrap();
+    let added = cli.ok(&[
+        "server",
+        "add",
+        "notes",
+        "--client",
+        "claude-code",
+        "--",
+        "npx",
+    ]);
+    let apply_id = added["apply"]["apply_id"].as_str().unwrap().to_owned();
+    assert!(cli.claude().contains("\"notes\""));
+    let runs = cli.home.join("backups").join("files");
+    let backups: Vec<PathBuf> = std::fs::read_dir(&runs)
+        .unwrap()
+        .flat_map(|run| std::fs::read_dir(run.unwrap().path()).unwrap())
+        .map(|file| file.unwrap().path())
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    assert!(
+        backups[0].as_os_str().len() > 260,
+        "the backup path must pass MAX_PATH: {}",
+        backups[0].display()
+    );
+
+    let restored = cli.ok(&["restore", "--files", &apply_id]);
+    assert_eq!(restored["files"][0]["outcome"], "restored", "{restored:#}");
+    assert_eq!(cli.claude(), before);
+    // Paths shown to the user never carry the `\\?\` prefix (JSON-escaped).
+    for doc in [&added, &restored] {
+        assert!(!doc.to_string().contains(r"\\\\?\\"), "{doc:#}");
+    }
 }

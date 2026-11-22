@@ -246,3 +246,24 @@ fn serde_json_string(dropbox_root: &Path) -> String {
         .replace('"', "\\\"");
     format!(r#"{{"personal": {{"path": "{escaped}", "host": 1, "is_team": false}}}}"#)
 }
+
+#[cfg(windows)]
+#[test]
+fn extended_paths_round_trip_through_plain() {
+    use agent_loadout_core::paths::{extended, normalize, plain};
+    let long_claude = r"\\?\C:\Users\me\.claude.json";
+    for (path, long) in [
+        (r"C:\Users\me\.claude.json", long_claude),
+        (r"C:/Users/me/./a/../.claude.json", long_claude),
+        (r"C:\", r"\\?\C:\"),
+        (r"\\srv\share\f.json", r"\\?\UNC\srv\share\f.json"),
+    ] {
+        let made = extended(Path::new(path));
+        assert_eq!(made.as_os_str(), long, "{path}");
+        assert_eq!(plain(&made).as_ref(), normalize(Path::new(path)));
+    }
+    // Relative and already-extended paths are left alone.
+    assert_eq!(extended(Path::new(r"a\b")).as_os_str(), r"a\b");
+    assert_eq!(extended(Path::new(r"\\?\C:\x")).as_os_str(), r"\\?\C:\x");
+    assert_eq!(plain(Path::new(r"C:\x")).as_os_str(), r"C:\x");
+}

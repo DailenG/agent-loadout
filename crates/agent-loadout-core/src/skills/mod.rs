@@ -20,6 +20,7 @@ pub mod install;
 pub mod link;
 pub mod store;
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -30,7 +31,7 @@ use crate::adapters::detect::RegistryProbe;
 use crate::env::Env;
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
-use crate::paths::{LoadoutHome, normalize};
+use crate::paths::{LoadoutHome, normalize, plain};
 use crate::remote::git::Runner;
 
 pub use install::{InstallRequest, Installed, Naming, Source, UpdateCheck, UpdateStatus, Updated};
@@ -136,14 +137,8 @@ pub(crate) fn entry(fs: &dyn Fs, path: &Path) -> Result<Entry, CoreError> {
 /// back verbatim (`\\?\C:\...`, `\\?\UNC\server\...`), and relative
 /// symbolic link targets are relative to the link's folder.
 fn plain_target(link: &Path, target: PathBuf) -> PathBuf {
-    let text = target.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{rest}"));
-    }
-    if let Some(rest) = text.strip_prefix(r"\\?\")
-        && rest.as_bytes().get(1) == Some(&b':')
-    {
-        return PathBuf::from(rest);
+    if let Cow::Owned(target) = plain(&target) {
+        return target;
     }
     if target.is_relative()
         && let Some(parent) = link.parent()

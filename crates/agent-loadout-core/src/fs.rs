@@ -1,9 +1,12 @@
 //! File system facade. Core code takes `&dyn Fs` so tests can confine every
 //! access to a temp root (`agent_loadout_testkit::RootedFs`).
 
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+use crate::paths::extended;
 
 pub trait Fs: Send + Sync {
     /// The directory this view is confined to, or `None` for the whole file
@@ -66,88 +69,109 @@ pub trait Fs: Send + Sync {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RealFs;
 
+/// `path` as [`RealFs`] hands it to the OS: on Windows, in its `\\?\` form
+/// ([`extended`]) once it is long enough to reach `MAX_PATH`, so names
+/// built from whole paths (backup copies) work past it (SPEC 16.1). std
+/// does this for its own calls; the Windows security calls need it too.
+/// Paths given back to callers stay as they were given.
+fn long(path: &Path) -> Cow<'_, Path> {
+    // std's threshold: `MAX_PATH` less room for an 8.3 file name.
+    const LIMIT: usize = 248;
+    if cfg!(windows) && path.as_os_str().len() >= LIMIT {
+        extended(path)
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
 impl Fs for RealFs {
     fn root(&self) -> Option<&Path> {
         None
     }
 
     fn exists(&self, path: &Path) -> bool {
-        path.exists()
+        long(path).exists()
     }
 
     fn is_dir(&self, path: &Path) -> bool {
-        path.is_dir()
+        long(path).is_dir()
     }
 
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
-        std::fs::read_to_string(path)
+        std::fs::read_to_string(long(path))
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        std::fs::read(path)
+        std::fs::read(long(path))
     }
 
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
-        std::fs::write(path, contents)
+        std::fs::write(long(path), contents)
     }
 
     fn write_new(&self, path: &Path, contents: &[u8], like: Option<&Path>) -> io::Result<()> {
+        let path = long(path);
+        let like = like.map(long);
         let mut options = File::options();
         options.write(true).create_new(true);
-        if let Some(like) = like {
+        if let Some(like) = &like {
             platform::copy_open_options(&mut options, like)?;
         }
-        let mut file = options.open(path)?;
+        let mut file = options.open(&path)?;
         let written = (|| {
-            if let Some(like) = like {
-                platform::copy_permissions(like, path, &file)?;
+            if let Some(like) = &like {
+                platform::copy_permissions(like, &path, &file)?;
             }
             file.write_all(contents)?;
             file.sync_all()
         })();
         if written.is_err() {
             drop(file);
-            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(&path);
         }
         written
     }
 
     fn replace(&self, from: &Path, to: &Path) -> io::Result<()> {
-        std::fs::rename(from, to)?;
-        platform::sync_parent(to)
+        let to = long(to);
+        std::fs::rename(long(from), &to)?;
+        platform::sync_parent(&to)
     }
 
     fn write_private(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        let path = long(path);
         let mut options = File::options();
         options.write(true).create(true).truncate(true);
         platform::private_open_options(&mut options);
-        let mut file = options.open(path)?;
+        let mut file = options.open(&path)?;
         // Restrict before any content lands, also for an existing file.
-        platform::make_private(path, &file)?;
+        platform::make_private(&path, &file)?;
         file.write_all(contents)?;
         file.sync_all()
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
-        std::fs::create_dir_all(path)
+        std::fs::create_dir_all(long(path))
     }
 
     fn create_private_dir_all(&self, path: &Path) -> io::Result<()> {
-        std::fs::create_dir_all(path)?;
-        platform::make_private_dir(path)
+        let path = long(path);
+        std::fs::create_dir_all(&path)?;
+        platform::make_private_dir(&path)
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
-        std::fs::remove_file(path)
+        std::fs::remove_file(long(path))
     }
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
-        std::fs::remove_dir_all(path)
+        std::fs::remove_dir_all(long(path))
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
-        let mut entries = std::fs::read_dir(path)?
-            .map(|entry| entry.map(|entry| entry.path()))
+        // Entries are joined to `path` as given, never to its `\\?\` form.
+        let mut entries = std::fs::read_dir(long(path))?
+            .map(|entry| entry.map(|entry| path.join(entry.file_name())))
             .collect::<io::Result<Vec<_>>>()?;
         entries.sort();
         Ok(entries)
@@ -159,11 +183,11 @@ impl Fs for RealFs {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(path)
+            .open(long(path))
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        std::fs::canonicalize(path)
+        std::fs::canonicalize(long(path))
     }
 }
 

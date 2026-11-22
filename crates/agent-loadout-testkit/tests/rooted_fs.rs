@@ -73,3 +73,30 @@ fn access_outside_root_panics_without_touching_disk() {
 
     assert!(!outside.exists(), "a rejected write reached the disk");
 }
+
+/// A `\\?\` path is confined by its plain form: inside the root it works,
+/// outside it (also through `..`) it panics.
+#[cfg(windows)]
+#[test]
+fn extended_paths_are_confined_like_plain_ones() {
+    use agent_loadout_core::paths::extended;
+    let th = TempHome::new();
+    let fs = th.fs();
+    let file = th.home().join("a.json");
+    fs.write(&extended(&file), b"{}").unwrap();
+    assert_eq!(fs.read_to_string(&file).unwrap(), "{}");
+
+    let outside = outside(&th);
+    assert_panics("extended outside", || {
+        let _ = fs.write(&extended(&outside), b"x");
+    });
+    let escape = std::ffi::OsString::from(format!(
+        r"{}\..\..\{}",
+        extended(&th.home()).display(),
+        outside.file_name().unwrap().to_string_lossy()
+    ));
+    assert_panics("extended through ..", || {
+        let _ = fs.write(Path::new(&escape), b"x");
+    });
+    assert!(!outside.exists(), "a rejected write reached the disk");
+}

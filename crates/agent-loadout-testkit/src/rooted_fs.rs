@@ -2,12 +2,13 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use agent_loadout_core::paths::normalize;
+use agent_loadout_core::paths::{normalize, plain};
 use agent_loadout_core::{Fs, RealFs};
 
 /// A real file system confined to one root. Any access to a path outside the
 /// root (including relative paths and `..` escapes) panics before touching
 /// the disk, so a test that would read or write real agent configs fails.
+/// A `\\?\` path is checked in its plain form.
 #[derive(Debug, Clone)]
 pub struct RootedFs {
     root: PathBuf,
@@ -23,12 +24,12 @@ impl RootedFs {
             root.display()
         );
         Self {
-            root: normalize(&root),
+            root: normalize(&plain(&root)),
         }
     }
 
     fn check<'a>(&self, path: &'a Path) -> &'a Path {
-        if !path.is_absolute() || !normalize(path).starts_with(&self.root) {
+        if !path.is_absolute() || !normalize(&plain(path)).starts_with(&self.root) {
             panic!(
                 "RootedFs: access outside test root: {} (root {})",
                 path.display(),

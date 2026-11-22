@@ -35,9 +35,15 @@ pub struct TempHome {
 
 impl TempHome {
     pub fn new() -> Self {
+        Self::new_in(std::env::temp_dir())
+    }
+
+    /// A temp root inside `parent` (for a deep root that pushes derived
+    /// paths past Windows `MAX_PATH`).
+    pub fn new_in(parent: impl AsRef<Path>) -> Self {
         let dir = tempfile::Builder::new()
             .prefix("loadout-test-")
-            .tempdir()
+            .tempdir_in(parent)
             .expect("create temp root");
         let home = Self { dir };
         let xdg = home.xdg();

@@ -1,7 +1,7 @@
 //! `LOADOUT_HOME` resolution, data layout and sync-root detection (SPEC 4.5).
 
 use std::borrow::Cow;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf, Prefix};
 
 use crate::brand;
@@ -297,6 +297,70 @@ pub fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// The `\\?\` (extended-length) form of an absolute Windows path, which
+/// file system calls accept past `MAX_PATH` (SPEC 16.1): `C:\x` is
+/// `\\?\C:\x`, `\\server\share\x` is `\\?\UNC\server\share\x`. The path is
+/// normalized first, since the OS takes a `\\?\` path literally (no `/`,
+/// `.` or `..` handling). Any other path, and every path off Windows, is
+/// returned as it is.
+pub fn extended(path: &Path) -> Cow<'_, Path> {
+    if !path.is_absolute() {
+        return Cow::Borrowed(path);
+    }
+    let normal = normalize(path);
+    let mut components = normal.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Cow::Borrowed(path);
+    };
+    let mut out = match prefix.kind() {
+        Prefix::Disk(letter) => OsString::from(format!(r"\\?\{}:", char::from(letter))),
+        Prefix::UNC(server, share) => {
+            let mut out = OsString::from(r"\\?\UNC\");
+            out.push(server);
+            out.push(r"\");
+            out.push(share);
+            out
+        }
+        _ => return Cow::Borrowed(path),
+    };
+    let mut named = false;
+    for component in components {
+        if let Component::Normal(name) = component {
+            out.push(r"\");
+            out.push(name);
+            named = true;
+        }
+    }
+    if !named {
+        out.push(r"\");
+    }
+    Cow::Owned(PathBuf::from(out))
+}
+
+/// `path` without a `\\?\` prefix ([`extended`] undone): `\\?\C:\x` is
+/// `C:\x`, `\\?\UNC\server\share\x` is `\\server\share\x`. Any other path,
+/// and every path off Windows, is returned as it is.
+pub fn plain(path: &Path) -> Cow<'_, Path> {
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Cow::Borrowed(path);
+    };
+    let head = match prefix.kind() {
+        Prefix::VerbatimDisk(letter) => OsString::from(format!("{}:", char::from(letter))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut head = OsString::from(r"\\");
+            head.push(server);
+            head.push(r"\");
+            head.push(share);
+            head
+        }
+        _ => return Cow::Borrowed(path),
+    };
+    let mut out = PathBuf::from(head);
+    out.extend(components);
+    Cow::Owned(out)
 }
 
 /// Whether `path` equals `base` or lies below it, comparing components

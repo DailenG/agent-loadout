@@ -89,8 +89,7 @@ impl OpStub {
     /// signed in, no items).
     pub fn install(dir: &Path) -> Self {
         let target = dir.join(format!("op{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(binary(), &target)
-            .unwrap_or_else(|err| panic!("install op-stub at {}: {err}", target.display()));
+        copy_executable(&binary(), &target);
         let mut stub = Self {
             dir: dir.to_owned(),
             config: OpStubConfig::default(),
@@ -176,6 +175,29 @@ impl Drop for OpStub {
             forbidden.join("\n")
         );
     }
+}
+
+/// Copies an executable so that it can be run at once from any thread.
+///
+/// On Unix the copy runs in a child process (`cp`): a write descriptor
+/// opened in this process would be inherited by a child that another test
+/// thread forks at the same moment, and while that child holds it, running
+/// the copy fails with ETXTBSY ("Text file busy").
+fn copy_executable(from: &Path, to: &Path) {
+    #[cfg(unix)]
+    {
+        let status = std::process::Command::new("cp")
+            .arg("--")
+            .arg(from)
+            .arg(to)
+            .status()
+            .unwrap_or_else(|err| panic!("run cp for {}: {err}", to.display()));
+        assert!(status.success(), "cp {} failed: {status}", to.display());
+    }
+    #[cfg(not(unix))]
+    std::fs::copy(from, to)
+        .map(drop)
+        .unwrap_or_else(|err| panic!("install op-stub at {}: {err}", to.display()));
 }
 
 /// The built `op-stub` binary. See [`built_binary`].
