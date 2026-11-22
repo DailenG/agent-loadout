@@ -11,6 +11,7 @@ pub mod exec;
 pub mod git_credential;
 pub mod history;
 pub mod import;
+pub mod migrate;
 pub mod project;
 pub mod remote;
 pub mod restore;

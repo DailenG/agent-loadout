@@ -14,6 +14,7 @@ pub mod formats;
 pub mod fs;
 pub mod layering;
 pub mod local_settings;
+pub mod migrate;
 pub mod model;
 pub mod paths;
 pub mod remote;

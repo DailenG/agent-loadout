@@ -1,0 +1,11 @@
+# Codex configuration (synthetic fixture)
+model = "example-model"
+
+[mcp_servers.time]
+command = "uvx"
+args = ["mcp-server-time"]
+
+# Written by SkillDock: one tool of context7 is off.
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "mcp-filter", "--include", "resolve-library-id", "--", "npx", "-y", "@upstash/context7-mcp"]

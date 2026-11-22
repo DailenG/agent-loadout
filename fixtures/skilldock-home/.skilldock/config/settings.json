@@ -1,0 +1,29 @@
+{
+  "skillLibraryProvider": "skilldock",
+  "agentSkillsCompatibilityEnabled": true,
+  "defaultOpenToolId": "vscode",
+  "skillInstallActivation": "disable-all-tools",
+  "mcpInstallActivation": "apply-all-tools",
+  "skillSourceViewStyle": "select",
+  "skillTagFilterLayout": "inline",
+  "language": "zh-CN",
+  "languageSource": "auto",
+  "theme": "dark",
+  "githubConnection": {
+    "authMethod": "device",
+    "userId": 1001,
+    "username": "example-user",
+    "avatarUrl": "",
+    "credentialPersisted": true
+  },
+  "githubBackup": {
+    "enabled": true,
+    "accountUserId": 1001,
+    "repositoryOwner": "example-user",
+    "repositoryName": "skilldock-backup",
+    "repositoryUrl": "https://github.com/example-user/skilldock-backup",
+    "lastSyncAt": "2026-05-08T10:00:00Z",
+    "lastOperation": "backup",
+    "lastError": ""
+  }
+}

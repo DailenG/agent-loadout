@@ -1,0 +1,141 @@
+---
+source: crates/agent-loadout-core/tests/migrate.rs
+expression: tree
+---
+== .gitattributes ==
+* -text
+== servers/context7.toml ==
+schema = 1
+id = "context7"
+description = "Library documentation lookup"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[tools]
+deny = ["get-library-docs"]
+
+[meta]
+homepage = "https://example.invalid/context7"
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["claude-code", "codex"]
+== servers/fetch.toml ==
+schema = 1
+id = "fetch"
+transport = "stdio"
+command = "uvx"
+args = ["mcp-server-fetch"]
+
+[meta]
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["claude-code"]
+== servers/notes.toml ==
+schema = 1
+id = "notes"
+transport = "stdio"
+command = "/opt/example/bin/notes-mcp"
+args = ["--token", "${secret:NOTES_TOKEN}", "--verbose"]
+
+[env]
+LOG_LEVEL = "info"
+NOTES_API_KEY = "${secret:NOTES_NOTES_API_KEY}"
+
+[meta]
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["claude-code", "codex", "legacy-ide"]
+== servers/remote-docs.toml ==
+schema = 1
+id = "remote-docs"
+display_name = "Remote Docs"
+transport = "http"
+url = "https://docs.example.invalid/mcp"
+
+[headers]
+Authorization = "Bearer ${secret:REMOTE_DOCS_AUTHORIZATION}"
+
+[tools]
+deny = ["admin_reset"]
+
+[client.cursor]
+native_name = "Remote-Docs"
+
+[client.windsurf]
+native_name = "Remote-Docs"
+
+[meta]
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["cursor", "windsurf"]
+== servers/time.toml ==
+schema = 1
+id = "time"
+transport = "stdio"
+command = "uvx"
+args = ["mcp-server-time"]
+
+[meta]
+origin = "migrated:skilldock"
+
+[enable]
+clients = ["codex"]
+== settings.toml ==
+schema = 1
+theme = "dark"
+new_server_enable = "all-detected"
+new_skill_enable = "none"
+agents_cli_compat = true
+== skill-meta/repo-notes.toml ==
+schema = 1
+id = "repo-notes"
+name = "repo-notes"
+tags = ["docs"]
+
+[source]
+kind = "local"
+
+[enable]
+clients = ["claude-code"]
+method = "link"
+== skill-meta/team-review.toml ==
+schema = 1
+id = "team-review"
+name = "Team Review"
+tags = ["team"]
+
+[source]
+kind = "git"
+url = "https://example.invalid/team/team-review.git"
+ref = "main"
+commit = "<team-review-head>"
+== skills/repo-notes/SKILL.md ==
+---
+name: repo-notes
+description: >-
+  Where this repository keeps its design notes
+  and how to add one.
+---
+
+# Repo notes
+
+Read `references/style.md` before writing a note.
+== skills/repo-notes/references/style.md ==
+# Style
+
+Short sentences. American English.
+== skills/team-review/SKILL.md ==
+---
+name: Team Review
+description: Review checklist for team pull requests.
+---
+
+# Team review
+
+1. Tests pass.
+2. The change note is written.

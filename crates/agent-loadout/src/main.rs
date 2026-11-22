@@ -76,6 +76,8 @@ enum Command {
     Import(cmd::import::ImportArgs),
     /// Take ownership of foreign or changed client entries.
     Adopt(cmd::adopt::AdoptArgs),
+    /// Migrate from SkillDock (~/.skilldock is only read).
+    Migrate(cmd::migrate::MigrateArgs),
     /// Secret references: aliases, providers and their status.
     Secrets(cmd::secrets::SecretsArgs),
     /// Print export statements for secret aliases.
@@ -149,6 +151,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::GitCredential(args) => done(cmd::git_credential::run(&context()?, args)),
         Command::Import(args) => cmd::import::run(&context()?, args),
         Command::Adopt(args) => cmd::adopt::run(&context()?, args),
+        Command::Migrate(args) => cmd::migrate::run(&context()?, args),
         Command::Secrets(args) => cmd::secrets::run(&context()?, args),
         Command::Env(args) => cmd::env::run_env(&context()?, args),
         Command::Secret(args) => cmd::env::run_secret(&context()?, args),

@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "servers": [
+    {
+      "id": "context7",
+      "name": "context7",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ]
+      },
+      "description": "Library documentation lookup",
+      "sourceUrl": "https://example.invalid/context7",
+      "enabledAppIds": [
+        "claude-code",
+        "codex"
+      ],
+      "importedFromAppIds": [],
+      "managedAppIds": [
+        "claude-code",
+        "codex"
+      ],
+      "tools": [
+        {
+          "name": "resolve-library-id",
+          "isEnabled": true
+        },
+        {
+          "name": "get-library-docs",
+          "isEnabled": false
+        }
+      ],
+      "toolsDiscoveredAt": "2026-05-01T10:00:00Z",
+      "installedAt": "2026-05-01T10:00:00Z",
+      "updatedAt": "2026-05-01T10:00:00Z",
+      "lifecycleSource": "manual"
+    },
+    {
+      "id": "fetch",
+      "name": "fetch",
+      "server": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch"
+        ]
+      },
+      "enabledAppIds": [
+        "claude-code"
+      ],
+      "importedFromAppIds": [
+        "claude-code"
+      ],
+      "managedAppIds": [
+        "claude-code"
+      ],
+      "tools": [],
+      "updatedAt": "2026-05-02T10:00:00Z"
+    },
+    {
+      "id": "Remote-Docs",
+      "name": "Remote Docs",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "mcp-remote@latest",
+          "https://docs.example.invalid/mcp",
+          "--transport",
+          "http-only",
+          "--header",
+          "Authorization:Bearer fixture-header-value",
+          "--ignore-tool",
+          "admin_reset"
+        ]
+      },
+      "enabledAppIds": [
+        "cursor",
+        "windsurf"
+      ],
+      "importedFromAppIds": [
+        "cursor"
+      ],
+      "managedAppIds": [
+        "cursor"
+      ],
+      "updatedAt": "2026-05-03T10:00:00Z"
+    },
+    {
+      "id": "notes",
+      "name": "notes",
+      "server": {
+        "command": "/opt/example/bin/notes-mcp",
+        "args": [
+          "--token",
+          "fixture-arg-value",
+          "--verbose"
+        ],
+        "env": {
+          "LOG_LEVEL": "info",
+          "NOTES_API_KEY": "fixture-env-value"
+        },
+        "timeout": 30
+      },
+      "enabledAppIds": [
+        "claude-code",
+        "codex",
+        "legacy-ide"
+      ],
+      "importedFromAppIds": [],
+      "managedAppIds": [],
+      "updatedAt": "2026-05-04T10:00:00Z"
+    },
+    {
+      "id": "time",
+      "name": "time",
+      "server": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-time"
+        ]
+      },
+      "enabledAppIds": [],
+      "importedFromAppIds": [
+        "codex"
+      ],
+      "managedAppIds": [],
+      "updatedAt": "2026-05-05T10:00:00Z"
+    },
+    {
+      "id": "plugin-helper",
+      "name": "plugin-helper",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "example-plugin-helper"
+        ]
+      },
+      "enabledAppIds": [
+        "claude-code"
+      ],
+      "lifecycleSource": "plugin",
+      "ownerPluginId": "example-plugin",
+      "ownerPluginName": "Example Plugin",
+      "updatedAt": "2026-05-06T10:00:00Z"
+    },
+    {
+      "id": "broken",
+      "name": "broken",
+      "server": "npx broken-server",
+      "updatedAt": "2026-05-07T10:00:00Z"
+    }
+  ]
+}

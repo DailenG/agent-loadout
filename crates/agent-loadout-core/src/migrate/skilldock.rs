@@ -1,0 +1,883 @@
+// Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
+
+//! SkillDock's data folder (`~/.skilldock`), read only: its MCP registry,
+//! settings, skill tags and skill library, and the mapping of one registry
+//! record to a store server (SPEC 15.1).
+//!
+//! Shapes follow SkillDock's `mcp_manager.rs` (`McpServerRecord`,
+//! `McpPersistence`), `state.rs` (`SettingsPersistence`,
+//! `SkillTagPersistence`), `models.rs` (`WorkspacePersistence`) and
+//! `workspace.rs` (the `config/`, `data/`, `credentials/` layout and the
+//! older top-level files). Every field is read leniently: SkillDock wrote
+//! some of them only in later versions.
+//!
+//! Records SkillDock synced with disabled tools were written to clients
+//! through a wrapper: `npx -y mcp-filter --include <tool>... -- <command>
+//! <args>...` for stdio servers and `npx -y mcp-remote@latest <url>
+//! [--transport http-only|sse-only] [--allow-http] [--header N:V]...
+//! [--ignore-tool <tool>]...` for remote ones. [`unwrap`] turns both back
+//! into the native server plus a tool filter.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use serde_json::{Map, Value};
+
+use crate::adapters::adapter;
+use crate::adapters::caps::{Caps, FieldSet};
+use crate::apply::render::native_to_template;
+use crate::error::{CoreError, ErrorCode};
+use crate::fs::Fs;
+use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
+use crate::model::ids::{self, IdKind};
+use crate::model::server::{Enable, Meta, Server, ToolFilter, Transport};
+use crate::secrets::classify::{
+    Reason, classify_args_import, classify_import, find_in_text, is_sensitive_argument_name,
+};
+
+/// SkillDock's data folder under the home folder.
+pub const DIR: &str = ".skilldock";
+/// The folder of SkillDock's first releases (`skillm`), read for its MCP
+/// registry only.
+pub const LEGACY_DIR: &str = ".skillm";
+/// `meta.origin` of a migrated server.
+pub const ORIGIN: &str = "migrated:skilldock";
+
+/// Where SkillDock kept its MCP registry, newest layout first.
+pub const MCP_FILES: [&str; 3] = [
+    "~/.skilldock/config/mcp-servers.json",
+    "~/.skilldock/mcp-servers.json",
+    "~/.skillm/mcp-servers.json",
+];
+/// Settings, newest layout first.
+pub const SETTINGS_FILES: [&str; 2] = [
+    "~/.skilldock/config/settings.json",
+    "~/.skilldock/settings.json",
+];
+/// Workspace state (installed skills and, in older versions, tags).
+pub const STATE_FILES: [&str; 2] = ["~/.skilldock/data/state.json", "~/.skilldock/state.json"];
+/// Skill tags, newest layout first.
+pub const TAG_FILES: [&str; 2] = [
+    "~/.skilldock/data/skill-tags.json",
+    "~/.skilldock/skill-tags.json",
+];
+/// The skill library.
+pub const SKILLS_DIR: &str = "~/.skilldock/skills";
+/// SkillDock's GitHub credential.
+pub const GITHUB_CREDENTIAL: &str = "~/.skilldock/credentials/github.json";
+/// SkillDock's backup repository (a working copy).
+pub const BACKUP_REPO: &str = "~/.skilldock/backup/repo";
+
+/// `~/...` display path as an absolute path under `home`.
+pub fn resolve(home: &Path, display: &str) -> PathBuf {
+    let rest = display.strip_prefix("~/").unwrap_or(display);
+    rest.split('/')
+        .fold(home.to_path_buf(), |path, part| path.join(part))
+}
+
+/// The first of `candidates` that exists, as `(display, path)`.
+pub fn first_existing(fs: &dyn Fs, home: &Path, candidates: &[&str]) -> Option<(String, PathBuf)> {
+    candidates.iter().find_map(|display| {
+        let path = resolve(home, display);
+        fs.exists(&path).then(|| ((*display).to_owned(), path))
+    })
+}
+
+/// Reads a JSON file; `parse_error` names the display path, never the
+/// content.
+pub fn read_json(fs: &dyn Fs, path: &Path, display: &str) -> Result<Value, CoreError> {
+    let text = fs.read_to_string(path).map_err(|err| {
+        CoreError::new(ErrorCode::IoError, format!("cannot read {display}: {err}"))
+    })?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    serde_json::from_str(text).map_err(|err| {
+        CoreError::new(
+            ErrorCode::ParseError,
+            format!("{display} is not valid JSON (line {})", err.line()),
+        )
+    })
+}
+
+/// One `McpServerRecord`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Record {
+    /// The key SkillDock wrote into client files.
+    pub id: String,
+    pub name: String,
+    /// The server definition as SkillDock kept it (client JSON shape).
+    pub server: Value,
+    pub description: String,
+    pub source_url: String,
+    pub enabled_app_ids: Vec<String>,
+    pub imported_from_app_ids: Vec<String>,
+    pub managed_app_ids: Vec<String>,
+    /// `(tool, is_enabled)`.
+    pub tools: Vec<(String, bool)>,
+    /// `plugin` for records a SkillDock plugin installed.
+    pub lifecycle_source: String,
+    pub owner_plugin_name: String,
+}
+
+impl Record {
+    /// Whether a SkillDock plugin owns the record (plugins are not
+    /// migrated).
+    pub fn plugin_owned(&self) -> bool {
+        self.lifecycle_source == "plugin" || !self.owner_plugin_name.is_empty()
+    }
+}
+
+fn text(map: &Map<String, Value>, key: &str) -> String {
+    map.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn texts(map: &Map<String, Value>, key: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in map.get(key).and_then(Value::as_array).into_iter().flatten() {
+        if let Some(item) = item.as_str().map(str::trim).filter(|s| !s.is_empty())
+            && !out.iter().any(|known| known == item)
+        {
+            out.push(item.to_owned());
+        }
+    }
+    out
+}
+
+/// The records of an MCP registry file (`{ "servers": [...] }`, or a bare
+/// array in the oldest files). A record that is not an object or has no
+/// id is an error of its own, so the others still migrate.
+pub fn parse_records(doc: &Value) -> Result<Vec<Result<Record, CoreError>>, CoreError> {
+    let items = match doc {
+        Value::Array(items) => items,
+        Value::Object(map) => match map.get("servers") {
+            Some(Value::Array(items)) => items,
+            None => return Ok(Vec::new()),
+            Some(_) => {
+                return Err(CoreError::new(
+                    ErrorCode::UnexpectedShape,
+                    "`servers` is not a list",
+                ));
+            }
+        },
+        _ => {
+            return Err(CoreError::new(
+                ErrorCode::UnexpectedShape,
+                "the MCP registry is not an object",
+            ));
+        }
+    };
+    Ok(items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let map = item.as_object().ok_or_else(|| {
+                CoreError::new(
+                    ErrorCode::UnexpectedShape,
+                    format!("record {} is not an object", index + 1),
+                )
+            })?;
+            let id = text(map, "id");
+            let name = text(map, "name");
+            let id = if id.is_empty() { name.clone() } else { id };
+            if id.is_empty() {
+                return Err(CoreError::new(
+                    ErrorCode::MissingField,
+                    format!("record {} has no id or name", index + 1),
+                ));
+            }
+            let tools = map
+                .get("tools")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|tool| {
+                    let tool = tool.as_object()?;
+                    let name = text(tool, "name");
+                    let enabled = tool
+                        .get("isEnabled")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true);
+                    (!name.is_empty()).then_some((name, enabled))
+                })
+                .collect();
+            Ok(Record {
+                name: if name.is_empty() { id.clone() } else { name },
+                id,
+                server: map.get("server").cloned().unwrap_or(Value::Null),
+                description: text(map, "description"),
+                source_url: text(map, "sourceUrl"),
+                enabled_app_ids: texts(map, "enabledAppIds"),
+                imported_from_app_ids: texts(map, "importedFromAppIds"),
+                managed_app_ids: texts(map, "managedAppIds"),
+                tools,
+                lifecycle_source: text(map, "lifecycleSource"),
+                owner_plugin_name: text(map, "ownerPluginName"),
+            })
+        })
+        .collect())
+}
+
+/// Skill tags: `skillTags` maps a skill name to its one tag (SkillDock
+/// allowed one). Both `skill-tags.json` and `state.json` hold the map.
+pub fn parse_tags(doc: &Value, into: &mut BTreeMap<String, Vec<String>>) {
+    let Some(tags) = doc.get("skillTags").and_then(Value::as_object) else {
+        return;
+    };
+    for (name, tag) in tags {
+        let Some(tag) = tag.as_str().map(str::trim).filter(|tag| !tag.is_empty()) else {
+            continue;
+        };
+        let list = into.entry(name.clone()).or_default();
+        if !list.iter().any(|known| known == tag) {
+            list.push(tag.to_owned());
+        }
+    }
+}
+
+/// What `state.json` recorded about an installed skill.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InstalledSkill {
+    pub source_type: String,
+    pub source_url: String,
+    pub branch: String,
+}
+
+/// `installedSkills` of `state.json`, by skill name.
+pub fn parse_installed(doc: &Value) -> BTreeMap<String, InstalledSkill> {
+    let mut out = BTreeMap::new();
+    for item in doc
+        .get("installedSkills")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(map) = item.as_object() else {
+            continue;
+        };
+        let name = text(map, "name");
+        if name.is_empty() {
+            continue;
+        }
+        out.insert(
+            name,
+            InstalledSkill {
+                source_type: text(map, "sourceType"),
+                source_url: text(map, "sourceUrl"),
+                branch: text(map, "branch"),
+            },
+        );
+    }
+    out
+}
+
+/// One plaintext value routed to the secret extraction wizard (SPEC
+/// 11.7). The value itself is never kept: the store gets a
+/// `${secret:<alias>}` reference in its place.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Extraction {
+    pub server: String,
+    /// `env.NAME`, `headers.NAME`, `args[N]` (1-based) or `url`.
+    pub field: String,
+    pub alias: String,
+    /// Why it counts as sensitive ([`Reason::as_str`]).
+    pub reason: &'static str,
+    /// The default destination (`keyring://loadout/<alias>`); the wizard
+    /// also offers 1Password, an environment variable, or "not a secret".
+    pub suggested_ref: String,
+}
+
+/// A record as a store server.
+#[derive(Debug, Clone)]
+pub struct Mapped {
+    pub server: Server,
+    /// The wrapper the definition was unwrapped from (`mcp-filter`,
+    /// `mcp-remote`).
+    pub unwrapped: Option<&'static str>,
+    pub extractions: Vec<Extraction>,
+    /// The command is an absolute path on this machine.
+    pub machine_path: bool,
+    /// Definition keys with no store field (dropped).
+    pub dropped: Vec<String>,
+    /// Client ids Loadout has no adapter for (kept in the enable list).
+    pub unknown_clients: Vec<String>,
+}
+
+/// The parts of a SkillDock server definition.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Raw {
+    transport: Option<Transport>,
+    command: Option<String>,
+    args: Vec<String>,
+    cwd: Option<String>,
+    url: Option<String>,
+    env: BTreeMap<String, String>,
+    headers: BTreeMap<String, String>,
+    /// From an `mcp-filter --include` list.
+    allow: Vec<String>,
+    /// From `mcp-remote --ignore-tool`.
+    deny: Vec<String>,
+}
+
+fn is_filter(arg: &str) -> bool {
+    arg == "mcp-filter" || arg.ends_with("/mcp-filter") || arg.starts_with("mcp-filter@")
+}
+
+fn is_remote(arg: &str) -> bool {
+    arg == "mcp-remote" || arg.starts_with("mcp-remote@") || arg.ends_with("/mcp-remote")
+}
+
+/// The wrapper an entry's `command` and `args` use, if any: SkillDock's
+/// `mcp-filter` or `mcp-remote` in the first arguments of `npx`.
+pub fn wrapper_kind(command: Option<&str>, args: &[String]) -> Option<&'static str> {
+    let command = command?;
+    let program = command
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(command)
+        .trim_end_matches(".cmd")
+        .trim_end_matches(".exe");
+    if program != "npx" {
+        return None;
+    }
+    let first = args.iter().take(3).find(|arg| !arg.starts_with('-'))?;
+    if is_filter(first) {
+        Some("mcp-filter")
+    } else if is_remote(first) {
+        Some("mcp-remote")
+    } else {
+        None
+    }
+}
+
+/// The definition inside a SkillDock wrapper, or `None` when `raw` is not
+/// one or cannot be read back.
+fn unwrap(raw: &Raw) -> Option<(Raw, &'static str)> {
+    let kind = wrapper_kind(raw.command.as_deref(), &raw.args)?;
+    let args = &raw.args;
+    let start = args.iter().position(|arg| !arg.starts_with('-'))? + 1;
+    match kind {
+        "mcp-filter" => {
+            let delimiter = args.iter().position(|arg| arg == "--")?;
+            let command = args.get(delimiter + 1)?.trim();
+            if command.is_empty() || delimiter < start {
+                return None;
+            }
+            let mut allow = Vec::new();
+            let mut index = start;
+            while index < delimiter {
+                if args[index] == "--include"
+                    && let Some(tool) = args.get(index + 1).map(|t| t.trim())
+                {
+                    if !tool.is_empty() && !allow.iter().any(|known| known == tool) {
+                        allow.push(tool.to_owned());
+                    }
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            Some((
+                Raw {
+                    transport: Some(Transport::Stdio),
+                    command: Some(command.to_owned()),
+                    args: args[delimiter + 2..].to_vec(),
+                    cwd: raw.cwd.clone(),
+                    env: raw.env.clone(),
+                    allow,
+                    ..Raw::default()
+                },
+                kind,
+            ))
+        }
+        _ => {
+            let url = args.get(start)?.trim();
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return None;
+            }
+            let mut inner = Raw {
+                transport: Some(Transport::Http),
+                url: Some(url.to_owned()),
+                env: raw.env.clone(),
+                ..Raw::default()
+            };
+            let mut index = start + 1;
+            while index < args.len() {
+                let value = args.get(index + 1);
+                match (args[index].as_str(), value) {
+                    ("--transport", Some(mode)) => {
+                        inner.transport = Some(match mode.as_str() {
+                            "sse-only" | "sse-first" => Transport::Sse,
+                            _ => Transport::Http,
+                        });
+                        index += 2;
+                    }
+                    ("--header", Some(header)) => {
+                        let (name, value) = header.split_once(':')?;
+                        inner
+                            .headers
+                            .insert(name.trim().to_owned(), value.trim().to_owned());
+                        index += 2;
+                    }
+                    ("--ignore-tool", Some(tool)) => {
+                        if !inner.deny.iter().any(|known| known == tool) {
+                            inner.deny.push(tool.clone());
+                        }
+                        index += 2;
+                    }
+                    ("--allow-http", _) => index += 1,
+                    _ => return None,
+                }
+            }
+            Some((inner, kind))
+        }
+    }
+}
+
+const KNOWN_KEYS: [&str; 7] = ["type", "command", "args", "env", "url", "headers", "cwd"];
+
+fn read_raw(server: &Value, dropped: &mut Vec<String>) -> Result<Raw, CoreError> {
+    let map = server.as_object().ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::UnexpectedShape,
+            "the server definition is not an object",
+        )
+    })?;
+    let shape = |field: &str, expected: &str| {
+        CoreError::new(
+            ErrorCode::UnexpectedShape,
+            format!("`{field}` is not {expected}"),
+        )
+    };
+    let string = |key: &str| -> Result<Option<String>, CoreError> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(text)) if text.trim().is_empty() => Ok(None),
+            Some(Value::String(text)) => Ok(Some(text.clone())),
+            Some(_) => Err(shape(key, "a string")),
+        }
+    };
+    let string_map = |key: &str| -> Result<BTreeMap<String, String>, CoreError> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(BTreeMap::new()),
+            Some(Value::Object(items)) => items
+                .iter()
+                .map(|(name, value)| match value {
+                    Value::String(text) => Ok((name.clone(), text.clone())),
+                    Value::Number(_) | Value::Bool(_) => Ok((name.clone(), value.to_string())),
+                    _ => Err(shape(&format!("{key}.{name}"), "a string")),
+                })
+                .collect(),
+            Some(_) => Err(shape(key, "an object")),
+        }
+    };
+    let args = match map.get("args") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| match item {
+                Value::String(text) => Ok(text.clone()),
+                Value::Number(_) | Value::Bool(_) => Ok(item.to_string()),
+                _ => Err(shape("args", "a list of strings")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(shape("args", "a list")),
+    };
+    let command = string("command")?;
+    let url = string("url")?;
+    let transport = match string("type")?.as_deref() {
+        Some("stdio") => Some(Transport::Stdio),
+        Some("http" | "streamable-http" | "streamableHttp" | "streamable_http") => {
+            Some(Transport::Http)
+        }
+        Some("sse") => Some(Transport::Sse),
+        Some(other) => {
+            return Err(CoreError::new(
+                ErrorCode::UnsupportedTransport,
+                format!("transport {other:?} has no store equivalent"),
+            ));
+        }
+        None if command.is_some() => Some(Transport::Stdio),
+        None if url.is_some() => Some(Transport::Http),
+        None => None,
+    };
+    for key in map.keys() {
+        if !KNOWN_KEYS.contains(&key.as_str()) {
+            dropped.push(key.clone());
+        }
+    }
+    Ok(Raw {
+        transport,
+        command,
+        args,
+        cwd: string("cwd")?,
+        url,
+        env: string_map("env")?,
+        headers: string_map("headers")?,
+        allow: Vec::new(),
+        deny: Vec::new(),
+    })
+}
+
+/// Whether `command` names a program by an absolute path (or `~`), which
+/// only holds on this machine (SkillDock rewrote `npx` and friends to
+/// `~/.local/bin/...` shims).
+pub fn is_machine_path(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    command.starts_with('/')
+        || command.starts_with('~')
+        || command.starts_with("\\\\")
+        || (bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/'))
+}
+
+/// Secret aliases in use; [`Aliases::new_alias`] picks free ones.
+#[derive(Debug, Clone, Default)]
+pub struct Aliases {
+    taken: BTreeSet<String>,
+}
+
+impl Aliases {
+    pub fn new(taken: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            taken: taken.into_iter().collect(),
+        }
+    }
+
+    /// `<SERVER>_<KEY>` in upper case with `_` for anything else, free of
+    /// every alias seen so far (`_2`, `_3` when taken).
+    pub fn new_alias(&mut self, server: &str, key: &str) -> String {
+        let mut base: String = format!("{server}_{key}")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() {
+                    ch.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        while base.contains("__") {
+            base = base.replace("__", "_");
+        }
+        let mut base = base.trim_matches('_').to_owned();
+        if base.is_empty() || base.as_bytes()[0].is_ascii_digit() {
+            base.insert(0, '_');
+        }
+        base.truncate(60);
+        let mut alias = base.clone();
+        let mut n = 2;
+        while self.taken.contains(&alias) || !ids::is_valid(IdKind::SecretAlias, &alias) {
+            alias = format!("{base}_{n}");
+            n += 1;
+        }
+        self.taken.insert(alias.clone());
+        alias
+    }
+}
+
+fn reference(alias: &str) -> String {
+    format!("${{secret:{alias}}}")
+}
+
+/// Maps a record to store server `id`. Sensitive literals are replaced by
+/// `${secret:<alias>}` references and listed in [`Mapped::extractions`];
+/// the values are dropped.
+pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Mapped, CoreError> {
+    ids::check(IdKind::Server, id)?;
+    let mut dropped = Vec::new();
+    let raw = read_raw(&record.server, &mut dropped)?;
+    let (raw, unwrapped) = match unwrap(&raw) {
+        Some((inner, kind)) => (inner, Some(kind)),
+        None if wrapper_kind(raw.command.as_deref(), &raw.args).is_some() => {
+            return Err(CoreError::new(
+                ErrorCode::UnexpectedShape,
+                "a SkillDock wrapper whose arguments cannot be read back",
+            ));
+        }
+        None => (raw, None),
+    };
+    let Some(transport) = raw.transport else {
+        return Err(CoreError::new(
+            ErrorCode::MissingField,
+            "the definition has neither `command` nor `url`",
+        ));
+    };
+    let caps = &adapter(crate::adapters::claude_code::ID)
+        .and_then(|spec| spec.mcp.as_ref())
+        .expect("Claude Code has MCP")
+        .caps;
+    let mut extractions = Vec::new();
+    let mut server = Server::new(id);
+    let body = &mut server.body;
+    body.transport = Some(transport);
+    if let Some(command) = &raw.command {
+        body.command = Some(convert(caps, command, FieldSet::COMMAND)?);
+    }
+    if !raw.args.is_empty() {
+        let args = raw
+            .args
+            .iter()
+            .map(|arg| convert(caps, arg, FieldSet::ARGS))
+            .collect::<Result<Vec<_>, _>>()?;
+        body.args = Some(extract_args(id, args, aliases, &mut extractions));
+    }
+    if let Some(cwd) = &raw.cwd {
+        body.cwd = Some(convert(caps, cwd, FieldSet::CWD)?);
+    }
+    if let Some(url) = &raw.url {
+        let url = convert(caps, url, FieldSet::URL)?;
+        body.url = Some(extract_url(id, url, aliases, &mut extractions)?);
+    }
+    for (field, source, label) in [
+        (FieldSet::ENV, &raw.env, "env"),
+        (FieldSet::HEADERS, &raw.headers, "headers"),
+    ] {
+        let mut map = BTreeMap::new();
+        for (name, value) in source {
+            let value = convert(caps, value, field)?;
+            let value = match classify_import(Some(name), &value) {
+                Some(reason) => {
+                    let alias = aliases.new_alias(id, name);
+                    extractions.push(extraction(id, format!("{label}.{name}"), &alias, reason));
+                    // Keep an `Authorization: Bearer` scheme around the reference.
+                    match value.split_once(' ') {
+                        Some((scheme, _))
+                            if label == "headers"
+                                && matches!(
+                                    scheme.to_ascii_lowercase().as_str(),
+                                    "bearer" | "basic" | "token"
+                                ) =>
+                        {
+                            format!("{scheme} {}", reference(&alias))
+                        }
+                        _ => reference(&alias),
+                    }
+                }
+                None => value,
+            };
+            map.insert(name.clone(), value);
+        }
+        let map = (!map.is_empty()).then_some(map);
+        match label {
+            "env" => body.env = map,
+            _ => body.headers = map,
+        }
+    }
+    let disabled: Vec<String> = record
+        .tools
+        .iter()
+        .filter(|(_, enabled)| !enabled)
+        .map(|(name, _)| name.clone())
+        .collect();
+    let mut deny = raw.deny.clone();
+    for tool in disabled {
+        if !deny.contains(&tool) {
+            deny.push(tool);
+        }
+    }
+    deny.sort();
+    let mut allow = raw.allow.clone();
+    allow.sort();
+    if !deny.is_empty() || !allow.is_empty() {
+        body.tools = Some(ToolFilter {
+            // A deny list says the same as the wrapper's include list.
+            allow: (deny.is_empty() && !allow.is_empty()).then_some(allow),
+            deny: (!deny.is_empty()).then_some(deny),
+            extra: toml::Table::new(),
+        });
+    }
+    if record.name != id {
+        body.display_name = Some(record.name.clone());
+    }
+    if !record.description.is_empty() {
+        body.description = Some(record.description.clone());
+    }
+    body.meta = Some(Meta {
+        homepage: (!record.source_url.is_empty()).then(|| record.source_url.clone()),
+        origin: Some(ORIGIN.to_owned()),
+        extra: toml::Table::new(),
+    });
+    let mut unknown_clients = Vec::new();
+    for client in &record.enabled_app_ids {
+        if adapter(client).is_none() {
+            unknown_clients.push(client.clone());
+        }
+    }
+    if record.id != id {
+        // The native key stays SkillDock's, so existing entries match.
+        let mut clients = BTreeMap::new();
+        for client in record
+            .enabled_app_ids
+            .iter()
+            .chain(&record.managed_app_ids)
+            .chain(&record.imported_from_app_ids)
+        {
+            if adapter(client).is_some() {
+                let mut table = toml::Table::new();
+                table.insert(
+                    NATIVE_NAME_KEY.to_owned(),
+                    toml::Value::String(record.id.clone()),
+                );
+                clients.insert(client.clone(), table);
+            }
+        }
+        body.client = (!clients.is_empty()).then_some(clients);
+    }
+    if !record.enabled_app_ids.is_empty() {
+        server.enable = Some(Enable {
+            clients: Some(ClientSelection::List(record.enabled_app_ids.clone())),
+            extra: toml::Table::new(),
+        });
+    }
+    if let Some(err) = server.validate(Some(id)).first_error(None) {
+        return Err(err);
+    }
+    let machine_path = server.body.command.as_deref().is_some_and(is_machine_path);
+    Ok(Mapped {
+        server,
+        unwrapped,
+        extractions,
+        machine_path,
+        dropped,
+        unknown_clients,
+    })
+}
+
+fn convert(caps: &Caps, text: &str, field: FieldSet) -> Result<String, CoreError> {
+    native_to_template(text, caps, field).ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::UnsupportedField,
+            "a value uses a variable form the store cannot express (`${NAME:-default}`)",
+        )
+    })
+}
+
+fn extraction(server: &str, field: String, alias: &str, reason: Reason) -> Extraction {
+    Extraction {
+        server: server.to_owned(),
+        field,
+        alias: alias.to_owned(),
+        reason: reason.as_str(),
+        suggested_ref: format!("keyring://{}/{alias}", crate::brand::KEYRING_SERVICE),
+    }
+}
+
+/// Arguments with each sensitive one (or the value part of `--flag=value`)
+/// replaced by a reference.
+fn extract_args(
+    id: &str,
+    mut args: Vec<String>,
+    aliases: &mut Aliases,
+    extractions: &mut Vec<Extraction>,
+) -> Vec<String> {
+    let flagged = classify_args_import(&args);
+    for (index, reason) in flagged.into_iter().enumerate() {
+        let Some(reason) = reason else {
+            continue;
+        };
+        let arg = args[index].clone();
+        let (prefix, key) = match arg.split_once('=') {
+            Some((flag, _)) if flag.starts_with('-') => {
+                (format!("{flag}="), flag.trim_start_matches('-').to_owned())
+            }
+            _ => {
+                let previous = index
+                    .checked_sub(1)
+                    .map(|i| args[i].as_str())
+                    .filter(|prev| prev.starts_with('-') && is_sensitive_argument_name(prev));
+                (
+                    String::new(),
+                    previous.map_or_else(
+                        || format!("arg{}", index + 1),
+                        |flag| flag.trim_start_matches('-').to_owned(),
+                    ),
+                )
+            }
+        };
+        let alias = aliases.new_alias(id, &key);
+        extractions.push(extraction(
+            id,
+            format!("args[{}]", index + 1),
+            &alias,
+            reason,
+        ));
+        args[index] = format!("{prefix}{}", reference(&alias));
+    }
+    args
+}
+
+/// The URL with each credential part (userinfo, token query parameter,
+/// token-shaped text) replaced by a reference.
+fn extract_url(
+    id: &str,
+    url: String,
+    aliases: &mut Aliases,
+    extractions: &mut Vec<Extraction>,
+) -> Result<String, CoreError> {
+    let Some(reason) = classify_import(None, &url) else {
+        return Ok(url);
+    };
+    let hits = find_in_text(&url);
+    if hits.is_empty() {
+        return Err(CoreError::new(
+            ErrorCode::NeedsSecretExtraction,
+            format!(
+                "the URL may hold a secret ({}); edit it by hand",
+                reason.describe()
+            ),
+        ));
+    }
+    let mut out = url.clone();
+    for (n, hit) in hits.iter().enumerate().rev() {
+        let key = if hits.len() == 1 {
+            "url".to_owned()
+        } else {
+            format!("url{}", n + 1)
+        };
+        let alias = aliases.new_alias(id, &key);
+        extractions.push(extraction(id, "url".to_owned(), &alias, hit.reason));
+        out.replace_range(hit.range.clone(), &reference(&alias));
+    }
+    // Listed in URL order.
+    let start = extractions.len() - hits.len();
+    extractions[start..].reverse();
+    Ok(out)
+}
+
+/// `settings.json` fields and how they map (SPEC 15.1): theme, agents CLI
+/// compatibility, install activation. The rest is listed as skipped.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SkillDockSettings {
+    pub fields: Map<String, Value>,
+}
+
+impl SkillDockSettings {
+    pub fn parse(doc: &Value) -> Result<Self, CoreError> {
+        match doc {
+            Value::Object(fields) => Ok(Self {
+                fields: fields.clone(),
+            }),
+            _ => Err(CoreError::new(
+                ErrorCode::UnexpectedShape,
+                "settings are not an object",
+            )),
+        }
+    }
+
+    pub fn text(&self, key: &str) -> Option<&str> {
+        self.fields
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    pub fn bool(&self, key: &str) -> Option<bool> {
+        self.fields.get(key).and_then(Value::as_bool)
+    }
+}

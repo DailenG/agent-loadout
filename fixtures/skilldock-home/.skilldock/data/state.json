@@ -1,0 +1,37 @@
+{
+  "installedSkills": [
+    {
+      "name": "repo-notes",
+      "sourceLabel": "Local",
+      "sourceType": "local",
+      "sourceUrl": "",
+      "description": "Notes",
+      "localPath": "",
+      "branch": "",
+      "collabStatus": "",
+      "statusText": "",
+      "lastCheckedAt": "",
+      "syncedToolCount": 1,
+      "lastEditor": "",
+      "commitLabel": ""
+    },
+    {
+      "name": "team-review",
+      "sourceLabel": "Git",
+      "sourceType": "git",
+      "sourceUrl": "https://example.invalid/team/team-review.git",
+      "description": "Review checklist",
+      "localPath": "",
+      "branch": "main",
+      "collabStatus": "",
+      "statusText": "",
+      "lastCheckedAt": "",
+      "syncedToolCount": 0,
+      "lastEditor": "",
+      "commitLabel": ""
+    }
+  ],
+  "skillTags": {
+    "repo-notes": "docs"
+  }
+}

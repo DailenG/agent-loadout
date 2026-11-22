@@ -1,0 +1,59 @@
+---
+source: crates/agent-loadout-core/tests/migrate.rs
+expression: text
+---
+[migrated] file ~/.skilldock/config/mcp-servers.json: the MCP registry: 7 records
+[migrated] server context7 -> context7: tools denied: get-library-docs; enabled for claude-code, codex
+[migrated] server fetch -> fetch: enabled for claude-code
+[needs_review] server Remote-Docs -> remote-docs: unwrapped from SkillDock's mcp-remote wrapper; tools denied: admin_reset; enabled for cursor, windsurf; headers.Authorization may be a secret; replaced by ${secret:REMOTE_DOCS_AUTHORIZATION}
+    offer: {"kind":"set_secret","alias":"REMOTE_DOCS_AUTHORIZATION","command":"loadout secrets set REMOTE_DOCS_AUTHORIZATION --keyring"}
+[needs_review] server notes -> notes: enabled for claude-code, codex, legacy-ide; no Loadout adapter for legacy-ide; machine-specific path: the command is absolute; consider moving it into [os.*] or the machine overlay; args[2] may be a secret; replaced by ${secret:NOTES_TOKEN}; env.NOTES_API_KEY may be a secret; replaced by ${secret:NOTES_NOTES_API_KEY}; fields with no store equivalent dropped: timeout
+    offer: {"kind":"machine_path","server":"notes"}
+    offer: {"kind":"set_secret","alias":"NOTES_TOKEN","command":"loadout secrets set NOTES_TOKEN --keyring"}
+    offer: {"kind":"set_secret","alias":"NOTES_NOTES_API_KEY","command":"loadout secrets set NOTES_NOTES_API_KEY --keyring"}
+[migrated] server time -> time: SkillDock enabled it for no client; enabled for codex (identical entry found)
+[skipped] server plugin-helper: installed by a SkillDock plugin; plugins are not migrated
+[needs_review] server broken: the server definition is not an object (unexpected_shape)
+[migrated] file ~/.skilldock/data/skill-tags.json: skill tags
+[migrated] file ~/.skilldock/data/state.json: installed skills (sources) and skill tags
+[skipped] file ~/.skilldock/skills/README.txt: not a skill folder
+[needs_review] skill leaky: SKILL.md looks like it holds a secret, which the store refuses; remove it, then install the folder with `skills add` (leak_detected)
+[migrated] skill repo-notes -> repo-notes: tags: docs; source: local; enabled for claude-code (links on disk)
+[migrated] skill team-review -> team-review: tags: team; source: https://example.invalid/team/team-review.git; not linked into any client
+[skipped] skill retired-skill: tag old for a skill that is not in ~/.skilldock/skills
+[migrated] file ~/.skilldock/config/settings.json: settings; one item per field below
+[migrated] setting agentSkillsCompatibilityEnabled: agents_cli_compat = true
+[skipped] setting defaultOpenToolId: no portable setting; the default editor is chosen per machine
+[needs_review] setting githubBackup: SkillDock backed up to https://github.com/example-user/skilldock-backup; add it as a backup remote if wanted
+    offer: {"kind":"add_remote","url":"https://github.com/example-user/skilldock-backup"}
+[skipped] setting githubConnection: GitHub account details; remotes are added in Loadout
+[skipped] setting language: Loadout is English only
+[skipped] setting languageSource: Loadout is English only
+[migrated] setting mcpInstallActivation: new_server_enable = all-detected
+[migrated] setting skillInstallActivation: new_skill_enable = none
+[skipped] setting skillLibraryProvider: SkillDock's own library is migrated from ~/.skilldock/skills
+[skipped] setting skillSourceViewStyle: a SkillDock layout preference
+[skipped] setting skillTagFilterLayout: a SkillDock layout preference
+[migrated] setting theme: theme = dark
+[skipped] backup ~/.skilldock/backup/last-sync.json: SkillDock backup bookkeeping; the repository itself is imported
+[migrated] backup ~/.skilldock/backup/repo: bare-cloned to imports/skilldock-backup.git (history kept, read-only); one backup's servers and skills can be imported from there
+[needs_review] credential ~/.skilldock/credentials/github.json: SkillDock's GitHub token; never copied into the store. Move it into the OS keyring for a git remote with token auth
+    offer: {"kind":"keyring_token","command":"loadout remote add git <NAME> <URL> --auth token, then pipe the token to `loadout remote token <NAME>`"}
+[skipped] skillhub ~/.skilldock/credentials/skillhub.json: SkillHub sign-in; SkillHub is not migrated
+[skipped] skillhub ~/.skilldock/data/publishing: SkillHub publishing state; SkillHub is not migrated
+[skipped] file ~/.skilldock/logs: SkillDock caches and logs; nothing to migrate
+[skipped] plugin ~/.skilldock/plugins: SkillDock plugins are not migrated
+[needs_review] client_entry claude-code/context7: ~/.claude.json holds SkillDock's mcp-filter wrapper; the native definition cannot be written there yet: the client has no native field for `tools` (unsupported_field)
+    offer: {"kind":"replace_wrapper","client":"claude-code","name":"context7","command":"loadout adopt claude-code/context7"}
+[migrated] client_entry claude-code/fetch: identical entry in ~/.claude.json; recorded as adopted on the first apply, without a write
+[needs_review] client_entry claude-code/notes: not applied to ~/.claude.json yet: NOTES_TOKEN is not defined in secrets.toml; set it with `loadout secrets set NOTES_TOKEN ...` (missing_secret)
+[migrated] client_entry codex/time: identical entry in ~/.codex/config.toml (found by the scan); recorded as adopted on the first apply, without a write
+[needs_review] client_entry codex/context7: ~/.codex/config.toml holds SkillDock's mcp-filter wrapper; replace it with the native definition (collision)
+    offer: {"kind":"replace_wrapper","client":"codex","name":"context7","command":"loadout adopt codex/context7"}
+[needs_review] client_entry codex/notes: not applied to ~/.codex/config.toml yet: NOTES_TOKEN is not defined in secrets.toml; set it with `loadout secrets set NOTES_TOKEN ...` (missing_secret)
+[needs_review] client_entry cursor/Remote-Docs: not applied to ~/.cursor/mcp.json yet: REMOTE_DOCS_AUTHORIZATION is not defined in secrets.toml; set it with `loadout secrets set REMOTE_DOCS_AUTHORIZATION ...` (missing_secret)
+[needs_review] client_entry windsurf/Remote-Docs: not applied to ~/.codeium/windsurf/mcp_config.json yet: REMOTE_DOCS_AUTHORIZATION is not defined in secrets.toml; set it with `loadout secrets set REMOTE_DOCS_AUTHORIZATION ...` (missing_secret)
+[migrated] skill_link claude-code/repo-notes -> repo-notes: ~/.claude/skills/repo-notes points into ~/.skilldock/skills; re-pointed to the store copy by the next skills sync (planned as an update)
+extract remote-docs headers.Authorization -> ${secret:REMOTE_DOCS_AUTHORIZATION} (sensitive_key, default keyring://loadout/REMOTE_DOCS_AUTHORIZATION)
+extract notes args[2] -> ${secret:NOTES_TOKEN} (sensitive_key, default keyring://loadout/NOTES_TOKEN)
+extract notes env.NOTES_API_KEY -> ${secret:NOTES_NOTES_API_KEY} (sensitive_key, default keyring://loadout/NOTES_NOTES_API_KEY)
