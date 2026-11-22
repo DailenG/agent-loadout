@@ -144,6 +144,18 @@ impl Transaction<'_> {
         !self.changes.is_empty()
     }
 
+    /// Validates and leak-scans what is staged so far, as the commit will
+    /// (SPEC 5, 11.8), without writing anything. For work inside the
+    /// transaction that has effects outside the store (an instant apply).
+    pub fn check(&self) -> Result<(), CoreError> {
+        self.store.validate_changes(&self.changes)?;
+        let message = compose_message(
+            &self.operation.summary,
+            &self.operation.trailers(&self.machine, &self.store.client),
+        );
+        self.store.scan_changes(&self.changes, &message)
+    }
+
     /// A store file as this transaction sees it; `None` if absent.
     pub fn read_to_string(&self, relative: &str) -> Result<Option<String>, CoreError> {
         check_relative(relative)?;

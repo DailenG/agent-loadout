@@ -16,7 +16,7 @@ use agent_loadout_core::apply::{ApplyReport, ProjectSelection};
 use agent_loadout_core::layering::manifest::manifest_dir;
 use agent_loadout_core::layering::{
     KnownProject, LOCAL_FILE, Project, ProjectRepo, ProjectStatus, SHARED_FILE, TrustState,
-    TrustStore, discover, known_projects, same_path,
+    TrustStore, content_hash, discover, known_projects, same_path,
 };
 use agent_loadout_core::model::TomlDocument;
 use agent_loadout_core::model::ids::{self, IdKind};
@@ -183,7 +183,7 @@ fn init(
         let project = load_project(fs, &root)?;
         let summary = format!("project: init {id}");
         commit_project(ctx, &store, "project.init", summary, &id, true, |tx| {
-            set_known(tx, &project.id, &root)?;
+            set_known(tx, ctx.fs(), &project.id, &root)?;
             mirror(tx, &project)?;
             save_trust(ctx, &project)
         })
@@ -239,7 +239,7 @@ fn add(ctx: &Context, path: &Path) -> Result<(), CoreError> {
     let id = project.id.clone();
     let summary = format!("project: add {id}");
     let (_, commit) = commit_project(ctx, &store, "project.add", summary, &id, false, |tx| {
-        set_known(tx, &id, &root)
+        set_known(tx, fs, &id, &root)
     })?;
     let trust = TrustStore::load(fs, &ctx.home.state_dir())?.state(&project);
     if ctx.json {
@@ -425,7 +425,7 @@ fn trust(ctx: &Context, path: &Path) -> Result<u8, CoreError> {
     let summary = format!("project: trust {id}");
     let (report, commit) =
         commit_project(ctx, &store, "project.trust", summary, &id, true, |tx| {
-            set_known(tx, &id, &root)?;
+            set_known(tx, ctx.fs(), &id, &root)?;
             mirror(tx, &project)?;
             save_trust(ctx, &project)
         })?;
@@ -531,6 +531,9 @@ fn share(ctx: &Context, id: &str, servers: &[String]) -> Result<u8, CoreError> {
         .with_path(&local_path)
     })?;
     let shared_before = read_optional(fs, &shared_path)?;
+    if let Some(project) = known.project() {
+        check_unchanged(project, shared_before.as_deref(), &local_before)?;
+    }
     let moved = move_servers(id, &local_before, shared_before.as_deref(), servers)?;
 
     let created_shared = shared_before.is_none();
@@ -601,10 +604,32 @@ struct Moved {
     names: Vec<String>,
 }
 
-/// Moves `[servers.<name>]` tables (with their comments and sub-tables)
-/// from the local text into the shared one, creating the shared file when
-/// absent (`schema`, `id`, and the local `name`). The local file keeps its
-/// `id` unless nothing but `schema` and `id` is left.
+/// `trust_required` when the manifest texts about to be rewritten are not
+/// the content `project` was loaded (and found trusted) with: a file
+/// changed in between must be reviewed, not trusted along with the share.
+fn check_unchanged(project: &Project, shared: Option<&str>, local: &str) -> Result<(), CoreError> {
+    if content_hash(shared.map(str::as_bytes), Some(local.as_bytes())) == project.hash() {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        ErrorCode::TrustRequired,
+        format!(
+            "the manifests of project {:?} changed while sharing; review them, then run `{} \
+             project trust {}`",
+            project.name(),
+            agent_loadout_core::brand::BIN_NAME,
+            project.root.display()
+        ),
+    )
+    .with_path(manifest_dir(&project.root)))
+}
+
+/// Moves `[servers.<name>]` tables (with their sub-tables and the comment
+/// block directly above each header) from the local text into the shared
+/// one, creating the shared file when absent (`schema`, `id`, and the local
+/// `name`). Without `wanted`, every local server the shared file does not
+/// define moves; local tables of shared names are overrides and stay. The
+/// local file keeps its `id` unless nothing but `schema` and `id` is left.
 fn move_servers(
     id: &str,
     local: &str,
@@ -619,14 +644,22 @@ fn move_servers(
             )
         })
     };
+    let server_names = |doc: &DocumentMut| -> Vec<String> {
+        doc.get("servers")
+            .and_then(Item::as_table_like)
+            .map(|servers| servers.iter().map(|(name, _)| name.to_owned()).collect())
+            .unwrap_or_default()
+    };
     let mut local_doc = parse(local, LOCAL_FILE)?;
-    let available: Vec<String> = local_doc
-        .get("servers")
-        .and_then(Item::as_table_like)
-        .map(|servers| servers.iter().map(|(name, _)| name.to_owned()).collect())
-        .unwrap_or_default();
+    let shared_doc = shared.map(|text| parse(text, SHARED_FILE)).transpose()?;
+    let available = server_names(&local_doc);
+    let defined = shared_doc.as_ref().map(server_names).unwrap_or_default();
     let names: Vec<String> = if wanted.is_empty() {
-        available.clone()
+        available
+            .iter()
+            .filter(|name| !defined.contains(name))
+            .cloned()
+            .collect()
     } else {
         let mut names = Vec::new();
         for name in wanted {
@@ -634,6 +667,15 @@ fn move_servers(
                 return Err(CoreError::new(
                     ErrorCode::NotFound,
                     format!("project.local.toml has no server {name:?}"),
+                ));
+            }
+            if defined.contains(name) {
+                return Err(CoreError::new(
+                    ErrorCode::AlreadyExists,
+                    format!(
+                        "project.toml already defines server {name:?}; the local table is a \
+                         private override of it"
+                    ),
                 ));
             }
             if !names.contains(name) {
@@ -645,11 +687,16 @@ fn move_servers(
     if names.is_empty() {
         return Err(CoreError::new(
             ErrorCode::NotFound,
-            "project.local.toml has no servers to share",
+            if available.is_empty() {
+                "project.local.toml has no servers to share"
+            } else {
+                "every server in project.local.toml overrides one in project.toml; overrides \
+                 stay private"
+            },
         ));
     }
-    let mut shared_doc = match shared {
-        Some(text) => parse(text, SHARED_FILE)?,
+    let mut shared_doc = match shared_doc {
+        Some(doc) => doc,
         None => {
             let mut doc = DocumentMut::new();
             doc["schema"] = toml_edit::value(1);
@@ -674,25 +721,40 @@ fn move_servers(
                 "`servers` in project.toml is not a table",
             )
         })?;
-    if let Some(taken) = names.iter().find(|name| shared_servers.contains_key(name)) {
-        return Err(CoreError::new(
-            ErrorCode::AlreadyExists,
-            format!("project.toml already defines server {taken:?}"),
-        ));
-    }
     let local_servers = local_doc
         .get_mut("servers")
         .and_then(Item::as_table_like_mut)
         .expect("servers were listed above");
+    // Comments above a moved header that a blank line separates from it
+    // belong to what came before; they stay in the local file.
+    let mut left_behind: Vec<(isize, String)> = Vec::new();
     for name in &names {
         let mut item = local_servers
             .remove(name)
             .expect("names come from this table");
+        if let Item::Table(table) = &mut item {
+            let prefix = table
+                .decor()
+                .prefix()
+                .and_then(|raw| raw.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            let (kept, attached) = split_comments(&prefix);
+            table.decor_mut().set_prefix(format!("\n{attached}"));
+            if let (Some(position), Some(kept)) = (table.position(), kept) {
+                left_behind.push((position, kept));
+            }
+        }
         clear_positions(&mut item);
         shared_servers.insert(name, item);
     }
     if local_servers.is_empty() {
         local_doc.remove("servers");
+    }
+    // Latest first, so text left by earlier tables lands in front of it.
+    left_behind.sort_by_key(|(position, _)| std::cmp::Reverse(*position));
+    for (position, text) in left_behind {
+        attach_after(&mut local_doc, position, &text);
     }
     let only_identity = local_doc
         .iter()
@@ -705,6 +767,74 @@ fn move_servers(
         shared: shared_doc.to_string(),
         names,
     })
+}
+
+/// Splits a header's prefix decor at its last blank line: the text before
+/// it (`None` when only whitespace) and the comment block directly above
+/// the header.
+fn split_comments(prefix: &str) -> (Option<String>, String) {
+    let lines: Vec<&str> = prefix.split_inclusive('\n').collect();
+    let Some(blank) = lines
+        .iter()
+        .rposition(|line| line.ends_with('\n') && line.trim().is_empty())
+    else {
+        return (None, prefix.to_owned());
+    };
+    let kept = lines[..blank].concat();
+    let attached = lines[blank + 1..].concat();
+    ((!kept.trim().is_empty()).then_some(kept), attached)
+}
+
+/// Puts `text` in front of the first table header after document position
+/// `position`, or at the end of the document when none follows.
+fn attach_after(doc: &mut DocumentMut, position: isize, text: &str) {
+    let mut headers = Vec::new();
+    header_tables(doc.as_table(), &mut Vec::new(), &mut headers);
+    let next = headers
+        .into_iter()
+        .filter(|(at, _)| *at > position)
+        .min_by_key(|(at, _)| *at);
+    match next {
+        Some((_, path)) => {
+            let mut table = doc.as_table_mut();
+            for key in &path {
+                table = table
+                    .get_mut(key)
+                    .and_then(Item::as_table_mut)
+                    .expect("the path was collected from this document");
+            }
+            let prefix = table
+                .decor()
+                .prefix()
+                .and_then(|raw| raw.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            // One blank line between the kept comments and the next block.
+            let gap = if prefix.starts_with('\n') { "" } else { "\n" };
+            table.decor_mut().set_prefix(format!("{text}{gap}{prefix}"));
+        }
+        None => {
+            let trailing = doc.trailing().as_str().unwrap_or_default().to_owned();
+            doc.set_trailing(format!("{text}{trailing}"));
+        }
+    }
+}
+
+/// Document positions and key paths of every table with a `[header]`.
+fn header_tables(table: &Table, path: &mut Vec<String>, out: &mut Vec<(isize, Vec<String>)>) {
+    for (key, item) in table.iter() {
+        if let Item::Table(child) = item {
+            path.push(key.to_owned());
+            if !child.is_implicit()
+                && !child.is_dotted()
+                && let Some(position) = child.position()
+            {
+                out.push((position, path.clone()));
+            }
+            header_tables(child, path, out);
+            path.pop();
+        }
+    }
 }
 
 /// Lets moved tables take their place in the destination document's order
@@ -730,6 +860,9 @@ fn clear_positions(item: &mut Item) {
 }
 
 /// Stages one project commit; with `apply`, the instant apply runs in it.
+/// `state/trust.json` reflects committed operations only: when the
+/// transaction fails (staging, validation, the leak scanner), the trust
+/// file as it was before is written back.
 fn commit_project(
     ctx: &Context,
     store: &Store<'_>,
@@ -743,6 +876,8 @@ fn commit_project(
         .entity(format!("project/{id}"))
         .scope(Scope::Project(id.to_owned()));
     let ax = ctx.apply_env();
+    let state = ctx.home.state_dir();
+    let previous = TrustStore::load(ctx.fs(), &state).ok();
     let committed = store.transaction(operation, |tx| {
         stage(tx)?;
         if apply {
@@ -750,8 +885,21 @@ fn commit_project(
         } else {
             Ok(None)
         }
-    })?;
-    Ok((committed.value, committed.commit))
+    });
+    match committed {
+        Ok(committed) => Ok((committed.value, committed.commit)),
+        Err(err) => {
+            if let Some(previous) = previous
+                && let Err(restore) = previous.save(ctx.fs(), &state)
+            {
+                eprintln!(
+                    "warning[{}]: cannot restore the trust file: {restore}",
+                    restore.code()
+                );
+            }
+            Err(err)
+        }
+    }
 }
 
 /// This machine's overlay, staged or new.
@@ -770,10 +918,37 @@ fn overlay_doc(tx: &Transaction<'_>) -> Result<TomlDocument<MachineOverlay>, Cor
 }
 
 /// Records `[projects.<id>] path` in this machine's overlay. Another id
-/// recorded for the same folder (its manifest id changed) is dropped.
-fn set_known(tx: &mut Transaction<'_>, id: &str, root: &Path) -> Result<(), CoreError> {
+/// recorded for the same folder (its manifest id changed) is dropped. When
+/// `id` is known at another folder that still holds a manifest with this
+/// id (a second checkout of the same project), the change is refused; a
+/// folder that is gone or now holds another project is repointed (moved).
+fn set_known(
+    tx: &mut Transaction<'_>,
+    fs: &dyn Fs,
+    id: &str,
+    root: &Path,
+) -> Result<(), CoreError> {
     let mut doc = overlay_doc(tx)?;
     let projects = doc.value_mut().projects.get_or_insert_with(BTreeMap::new);
+    if let Some(known) = projects.get(id) {
+        let other = Path::new(&known.path);
+        let checkout = !same_path(other, root)
+            && matches!(Project::load(fs, other), Ok(Some(project)) if project.id == id);
+        if checkout {
+            return Err(CoreError::new(
+                ErrorCode::AlreadyExists,
+                format!(
+                    "project {id:?} is already known at {}, which still holds its manifest; \
+                     one machine applies a project from one folder. To use {} instead, run \
+                     `{} project rm {id}` first",
+                    other.display(),
+                    root.display(),
+                    agent_loadout_core::brand::BIN_NAME,
+                ),
+            )
+            .with_path(root));
+        }
+    }
     projects.retain(|known, project| known == id || !same_path(Path::new(&project.path), root));
     let path = root.to_string_lossy().into_owned();
     projects
@@ -1045,5 +1220,100 @@ fn short(commit: Option<&CommitId>) -> &str {
 fn warn_all(warnings: &[CoreError]) {
     for warning in warnings {
         eprintln!("warning[{}]: {warning}", warning.code());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LOCAL: &str = "schema = 1\nid = \"app-ab12\"\n\n\
+                         [servers.docs]\ncommand = \"docs-mcp\"\nargs = [\"--verbose\"]\n\
+                         # old = \"a private note\"\n\n\
+                         # The team's search.\n[servers.search]\ncommand = \"search-mcp\"\n\n\
+                         [servers.notes]\ncommand = \"notes-mcp\"\n";
+    const SHARED: &str = "schema = 1\nid = \"app-ab12\"\n\n\
+                          [servers.docs]\ncommand = \"docs-mcp\"\n";
+
+    #[test]
+    fn default_share_leaves_overrides_of_shared_servers_local() {
+        let moved = move_servers("app-ab12", LOCAL, Some(SHARED), &[]).unwrap();
+        assert_eq!(moved.names, ["search", "notes"]);
+        assert!(moved.local.contains("[servers.docs]"), "{}", moved.local);
+        assert!(!moved.local.contains("search-mcp"), "{}", moved.local);
+        // The existing shared file is kept as it was, plus the new tables.
+        assert!(moved.shared.starts_with(SHARED), "{}", moved.shared);
+        assert!(moved.shared.contains("[servers.notes]"), "{}", moved.shared);
+
+        // Naming an override explicitly is a conflict.
+        let err = move_servers("app-ab12", LOCAL, Some(SHARED), &["docs".to_owned()])
+            .err()
+            .unwrap();
+        assert_eq!(err.code(), ErrorCode::AlreadyExists);
+        // Only overrides left: nothing to share.
+        let only = "schema = 1\nid = \"app-ab12\"\n\n[servers.docs]\nargs = [\"-v\"]\n";
+        let err = move_servers("app-ab12", only, Some(SHARED), &[])
+            .err()
+            .unwrap();
+        assert_eq!(err.code(), ErrorCode::NotFound);
+        assert!(err.message().contains("overrides"), "{err}");
+    }
+
+    #[test]
+    fn only_the_comment_block_attached_to_a_header_moves() {
+        let moved = move_servers("app-ab12", LOCAL, None, &["search".to_owned()]).unwrap();
+        assert!(
+            moved
+                .shared
+                .contains("\n# The team's search.\n[servers.search]\n"),
+            "{}",
+            moved.shared
+        );
+        assert!(!moved.shared.contains("private note"), "{}", moved.shared);
+        // The detached comment stays in the local file, before what follows.
+        assert!(
+            moved
+                .local
+                .contains("args = [\"--verbose\"]\n# old = \"a private note\"\n\n[servers.notes]"),
+            "{}",
+            moved.local
+        );
+        // Moving the last table leaves the detached text at the end.
+        let last = "schema = 1\nid = \"app-ab12\"\n\n[servers.a]\ncommand = \"a\"\n\
+                    # trailing note\n\n[servers.b]\ncommand = \"b\"\n";
+        let moved = move_servers("app-ab12", last, None, &["b".to_owned()]).unwrap();
+        assert!(moved.local.contains("# trailing note"), "{}", moved.local);
+        assert!(!moved.shared.contains("trailing note"), "{}", moved.shared);
+    }
+
+    #[test]
+    fn split_comments_cuts_at_the_last_blank_line() {
+        assert_eq!(
+            split_comments("\n# a\n\n# b\n"),
+            (Some("\n# a\n".to_owned()), "# b\n".to_owned())
+        );
+        assert_eq!(split_comments("\n# b\n"), (None, "# b\n".to_owned()));
+        assert_eq!(split_comments("# b\n"), (None, "# b\n".to_owned()));
+    }
+
+    #[test]
+    fn share_refuses_manifests_that_changed_since_loading() {
+        let th = agent_loadout_testkit::TempHome::new();
+        let root = th.projects().join("app");
+        let manifests = manifest_dir(&root);
+        std::fs::create_dir_all(&manifests).unwrap();
+        let local = "schema = 1\nid = \"app-ab12\"\n";
+        std::fs::write(manifests.join(LOCAL_FILE), local).unwrap();
+        let project = Project::load(&agent_loadout_core::RealFs, &root)
+            .unwrap()
+            .unwrap();
+        check_unchanged(&project, None, local).unwrap();
+        let err = check_unchanged(&project, Some(SHARED), local)
+            .err()
+            .unwrap();
+        assert_eq!(err.code(), ErrorCode::TrustRequired);
+        let edited = format!("{local}name = \"edited\"\n");
+        let err = check_unchanged(&project, None, &edited).err().unwrap();
+        assert_eq!(err.code(), ErrorCode::TrustRequired);
     }
 }

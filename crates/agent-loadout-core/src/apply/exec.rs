@@ -168,12 +168,15 @@ pub fn run(
 /// Plans against the transaction's view of the store (staged edits
 /// included), executes, and records the run in the transaction: always
 /// when the transaction commits anyway (an instant-mode edit, a rollback),
-/// otherwise only when a file was written.
+/// otherwise only when a file was written. Staged edits are validated and
+/// leak-scanned first, so an edit the commit would refuse never reaches a
+/// client file.
 pub fn apply_in(
     tx: &mut Transaction<'_>,
     ax: &ApplyEnv<'_>,
     request: &ApplyRequest,
 ) -> Result<ApplyReport, CoreError> {
+    tx.check()?;
     let state_dir = ax.home.state_dir();
     let machine = tx.machine().clone();
     let cx = ax.render_cx(tx.store().secret_memory().clone());

@@ -776,7 +776,10 @@ impl ProjectPlanner<'_, '_> {
                         blocked: project.trust_error(),
                     };
                     let start = self.inputs.len();
-                    let held = self.plan_project(&pcx, loaded);
+                    let mut held = self.plan_project(&pcx, loaded);
+                    // What a server that does not load owns here (its
+                    // overrides, its suppressions) is left alone too.
+                    held.extend(self.desired.invalid.keys().cloned());
                     for input in &mut self.inputs[start..] {
                         input.project_id = Some(project.id.clone());
                         input.blocked.clone_from(&pcx.blocked);
@@ -793,7 +796,8 @@ impl ProjectPlanner<'_, '_> {
         }
         if self.options.projects == ProjectSelection::All {
             let known_ids: Vec<&str> = known.iter().map(|project| project.id.as_str()).collect();
-            self.cleanup(|id| !known_ids.contains(&id), None, None, &[]);
+            let invalid: Vec<String> = self.desired.invalid.keys().cloned().collect();
+            self.cleanup(|id| !known_ids.contains(&id), None, None, &invalid);
         }
     }
 
@@ -1653,13 +1657,7 @@ fn plan_entry(
                 .is_some_and(|id| input.invalid_servers.contains(id))
             {
                 entry.state = EntryState::Blocked;
-                entry.problem = Some(CoreError::new(
-                    ErrorCode::ParseError,
-                    format!(
-                        "server {:?} does not load; its entry is left alone",
-                        l.server_id.as_deref().unwrap_or_default()
-                    ),
-                ));
+                entry.problem = Some(not_loading(l.server_id.as_deref()));
                 return Some(entry);
             }
             let mapper = mapper_of(client)?;
@@ -1844,6 +1842,15 @@ fn plan_list(
                     entry.written = Some(member);
                 }
             }
+            (false, true, true)
+                if entry
+                    .server_id
+                    .as_ref()
+                    .is_some_and(|id| plan.input.invalid_servers.contains(id)) =>
+            {
+                entry.state = EntryState::Blocked;
+                entry.problem = Some(not_loading(entry.server_id.as_deref()));
+            }
             (false, true, true) => {
                 entry.state = EntryState::PendingRemove;
                 entry.action = Action::Remove;
@@ -1951,6 +1958,18 @@ fn blocked_target(mut plan: TargetPlan, err: CoreError) -> TargetPlan {
     plan.problem = Some(err);
     plan.after = None;
     plan
+}
+
+/// Why an owned entry of server `id` is left alone: its file does not
+/// load, so whether it is still wanted is unknown.
+fn not_loading(id: Option<&str>) -> CoreError {
+    CoreError::new(
+        ErrorCode::ParseError,
+        format!(
+            "server {:?} does not load; its entry is left alone",
+            id.unwrap_or_default()
+        ),
+    )
 }
 
 fn blocked_entry(

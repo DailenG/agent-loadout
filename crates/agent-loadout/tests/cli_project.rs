@@ -469,3 +469,129 @@ fn share_moves_private_servers_into_project_toml_with_comments() {
     assert_eq!(code, 1);
     assert_eq!(doc["error"]["code"], "not_found");
 }
+
+#[test]
+fn a_second_checkout_of_a_known_project_is_refused_until_rm() {
+    let cli = Cli::new();
+    let (first, _) = cli.folder("first", false);
+    let id = cli.init(&first, &["--shared"]);
+    append(
+        &manifest(&first, "project.toml"),
+        "\n[servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\nclients = [\"claude-code\"]\n",
+    );
+    cli.ok(&["project", "trust", first.to_str().unwrap()]);
+    let first_mcp = read(&first.join(".mcp.json"));
+
+    // A clone carries the same id.
+    let (second, _) = cli.folder("second", false);
+    std::fs::create_dir_all(second.join(".loadout")).unwrap();
+    std::fs::copy(
+        manifest(&first, "project.toml"),
+        manifest(&second, "project.toml"),
+    )
+    .unwrap();
+    for command in ["add", "trust"] {
+        let (code, doc) = cli.json(&["project", command, second.to_str().unwrap()]);
+        assert_eq!(code, 1, "{command}: {doc:#}");
+        assert_eq!(doc["error"]["code"], "already_exists");
+        let message = doc["error"]["message"].as_str().unwrap();
+        assert!(message.contains(first.to_str().unwrap()), "{message}");
+        assert!(message.contains(second.to_str().unwrap()), "{message}");
+        assert!(message.contains(&format!("project rm {id}")), "{message}");
+    }
+    // Nothing moved: the first checkout keeps its project and its entries.
+    let projects = cli.projects();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["path"], first.to_str().unwrap());
+    assert_eq!(read(&first.join(".mcp.json")), first_mcp);
+    assert!(!second.join(".mcp.json").exists());
+
+    // A folder that is gone is a move: the project follows it.
+    std::fs::remove_dir_all(&first).unwrap();
+    cli.ok(&["project", "trust", second.to_str().unwrap()]);
+    let projects = cli.projects();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["path"], second.to_str().unwrap());
+    assert_eq!(projects[0]["trust"], "trusted");
+}
+
+#[test]
+fn a_failed_trust_commit_leaves_the_trust_state_unchanged() {
+    let cli = Cli::new();
+    let (root, _) = cli.folder("leaky", false);
+    let id = cli.init(&root, &[]);
+    let local = manifest(&root, "project.local.toml");
+    let trusted = read(&local);
+    // Assembled at runtime so the repository holds no token-shaped string.
+    let token = ["gh", "p_", "FAKEfake0123456789FAKEfake0123456789"].concat();
+    append(
+        &local,
+        &format!(
+            "\n[servers.leaky]\ntransport = \"stdio\"\ncommand = \"leaky-mcp\"\n\
+             clients = [\"claude-code\"]\n\n[servers.leaky.env]\nUPSTREAM = \"{token}\"\n"
+        ),
+    );
+    let trust_file = cli.home.join("state").join("trust.json");
+    let before = read(&trust_file);
+
+    let (code, doc) = cli.json(&["project", "trust", root.to_str().unwrap()]);
+    assert_eq!(code, 1, "{doc:#}");
+    assert_eq!(doc["error"]["code"], "leak_detected");
+    assert_eq!(read(&trust_file), before);
+    assert_eq!(cli.projects()[0]["trust"], "changed");
+    assert_eq!(cli.mirror(&id, "project.local.toml"), Some(trusted));
+    // The instant apply never ran: no client file got the entry.
+    assert_eq!(cli.claude_private("leaky"), None);
+
+    // The next apply still blocks the project.
+    let (code, report) = cli.json(&["apply"]);
+    assert_eq!(code, 7, "trust_required exits 7: {report:#}");
+    let targets = project_targets(&report["targets"], &id);
+    assert!(!targets.is_empty(), "{report:#}");
+    for target in targets {
+        assert_eq!(target["error"]["code"], "trust_required", "{report:#}");
+    }
+}
+
+#[test]
+fn share_into_an_existing_project_toml_keeps_overrides_local() {
+    let cli = Cli::new();
+    let (root, repo) = cli.folder("both", true);
+    let repo = repo.unwrap();
+    let id = cli.init(&root, &["--shared"]);
+    append(
+        &manifest(&root, "project.toml"),
+        "\n[servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\nclients = [\"claude-code\"]\n",
+    );
+    let local = manifest(&root, "project.local.toml");
+    std::fs::write(
+        &local,
+        "schema = 1\n\n# My docs flags.\n[servers.docs]\ntransport = \"stdio\"\n\
+         command = \"docs-mcp\"\nargs = [\"--verbose\"]\nclients = [\"claude-code\"]\n\n\
+         [servers.search]\ntransport = \"stdio\"\ncommand = \"search-mcp\"\n\
+         clients = [\"claude-code\"]\n",
+    )
+    .unwrap();
+    cli.ok(&["project", "trust", root.to_str().unwrap()]);
+    let gitignore = read(&manifest(&root, ".gitignore"));
+    let exclude_before = exclude(&repo);
+
+    // An explicit override name collides; the default skips it.
+    let (code, doc) = cli.json(&["project", "share", &id, "--server", "docs"]);
+    assert_eq!(code, 1, "{doc:#}");
+    assert_eq!(doc["error"]["code"], "already_exists");
+    let shared = cli.ok(&["project", "share", &id]);
+    assert_eq!(shared["servers"], serde_json::json!(["search"]));
+    assert_eq!(shared["created"], false);
+    let rest = read(&local);
+    assert!(rest.contains("# My docs flags.\n[servers.docs]"), "{rest}");
+    assert!(!rest.contains("search"), "{rest}");
+    let project_toml = read(&manifest(&root, "project.toml"));
+    assert!(project_toml.contains("[servers.search]"), "{project_toml}");
+    assert!(!project_toml.contains("--verbose"), "{project_toml}");
+    // An existing shared layout keeps its ignore files as they were.
+    assert_eq!(read(&manifest(&root, ".gitignore")), gitignore);
+    assert_eq!(exclude(&repo), exclude_before);
+    assert_eq!(cli.projects()[0]["trust"], "trusted");
+    assert_eq!(cli.mirror(&id, "project.toml"), Some(project_toml));
+}

@@ -736,3 +736,53 @@ fn a_client_without_a_mechanism_cannot_suppress() {
     );
     assert!(plan.targets.iter().all(|t| t.project_id.is_none()));
 }
+
+#[test]
+fn suppressions_of_a_server_that_does_not_load_stay() {
+    let fx = Fx::new();
+    fx.put_server(stdio(
+        "slack",
+        &["claude-code", "omp"],
+        &["-y", "slack-mcp"],
+    ));
+    let root = fx.th.projects().join("quiet");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"quiet-c3d4\"\n\n[servers.slack]\nenabled = false\n\
+         clients = [\"claude-code\", \"omp\"]\n",
+    );
+    fx.know_projects(&[("quiet-c3d4", &root)]);
+    fx.trust(&root);
+    fx.apply();
+    let omp_file = root.join(".omp").join("mcp.json");
+    assert_eq!(
+        json_entry(&fx.read(&omp_file), "slack").unwrap()["enabled"],
+        false
+    );
+    assert_eq!(
+        claude_project(&fx, &root)["disabledMcpServers"],
+        serde_json::json!(["slack"])
+    );
+
+    // A broken hand edit of the server file (working tree only): whether
+    // the server is still enabled is unknown, so its suppressions stay.
+    let path = fx.home.store_dir().join("servers").join("slack.toml");
+    std::fs::write(&path, "schema = 1\nid = \"slack\"\ntransport = \n").unwrap();
+    let plan = fx.plan();
+    for target in plan.targets.iter().filter(|t| t.project_id.is_some()) {
+        assert!(target.after.is_none(), "{target:#?}");
+    }
+    let omp = entry(&plan, &omp_file, "slack");
+    assert_eq!(omp.state, EntryState::Blocked, "{omp:#?}");
+    assert_eq!(omp.problem.as_ref().unwrap().code(), ErrorCode::ParseError);
+    let member = plan
+        .targets
+        .iter()
+        .filter(|t| t.kind == EntryKind::ListMember)
+        .flat_map(|t| &t.entries)
+        .find(|e| e.name == "slack")
+        .unwrap_or_else(|| panic!("{plan:#?}"));
+    assert_eq!(member.state, EntryState::Blocked, "{member:#?}");
+    assert_eq!(member.action, agent_loadout_core::apply::Action::None);
+}
