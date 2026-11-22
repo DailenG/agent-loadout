@@ -1,0 +1,12 @@
+---
+source: crates/agent-loadout-core/tests/formats_yaml.rs
+expression: text(&doc)
+---
+mcp_servers:
+  files:
+    command: npx
+    args:
+      - -y
+      - files-mcp
+    env:
+      ROOT: ~/work

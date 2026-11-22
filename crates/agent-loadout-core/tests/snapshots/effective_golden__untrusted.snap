@@ -20,6 +20,7 @@ expression: "golden(&fx, &root, &view)"
         "shadowed": [],
         "also_visible_to": [
           "copilot",
+          "grok",
           "omp"
         ],
         "status": "blocked",
@@ -64,6 +65,7 @@ expression: "golden(&fx, &root, &view)"
         ],
         "also_visible_to": [
           "copilot",
+          "grok",
           "omp"
         ],
         "status": "blocked",
@@ -84,6 +86,7 @@ expression: "golden(&fx, &root, &view)"
         },
         "shadowed": [],
         "also_visible_to": [
+          "grok",
           "omp"
         ],
         "status": "foreign",
@@ -118,6 +121,7 @@ expression: "golden(&fx, &root, &view)"
         "shadowed": [],
         "also_visible_to": [
           "copilot",
+          "grok",
           "omp"
         ],
         "status": "foreign",
@@ -133,6 +137,7 @@ expression: "golden(&fx, &root, &view)"
         },
         "shadowed": [],
         "also_visible_to": [
+          "grok",
           "omp"
         ],
         "status": "synced",

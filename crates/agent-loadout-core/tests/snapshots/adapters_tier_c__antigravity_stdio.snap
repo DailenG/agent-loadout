@@ -1,0 +1,23 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(ANTIGRAVITY, Os::Windows, &github)"
+---
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_TOOLSETS = "repos,issues"

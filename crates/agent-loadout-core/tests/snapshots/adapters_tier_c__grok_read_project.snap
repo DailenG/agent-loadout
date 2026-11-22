@@ -1,0 +1,11 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "read_and_rewrite(spec, relative)"
+---
+## repo-docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+## repo-tools
+transport = "stdio"
+command = "node"
+args = ["tools/mcp.js"]

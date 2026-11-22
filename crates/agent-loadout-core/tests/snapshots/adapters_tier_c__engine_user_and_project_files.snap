@@ -1,0 +1,121 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: out
+---
+===== gemini: ~/.gemini/settings.json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "tracker": {
+      "httpUrl": "https://tracker.example.test/mcp",
+      "headers": {
+        "X-Client": "example"
+      }
+    }
+  }
+}
+
+===== gemini: <P>/.gemini/settings.json
+{
+  "mcpServers": {
+    "repo-docs": {
+      "httpUrl": "https://docs.example.test/mcp"
+    },
+    "repo-tools": {
+      "command": "node",
+      "args": ["tools/mcp.js"]
+    }
+  }
+}
+
+===== antigravity: ~/.gemini/config/mcp_config.json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "tracker": {
+      "serverUrl": "https://tracker.example.test/mcp",
+      "headers": {
+        "X-Client": "example"
+      }
+    }
+  }
+}
+
+===== antigravity: <P>/.agents/mcp_config.json
+{
+  "mcpServers": {
+    "repo-docs": {
+      "serverUrl": "https://docs.example.test/mcp"
+    },
+    "repo-tools": {
+      "command": "node",
+      "args": ["tools/mcp.js"]
+    }
+  }
+}
+
+===== opencode: ~/.config/opencode/opencode.json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "environment": {
+        "GITHUB_TOOLSETS": "repos,issues"
+      }
+    },
+    "tracker": {
+      "type": "remote",
+      "url": "https://tracker.example.test/mcp",
+      "headers": {
+        "X-Client": "example"
+      }
+    }
+  }
+}
+
+===== opencode: <P>/opencode.json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "repo-docs": {
+      "type": "remote",
+      "url": "https://docs.example.test/mcp"
+    },
+    "repo-tools": {
+      "type": "local",
+      "command": ["node", "tools/mcp.js"]
+    }
+  }
+}
+
+===== grok: ~/.grok/config.toml
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOOLSETS = "repos,issues" }
+
+[mcp_servers.tracker]
+url = "https://tracker.example.test/mcp"
+headers = { X-Client = "example" }
+
+===== grok: <P>/.grok/config.toml
+[mcp_servers.repo-docs]
+url = "https://docs.example.test/mcp"
+
+[mcp_servers.repo-tools]
+command = "node"
+args = ["tools/mcp.js"]

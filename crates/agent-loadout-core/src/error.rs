@@ -196,6 +196,11 @@ pub enum ErrorCode {
     /// `${input:...}`): it has no store form and must be set up as a secret
     /// by hand before the entry can be imported.
     NeedsManualSecret,
+    /// The native file can be read but not edited without risking its
+    /// meaning (SPEC 7.2): a JSON5 file that is not also JSONC, or a YAML
+    /// file whose target entry cannot be located unambiguously (anchors,
+    /// aliases, flow style). The target is blocked; the file is untouched.
+    ReadOnlyFormat,
 }
 
 impl ErrorCode {
@@ -264,6 +269,7 @@ impl ErrorCode {
             ErrorCode::PersonalPathInSharedFile => "personal_path_in_shared_file",
             ErrorCode::ReadOnlyClient => "read_only_client",
             ErrorCode::NeedsManualSecret => "needs_manual_secret",
+            ErrorCode::ReadOnlyFormat => "read_only_format",
         }
     }
 }

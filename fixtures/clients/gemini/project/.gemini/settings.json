@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "repo-docs": {
+      "httpUrl": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_TOKEN}"
+      },
+      "trust": true
+    },
+    "repo-tools": {
+      "command": "node",
+      "args": ["tools/mcp.js"],
+      "cwd": "${PROJECT_ROOT}"
+    }
+  },
+  "mcp": {
+    "excluded": ["github"]
+  }
+}

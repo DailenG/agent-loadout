@@ -1,0 +1,25 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "read_all(WINDSURF, &doc)"
+---
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${env:GITHUB_PAT}"
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${env:TRACKER_TOKEN}"
+## events
+transport = "sse"
+url = "https://events.example.com/sse"
+# disabled
+## notes
+transport = "stdio"
+command = "notes-mcp"
+# unmapped disabledTools: Array([String("delete_note")])

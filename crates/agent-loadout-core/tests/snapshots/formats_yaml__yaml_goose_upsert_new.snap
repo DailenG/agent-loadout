@@ -1,0 +1,15 @@
+---
+source: crates/agent-loadout-core/tests/formats_yaml.rs
+expression: "line_diff(&original, &added)"
+---
+@36
++  github:
++    enabled: true
++    name: github
++    type: stdio
++    cmd: npx
++    args:
++    - -y
++    - "@modelcontextprotocol/server-github"
++    envs:
++      GITHUB_TOKEN: ${GITHUB_TOKEN}

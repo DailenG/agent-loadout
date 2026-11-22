@@ -5,8 +5,9 @@
 mod support;
 
 use agent_loadout_core::ErrorCode;
+use agent_loadout_core::adapters::adapter;
 use agent_loadout_core::apply::{Action, Decision, EntryState, OnConflict, PlanOptions};
-use agent_loadout_core::model::clients::ClientSelection;
+use agent_loadout_core::model::clients::{ClientSelection, KNOWN_CLIENTS};
 use agent_loadout_core::model::server::{Delivery, DeliveryMode, Transport};
 use support::{Fx, entry, json_entry, stdio};
 
@@ -419,14 +420,21 @@ fn unwritable_entries_are_blocked_never_dropped() {
 #[test]
 fn clients_without_an_adapter_or_excluded_are_reported_not_written() {
     let fx = Fx::new();
-    fx.put_server(stdio(
-        "notes",
-        &["claude-code", "gemini", "warp"],
-        &NOTES_ARGS,
-    ));
+    // A known client without an adapter in this build, if one is left.
+    let unported = KNOWN_CLIENTS
+        .iter()
+        .map(|client| client.id)
+        .find(|id| adapter(id).is_none());
+    let mut clients = vec!["claude-code", "warp"];
+    clients.extend(unported);
+    fx.put_server(stdio("notes", &clients, &NOTES_ARGS));
     let plan = fx.plan();
     let codes: Vec<ErrorCode> = plan.warnings.iter().map(|w| w.code()).collect();
-    assert!(codes.contains(&ErrorCode::NoAdapter), "{codes:?}");
+    assert_eq!(
+        codes.contains(&ErrorCode::NoAdapter),
+        unported.is_some(),
+        "{codes:?}"
+    );
     assert!(codes.contains(&ErrorCode::UnknownClient), "{codes:?}");
     assert_eq!(plan.targets.len(), 1);
 

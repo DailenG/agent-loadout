@@ -1,0 +1,18 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(GROK, Os::Windows, &github)"
+---
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}" }
+startup_timeout_sec = 20
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}"
+# passthrough startup_timeout_sec: Integer(20)

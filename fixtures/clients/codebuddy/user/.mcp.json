@@ -1,0 +1,10 @@
+{
+  // CodeBuddy MCP servers (synthetic fixture): JSON5 that is also JSONC
+  "mcpServers": {
+    "files": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "files-mcp"], // pinned
+    },
+  },
+}

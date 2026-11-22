@@ -1,0 +1,8 @@
+# Project servers (synthetic fixture)
+
+[mcp_servers.repo-docs]
+url = "https://docs.example.com/mcp"
+
+[mcp_servers.repo-tools]
+command = "node"
+args = ["tools/mcp.js"]

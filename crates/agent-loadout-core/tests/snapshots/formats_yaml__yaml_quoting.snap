@@ -1,0 +1,48 @@
+---
+source: crates/agent-loadout-core/tests/formats_yaml.rs
+expression: written
+---
+servers:
+  tricky:
+    k0: ""
+    k1: "yes"
+    k2: "No"
+    k3: "on"
+    k4: "null"
+    k5: "~"
+    k6: "true"
+    k7: "12"
+    k8: "1.5"
+    k9: "0x10"
+    k10: "-1"
+    k11: ".5"
+    k12: "- item"
+    k13: "key: value"
+    k14: "a #comment"
+    k15: "trailing:"
+    k16: " padded"
+    k17: "tab\there"
+    k18: "line\nbreak"
+    k19: "#hash"
+    k20: "*alias"
+    k21: "&anchor"
+    k22: "!tag"
+    k23: "@at"
+    k24: "`tick`"
+    k25: "'single'"
+    k26: "\"double\""
+    k27: "{brace}"
+    k28: "[bracket]"
+    k29: "%percent"
+    k30: "|pipe"
+    k31: ">fold"
+    k32: "---"
+    k33: "..."
+    k34: été
+    k35: ${env:TOKEN}
+    k36: https://example.com/mcp?x=1
+    k37: -y
+    k38: --flag=value
+    k39: C:\tools\mcp.exe
+    k40: back\slash
+    "quoted key: yes": v

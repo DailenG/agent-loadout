@@ -1,0 +1,40 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Synthetic fixture: OpenCode's global config.
+  "theme": "opencode",
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PAT}",
+      },
+      "enabled": true,
+    },
+    "tracker": {
+      "type": "remote",
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:TRACKER_TOKEN}",
+      },
+      "oauth": false,
+      "timeout": 10000,
+    },
+    "events": {
+      "type": "remote",
+      "url": "https://events.example.com/sse?channel=all",
+      "enabled": false,
+    },
+    "untyped": {
+      "command": ["example-untyped-mcp"],
+    },
+    "string-command": {
+      "type": "local",
+      "command": "npx -y example-mcp",
+    },
+    "empty-command": {
+      "type": "local",
+      "command": [],
+    },
+  },
+}

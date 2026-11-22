@@ -1,0 +1,17 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(OPENCODE, Os::Linux, &events)"
+---
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "events": {
+      "type": "remote",
+      "url": "https://events.example.com/sse"
+    }
+  }
+}
+
+# read back
+transport = "sse"
+url = "https://events.example.com/sse"

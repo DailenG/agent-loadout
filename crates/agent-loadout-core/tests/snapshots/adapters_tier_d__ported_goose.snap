@@ -1,0 +1,37 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: golden
+---
+extensions:
+  files:
+    args:
+      - -y
+      - files-mcp
+    cmd: npx
+    enabled: true
+    envs:
+      ROOT: /srv/work
+    name: files
+    type: stdio
+  search:
+    enabled: true
+    headers:
+      Authorization: Bearer example-token
+    name: search
+    type: streamable_http
+    uri: https://search.example.com/mcp
+
+# read back
+## files
+transport = "stdio"
+command = "npx"
+args = ["-y", "files-mcp"]
+
+[env]
+ROOT = "/srv/work"
+## search
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+Authorization = "Bearer example-token"

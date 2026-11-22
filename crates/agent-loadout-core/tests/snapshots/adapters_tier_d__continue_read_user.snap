@@ -1,0 +1,21 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "read_all(spec, &doc)"
+---
+## files
+transport = "stdio"
+command = "npx"
+args = ["-y", "files-mcp"]
+
+[env]
+ROOT = "~/work"
+## search
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${{ secrets.SEARCH_TOKEN }}"
+# unmapped requestOptions: Object(NativeMap { entries: [("timeout", Integer(30))] })
+## legacy
+transport = "sse"
+url = "https://events.example.com/sse"

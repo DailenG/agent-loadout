@@ -1,0 +1,27 @@
+name: Local Assistant
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Claude
+    provider: anthropic
+    model: claude-sonnet-4
+
+mcpServers:
+  - name: files
+    command: npx
+    args:
+      - -y
+      - files-mcp
+    env:
+      ROOT: ~/work
+  - name: search
+    type: streamable-http
+    url: https://search.example.com/mcp
+    requestOptions:
+      headers:
+        Authorization: Bearer ${{ secrets.SEARCH_TOKEN }}
+      timeout: 30
+  - name: legacy
+    transport: sse
+    url: https://events.example.com/sse

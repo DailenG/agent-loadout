@@ -1,0 +1,32 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "read_and_rewrite(spec, relative)"
+---
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "{env:GITHUB_PAT}"
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer {env:TRACKER_TOKEN}"
+# unmapped oauth: Bool(false)
+# unmapped timeout: Integer(10000)
+## events
+transport = "sse"
+url = "https://events.example.com/sse?channel=all"
+# disabled
+## untyped
+transport = "stdio"
+command = "example-untyped-mcp"
+args = []
+# skipped by the client: has no `type` (`local` or `remote`), so the client rejects it
+## string-command
+error[unexpected_shape]: `command` must be a non-empty array of strings (the command, then its arguments)
+## empty-command
+error[unexpected_shape]: `command` must be a non-empty array of strings (the command, then its arguments)

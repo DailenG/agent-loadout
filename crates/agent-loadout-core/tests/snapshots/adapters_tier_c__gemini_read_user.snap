@@ -1,0 +1,34 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "read_and_rewrite(spec, relative)"
+---
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+cwd = "./servers"
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}"
+# tools.allow: ["search_code", "get_issue"]
+# passthrough timeout: Integer(30000)
+# passthrough trust: Bool(false)
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${TRACKER_TOKEN}"
+# tools.deny: ["delete_issue"]
+## events
+transport = "sse"
+url = "https://events.example.com/sse"
+## typed-http
+transport = "http"
+url = "https://typed.example.com/mcp"
+# unmapped description: String("Gemini's newer typed spelling")
+## both-urls
+transport = "http"
+url = "https://both.example.com/mcp"
+## socket
+error[unsupported_transport]: the client cannot run "ws" servers

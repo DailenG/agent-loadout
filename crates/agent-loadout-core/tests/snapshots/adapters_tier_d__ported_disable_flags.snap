@@ -1,0 +1,27 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "flags.join(\"\\n\")"
+---
+augment: -
+cline: disabled=Bool(true)
+roo-code: disabled=Bool(true)
+kilo-code: disabled=Bool(true)
+kiro: disabled=Bool(true)
+junie: -
+droid: -
+commandcode: -
+crush: -
+qoder: -
+trae: -
+trae-cn: -
+codebuddy: -
+iflow: -
+qwen-code: -
+zencoder: -
+openclaw: enabled=Bool(false)
+mimo-code: enabled=Bool(false)
+workbuddy: -
+zcode: enable=Bool(false)
+continue: -
+goose: enabled=Bool(false)
+hermes: -

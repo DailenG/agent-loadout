@@ -1,0 +1,11 @@
+# Shared defaults through an anchor
+defaults: &defaults
+  timeout: 300
+  enabled: true
+mcp_servers:
+  files:
+    <<: *defaults
+    command: npx
+    args: ["-y", "files-mcp"]
+  search:
+    url: https://search.example.com/mcp

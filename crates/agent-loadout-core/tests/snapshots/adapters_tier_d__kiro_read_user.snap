@@ -1,0 +1,16 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "read_all(spec, &doc)"
+---
+## fetch
+transport = "stdio"
+command = "uvx"
+args = ["mcp-server-fetch"]
+
+[env]
+# unmapped autoApprove: Array([])
+## aws-docs
+transport = "stdio"
+command = "uvx"
+args = ["awslabs.aws-documentation-mcp-server@latest"]
+# disabled

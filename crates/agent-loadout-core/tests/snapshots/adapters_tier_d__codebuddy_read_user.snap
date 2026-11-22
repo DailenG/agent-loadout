@@ -1,0 +1,8 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "read_all(spec, &doc)"
+---
+## files
+transport = "stdio"
+command = "npx"
+args = ["-y", "files-mcp"]

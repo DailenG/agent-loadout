@@ -1,0 +1,16 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "mcp": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/opt/mcp/filesystem.js"],
+      "timeout": 120
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer $GH_PAT" }
+    }
+  }
+}

@@ -294,8 +294,9 @@ impl AdapterSpec {
 
     /// Where a project hides a same-named user server, as a target:
     ///
-    /// - [`ProjectDisable::ListMember`]: the project-local file, with the
-    ///   list as its container (Claude Code
+    /// - [`ProjectDisable::ListMember`]: the project-local file (the
+    ///   project file for a client without one, Gemini `mcp.excluded`),
+    ///   with the list as its container (Claude Code
     ///   `projects["<P>"].disabledMcpServers`), for
     ///   [`Document::set_list_member`].
     /// - [`ProjectDisable::EnabledFalse`]: the project file and its server
@@ -311,6 +312,9 @@ impl AdapterSpec {
     ) -> Result<Option<Target>, CoreError> {
         let mcp = self.mcp_on(env.os())?;
         let (scope, list) = match mcp.caps.project_disable {
+            Some(ProjectDisable::ListMember(list)) if mcp.project_local.is_empty() => {
+                (Scope::Project, Some(list))
+            }
             Some(ProjectDisable::ListMember(list)) => (Scope::ProjectLocal, Some(list)),
             Some(ProjectDisable::EnabledFalse { .. }) => (Scope::Project, None),
             None => return Ok(None),

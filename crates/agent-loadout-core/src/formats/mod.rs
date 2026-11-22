@@ -15,10 +15,21 @@
 //! - TOML: `toml_edit`. An existing entry is updated key by key inside its
 //!   table, so comments in it survive; tables outside the entry are never
 //!   touched.
+//! - JSON5: a file that also parses as JSONC is edited as JSONC; any other
+//!   JSON5 file is read with the `json5` crate and never written (every
+//!   edit that would change it fails with `read_only_format`).
+//! - YAML: span splice over saphyr's parser (see `yaml.rs`). Entries that
+//!   cannot be located unambiguously (anchors, aliases, flow-style
+//!   containers, several documents) make edits fail with
+//!   `read_only_format`. A last container segment `[field]` addresses a
+//!   sequence of mappings keyed by their `field` member (YAML only; in the
+//!   other formats it is an ordinary key).
 
+mod json5;
 mod jsonc;
 mod text;
 mod toml;
+mod yaml;
 
 use crate::error::{CoreError, ErrorCode};
 
@@ -33,6 +44,9 @@ pub enum Format {
     /// JSON with comments and trailing commas.
     Jsonc,
     Toml,
+    /// JSON5: read always, written only when the file is also JSONC.
+    Json5,
+    Yaml,
 }
 
 impl Format {
@@ -41,6 +55,8 @@ impl Format {
             Format::Json => "json",
             Format::Jsonc => "jsonc",
             Format::Toml => "toml",
+            Format::Json5 => "json5",
+            Format::Yaml => "yaml",
         }
     }
 }
@@ -238,6 +254,8 @@ pub struct Document {
 enum Body {
     Json(jsonc::JsonBody),
     Toml(toml::TomlBody),
+    Json5(json5::Json5Body),
+    Yaml(yaml::YamlBody),
 }
 
 impl Document {
@@ -250,6 +268,11 @@ impl Document {
             Format::Json => Body::Json(jsonc::JsonBody::parse(text, true)?),
             Format::Jsonc => Body::Json(jsonc::JsonBody::parse(text, false)?),
             Format::Toml => Body::Toml(toml::TomlBody::parse(text)?),
+            Format::Json5 => match jsonc::JsonBody::parse(text.clone(), false) {
+                Ok(body) => Body::Json(body),
+                Err(_) => Body::Json5(json5::Json5Body::parse(text)?),
+            },
+            Format::Yaml => Body::Yaml(yaml::YamlBody::parse(text)?),
         };
         Ok(Self {
             format,
@@ -280,6 +303,8 @@ impl Document {
         match &self.body {
             Body::Json(body) => body.list(container),
             Body::Toml(body) => body.list(container),
+            Body::Json5(body) => body.list(container),
+            Body::Yaml(body) => body.list(container),
         }
     }
 
@@ -288,6 +313,8 @@ impl Document {
         match &self.body {
             Body::Json(body) => body.get(container, key),
             Body::Toml(body) => body.get(container, key),
+            Body::Json5(body) => body.get(container, key),
+            Body::Yaml(body) => body.get(container, key),
         }
     }
 
@@ -311,6 +338,14 @@ impl Document {
         let changed = match &mut self.body {
             Body::Json(body) => body.upsert(container, key, value, &mut created)?,
             Body::Toml(body) => body.upsert(container, key, value, &mut created)?,
+            Body::Json5(body) => {
+                if body.get(container, key)?.as_ref() == Some(value) {
+                    false
+                } else {
+                    return Err(body.read_only(container));
+                }
+            }
+            Body::Yaml(body) => body.upsert(container, key, value, &mut created)?,
         };
         self.created.extend(created);
         Ok(changed)
@@ -324,6 +359,13 @@ impl Document {
         let removed = match &mut self.body {
             Body::Json(body) => body.remove(container, key)?,
             Body::Toml(body) => body.remove(container, key)?,
+            Body::Json5(body) => {
+                if body.get(container, key)?.is_some() {
+                    return Err(body.read_only(container));
+                }
+                false
+            }
+            Body::Yaml(body) => body.remove(container, key)?,
         };
         if removed {
             self.prune(container)?;
@@ -350,6 +392,20 @@ impl Document {
         let changed = match &mut self.body {
             Body::Json(body) => body.set_list_member(list, member, present, &mut created)?,
             Body::Toml(body) => body.set_list_member(list, member, present, &mut created)?,
+            Body::Json5(body) => {
+                let (name, parent) = list.split_last().expect("checked above");
+                let listed = body.get(parent, name)?.is_some_and(|value| match value {
+                    NativeValue::Array(items) => {
+                        items.iter().any(|item| item.as_str() == Some(member))
+                    }
+                    _ => false,
+                });
+                if listed != present {
+                    return Err(body.read_only(list));
+                }
+                false
+            }
+            Body::Yaml(body) => body.set_list_member(list, member, present, &mut created)?,
         };
         self.created.extend(created);
         if changed && !present {
@@ -364,6 +420,8 @@ impl Document {
         let body = match &self.body {
             Body::Json(body) => body.text(),
             Body::Toml(body) => body.text(),
+            Body::Json5(body) => body.text(),
+            Body::Yaml(body) => body.text(),
         };
         text::encode(&body, self.style)
     }
@@ -379,6 +437,8 @@ impl Document {
             let removed = match &mut self.body {
                 Body::Json(body) => body.remove_if_empty(prefix)?,
                 Body::Toml(body) => body.remove_if_empty(prefix)?,
+                Body::Json5(_) => false,
+                Body::Yaml(body) => body.remove_if_empty(prefix)?,
             };
             if !removed {
                 return Ok(());
@@ -386,6 +446,18 @@ impl Document {
             self.created.remove(index);
         }
         Ok(())
+    }
+}
+
+/// The mapping keys of a container path: `path` without a last `[field]`
+/// segment (a YAML list keyed by `field`, see the module docs), so the
+/// container is the value at the returned path.
+pub fn mapping_path<'p, 'a>(path: &'p [&'a str]) -> &'p [&'a str] {
+    match path.split_last() {
+        Some((last, rest)) if last.len() > 2 && last.starts_with('[') && last.ends_with(']') => {
+            rest
+        }
+        _ => path,
     }
 }
 

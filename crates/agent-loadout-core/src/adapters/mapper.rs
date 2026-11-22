@@ -250,8 +250,8 @@ const ENABLED: &str = "enabled";
 const WINDOWS_SHIMS: [&str; 7] = ["npx", "npm", "pnpm", "pnpx", "yarn", "yarnpkg", "corepack"];
 
 /// The `mcpServers.<name>` JSON entry: `{type, command, args, env, cwd}` or
-/// `{type, url, headers, headersHelper}`, plus `enabled` for clients that
-/// disable natively (SPEC 7.3).
+/// `{type, url, headers, headersHelper}`, plus the disable flag (`enabled`
+/// or `disabled`) of clients that disable natively (SPEC 7.3).
 ///
 /// Stdio entries are written with `command` and `args`, plus `env` when it
 /// has variables (or the existing entry has the key).
@@ -286,7 +286,7 @@ impl McpServersJson {
         MODELED_KEYS.contains(&key)
             || (key == CWD && self.cwd)
             || (key == HEADERS_HELPER && self.headers_helper())
-            || (key == ENABLED && disables_natively(self.caps))
+            || is_disable_key(self.caps, key)
             || is_tool_key(self.caps, key)
             || self.caps.passthrough_allowlist.contains(&key)
     }
@@ -502,44 +502,64 @@ pub(crate) fn check_transport(caps: &Caps, launch: &Launch) -> Result<Transport,
     }
 }
 
-fn disables_natively(caps: &Caps) -> bool {
-    caps.native_disable == Some(DisableMech::EnabledFalse)
+/// The entry key of the client's in-entry disable flag and the value that
+/// disables (`enabled: false`, `disabled: true`); `None` when the client
+/// has no such flag.
+fn disable_flag(caps: &Caps) -> Option<(&'static str, bool)> {
+    match caps.native_disable {
+        Some(DisableMech::EnabledFalse) => Some((ENABLED, false)),
+        Some(DisableMech::DisabledTrue) => Some(("disabled", true)),
+        Some(DisableMech::ListMember(_)) | None => None,
+    }
 }
 
-/// `enabled: false` for a disabled server; `enabled: true` only when the
-/// existing entry has the key, so an update does not churn it.
+/// Whether `key` is the client's in-entry disable flag.
+pub(crate) fn is_disable_key(caps: &Caps, key: &str) -> bool {
+    disable_flag(caps).is_some_and(|(flag, _)| flag == key)
+}
+
+/// The disable flag set for a disabled server (`enabled: false` or
+/// `disabled: true`); its enabled value only when the existing entry has
+/// the key, so an update does not churn it.
 pub(crate) fn write_enabled(
     entry: &mut NativeMap,
     caps: &Caps,
     server: &RenderedServer,
     existing: Option<&NativeMap>,
 ) -> Result<(), MapError> {
+    let Some((flag, disabled)) = disable_flag(caps) else {
+        return if server.enabled {
+            Ok(())
+        } else {
+            unsupported(ENABLED)
+        };
+    };
     if !server.enabled {
-        if !disables_natively(caps) {
-            return unsupported(ENABLED);
-        }
-        entry.insert(ENABLED, NativeValue::Bool(false));
-    } else if disables_natively(caps) && existing.is_some_and(|entry| entry.contains_key(ENABLED)) {
-        entry.insert(ENABLED, NativeValue::Bool(true));
+        entry.insert(flag, NativeValue::Bool(disabled));
+    } else if existing.is_some_and(|entry| entry.contains_key(flag)) {
+        entry.insert(flag, NativeValue::Bool(!disabled));
     }
     Ok(())
 }
 
 pub(crate) fn read_disabled(entry: &NativeMap, caps: &Caps) -> Result<bool, MapError> {
-    if !disables_natively(caps) {
+    let Some((flag, disabled)) = disable_flag(caps) else {
         return Ok(false);
-    }
-    match entry.get(ENABLED) {
+    };
+    match entry.get(flag) {
         None => Ok(false),
-        Some(NativeValue::Bool(enabled)) => Ok(!enabled),
-        Some(_) => shape(ENABLED, "a boolean"),
+        Some(NativeValue::Bool(value)) => Ok(*value == disabled),
+        Some(_) => shape(flag, "a boolean"),
     }
 }
 
-/// Removes `enabled: true`, the default, when the client models `enabled`.
+/// Removes the disable flag at its enabled value, the default, when the
+/// client has one.
 pub(crate) fn drop_default_enabled(entry: &mut NativeMap, caps: &Caps) {
-    if disables_natively(caps) && entry.get(ENABLED) == Some(&NativeValue::Bool(true)) {
-        entry.remove(ENABLED);
+    if let Some((flag, disabled)) = disable_flag(caps)
+        && entry.get(flag) == Some(&NativeValue::Bool(!disabled))
+    {
+        entry.remove(flag);
     }
 }
 

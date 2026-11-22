@@ -1,0 +1,16 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(GROK, Os::Linux, &tracker)"
+---
+[mcp_servers.tracker]
+url = "https://tracker.example.com/mcp"
+headers = { Authorization = "Bearer ${TRACKER_TOKEN:-anonymous}" }
+tool_timeout_sec = 2.5
+
+# read back
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${TRACKER_TOKEN:-anonymous}"
+# passthrough tool_timeout_sec: Float(2.5)

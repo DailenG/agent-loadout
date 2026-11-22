@@ -1,0 +1,13 @@
+{
+  "theme": "Default",
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}" },
+      "trust": false
+    },
+    "tracker": { "httpUrl": "https://tracker.example.com/mcp", "timeout": 30000 },
+    "events": { "url": "https://events.example.com/sse", "excludeTools": ["delete"] }
+  }
+}

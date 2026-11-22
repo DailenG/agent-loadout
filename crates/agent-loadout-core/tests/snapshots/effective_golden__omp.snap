@@ -85,7 +85,8 @@ expression: "golden(&fx, &root, &view)"
         },
         "shadowed": [],
         "also_visible_to": [
-          "claude-code"
+          "claude-code",
+          "grok"
         ],
         "status": "foreign",
         "warnings": []
@@ -114,7 +115,8 @@ expression: "golden(&fx, &root, &view)"
         "shadowed": [],
         "also_visible_to": [
           "claude-code",
-          "copilot"
+          "copilot",
+          "grok"
         ],
         "status": "foreign",
         "warnings": []

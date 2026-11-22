@@ -1,0 +1,15 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: text
+---
+{
+  // project settings
+  "$schema": "https://opencode.ai/config.json",
+  "model": "example/model",
+  "mcp": {
+    "repo-tools": {
+      "type": "local",
+      "command": ["node", "tools/mcp.js"]
+    }
+  },
+}

@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "docs": { "command": "docs-mcp", "args": ["--root", ".", "--verbose"] }
+  }
+}

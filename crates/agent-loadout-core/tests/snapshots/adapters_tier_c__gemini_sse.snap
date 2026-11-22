@@ -1,0 +1,15 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(GEMINI, Os::Linux, &events)"
+---
+{
+  "mcpServers": {
+    "events": {
+      "url": "https://events.example.com/sse"
+    }
+  }
+}
+
+# read back
+transport = "sse"
+url = "https://events.example.com/sse"

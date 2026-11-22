@@ -1107,7 +1107,20 @@ impl ProjectPlanner<'_, '_> {
                             return;
                         }
                     };
+                // A private suppression listed in a shared project file
+                // (Gemini `mcp.excluded`, SPEC 6.5).
+                let mut exclude = false;
+                if pcx.blocked.is_none() && matches!(entry.layer, EntryLayer::Local) {
+                    match Self::private_file(pcx, spec, &target) {
+                        Ok(hide) => exclude = hide,
+                        Err(err) => {
+                            self.warnings.push(err);
+                            return;
+                        }
+                    }
+                }
                 let input = self.input_for(target, spec.id, native_disable, EntryKind::ListMember);
+                input.exclude |= exclude;
                 input.members.push(DesiredMember {
                     client: spec.id,
                     server_id: entry.name.clone(),

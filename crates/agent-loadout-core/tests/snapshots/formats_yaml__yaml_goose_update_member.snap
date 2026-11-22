@@ -1,0 +1,12 @@
+---
+source: crates/agent-loadout-core/tests/formats_yaml.rs
+expression: "line_diff(&original, &updated)"
+---
+@17
+-    cmd: npx
+-    description: Local files
++    cmd: bunx
+@22
++      MODE: ro
+@26
++    display_name: Files

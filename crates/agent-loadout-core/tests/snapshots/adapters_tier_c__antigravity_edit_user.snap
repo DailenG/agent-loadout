@@ -1,0 +1,32 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: edited
+---
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github", "--read-only"],
+      "env": {}
+    },
+    "tracker": {
+      "serverUrl": "https://tracker.example.com/mcp",
+      "headers": {
+        "X-Client": "example-fixture"
+      },
+      "timeoutSeconds": 45
+    },
+    "paused": {
+      "command": "example-paused-mcp",
+      "disabled": true,
+      "disabledTools": ["delete"]
+    },
+    "plain-url": {
+      "url": "https://plain.example.com/mcp"
+    },
+    "added": {
+      "command": "example-mcp",
+      "args": []
+    }
+  }
+}

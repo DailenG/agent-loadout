@@ -1,0 +1,24 @@
+name: Local Assistant
+version: 1.0.0
+schema: v1
+
+models:
+    - name: Claude
+      provider: anthropic
+      model: claude-sonnet-4
+
+# MCP servers, matched by name
+mcpServers:
+    - name: files
+      command: npx
+      args:
+          - -y
+          - files-mcp
+      env:
+          ROOT: ~/work
+    - name: search
+      type: streamable-http
+      url: https://search.example.com/mcp
+
+rules:
+    - Keep answers short

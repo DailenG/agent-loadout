@@ -1,0 +1,14 @@
+---
+source: crates/agent-loadout-core/tests/formats_yaml.rs
+expression: "line_diff(&original, &text(&doc))"
+---
+@27
+-  # Remote search
+-  search:
+-    enabled: false
+-    name: search
+-    type: streamable_http
+-    uri: "https://search.example.com/mcp"
+-    headers:
+-      Authorization: Bearer ${SEARCH_TOKEN}
+-    timeout: 300

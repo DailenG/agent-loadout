@@ -1,0 +1,30 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: edited
+---
+# Grok Build configuration (synthetic fixture)
+model = "example-model"
+
+[mcp_servers.github]
+command = "npx"   # launcher
+args = ["-y", "@modelcontextprotocol/server-github", "--read-only"]
+startup_timeout_sec = 20
+
+[mcp_servers.github.env]
+
+[mcp_servers.tracker]
+url = "https://tracker.example.com/mcp"
+headers = { Authorization = "Bearer ${TRACKER_TOKEN:-anonymous}" }
+tool_timeout_sec = 2.5
+
+[mcp_servers.events]
+type = "sse"
+url = "https://events.example.com/sse"
+
+[mcp_servers.scoped]
+command = "example-scoped-mcp"
+cwd = "/srv/example"
+
+[mcp_servers.added]
+command = "example-mcp"
+args = []

@@ -69,7 +69,8 @@ pub const KNOWN_CLIENTS: &[KnownClient] = &[
     client("trae-cn", &[]),
     client("codebuddy", &[]),
     client("iflow", &[]),
-    client("qwen-code", &[]),
+    // A Gemini CLI fork, written through Gemini's mapper.
+    client("qwen-code", &["timeout", "trust"]),
     client("zencoder", &[]),
     client("openclaw", &[]),
     client("mimo-code", &[]),

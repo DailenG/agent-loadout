@@ -1,0 +1,15 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "read_and_rewrite(spec, relative)"
+---
+## repo-docs
+transport = "http"
+url = "https://docs.example.com/mcp"
+
+[headers]
+Authorization = "Bearer {env:DOCS_TOKEN}"
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+# disabled

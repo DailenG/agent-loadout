@@ -1,0 +1,23 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(OPENCODE, Os::Linux, &tracker)"
+---
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "tracker": {
+      "type": "remote",
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:TRACKER_TOKEN}"
+      }
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer {env:TRACKER_TOKEN}"

@@ -1,0 +1,37 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: golden
+---
+{
+  "mcp": {
+    "files": {
+      "type": "local",
+      "command": ["npx", "-y", "files-mcp"],
+      "environment": {
+        "ROOT": "/srv/work"
+      }
+    },
+    "search": {
+      "type": "remote",
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer example-token"
+      }
+    }
+  }
+}
+
+# read back
+## files
+transport = "stdio"
+command = "npx"
+args = ["-y", "files-mcp"]
+
+[env]
+ROOT = "/srv/work"
+## search
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+Authorization = "Bearer example-token"

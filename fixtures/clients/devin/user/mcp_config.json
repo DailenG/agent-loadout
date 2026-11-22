@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PAT}" }
+    },
+    "tracker": {
+      "url": "https://tracker.example.com/mcp",
+      "transport": "streamable-http",
+      "headers": { "Authorization": "Bearer ${env:TRACKER_TOKEN}" }
+    },
+    "events": { "url": "https://events.example.com/sse", "transport": "sse" },
+    "plain": { "url": "https://plain.example.com/mcp" }
+  }
+}

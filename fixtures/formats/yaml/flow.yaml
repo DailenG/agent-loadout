@@ -1,0 +1,4 @@
+# Servers in flow style
+mcp_servers: {files: {command: npx, args: [-y, files-mcp]}}
+other:
+  keep: true

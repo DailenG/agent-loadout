@@ -1,0 +1,44 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "golden(DEVIN, Os::Linux, &list)"
+---
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PAT}"
+      }
+    },
+    "tracker": {
+      "transport": "http",
+      "url": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:TRACKER_TOKEN}"
+      }
+    },
+    "events": {
+      "transport": "sse",
+      "url": "https://events.example.com/sse"
+    }
+  }
+}
+
+# read back
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${env:GITHUB_PAT}"
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${env:TRACKER_TOKEN}"
+## events
+transport = "sse"
+url = "https://events.example.com/sse"

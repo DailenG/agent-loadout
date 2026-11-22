@@ -1,0 +1,16 @@
+---
+source: crates/agent-loadout-core/tests/formats_yaml.rs
+expression: "line_diff(&original, &edited)"
+---
+@13
+-      command: npx
++      command: bunx
+@17
+-      env:
+-          ROOT: ~/work
+@20
++    - name: github
++      command: npx
++      args:
++          - -y
++          - server-github

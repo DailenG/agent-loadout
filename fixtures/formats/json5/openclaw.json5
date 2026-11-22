@@ -1,0 +1,14 @@
+// OpenClaw settings (synthetic fixture): JSON5, not JSONC
+{
+  agent: { model: 'claude-sonnet-4' },
+  mcp: {
+    servers: {
+      files: {
+        type: 'local',
+        command: ['npx', '-y', 'files-mcp'],
+        environment: { ROOT: '~/work' },
+      },
+      search: { type: 'remote', url: 'https://search.example.com/sse', },
+    },
+  },
+}

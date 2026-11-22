@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "repo-docs": {
+      "type": "remote",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:DOCS_TOKEN}"
+      }
+    },
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "enabled": false
+    }
+  }
+}

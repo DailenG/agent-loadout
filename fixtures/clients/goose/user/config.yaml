@@ -1,0 +1,36 @@
+# Goose settings (synthetic fixture)
+GOOSE_PROVIDER: anthropic
+GOOSE_MODEL: claude-sonnet-4
+extensions:
+  developer:
+    bundled: true
+    display_name: Developer
+    enabled: true
+    name: developer
+    timeout: 300
+    type: builtin
+  files:
+    args:
+    - -y
+    - files-mcp # pinned by the lockfile
+    bundled: null
+    cmd: npx
+    description: Local files
+    enabled: true
+    env_keys: []
+    envs:
+      ROOT: ~/work
+    name: files
+    timeout: 300
+    type: stdio
+
+  # Remote search
+  search:
+    enabled: false
+    name: search
+    type: streamable_http
+    uri: "https://search.example.com/mcp"
+    headers:
+      Authorization: Bearer ${SEARCH_TOKEN}
+    timeout: 300
+GOOSE_MODE: smart_approve

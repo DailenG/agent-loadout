@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "tracker": { "type": "http", "url": "https://tracker.example.com/mcp" }
+  }
+}

@@ -1,0 +1,15 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "read_all(spec, &doc)"
+---
+## filesystem
+transport = "stdio"
+command = "node"
+args = ["/opt/mcp/filesystem.js"]
+# unmapped timeout: Integer(120)
+## github
+transport = "http"
+url = "https://api.githubcopilot.com/mcp/"
+
+[headers]
+Authorization = "Bearer $GH_PAT"

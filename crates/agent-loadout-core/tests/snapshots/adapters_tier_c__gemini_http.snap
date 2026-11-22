@@ -1,0 +1,21 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(GEMINI, Os::Linux, &tracker)"
+---
+{
+  "mcpServers": {
+    "tracker": {
+      "httpUrl": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TRACKER_TOKEN}"
+      }
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${TRACKER_TOKEN}"

@@ -219,7 +219,24 @@ fn read_all(spec: &AdapterSpec, doc: &Document) -> String {
 
 #[test]
 fn tier_b_adapters_are_registered() {
-    let ids: Vec<&str> = ADAPTERS.iter().map(|spec| spec.id).collect();
+    // Tier A and B in table order; later tiers add their own rows.
+    let ids: Vec<&str> = ADAPTERS
+        .iter()
+        .map(|spec| spec.id)
+        .filter(|id| {
+            [
+                "claude-code",
+                "omp",
+                "pi",
+                "codex",
+                "claude-desktop",
+                "copilot",
+                "cursor",
+                "vscode-legacy",
+            ]
+            .contains(id)
+        })
+        .collect();
     assert_eq!(
         ids,
         [

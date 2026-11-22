@@ -1,0 +1,23 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(ANTIGRAVITY, Os::Linux, &tracker)"
+---
+{
+  "mcpServers": {
+    "tracker": {
+      "serverUrl": "https://tracker.example.com/mcp",
+      "headers": {
+        "X-Client": "example"
+      },
+      "timeoutSeconds": 45
+    }
+  }
+}
+
+# read back
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+X-Client = "example"
+# passthrough timeoutSeconds: Integer(45)

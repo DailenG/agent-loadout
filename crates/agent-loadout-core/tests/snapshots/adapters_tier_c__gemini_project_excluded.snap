@@ -1,0 +1,12 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "fx.read(&settings).replace(\"\\r\\n\", \"\\n\")"
+---
+{
+  "ui": {
+    "theme": "GitHub"
+  },
+  "mcp": {
+    "excluded": ["slack"]
+  }
+}

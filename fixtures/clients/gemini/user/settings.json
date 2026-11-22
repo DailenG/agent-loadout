@@ -1,0 +1,47 @@
+{
+  "general": {
+    "vimMode": false
+  },
+  "ui": {
+    "theme": "GitHub"
+  },
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
+      },
+      "cwd": "./servers",
+      "timeout": 30000,
+      "trust": false,
+      "includeTools": ["search_code", "get_issue"]
+    },
+    "tracker": {
+      "httpUrl": "https://tracker.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TRACKER_TOKEN}"
+      },
+      "excludeTools": ["delete_issue"]
+    },
+    "events": {
+      "url": "https://events.example.com/sse"
+    },
+    "typed-http": {
+      "type": "http",
+      "url": "https://typed.example.com/mcp",
+      "description": "Gemini's newer typed spelling"
+    },
+    "both-urls": {
+      "httpUrl": "https://both.example.com/mcp",
+      "url": "https://both.example.com/sse"
+    },
+    "socket": {
+      "type": "ws",
+      "url": "wss://socket.example.com/mcp"
+    }
+  },
+  "mcp": {
+    "excluded": ["legacy-tool"]
+  }
+}

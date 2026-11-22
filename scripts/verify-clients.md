@@ -194,6 +194,153 @@ adapter's assumptions are listed in
 | VSL-5 | Detection: `code.cmd`, `code-insiders.cmd` or `codium.cmd` on `PATH`, or a variant's `User` dir alone. | Any detects `vscode-legacy`, and `all-detected` still never writes it. | SPEC 7.7; `vscode_legacy::SPEC.detect` `[verify]` |
 | VSL-6 | Record `Get-FileHash` of every file from VSL-1 to VSL-3 (in a `.ps1` file), then run `loadout server add verify-ro --client vscode-legacy --client copilot -- npx -y @modelcontextprotocol/server-everything`, `loadout import --scan`, `loadout import`, `loadout adopt`, `loadout apply` and `loadout server rm verify-ro`; hash again. Add one entry with `${env:VERIFY_VALUE}` and one with `${input:verify-token}` (plus its `inputs[]` item) before the scan. | Every hash is unchanged; the apply warns `read_only_client`; the scan imports `${env:VERIFY_VALUE}` as a reference and reports the `${input:...}` entry `needs_manual_secret`; nothing imported is enabled for `vscode-legacy`. | SPEC 7.3 "never written", 8.6 import; `McpSpec::read_only`, `import::server_from_native` |
 
+## Tier C clients (M21)
+
+Gemini CLI, Antigravity, OpenCode and Grok Build. SPEC 19 schedules no
+gate for Tier C yet; run these before Tier C ships, on Windows 11 and Arch
+Linux, and record results the same way. The ground rules above apply:
+throwaway `LOADOUT_HOME`, backups of any real client file, and for OpenCode
+a throwaway `XDG_CONFIG_HOME`. Hand-written entries come from the goldens
+in `crates/agent-loadout-core/tests/snapshots/adapters_tier_c__*.snap`.
+Each adapter lists its assumptions in its header comment
+(`crates/agent-loadout-core/src/adapters/{gemini,antigravity,opencode,grok}.rs`).
+
+### Gemini CLI (`gemini`)
+
+Lister: `/mcp` inside `gemini` (and `gemini mcp list`).
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| GEM-1 | Add `verify-user` (the `gemini_stdio` golden) to `~/.gemini/settings.json`, run `/mcp`. | Listed and connected. | SPEC 7.3 `gemini` user file |
+| GEM-2 | Put `verify-project` in `<P>/.gemini/settings.json`; start `gemini` in `<P>` before and after trusting the folder. | Listed only once the folder is trusted. | SPEC 7.3 project file; `TrustGate::TrustedFolder` |
+| GEM-3 | Point entries at an SSE endpoint as a bare `url`, at a Streamable HTTP endpoint as `httpUrl`, and at the HTTP endpoint as `{"type": "http", "url": ...}`; then one entry with both `httpUrl` and `url`, and one with `url` and `command`. | `url` connects over SSE, `httpUrl` and the typed form over HTTP. Record which transport the mixed entries use (Loadout assumes `httpUrl`, then `url`, then `command`, and treats `url` beside `httpUrl` as ignored). | SPEC 7.5 Gemini inference; `gemini::GeminiJson` `[verify]` |
+| GEM-4 | With `verify-user` in the user file, add `"mcp": { "excluded": ["verify-user"] }` to the trusted `<P>/.gemini/settings.json`. Run `/mcp` inside and outside `<P>`. | Hidden inside `<P>`, listed elsewhere. | SPEC 7.4 project `mcp.excluded` `[verify]`; `ProjectDisable::ListMember` in the project file |
+| GEM-5 | Put `verify-both` in the user file and, with other `args` only, in `<P>/.gemini/settings.json`. | Record whether the project entry replaces the user one or merges field by field (Loadout: `ProjectSemantics::DeepMerge`, so `unset` reports `unset_not_expressible`). | SPEC 7.4 `gemini` precedence `[verify]` |
+| GEM-6 | A server that reports its environment, arguments and headers with `${VERIFY_VALUE}` in `command` (a directory prefix), `args`, `env`, `cwd`, `httpUrl` and a header; also a literal `$VERIFY_VALUE` (no braces) in `args`. Start `gemini` from a shell with `VERIFY_VALUE` set. | Every `${...}` is expanded. Record what the bare `$VERIFY_VALUE` becomes (Loadout writes literal `$` text unchanged). | SPEC 7.4 `gemini` `${VAR}`; `gemini::CAPS.env_ref_fields` `[verify]` |
+| GEM-7 | Add `"disabled": true`, then `"enabled": false`, to `verify-user`; also disable it with `/mcp` commands and diff the file. | Record whether any field disables it. Loadout writes neither (`native_disable = None`). | SPEC 7.4 `gemini` native disable |
+| GEM-8 | Servers named `verify.dotted`, `verify_under` and `verify spaced`. | Record which load and any warning (SPEC 5.1 says Gemini recommends no underscores; Loadout accepts any non-empty name). | `gemini` `valid_name` `[verify]` |
+| GEM-9 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| GEM-10 | Detection: `gemini.cmd` on `PATH`, `~/.gemini/settings.json` alone, and `~/.gemini/config` alone (Antigravity's dir). | The first two detect Gemini; the third does not. | SPEC 7.7; `gemini::SPEC.detect` `[verify]` |
+| GEM-11 | Set `"includeTools": ["<one tool>"]`, then `"excludeTools": ["<that tool>"]`; set `"timeout": 1000` on a slow tool. | The filter applies; the call times out after about 1 s (milliseconds). | SPEC 7.3 tool lists and `timeout`; `ToolFilterMech::AllowDeny`, `TimeoutField` milliseconds |
+
+### Antigravity (`antigravity`)
+
+Lister: the MCP servers panel (Manage MCP Servers) in the agent view.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| ANT-1 | Open Manage MCP Servers, then View raw config; note the file it opens. Add `verify-user` (the `antigravity_stdio` golden) there. | Record the path: SPEC 7.3 names `~/.gemini/config/mcp_config.json`; if the app uses another file (for example `~/.gemini/antigravity/mcp_config.json`), `antigravity::SPEC` must change. | SPEC 7.3 `antigravity` user file `[verify]` |
+| ANT-2 | Put `verify-project` in `<P>/.agents/mcp_config.json` and open `<P>`. | Listed in `<P>` only. | SPEC 7.3 project file `[verify]` |
+| ANT-3 | A server that reports its environment with `${VERIFY_VALUE}`, `${env:VERIFY_VALUE}` and `$VERIFY_VALUE` in `env` values, started with `VERIFY_VALUE` set. | Record which spelling (if any) is expanded. Loadout writes literal values only (`env_ref = None`). | SPEC 7.4 `antigravity` env ref `[verify]` |
+| ANT-4 | Toggle `verify-user` off in the panel and diff the file; then hand-add `"disabled": true`. | Record the field the app writes and whether it is honored. Loadout keeps an existing `disabled` or `disabledTools` and writes neither (`native_disable = None`). | SPEC 7.4 `antigravity` native disable `[verify]` |
+| ANT-5 | Put `verify-both` in the user file and, with other `args`, in the project file; then `{ "disabled": true }` alone in the project file. | Record which entry runs and whether any project entry hides the user one (Loadout: `ProjectSemantics::Unknown`, `cannot_suppress_in_project`). | SPEC 7.4 `antigravity` precedence and suppression `[verify]` |
+| ANT-6 | Open an untrusted folder holding `<P>/.agents/mcp_config.json`. | Record any trust prompt (Loadout assumes none). | SPEC 7.4 `antigravity` trust gate `[verify]` |
+| ANT-7 | A Streamable HTTP endpoint as `serverUrl` (with `timeoutSeconds`), then as `url`; an SSE endpoint as `serverUrl`. | `serverUrl` connects over HTTP. Record whether `url` or SSE work (Loadout reads `serverUrl` only and blocks SSE). | SPEC 7.3, 7.5 `serverUrl` |
+| ANT-8 | Servers named `verify.dotted` and `verify spaced`. | Record which load (Loadout accepts any non-empty name). | `antigravity` `valid_name` `[verify]` |
+| ANT-9 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| ANT-10 | Detection: `antigravity.exe` or `.cmd` on `PATH`, `%APPDATA%\Antigravity` alone, `~/.antigravity` alone, `~/.gemini/config` alone. | Any detects Antigravity. Record the real install dirs. | SPEC 7.7; `antigravity::SPEC.detect` `[verify]` |
+
+### OpenCode (`opencode`)
+
+Lister: `opencode mcp list`. Use a throwaway `XDG_CONFIG_HOME` for every
+check.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| OC-1 | Add `verify-user` (the `opencode_stdio` golden, with its `$schema` line) to `$XDG_CONFIG_HOME/opencode/opencode.json`; on Windows also check that `~/.config/opencode/opencode.json` is read with `XDG_CONFIG_HOME` unset. Then put a different `verify-user` in `opencode.jsonc` next to it. | Listed from `opencode.json`. Record which file wins when both exist (Loadout writes `opencode.json`, or `opencode.jsonc` when only it exists). | SPEC 7.3 `XdgConfigAllOs`; `opencode::SPEC.mcp.user` `[verify]` |
+| OC-2 | Put `verify-project` in `<P>/opencode.json`, then only in `<P>/.opencode/opencode.json`. | Listed in `<P>` both times. | SPEC 7.3 project files `[verify]` |
+| OC-3 | A `remote` entry pointing at an SSE-only endpoint whose path does not end in `/sse`, and one that does. | Both connect (OpenCode tries Streamable HTTP, then SSE). Loadout writes SSE servers as `remote` and reads one back as SSE only when the path ends in `/sse`. | SPEC 7.5 OpenCode `remote`; `opencode::is_sse_url` `[verify]` |
+| OC-4 | With `verify-user` in the user file, put the whole entry with `"enabled": false` in `<P>/opencode.json`; then replace it with `{ "enabled": false }` alone. | The full disabled entry hides `verify-user` inside `<P>` only. Record whether the `enabled`-only entry is accepted (Loadout writes the full entry). | SPEC 7.4 project `enabled: false`; `ProjectDisable::EnabledFalse { partial: false }` `[verify]` |
+| OC-5 | Put `verify-both` in the user file and, with another `command` array only, in the project file. | Record whether the project entry merges over the user one (Loadout: DeepMerge). | SPEC 7.4 `opencode` precedence `[verify]` |
+| OC-6 | An entry without `type` (`{"command": ["x"]}`). | Record whether OpenCode rejects the file or the entry. Loadout reads it but reports that the client skips it. | `opencode::OpenCodeJson::skipped_by_client` `[verify]` |
+| OC-7 | A server that reports its environment, arguments and headers with `{env:VERIFY_VALUE}` in the command array, `environment`, `url` and a header. | Every field is expanded. | SPEC 7.4 `{env:NAME}`; `opencode::CAPS.env_ref_fields` `[verify]` |
+| OC-8 | Servers named `verify.dotted` and `verify spaced`. | Record which load (Loadout accepts any non-empty name). | `opencode` `valid_name` `[verify]` |
+| OC-9 | Windows: `"command": ["npx", "-y", "@modelcontextprotocol/server-everything"]`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| OC-10 | Detection: `opencode.exe` or `opencode.cmd` on `PATH`, `$XDG_CONFIG_HOME/opencode` alone. | Either detects OpenCode. | SPEC 7.7; `opencode::SPEC.detect` `[verify]` |
+
+### Grok Build (`grok`)
+
+Lister: Grok's MCP list command (record its name).
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| GRK-1 | Add `[mcp_servers.verify-user]` (the `grok_stdio` golden) to `~/.grok/config.toml`. | Listed and connected. | SPEC 7.3 `grok` user file `[verify]` |
+| GRK-2 | Put `verify-project` in `<P>/.grok/config.toml` and start Grok in `<P>/src/deep` (inside the same git repository). | Listed: Grok walks up to the git root. | SPEC 7.3 project file `[verify]` |
+| GRK-3 | Start Grok in `<P>` before and after trusting the folder. | Project servers load only once trusted. | SPEC 7.4 `grok` folder trust; `TrustGate::TrustedFolder` |
+| GRK-4 | Put `verify-compat` in `~/.claude.json` (top-level `mcpServers`) and in `projects["<P>"].mcpServers`, in `<P>/.cursor/mcp.json` and in `<P>/.mcp.json`, each with a different `args` marker; also put a same-named entry in `<P>/.grok/config.toml`. Remove them one at a time. Run `loadout effective <P> --client grok`. | Record which files Grok reads and which entry wins at each step (Loadout: Grok's own files first, then `~/.claude.json` top level, `.cursor/mcp.json`, `.mcp.json`; `projects[...]` not read). The effective view flags the native entry `duplicate_via_compat`. | SPEC 6.4, 7.4 `grok` compat reads; `grok::CAPS.compat_reads` `[verify]` |
+| GRK-5 | Add `enabled = false`, then `disabled = true`, to `verify-user`. | Record whether either disables it (Loadout: `native_disable = None`). | SPEC 7.4 `grok` native disable `[verify]` |
+| GRK-6 | Put `verify-both` in the user file and, with other `args` only, in the project file. | The project entry replaces the user one (no field merge). | SPEC 7.4 `grok` Replace; `cannot_suppress_in_project` |
+| GRK-7 | A server that reports its environment, arguments and headers with `${VERIFY_VALUE}` and `${VERIFY_UNSET:-fallback}` in `command`, `args`, `env`, `url` and a header. | `env` and header values are expanded (Loadout writes references only there); record the other fields. | SPEC 7.4 `grok` `${VAR}`, `${VAR:-d}`; `grok::CAPS.env_ref_fields` `[verify]` |
+| GRK-8 | Servers named `verify.dotted` and `"verify spaced"`. | Record which load (Loadout accepts any non-empty name). | `grok` `valid_name` `[verify]` |
+| GRK-9 | Windows: a stdio entry with plain `command = "npx"`; set `startup_timeout_sec = 1` on a slow server. | Record whether `npx` connects (`windows_shell_shim = false`); the startup times out after about 1 s. | SPEC 7.4 notes; `TimeoutField` seconds |
+| GRK-10 | Detection: `grok.exe` or `grok.cmd` on `PATH`, `~/.grok` alone. | Either detects Grok. | SPEC 7.7; `grok::SPEC.detect` `[verify]` |
+
+## Tier D clients (M22)
+
+Windsurf, Devin Desktop and the ported clients of SPEC 7.5, plus the YAML
+and JSON5 editors they rely on. Best effort: SPEC 19 schedules no gate for
+Tier D; run whichever checks a machine has the client for, on Windows 11
+and Arch Linux, and record results the same way. The ground rules above
+apply (throwaway `LOADOUT_HOME`, backups of any real client file; for
+Goose a throwaway `GOOSE_PATH_ROOT`, for Crush a throwaway
+`XDG_CONFIG_HOME`). Hand-written entries come from the goldens in
+`crates/agent-loadout-core/tests/snapshots/adapters_tier_d__*.snap`. The
+adapters list their assumptions in their header comments
+(`crates/agent-loadout-core/src/adapters/{windsurf,devin,ported}.rs`).
+
+### Windsurf (`windsurf`)
+
+Lister: Windsurf's Cascade MCP panel (Settings, Cascade, MCP servers).
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| WSF-1 | Add the `github` entry of the `windsurf_goldens` golden to `~/.codeium/windsurf/mcp_config.json` and refresh the MCP panel. | Listed and connected. | SPEC 7.3 `windsurf` user file |
+| WSF-2 | Put `verify-project` in `<P>/.windsurf/mcp_config.json` and open `<P>`. | Listed in `<P>` only; record any approval prompt. | SPEC 7.3 project file `[verify]` |
+| WSF-3 | A Streamable HTTP server as `{ "serverUrl": ... }`, then as `{ "url": ... }`; an SSE server as `{ "type": "sse", "serverUrl": ... }`. | Record which spellings connect. Loadout writes `serverUrl`, and `"type": "sse"` for SSE. | SPEC 7.3 `url` vs `serverUrl` `[verify]`; `windsurf::MAPPER` |
+| WSF-4 | Servers that report environment, arguments and headers with `${env:VERIFY_VALUE}` in `command`, `args`, `env`, `serverUrl` and a header; start Windsurf from a shell with `VERIFY_VALUE` set. | Each field is expanded; record any that is not. | SPEC 7.4 `windsurf` `${env:NAME}`; `windsurf::CAPS.env_ref_fields` `[verify]` |
+| WSF-5 | Toggle `verify-user` off in the MCP panel and diff the file; then hand-add `"disabled": true` to another entry. | The toggle writes `"disabled": true` and a hand-written one hides the server. | SPEC 7.4 `windsurf` native disable `[verify]`; `DisableMech::DisabledTrue` |
+| WSF-6 | Put `verify-both` in the user file and, with other `args`, in the project file; then try `{ "disabled": true }` alone in the project file. | Record which entry runs in `<P>`, whether fields merge and whether the project entry hides the user one (Loadout: `ProjectSemantics::Unknown`, `cannot_suppress_in_project`). | SPEC 7.4 `windsurf` project suppression and precedence `[verify]` |
+| WSF-7 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| WSF-8 | Detection: `windsurf.cmd` on `PATH`, `~/.codeium/windsurf` alone; record the uninstall entry `DisplayName` (in a `.ps1` file). | Any probe detects Windsurf; the `DisplayName` is `Windsurf` or the value to put in `Probe::UninstallEntry`. | SPEC 7.7; `windsurf::SPEC.detect` `[verify]` |
+
+### Devin Desktop (`devin`)
+
+Lister: Devin Desktop's MCP settings page.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| DEV-1 | Add the `github` entry of the `devin_goldens` golden to `%APPDATA%\devin\mcp_config.json` (Windows) or `~/.config/devin/mcp_config.json` (Linux; also try with `XDG_CONFIG_HOME` set elsewhere). | Listed and connected; on Linux the file under `~/.config` is read whatever `XDG_CONFIG_HOME` says. | SPEC 7.3 `devin` user file `[verify]`; `devin::user_files` |
+| DEV-2 | Put `verify-project` in `<P>/.devin/mcp_config.json` and `verify-local` in `<P>/.devin/mcp_config.local.json`; open `<P>`. | Both listed in `<P>` only; record any approval prompt. | SPEC 7.3 project and project-local files |
+| DEV-3 | Put `verify-both` in the user, project and project-local files, each with a different `args` marker. Remove them one at a time. | The project-local entry wins, then the project one, then the user one; record whether fields merge (Loadout: `ProjectSemantics::Unknown`). | SPEC 7.4 `devin` precedence local > project > user `[verify]` |
+| DEV-4 | Remote servers as `{ "url": ..., "transport": "http" }`, `"transport": "sse"`, `"transport": "streamable-http"`, no `transport`, and one with `headers`. | Record which connect and whether `headers` is sent. Loadout writes `transport` `http` or `sse` and `headers`. | SPEC 7.3 `{url, transport}` `[verify]`; `devin::MAPPER` |
+| DEV-5 | Servers that report environment, arguments and headers with `${env:VERIFY_VALUE}` in `command`, `args`, `env`, `url` and a header. | Each field is expanded; record any that is not. | SPEC 7.4 `devin` `${env:VAR}` `[verify fields]` |
+| DEV-6 | Turn `verify-user` off in the settings page and diff the file; try `"disabled": true` and `"enabled": false` by hand; try `{ "disabled": true }` alone in the project file. | Record any disable flag and project suppression (Loadout: neither, `cannot_suppress_in_project`). | SPEC 7.4 `devin` native disable and suppression `[verify]` |
+| DEV-7 | Windows: a stdio entry with plain `"command": "npx"`. | Record whether it connects (`windows_shell_shim = false`). | SPEC 7.4 notes |
+| DEV-8 | Detection: `devin` on `PATH`, the config dir alone; record the uninstall entry `DisplayName`. | Any probe detects Devin Desktop. | SPEC 7.7; `devin::SPEC.detect` `[verify]` |
+
+### Ported clients (SPEC 7.5)
+
+User scope only. Lister: each client's own MCP settings or `/mcp` command.
+
+| # | Check | Expected | Clears |
+|---|---|---|---|
+| TD-1 | For each installed client, compare the file it creates or edits with the path in `adapters_tier_d__ported_user_files_<os>.snap` (Qoder on every OS; Goose with and without `GOOSE_PATH_ROOT`; Crush with `XDG_CONFIG_HOME`). | Same path. | SPEC 7.5 paths `[verify per OS]` |
+| TD-2 | Add the two entries of the client's `adapters_tier_d__ported_<id>.snap` golden to its file (Augment, Junie, Droid, Command Code, Crush, Qoder, Trae, Trae CN, CodeBuddy, iFlow, Zencoder, WorkBuddy, ZCode). | Both listed; the stdio one connects. | SPEC 7.5 unified `{type, command, args, env}` / `{type, url, headers}` |
+| TD-3 | Cline, Roo Code, Kilo Code: toggle a server off in the extension and diff the file; add an HTTP server through the UI. | The toggle writes `"disabled": true`; the UI writes `streamableHttp` (Cline) or `streamable-http` (Roo, Kilo). | SPEC 7.5 `cline` native `disabled`; `ported::{CLINE,ROO_CODE,KILO_CODE}` |
+| TD-4 | Kiro: toggle a server off and diff `~/.kiro/settings/mcp.json`. | `"disabled": true`. | `ported::KIRO` `DisableMech::DisabledTrue` `[verify]` |
+| TD-5 | ZCode: an entry with `"enable": false`, then `true`. | Hidden, then listed. | SPEC 7.5 `zcode` `enable` flag |
+| TD-6 | Zencoder: add a server in the UI and diff `~/.zencoder/settings.json`. | It lands under `"zencoder": { "mcpServers": ... }` (nested), not a `"zencoder.mcpServers"` key. | SPEC 7.5 `zencoder` nested vs dotted `[verify]` |
+| TD-7 | Trae: create a profile, add a server in it, and diff `User/mcp.json` and `User/profiles/<id>/mcp.json`. | Record which file the profile reads; Loadout writes the user file and every existing profile file. | SPEC 7.5 `trae` profiles; `ported::trae_files` |
+| TD-8 | CodeBuddy and iFlow: with several of the candidate files present, add a server in the client. | The client edits the first existing one in SPEC 7.5 order. Also hand-write a CodeBuddy file with unquoted keys (JSON5) and run `loadout apply`: the target reports `read_only_format` and the file is unchanged. | SPEC 7.5 first-of; SPEC 7.2 JSON5 |
+| TD-9 | OpenClaw and MiMo Code: add the `ported_openclaw` / `ported_mimo_code` golden entries; an SSE server whose URL ends in `/sse`; `{env:VERIFY_VALUE}` in MiMo's `environment`; `"enabled": false`. | Listed; SSE connects; MiMo expands `{env:NAME}`; `enabled: false` hides the server. | SPEC 7.5 agent-JSON shape `[verify]` |
+| TD-10 | Qwen Code: the `ported_qwen_code` golden plus an SSE `url` entry and `excludeTools`. | Same behavior as Gemini CLI (GEM-3, GEM-6). | SPEC 7.5 `qwen-code` Gemini mapping |
+| TD-11 | Continue: the `ported_continue` golden; an SSE server with `type: sse`; a header under `requestOptions.headers`; an entry SkillDock wrote with `transport: sse`. | Listed and connected; the header is sent; record whether `transport` is honored (Loadout reads it as `type`). | SPEC 7.5 `continue` list matched by `name` `[verify]` |
+| TD-12 | Goose: the `ported_goose` golden (`uri`, `headers`), then the same HTTP entry with `url` instead of `uri`; an entry without `name` or `enabled`; toggle an extension off in `goose configure`. | `uri` connects (record `url`); record which keys Goose requires; the toggle writes `enabled: false`. | SPEC 7.5 `goose` `[verify]` headers; `ported::GooseYaml` |
+| TD-13 | Hermes: the `ported_hermes` golden plus an SSE server with `transport: sse`. | Both connect. | SPEC 7.5 `hermes`; `ported::HERMES` |
+| TD-14 | For each installed client, an env value `${VERIFY_VALUE}` and `${env:VERIFY_VALUE}` on a server that reports its environment. | Record any expansion (Loadout assumes none for the ported clients but Qwen Code and MiMo Code, so `env` delivery falls back as it does for clients without references). | SPEC 7.5 best effort; `ported::ported_caps` `env_ref = None` |
+| TD-15 | Detection: each client's config dir alone, and its executable on `PATH` where listed in `ported.rs`. | Any probe detects the client; IntelliJ is detected but never gets an MCP target. | SPEC 7.7; `ported::*.detect` `[verify]` |
+| TD-16 | YAML editing: in a real Goose `config.yaml` and Continue `config.yaml` with comments, run `loadout server add verify-yaml --client goose --client continue -- npx -y @modelcontextprotocol/server-everything`, then `loadout server rm verify-yaml`. Then add an anchor (`&base`) and an alias (`<<: *base`) to `extensions` and add the server again. | Only the entry's lines change and the removal restores the file byte for byte; with the anchor, the Goose target reports `read_only_format` and the file is unchanged. | SPEC 7.2 YAML span splice |
+
 ## Apply engine (M6), gate V1
 
 Machines: Windows 11 and Arch Linux. Every check uses the throwaway

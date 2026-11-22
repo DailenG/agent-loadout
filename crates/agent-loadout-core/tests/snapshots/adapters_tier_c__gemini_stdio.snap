@@ -1,0 +1,33 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(GEMINI, Os::Windows, &github)"
+---
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
+      },
+      "cwd": "${HOME}/src",
+      "includeTools": ["search_code", "get_issue"],
+      "excludeTools": ["delete_repository"],
+      "timeout": 30000,
+      "trust": false
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+cwd = "${HOME}/src"
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}"
+# tools.allow: ["search_code", "get_issue"]
+# tools.deny: ["delete_repository"]
+# passthrough timeout: Integer(30000)
+# passthrough trust: Bool(false)

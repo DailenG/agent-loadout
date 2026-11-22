@@ -1,0 +1,25 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "read_and_rewrite(spec, relative)"
+---
+## github
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "example-literal-token"
+## tracker
+transport = "http"
+url = "https://tracker.example.com/mcp"
+
+[headers]
+X-Client = "example-fixture"
+# passthrough timeoutSeconds: Integer(45)
+## paused
+transport = "stdio"
+command = "example-paused-mcp"
+# unmapped disabled: Bool(true)
+# unmapped disabledTools: Array([String("delete")])
+## plain-url
+error[unexpected_shape]: `command` must be set (or `serverUrl` for a remote server)

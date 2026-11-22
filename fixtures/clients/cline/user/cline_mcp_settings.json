@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "disabled": false,
+      "autoApprove": ["search_code"]
+    },
+    "tracker": {
+      "type": "streamableHttp",
+      "url": "https://tracker.example.com/mcp",
+      "disabled": true
+    },
+    "events": { "type": "sse", "url": "https://events.example.com/sse" }
+  }
+}

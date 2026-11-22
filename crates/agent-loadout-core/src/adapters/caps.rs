@@ -107,7 +107,8 @@ pub enum DisableMech {
 pub enum ProjectDisable {
     /// The server name is added to a list in the client's project-local
     /// file at this container path (Claude Code
-    /// `projects["<P>"].disabledMcpServers`).
+    /// `projects["<P>"].disabledMcpServers`), or in its project file when
+    /// it has no project-local file (Gemini `mcp.excluded`).
     ListMember(crate::adapters::spec::ContainerPath),
     /// A project entry with `enabled: false` under the same name. With
     /// `partial`, the entry holds nothing else: the client merges it over

@@ -785,7 +785,7 @@ fn outside(doc: &Document, path: &[&str]) -> Result<NativeValue, CoreError> {
         }
     }
     let mut root = NativeValue::Object(root);
-    remove_path(&mut root, path);
+    remove_path(&mut root, crate::formats::mapping_path(path));
     Ok(root)
 }
 

@@ -1,0 +1,20 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_c.rs
+expression: "golden(OPENCODE, Os::Linux, &paused)"
+---
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "paused": {
+      "type": "local",
+      "command": ["example-mcp", "--stdio"],
+      "enabled": false
+    }
+  }
+}
+
+# read back
+transport = "stdio"
+command = "example-mcp"
+args = ["--stdio"]
+# disabled

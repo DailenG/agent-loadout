@@ -1,0 +1,27 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "table.join(\"\\n\")"
+---
+augment: home/.augment/settings.json
+cline: home/.cline/data/settings/cline_mcp_settings.json
+roo-code: home/.config/Code/User/globalStorage/RooVeterinaryInc.roo-cline/settings/mcp_settings.json
+kilo-code: home/.config/Code/User/globalStorage/kilocode.kilo-code/settings/mcp_settings.json
+kiro: home/.kiro/settings/mcp.json
+junie: home/.junie/mcp/mcp.json
+droid: home/.factory/mcp.json
+commandcode: home/.commandcode/mcp.json
+crush: home/.config/crush/crush.json
+qoder: home/.config/Qoder/SharedClientCache/mcp.json
+trae: home/.config/Trae/User/mcp.json
+trae-cn: home/.config/Trae CN/User/mcp.json
+codebuddy: home/.codebuddy/.mcp.json
+iflow: home/.iflow/settings.json
+qwen-code: home/.qwen/settings.json
+zencoder: home/.zencoder/settings.json
+openclaw: home/.openclaw/openclaw.json
+mimo-code: home/.config/mimocode/mimocode.json
+workbuddy: home/.workbuddy/.mcp.json
+zcode: home/.zcode/cli/config.json
+continue: home/.continue/config.yaml
+goose: home/.config/goose/config.yaml
+hermes: home/.hermes/config.yaml

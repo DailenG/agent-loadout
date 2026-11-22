@@ -1,0 +1,25 @@
+---
+source: crates/agent-loadout-core/tests/adapters_tier_d.rs
+expression: "read_all(spec, &doc)"
+---
+## developer
+error[unsupported_transport]: the client cannot run "builtin" servers
+## files
+transport = "stdio"
+command = "npx"
+args = ["-y", "files-mcp"]
+
+[env]
+ROOT = "~/work"
+# unmapped bundled: Null
+# unmapped description: String("Local files")
+# unmapped env_keys: Array([])
+# unmapped timeout: Integer(300)
+## search
+transport = "http"
+url = "https://search.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${SEARCH_TOKEN}"
+# disabled
+# unmapped timeout: Integer(300)

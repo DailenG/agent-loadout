@@ -1,0 +1,16 @@
+model: anthropic/claude-sonnet-4
+
+mcp_servers:
+  github:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: example-token
+    timeout: 120
+  tracker:
+    url: https://tracker.example.com/mcp
+    headers:
+      Authorization: Bearer example-token
+  events:
+    url: https://events.example.com/sse
+    transport: sse
