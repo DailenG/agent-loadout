@@ -18,7 +18,7 @@ behavior (prompts, sign-in, service accounts) is not. Method in
 | DX-8 | Pass | Codex `bearer_token_env_var = "VERIFY_KR"`, with the value from `loadout env --export --aliases VERIFY_KR --shell pwsh` (`$env:VERIFY_KR = '...'`): requests carried `Bearer <value>`. |
 | DX-9 | Not run | Arch. |
 | DX-10 | Pass (Claude Code) | A missing item and an unknown option: Claude Code lists `Failed to connect`, restarts the server once, and logs the server's stderr: `loadout-exec: VERIFY_TOKEN: ... 1Password item, field or Environment variable not found` (Claude Code redacts the word after the alias) and `loadout-exec: unknown option "--bogus-option"`. Exit codes themselves are not shown. omp and Codex not checked. |
-| DX-11 | Not run | Claude Desktop. |
+| DX-11 | Blocked (sign-in) | Windows Sandbox: a keyring alias on a claude-desktop entry rendered `"command": "C:\\v1\\bin\\loadout.exe", "args": ["exec", "--ref", "VERIFY_TOKEN=keyring://loadout/VERIFY_KR", "--", "C:\\v1\\envdump.cmd", "verify-launch"]` (no `cmd /c` around `loadout.exe`), but the signed-out app starts no server. See [claude-desktop.md](claude-desktop.md). |
 | DX-12 | Not run | Linux and macOS. |
 
 While setting up DX-5, a hand edit of a Codex entry made earlier was

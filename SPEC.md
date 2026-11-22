@@ -540,7 +540,7 @@ Paths: `~` per Conventions; `%APPDATA%` is Roaming; `$XDG_CONFIG_HOME` defaults 
 | Client | Transports | Env ref written | Command ref | Native disable | Project suppression of a user server | Project precedence | Trust gate | Notes |
 |---|---|---|---|---|---|---|---|---|
 | claude-code | stdio, http, sse, ws | `${VAR}`, `${VAR:-d}` in command, args, env, url, headers | `headersHelper` (http/ws) | none in entry | `projects["<P>"].disabledMcpServers` list membership | Replace (local > project > user; whole entry) | `.mcp.json` approval | `~/.claude.json` rewritten by Claude Code constantly: CAS write, retry |
-| claude-desktop | stdio | none (literal) | none | none (remove) | n/a | n/a | none | Windows only; `restart_required`; `windows_shell_shim` |
+| claude-desktop | stdio | none (literal) | none | none (remove) | n/a | n/a | none | Windows only; `restart_required`; `windows_shell_shim`; rewrites the whole file at launch, keeping `mcpServers` and adding `preferences` (`rewrites_file_at_runtime`; V1, Windows Sandbox) |
 | cursor | stdio, http, sse | `${env:NAME}`, `${userHome}`, `${workspaceFolder}` | none | none [verify] | unsupported [verify] | Replace [verify] | none | |
 | vscode-legacy | n/a (read/import only) | reads `${env:NAME}` | none | n/a | n/a | n/a | workspace trust | deprecated format, never written |
 | copilot | stdio, http, sse | `${NAME}`, `${NAME:-default}` in `command`, `args`, `env` and header values | none | none [verify] | unsupported | [verify] | workspace trust in VS Code [verify] | `tools` field for filtering; VS Code's workspace-root form rejects `${...}` but the runtime reads it |

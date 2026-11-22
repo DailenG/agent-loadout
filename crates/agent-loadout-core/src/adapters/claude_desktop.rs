@@ -40,7 +40,8 @@ const CAPS: Caps = Caps {
     precedence: &[Source::User],
     compat_reads: &[],
     trust_gate: None,
-    rewrites_file_at_runtime: false,
+    // The app re-serializes the whole file at launch (V1 CD-6).
+    rewrites_file_at_runtime: true,
     restart_required: true,
     tool_filter: None,
     windows_shell_shim: true,

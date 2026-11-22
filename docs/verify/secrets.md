@@ -8,6 +8,6 @@ Method in [README](README.md).
 | SE-2 | Not run | `op://` item states (locked, dismissed, renamed) need a vault item; only an Environment was used. |
 | SE-3 | Pass | Real Environment (family account) with `VERIFY_TOKEN` (concealed) and `VERIFY_PLAIN`. `op environment secret list <id> --format json` is a JSON array of `{name, value, concealed}`; the concealed value is masked even there. `secrets map-op-env <id> --all` mapped both, `secrets check` reports both `resolved`, and no value appeared in Loadout's output. Desktop-app approval: each `op` call took about 20 s and one prompt (one timed out at 60 s when the prompt went unnoticed); with the service account the same calls took 4 to 7 s and no prompt. |
 | SE-4 | Not run | Arch with the AUR CLI. |
-| SE-5 | Not run | Arch without the CLI. |
-| SE-6 | Not run | Real Windows Credential Manager. (The debug build's test keyring file was used for the delivery checks instead.) |
+| SE-5 | Pass (Linux) | See [linux.md](linux.md). |
+| SE-6 | Pass (sandbox) | In Windows Sandbox (its own Credential Manager, release build): `'verify-not-a-secret' \| loadout secrets set VERIFY_KR --keyring` stored it, `cmdkey /list` showed `LegacyGeneric:target=VERIFY_KR.loadout`, `secrets check VERIFY_KR` reported `resolved` (exit 0), `secrets clear VERIFY_KR` deleted it, and `check` then reported `missing` (exit 5) with the three fixes. The stored value itself was not read back there; newline stripping is covered on Linux. Linux: see [linux.md](linux.md). |
 | SE-7 | Pass | `server add` with a description holding `https://user:password@...` and one holding a hand-built `ghp_` token: both refused with `leak_detected`, naming the file and line, neither value echoed. |

@@ -39,10 +39,10 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
 | [Claude Code](claude-code.md) | CC-1 to CC-11 | 7 | 4 (CC-3, CC-5, CC-6, CC-7) | none (CC-2 and CC-10 without the TUI) |
 | [Codex](codex.md) | CX-1 to CX-8, CX-11 | 7 | 2 (CX-6, CX-7) | CX-9, CX-10 (need a model) |
 | [omp](omp.md) | OMP-1 to OMP-5, 7 to 9, 11 | 8 | 1 (OMP-9 unclear) | OMP-6 (needs a model), OMP-10 (Pi, V2) |
-| [Claude Desktop](claude-desktop.md) | CD-3 | 1 | 1 note | CD-1, 2, 4 to 7 (need Windows Sandbox or the maintainer's OK) |
-| [Apply engine](apply.md) | AP-1 to AP-5, AP-7 | 6 | none | AP-6 (Claude Desktop) |
-| [Secrets](secrets.md) | SE-7 (Windows); SE-5, SE-6 ([Linux](linux.md)) | 3 | FB-6 | SE-1 to SE-3 (real 1Password), SE-4 (AUR CLI 2.41), SE-6 on Windows |
-| [Delivery](delivery.md) | DX-1, 5 to 8, 10 (Windows); DX-1, 6 to 9, 12 ([Linux](linux.md)) | 11 | 1 note (Codex environment), FB-5, FB-6 | DX-2 (covered by the automated Job Object test), DX-3, DX-4, DX-11 |
+| [Claude Desktop](claude-desktop.md) | CD-1, 3 to 6 (Windows Sandbox for all but CD-3) | 1 | CD-6 (the app rewrites the file at launch) | CD-1, 4, 5 blocked: the signed-out app starts no server; CD-2 (MSIX), CD-7 (macOS) |
+| [Apply engine](apply.md) | AP-1 to AP-7 | 6 | none | AP-6 blocked (Claude Desktop sign-in) |
+| [Secrets](secrets.md) | SE-1, 3, 6, 7 (Windows; SE-6 in Windows Sandbox); SE-5, SE-6 ([Linux](linux.md)) | 5 | FB-6, FB-7 | SE-2 (`op://` items), SE-4 (AUR CLI 2.41) |
+| [Delivery](delivery.md) | DX-1, 3 to 8, 10, 11 (Windows); DX-1, 6 to 9, 12 ([Linux](linux.md)) | 12 | 1 note (Codex environment), FB-5, FB-6 | DX-2 (covered by the automated Job Object test), DX-3 prompt count, DX-11 blocked (Claude Desktop sign-in) |
 | [Linux](linux.md) | 29 rows | 24 | FB-2, FB-3, FB-5, FB-6 | SE-4 |
 | Pi | none | | | moved to V2 |
 
@@ -114,10 +114,10 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
 
 - **Linux, desktop session:** WSL has none, so the unlock prompt itself
   (DX-12 on a real Arch desktop) and SE-4 (AUR CLI 2.41) are open.
-- **Claude Desktop (CD-1, 2, 4 to 7, AP-6, DX-11):** Windows Sandbox
-  (Windows Features, needs admin and a reboot), or the maintainer's OK to
-  back up and restore the real `%APPDATA%\Claude` and MSIX configs.
-- **1Password (SE-1 to SE-3, DX-3, DX-4) and the OS keyring (SE-6):** the
-  maintainer's OK, ideally with a separate trial 1Password account.
+- **Claude Desktop (CD-1, 4, 5, AP-6, DX-11):** a signed-in Claude Desktop
+  in Windows Sandbox (`%TEMP%\loadout-v1\sandbox\run.ps1`); the signed-out
+  app starts no MCP server. CD-2 needs the MSIX package.
+- **1Password `op://` items (SE-2) and the DX-3 prompt count:** skipped at
+  the maintainer's request (no more approval prompts).
 - **Tool-call checks (CX-9, CX-10, OMP-6) and a full Claude Code session
   (AP-1 beyond onboarding):** a model login inside the throwaway profile.
