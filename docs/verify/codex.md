@@ -14,8 +14,8 @@ servers start, the model call fails.
 | CX-6 | Finding (FB-2) | `[mcp_servers."verify.dotted"]` loads. |
 | CX-7 | Finding (FB-3) | The legacy `[mcp.servers.verify-legacy]` table is not listed: Codex 0.168 ignores it. |
 | CX-8 | Pass | Plain `command = "npx"` resolves to `npx.cmd` (a probe `npx.cmd` first on `PATH` was started). |
-| CX-9 | Not run | Needs a model to call tools. |
-| CX-10 | Not run | Needs a model to call tools. |
+| CX-9 | Pass (V2) | Windows Sandbox, Codex 0.171.0 signed in: `enabled_tools` and `disabled_tools` were honored in a session. |
+| CX-10 | Pass (V2) | Windows Sandbox: `startup_timeout_sec = 1` stopped a server that takes 3 s to start at about 760 ms; `2.5` is accepted (fractional seconds). Codex prints no timeout message. |
 | CX-11 | Pass | Detected from `codex.exe` alone and `codex.cmd` alone on `PATH`. |
 
 Also observed: Codex starts stdio servers with a fixed environment

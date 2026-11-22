@@ -37,12 +37,12 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
 | Area | Run | Pass | Finding | Not run |
 |---|---|---|---|---|
 | [Claude Code](claude-code.md) | CC-1 to CC-11 | 7 | 4 (CC-3, CC-5, CC-6, CC-7) | none (CC-2 and CC-10 without the TUI) |
-| [Codex](codex.md) | CX-1 to CX-8, CX-11 | 7 | 2 (CX-6, CX-7) | CX-9, CX-10 (need a model) |
-| [omp](omp.md) | OMP-1 to OMP-5, 7 to 9, 11 | 8 | 1 (OMP-9 unclear) | OMP-6 (needs a model), OMP-10 (Pi, V2) |
-| [Claude Desktop](claude-desktop.md) | CD-1, 3 to 6 (Windows Sandbox for all but CD-3) | 1 | CD-6 (the app rewrites the file at launch) | CD-1, 4, 5 blocked: the signed-out app starts no server; CD-2 (MSIX), CD-7 (macOS) |
-| [Apply engine](apply.md) | AP-1 to AP-7 | 6 | none | AP-6 blocked (Claude Desktop sign-in) |
+| [Codex](codex.md) | CX-1 to CX-8, CX-11 | 7 | 2 (CX-6, CX-7) | none (CX-9, CX-10 ran in the V2 sandbox, below) |
+| [omp](omp.md) | OMP-1 to OMP-5, 7 to 9, 11 | 8 | 1 (OMP-9 unclear) | none (OMP-6 ran in the V2 sandbox; OMP-10 is V2) |
+| [Claude Desktop](claude-desktop.md) | CD-1, 3 to 6 (Windows Sandbox for all but CD-3) | 1 | CD-6 (the app rewrites the file at launch) | CD-2 (MSIX), CD-7 (macOS); CD-1, 4, 5 were blocked signed out and passed in the V2 sandbox |
+| [Apply engine](apply.md) | AP-1 to AP-7 | 6 | none | none (AP-6 was blocked signed out and passed in the V2 sandbox; AP-1 completed there) |
 | [Secrets](secrets.md) | SE-1, 3, 6, 7 (Windows; SE-6 in Windows Sandbox); SE-5, SE-6 ([Linux](linux.md)) | 5 | FB-6, FB-7 | SE-2 (`op://` items), SE-4 (AUR CLI 2.41) |
-| [Delivery](delivery.md) | DX-1, 3 to 8, 10, 11 (Windows); DX-1, 6 to 9, 12 ([Linux](linux.md)) | 12 | 1 note (Codex environment), FB-5, FB-6 | DX-2 (covered by the automated Job Object test), DX-3 prompt count, DX-11 blocked (Claude Desktop sign-in) |
+| [Delivery](delivery.md) | DX-1, 3 to 8, 10, 11 (Windows); DX-1, 6 to 9, 12 ([Linux](linux.md)) | 12 | 1 note (Codex environment), FB-5, FB-6 | DX-2 (covered by the automated Job Object test), DX-3 prompt count; DX-11 was blocked signed out and passed in the V2 sandbox (FB-12) |
 | [Linux](linux.md) | 29 rows | 24 | FB-2, FB-3, FB-5, FB-6 | SE-4 |
 | Pi | none | | | moved to V2 |
 
@@ -114,20 +114,45 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
 
 - **Linux, desktop session:** WSL has none, so the unlock prompt itself
   (DX-12 on a real Arch desktop) and SE-4 (AUR CLI 2.41) are open.
-- **Claude Desktop (CD-1, 4, 5, AP-6, DX-11):** a signed-in Claude Desktop
-  in Windows Sandbox (`%TEMP%\loadout-v1\sandbox\run.ps1`); the signed-out
-  app starts no MCP server. CD-2 needs the MSIX package.
 - **1Password `op://` items (SE-2) and the DX-3 prompt count:** skipped at
   the maintainer's request (no more approval prompts).
-- **Tool-call checks (CX-9, CX-10, OMP-6) and a full Claude Code session
-  (AP-1 beyond onboarding):** a model login inside the throwaway profile.
+- **CD-2:** needs the MSIX package. The checks that needed a signed-in
+  Claude Desktop or a model (CD-1, 4, 5, AP-1, AP-6, DX-11, CX-9, CX-10,
+  OMP-6) ran in the V2 sandbox (below).
 
-# Gate V2 (Tier B), in progress
+# Gate V2 (Tier B)
+
+The Pi rows and OMP-10 ran on the host with throwaway profiles. The rest ran
+on 2026-11-22 in Windows Sandbox with every client signed in by the
+maintainer: Claude Code 2.1.330, Codex 0.171.0, omp 19.1.0, Pi 1.6.0,
+Copilot CLI 1.0.114, VS Code 1.147.0, Cursor 3.31.15, Claude Desktop
+3.6556.2 (copied app), node 26.13.1, bun 1.4.5. Evidence is under
+`%TEMP%\loadout-v2\sandbox-results\`. The harness's own PASS/FAIL labels in
+`results.txt` were rescored by hand (VS Code's `.cmd` argument escaping
+broke the marker names of several checks, and CD-4 was scored inverted);
+the per-client pages give the rescored results.
 
 | Area | Run | Pass | Finding | Not run |
 |---|---|---|---|---|
-| [Pi](pi.md) | PI-1 to PI-12 (Windows) | 12 | FB-8 to FB-10 | PI-6 tool-call timeout, PI-8 `/mcp`, PI-11 reachability (need a model) |
-| [omp](omp.md) OMP-10 | Windows | 1 | FB-11 | |
+| [Pi](pi.md) | PI-1 to PI-12 (Windows; PI-6, 8, 11 also in the sandbox) | 12 | FB-8 to FB-10 | none |
+| [omp](omp.md) | OMP-6 (sandbox), OMP-10 | 1 | FB-11 (OMP-10), FB-14 (OMP-6) | |
+| [Claude Desktop](claude-desktop.md) | CD-1, 4, 5 (sandbox) | 3 | none | CD-2 (MSIX), CD-7 (macOS) |
+| [Apply engine](apply.md) | AP-1, AP-6 (sandbox) | 2 | FB-16 (AP-6, no restart hint) | |
+| [Delivery](delivery.md) | DX-11 (sandbox) | 1 | FB-12 | |
+| [Codex](codex.md) | CX-9, CX-10 (sandbox) | 2 | none | |
+| [Copilot](copilot.md) | COP-1 to COP-11 (sandbox) | 10 | none (COP-6 recorded) | COP-7; CLI parts of COP-4, 5, 9 (Copilot policy, environment note) |
+| [Cursor](cursor.md) | CUR-1 to CUR-10 (sandbox) | 10 | FB-13 (CUR-2) | none |
+| [VS Code legacy](vscode-legacy.md) | VSL-1 to VSL-6 (sandbox) | 5 | VSL-3 partial, FB-15 | VSL-1 on Arch; VSL-3 tool picker |
+
+**Environment note, Copilot CLI policy (not a Loadout result).** On the
+maintainer's personal GitHub account the CLI reported "Third-party MCP
+servers are disabled by your organization's Copilot policy" and "Failed to
+load models: access denied by Copilot policy". This is known CLI behavior
+on personal accounts
+([github/copilot-cli#1707](https://github.com/github/copilot-cli/issues/1707),
+[#1976](https://github.com/github/copilot-cli/issues/1976)): check
+<https://github.com/settings/copilot/features> ("Copilot CLI", "MCP servers
+in Copilot"), then `copilot logout` and `copilot login` before the next run.
 
 ## Fix briefs (V2)
 
@@ -180,3 +205,47 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
   (whichever of the two it is enabled for, since both read the file); with
   separate files each client keeps its own timeout
   (`omp_and_pi_share_their_agent_dir_file`).
+- **FB-12 BOM in piped secret values (DX-11). Done.** Windows PowerShell
+  5.1 pipes a UTF-8 BOM when `$OutputEncoding` is UTF-8 with BOM, so
+  `... | loadout secrets set --keyring` stored `\ufeff` +
+  `verify-not-a-secret` and the server got a 20-character value
+  (reproduced on the host). `read_value` in `cmd/secrets.rs` now strips a
+  leading UTF-8 BOM; `the_service_account_token_reaches_only_op` pipes a
+  BOM and CRLF.
+- **FB-13 Cursor project servers need enabling (CUR-2).** Cursor lists
+  servers from `<P>/.cursor/mcp.json` under "Disabled" until each is turned
+  on in its MCP page; the toggle lives in Cursor's own storage, not in the
+  file (CUR-4). Loadout models no gate for Cursor (`trust_gate = None`), so
+  `status` and `effective` call a written project entry loaded when Cursor
+  does not run it. Give Cursor's project scope a gate that says each server
+  needs a one-time enable in Cursor (an `ApprovalPrompt`-like
+  `TrustGate` variant or the existing one, with a hint naming Customize >
+  MCPs), and show it on Cursor project rows of `effective` and in the
+  apply report. Loadout cannot read the enable state, so it is a hint, not
+  a status.
+- **FB-14 omp's timeout bounds startup (OMP-6).** omp applies an entry's
+  `timeout` (ms) to the connection and startup too: with `1000`, a server
+  that starts more slowly lost all its tools for the run. Loadout writes the
+  value correctly; SPEC 7.3 now says so. Left: the `TimeoutField` note for
+  omp and the user guide should warn that a small omp `timeout` can stop a
+  slow server (for example `npx` on first run) from starting at all.
+- **FB-15 VSL-3: duplicate across `.vscode/mcp.json` and `<P>/.mcp.json`.**
+  The missing `duplicate_via_compat` was a harness error, not a bug: `<P>`
+  was not a Loadout project, so `loadout effective` printed "No project
+  here: user scope only." and read no project layer. The detection itself
+  (`layering/effective.rs`: a live native candidate plus a live compat
+  candidate of the same name) is covered by
+  `effective_view_lists_legacy_vscode_as_copilot_compat`.
+  `scripts/verify-clients.md` VSL-3 now makes `<P>` a project first. One
+  real gap remains: for a name in both files VS Code 1.147 ran the
+  `<P>/.vscode/mcp.json` entry, while Loadout's effective view makes
+  `<P>/.mcp.json` (Copilot's own project layer) the winner and the compat
+  entry shadowed. Rerun VSL-3 in a project to confirm which entry VS Code
+  runs, then order compat layers for `copilot` accordingly (or say in the
+  warning that VS Code may run the compat entry).
+- **FB-16 Restart hint for Claude Desktop (AP-6), opportunity.** A server
+  added while Claude Desktop runs starts only after a full restart, and
+  Loadout prints nothing: `Caps::restart_required` is set for
+  claude-desktop but no command reads it. `apply` and the instant-apply
+  commands should print a hint (for example "restart Claude Desktop to
+  load the change") when a target with `restart_required` changed.

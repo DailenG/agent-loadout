@@ -11,7 +11,7 @@ need one. Method in [README](README.md).
 | OMP-3 | Pass | `omp --profile verify` with `PI_CODING_AGENT_DIR` set lists only `~/.omp/profiles/verify/agent/mcp.json`. |
 | OMP-4 | Pass | Inside `<P>`, both the full entry with `"enabled": false` and `{ "enabled": false }` alone in `<P>/.omp/mcp.json` leave the user entry not connected and the project entry inactive. |
 | OMP-5 | Pass | From the `omp_new_file` golden plus an extra entry and unknown keys, `/mcp disable notes` added `"enabled": false` to `notes` and kept `$schema`, the other entry, `x-custom` and `x-top`, with two-space indent. It dropped the final newline. |
-| OMP-6 | Not run | Calling a tool needs a model. |
+| OMP-6 | Finding (V2) | Windows Sandbox, omp 19.1.0 signed in: with `"timeout": 1000` omp reported "timed out after 1000ms; its tools are unavailable for this run". omp applies `timeout` to the connection and startup too, not only to tool calls, so a server slower to start than the timeout loses all its tools. Loadout writes `timeout` as milliseconds correctly (`files\omp6-mcp.json`); the semantics are documented in SPEC 7.3 (fix brief FB-14). |
 | OMP-7 | Pass | `"env": {"VERIFY": "!echo verified", "VERIFY_PAD": "!echo padded   "}`: the server saw `verified` and `padded` (output trimmed). |
 | OMP-8 | Pass | Plain `"command": "npx"` connects. |
 | OMP-9 | Pass, one unclear | In `disabledServers`, the entry is not connected. In `enabledServers` with `"enabled": false` in the entry, omp's startup line says it connected, but `/mcp list` shows it inactive; which wins is unclear. Loadout never edits either list. |

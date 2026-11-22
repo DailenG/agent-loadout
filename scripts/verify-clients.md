@@ -13,9 +13,10 @@ M9.
   `PI_CODING_AGENT_DIR`, `COPILOT_HOME`). Back up any real client file a
   check touches before starting, and restore it afterwards.
 - Run each client's own lister to confirm what it loaded (`claude mcp list`,
-  the Claude Desktop developer settings, `codex mcp list`, omp `/mcp list`,
+  Claude Desktop's Local MCP servers list (Settings > Desktop app >
+  Extensions in build 3.6556.2), `codex mcp list`, omp `/mcp list`,
   `pi mcp list`, VS Code's `MCP: List Servers` command, Copilot CLI `/mcp`,
-  Cursor's Settings, MCP page).
+  Cursor's MCP page (Customize > MCPs in Cursor 3.x)).
 - Write Loadout's entries with `loadout server add <id> --client <client>`
   (instant apply, M6) against the throwaway `LOADOUT_HOME`, or by hand from
   the goldens in
@@ -54,7 +55,7 @@ Machine: Windows 11 (Decision 12). macOS is best effort; Linux has no target.
 
 | # | Check | Expected | Clears |
 |---|---|---|---|
-| CD-1 | Classic (non-MSIX) install: add a stdio entry to `%APPDATA%\Claude\claude_desktop_config.json`, fully quit the app (tray icon, Quit), start it again. | The server is listed in Settings, Developer. It is not picked up before the restart. | SPEC 7.3 Roaming path; `restart_required` |
+| CD-1 | Classic (non-MSIX) install: add a stdio entry to `%APPDATA%\Claude\claude_desktop_config.json`, fully quit the app (tray icon, Quit), start it again. | The server is listed under Settings > Desktop app > Extensions > Local MCP servers (build 3.6556.2; older builds: Settings, Developer). It is not picked up before the restart. | SPEC 7.3 Roaming path; `restart_required` |
 | CD-2 | MSIX install: list `%LOCALAPPDATA%\Packages` for `Claude_*`. With the app having saved settings once, check for `LocalCache\Roaming\Claude\claude_desktop_config.json` inside it. Add a different entry to each copy, restart. | Record the package dir name prefix (Loadout matches `Claude_*`), which copy the app reads, and that writing both is harmless. | SPEC 7.3 MSIX copy and "write both, warn"; `claude_desktop::MSIX_CONFIG` |
 | CD-3 | Run `uninstall-names.ps1` (below) on a machine with Claude Desktop installed, both installer kinds if possible. | Record the exact `DisplayName`. Loadout's registry probe looks for `Claude`. | `Probe::UninstallEntry("Claude")` `[verify]` |
 | CD-4 | Add `"command": "npx"` without a wrapper, then the Loadout form `"command": "cmd", "args": ["/c", "npx", ...]`. | The plain form fails to start, the wrapped form starts. | SPEC 5.2 `windows_shell_shim` |
@@ -167,7 +168,7 @@ Machines: Windows 11 with Cursor. The adapter's assumptions are listed in
 
 | # | Check | Expected | Clears |
 |---|---|---|---|
-| CUR-1 | Add `verify-user` (the `cursor_stdio` golden) to `~/.cursor/mcp.json`, open Settings, MCP. | Listed and connected. | SPEC 7.3 `cursor` user file |
+| CUR-1 | Add `verify-user` (the `cursor_stdio` golden) to `~/.cursor/mcp.json`, open Cursor's MCP page (Customize > MCPs in Cursor 3.x). | Listed and connected. | SPEC 7.3 `cursor` user file |
 | CUR-2 | Put `verify-project` in `<P>/.cursor/mcp.json` and open `<P>`. | Listed in `<P>` only. Record any approval prompt (Loadout assumes no trust gate). | SPEC 7.3 project file; `trust_gate = None` |
 | CUR-3 | Servers that report environment, arguments and headers with `${env:VERIFY_VALUE}` in `command`, `args`, `env`, `url` and a header; start Cursor from a shell with `VERIFY_VALUE` set. | Each field is expanded; record any that is not. | SPEC 7.4 `cursor` `${env:NAME}`; `cursor::CAPS.env_ref_fields` `[verify]` |
 | CUR-4 | Turn `verify-user` off with Cursor's toggle and diff `~/.cursor/mcp.json`; then hand-add `"disabled": true` to another entry. | Record where Cursor keeps the toggle and whether `disabled` is honored. Loadout writes neither (`native_disable = None`). | SPEC 7.4 `cursor` native disable `[verify]` |
@@ -189,7 +190,7 @@ adapter's assumptions are listed in
 |---|---|---|---|
 | VSL-1 | With `MCP: Open User Configuration`, add `verify-legacy` in each installed variant; note the file it opens. Set `import_variants` to the installed variants in the throwaway store's `clients.toml` and run `loadout import --scan`. | The files are `%APPDATA%\<variant>\User\mcp.json` (`$XDG_CONFIG_HOME/<variant>/User/mcp.json` on Linux), and the scan lists `verify-legacy` from each. | SPEC 7.3 `vscode-legacy` user paths `[verify]`; `vscode_legacy::user_files` |
 | VSL-2 | Create a VS Code profile, open its user MCP configuration, add `verify-profile`. Then set `import_profiles = "all"` and scan again. | The file is `User\profiles\<id>\mcp.json`; the scan lists `verify-profile`. | SPEC 7.3 profile layout `[verify]` |
-| VSL-3 | With `verify-legacy` only in the user `mcp.json` and `verify-workspace` only in `<P>/.vscode/mcp.json`, open `<P>` and the Copilot agent tool picker; run `loadout effective <P> --client copilot`. | Copilot offers both (record any setting it needs); the effective view lists them as `client-compat:` layers and flags a same-named `<P>/.mcp.json` entry `duplicate_via_compat`. | SPEC 7.3 forwarding into Copilot `[verify]`; `copilot` `compat_reads` |
+| VSL-3 | Make `<P>` a Loadout project first (`loadout project init` in `<P>`; `loadout effective` reads project layers only for a known project and otherwise prints "No project here: user scope only."). With `verify-legacy` only in the user `mcp.json` and `verify-workspace` in `<P>/.vscode/mcp.json` and, with other `args`, in `<P>/.mcp.json`, open `<P>` and the Copilot agent tool picker; run `loadout effective <P> --client copilot`. | Copilot offers both (record any setting it needs, and which `verify-workspace` entry runs); the effective view lists them as `client-compat:` layers and flags the same-named `<P>/.mcp.json` entry `duplicate_via_compat`. | SPEC 7.3 forwarding into Copilot `[verify]`; `copilot` `compat_reads` |
 | VSL-4 | Entries without `type`: one with `command`, one with `url`. | Both start; Loadout reads them as stdio and http. | SPEC 7.5 inference; `vscode-legacy` mapper |
 | VSL-5 | Detection: `code.cmd`, `code-insiders.cmd` or `codium.cmd` on `PATH`, or a variant's `User` dir alone. | Any detects `vscode-legacy`, and `all-detected` still never writes it. | SPEC 7.7; `vscode_legacy::SPEC.detect` `[verify]` |
 | VSL-6 | Record `Get-FileHash` of every file from VSL-1 to VSL-3 (in a `.ps1` file), then run `loadout server add verify-ro --client vscode-legacy --client copilot -- npx -y @modelcontextprotocol/server-everything`, `loadout import --scan`, `loadout import`, `loadout adopt`, `loadout apply` and `loadout server rm verify-ro`; hash again. Add one entry with `${env:VERIFY_VALUE}` and one with `${input:verify-token}` (plus its `inputs[]` item) before the scan. | Every hash is unchanged; the apply warns `read_only_client`; the scan imports `${env:VERIFY_VALUE}` as a reference and reports the `${input:...}` entry `needs_manual_secret`; nothing imported is enabled for `vscode-legacy`. | SPEC 7.3 "never written", 8.6 import; `McpSpec::read_only`, `import::server_from_native` |
