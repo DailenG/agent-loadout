@@ -45,7 +45,10 @@ cp -r "$aur/agent-loadout" "$src"
 srcinfo_matches "$src"
 git -C "$root" archive --format=tar.gz --prefix="agent-loadout-$version/" \
   -o "$src/agent-loadout-$version.tar.gz" "${LOADOUT_AUR_REV:-HEAD}"
-(cd "$src" && makepkg --nobuild --noconfirm "${flags[@]}")
+# The stand-in tarballs differ from the released ones, so their checksums
+# cannot match; --skipchecksums here only. verify-release.sh checks the real
+# sources against the PKGBUILD sums.
+(cd "$src" && makepkg --nobuild --noconfirm --skipchecksums "${flags[@]}")
 echo "agent-loadout: makepkg --nobuild passed"
 
 # Binary package.
@@ -57,7 +60,7 @@ mkdir -p "$stage/usr/bin"
 cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$stage/"
 tar -C "$work/stage" -czf "$bin/agent-loadout-$version-x86_64-linux.tar.gz" \
   "agent-loadout-$version-x86_64-linux"
-(cd "$bin" && makepkg --nobuild --noconfirm "${flags[@]}")
+(cd "$bin" && makepkg --nobuild --noconfirm --skipchecksums "${flags[@]}")
 echo "agent-loadout-bin: makepkg --nobuild passed"
 
 if command -v namcap >/dev/null; then

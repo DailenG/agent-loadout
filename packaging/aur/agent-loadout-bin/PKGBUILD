@@ -39,7 +39,7 @@ provides=("$_pkgname" 'loadout')
 conflicts=("$_pkgname")
 options=('!strip' '!debug')
 source_x86_64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-$CARCH-linux.tar.gz")
-sha256sums_x86_64=('SKIP')
+sha256sums_x86_64=('0183e9b8c8772e99829fc1125aa20cdf0c4007b82dc0b0c8cf2be0acf2d8cebd')
 
 package() {
   cd "$_pkgname-$pkgver-$CARCH-linux"

@@ -48,10 +48,28 @@ optional updater) are in place. Gates V1 (Tier A)
 and V2 (Tier B),
 the real-client checks, are partly run; see
 [docs/verify/README.md](docs/verify/README.md).
-Nothing is released yet. Installing and using Loadout:
-[docs/user-guide.md](docs/user-guide.md); supported clients:
+Using Loadout: [docs/user-guide.md](docs/user-guide.md); supported clients:
 [docs/adapters.md](docs/adapters.md). JSON Schemas for store files, for
 editor completion, are in [docs/schema](docs/schema).
+
+## Install
+
+Downloads are on the [latest release](https://github.com/DailenG/agent-loadout/releases/latest);
+`SHA256SUMS` lists every asset's hash.
+
+- **Windows:** `Loadout_<version>_x64-setup.exe` (per-user, signed; puts
+  `loadout` on your PATH and updates itself). winget
+  (`winget install DailenG.AgentLoadout`) once the package is accepted.
+- **Linux:** the AppImage (updates itself), or the `.deb` / `.rpm`.
+- **Arch Linux:** the AUR packages `agent-loadout` (source) and
+  `agent-loadout-bin` are not published yet; until then build them from this
+  repository:
+
+  ```sh
+  git clone https://github.com/DailenG/agent-loadout
+  cd agent-loadout/packaging/aur/agent-loadout-bin   # or agent-loadout
+  makepkg -si
+  ```
 
 ## Build
 
