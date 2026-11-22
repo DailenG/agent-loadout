@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "agent-loadout"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "agent-loadout-core",
  "agent-loadout-testkit",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agent-loadout-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "agent-loadout-testkit",
  "dirs",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "agent-loadout-testkit"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "agent-loadout-core",
  "serde",
