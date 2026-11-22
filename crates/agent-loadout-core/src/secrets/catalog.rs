@@ -74,6 +74,8 @@ pub struct Catalog {
     aliases: BTreeMap<String, Alias>,
     /// `[onepassword] environment`.
     pub environment: Option<String>,
+    /// `[onepassword] account`: the account every `op` call names.
+    pub op_account: Option<String>,
 }
 
 impl Catalog {
@@ -83,7 +85,10 @@ impl Catalog {
         let mut catalog = Self::default();
         if let Some(file) = load::<SecretCatalog>(src, CATALOG_FILE)? {
             checked(file.validate().first_error(Some(Path::new(CATALOG_FILE))))?;
-            catalog.environment = file.onepassword.and_then(|op| op.environment);
+            if let Some(op) = file.onepassword {
+                catalog.environment = op.environment;
+                catalog.op_account = op.account;
+            }
             for (alias, entry) in file.secrets.into_iter().flatten() {
                 catalog.aliases.insert(
                     alias.clone(),
@@ -240,6 +245,38 @@ pub fn stage_environment(
         .environment
         .replace(environment.to_owned())
         .filter(|previous| previous != environment);
+    tx.write(CATALOG_FILE, doc.to_text()?)?;
+    Ok(previous)
+}
+
+/// Stages `[onepassword] account` in `secrets.toml` (or removes it with
+/// `None`): the 1Password account Loadout's `op` calls use (gate V1
+/// FB-7). Returns the account it replaces.
+pub fn stage_op_account(
+    tx: &mut Transaction<'_>,
+    account: Option<&str>,
+) -> Result<Option<String>, CoreError> {
+    if let Some(account) = account
+        && !crate::secrets::grammar::is_op_account(account)
+    {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!(
+                "invalid 1Password account {account:?}: a sign-in address, shorthand or id \
+                 (for example example.1password.com)"
+            ),
+        ));
+    }
+    let mut doc = load_doc::<SecretCatalog>(tx, CATALOG_FILE)?
+        .unwrap_or_else(|| TomlDocument::new(SecretCatalog::new()));
+    let onepassword = doc
+        .value_mut()
+        .onepassword
+        .get_or_insert_with(Default::default);
+    let previous = match account {
+        Some(account) => onepassword.account.replace(account.to_owned()),
+        None => onepassword.account.take(),
+    };
     tx.write(CATALOG_FILE, doc.to_text()?)?;
     Ok(previous)
 }

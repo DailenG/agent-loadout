@@ -1,4 +1,4 @@
-//! `loadout secrets ls|check|providers|set|clear|map-op-env|service-account`
+//! `loadout secrets ls|check|providers|set|clear|map-op-env|op-account|service-account`
 //! (SPEC 11, 14).
 //!
 //! Values never pass through arguments or output: `set --keyring` and
@@ -22,7 +22,7 @@ use agent_loadout_core::secrets::catalog::{
     self, AliasStatus, AliasUpdate, Catalog, SetScope, keyring_parts,
 };
 use agent_loadout_core::secrets::delivery::{SERVICE_ACCOUNT_KEYRING_ACCOUNT, op_env};
-use agent_loadout_core::secrets::grammar::{SecretRef, is_op_environment_id};
+use agent_loadout_core::secrets::grammar::{SecretRef, is_op_account, is_op_environment_id};
 use agent_loadout_core::secrets::providers::onepassword::OpFeature;
 use agent_loadout_core::secrets::providers::{self, ProviderInfo, Resolver};
 use agent_loadout_core::secrets::scanner::SecretMemory;
@@ -68,6 +68,18 @@ enum SecretsCommand {
     /// Map the variables of a 1Password Environment to aliases
     /// (`op-env://<ENV-ID>/<NAME>`) and save the Environment id.
     MapOpEnv(MapOpEnvArgs),
+    /// The 1Password account Loadout's `op` calls use, for machines whose
+    /// desktop app is signed in to several accounts: show it, set it, or
+    /// clear it.
+    OpAccount {
+        /// Sign-in address, shorthand or account id
+        /// (for example example.1password.com).
+        #[arg(value_name = "ACCOUNT")]
+        account: Option<String>,
+        /// Remove the setting.
+        #[arg(long, conflicts_with = "account")]
+        clear: bool,
+    },
     /// The 1Password service account token in the OS keyring, passed by
     /// `loadout exec` to `op` only.
     ServiceAccount {
@@ -116,6 +128,10 @@ struct MapOpEnvArgs {
     /// Map every variable the Environment lists.
     #[arg(long, conflicts_with = "names")]
     all: bool,
+    /// The 1Password account holding the Environment (sign-in address,
+    /// shorthand or account id); saved for every later `op` call.
+    #[arg(long, value_name = "ACCOUNT")]
+    account: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -134,6 +150,7 @@ pub fn run(ctx: &Context, args: &SecretsArgs) -> Result<u8, CoreError> {
         SecretsCommand::Set(args) => set(ctx, args),
         SecretsCommand::Clear { alias } => clear(ctx, alias).map(|()| 0),
         SecretsCommand::MapOpEnv(args) => map_op_env(ctx, args),
+        SecretsCommand::OpAccount { account, clear } => op_account(ctx, account.as_deref(), *clear),
         SecretsCommand::ServiceAccount { command } => service_account(ctx, command).map(|()| 0),
     }
 }
@@ -218,7 +235,7 @@ fn check(ctx: &Context, only: &[String]) -> Result<u8, CoreError> {
         Some(store) => DesiredState::load(store, machine_id(ctx)?.as_deref())?,
         None => DesiredState::empty(),
     };
-    let env = op_env(&ctx.env, ctx.keyring());
+    let env = op_env(&ctx.env, ctx.keyring(), catalog.op_account.as_deref());
     let resolver = Resolver::new(&env, ctx.keyring(), ctx.op(), memory(store.as_ref())?);
     let statuses = catalog::check(&catalog, &usage, &resolver, only);
     let blocked = statuses.iter().any(|status| {
@@ -546,11 +563,27 @@ fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<u8, CoreError> {
     for name in &args.names {
         ids::check(IdKind::SecretAlias, name)?;
     }
+    if let Some(account) = &args.account
+        && !is_op_account(account)
+    {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!("invalid 1Password account {account:?}"),
+        ));
+    }
+    let account = match &args.account {
+        Some(account) => Some(account.clone()),
+        None => ctx
+            .open_store()?
+            .map(|store| Catalog::load(&store, None))
+            .transpose()?
+            .and_then(|catalog| catalog.op_account),
+    };
     let op = ctx.op();
     op.require(OpFeature::Environments)
         .map_err(|resolution| resolution.into_error("1Password Environments"))?;
     let listed = if op.supports(OpFeature::EnvironmentListing) {
-        let env = op_env(&ctx.env, ctx.keyring());
+        let env = op_env(&ctx.env, ctx.keyring(), account.as_deref());
         Some(
             op.list_environment(&env, id)
                 .map_err(|resolution| resolution.into_error(&format!("Environment {id}")))?,
@@ -616,6 +649,9 @@ fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<u8, CoreError> {
     let committed = store.transaction(Operation::new("secrets.map-op-env", summary), |tx| {
         tx.add_entity("secrets".to_owned());
         let previous = catalog::stage_environment(tx, id)?;
+        if let Some(account) = &args.account {
+            catalog::stage_op_account(tx, Some(account))?;
+        }
         for (alias, reference) in &mapped {
             let update = AliasUpdate {
                 reference: reference.clone(),
@@ -649,6 +685,61 @@ fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<u8, CoreError> {
         );
         for alias in &kept {
             eprintln!("warning[already_exists]: {alias} already points to another reference; kept");
+        }
+        if let Some(report) = &report {
+            print_report(report, committed.commit.as_ref());
+        }
+    }
+    Ok(report.as_ref().map_or(0, apply_exit_code))
+}
+
+/// `secrets op-account [ACCOUNT] [--clear]` (gate V1 FB-7): the
+/// 1Password account every `op` call names, saved in `secrets.toml`
+/// (`[onepassword] account`). Without arguments it shows the setting.
+fn op_account(ctx: &Context, account: Option<&str>, clear: bool) -> Result<u8, CoreError> {
+    if account.is_none() && !clear {
+        let current = ctx
+            .open_store()?
+            .map(|store| Catalog::load(&store, None))
+            .transpose()?
+            .and_then(|catalog| catalog.op_account);
+        if ctx.json {
+            print_json(&json!({ "schema": JSON_SCHEMA, "account": current }));
+        } else {
+            match &current {
+                Some(account) => println!("{account}"),
+                None => println!("No 1Password account is set; `op` picks one by itself."),
+            }
+        }
+        return Ok(0);
+    }
+    let store = ctx.open_store_for_change()?;
+    let summary = match account {
+        Some(account) => format!("secrets: 1Password account {account}"),
+        None => "secrets: clear the 1Password account".to_owned(),
+    };
+    let ax = ctx.apply_env();
+    let committed = store.transaction(Operation::new("secrets.op-account", summary), |tx| {
+        tx.add_entity("secrets".to_owned());
+        let previous = catalog::stage_op_account(tx, account)?;
+        Ok((previous, instant_apply(tx, &ax)?))
+    })?;
+    let (previous, report) = committed.value;
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "account": account,
+            "previous": previous,
+            "commit": committed.commit.as_ref().map(ToString::to_string),
+            "apply": report.as_ref().map(|r| report_json(r, committed.commit.as_ref())),
+        }));
+    } else {
+        match account {
+            Some(account) => println!(
+                "1Password calls now use account {account} (commit {}).",
+                committed.commit.as_ref().map_or("none", |c| c.short())
+            ),
+            None => println!("Cleared the 1Password account."),
         }
         if let Some(report) = &report {
             print_report(report, committed.commit.as_ref());

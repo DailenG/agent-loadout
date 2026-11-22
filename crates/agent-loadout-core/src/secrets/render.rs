@@ -209,6 +209,16 @@ impl<'a> Renderer<'a> {
         let mut args = vec!["exec".to_owned()];
         let mut environment: Option<String> = None;
         let mut maps = Vec::new();
+        let uses_op = self.launch.iter().any(|(_, source)| {
+            matches!(
+                source.reference(),
+                SecretRef::OnePassword { .. } | SecretRef::OnePasswordEnvironment { .. }
+            )
+        });
+        if uses_op && let Some(account) = &self.rx.catalog.op_account {
+            args.push("--op-account".to_owned());
+            args.push(account.clone());
+        }
         for (key, source) in &self.launch {
             match source.reference() {
                 SecretRef::OnePasswordEnvironment {
@@ -435,7 +445,7 @@ impl<'a> Renderer<'a> {
                 alias, reference, ..
             } => {
                 let keyring = self.rx.delivery.keyring();
-                let env = op_env(self.rx.env, keyring);
+                let env = op_env(self.rx.env, keyring, self.rx.catalog.op_account.as_deref());
                 let op = self.rx.delivery.op(self.rx.env, self.rx.fs);
                 Resolver::new(&env, keyring, op, self.rx.memory.clone())
                     .resolve(reference)

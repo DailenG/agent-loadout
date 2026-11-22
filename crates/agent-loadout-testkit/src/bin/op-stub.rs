@@ -17,13 +17,18 @@ use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 
 use agent_loadout_testkit::op_stub::{
-    CONCEALED, CONFIG_FILE, FORBIDDEN, LOG_FILE, OpStubConfig, OpStubMode, SERVICE_ACCOUNT_SEEN,
+    ACCOUNT_SEEN, CONCEALED, CONFIG_FILE, FORBIDDEN, LOG_FILE, OpStubConfig, OpStubMode,
+    SERVICE_ACCOUNT_SEEN,
 };
 
 const NOT_SIGNED_IN: &str = "[ERROR] 2026/01/01 00:00:00 You are not currently signed in. \
      Please run `op signin --help` for instructions";
 const BAD_TOKEN: &str = "[ERROR] 2026/01/01 00:00:00 invalid service account token";
+const MULTIPLE_ACCOUNTS: &str = "[ERROR] 2026/01/01 00:00:00 multiple accounts found. Use the \
+     --account flag or set the OP_ACCOUNT environment variable to select an account.";
+const UNKNOWN_ACCOUNT: &str = "[ERROR] 2026/01/01 00:00:00 no account found for filter";
 const TOKEN_VAR: &str = "OP_SERVICE_ACCOUNT_TOKEN";
+const ACCOUNT_VAR: &str = "OP_ACCOUNT";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,6 +44,12 @@ fn main() -> ExitCode {
     if token.is_some() {
         log(&log_file, SERVICE_ACCOUNT_SEEN);
     }
+    let account = std::env::var(ACCOUNT_VAR)
+        .ok()
+        .filter(|account| !account.is_empty());
+    if let Some(account) = &account {
+        log(&log_file, &format!("{ACCOUNT_SEEN} {account}"));
+    }
     let config: OpStubConfig = std::fs::read_to_string(dir.join(CONFIG_FILE))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -48,6 +59,18 @@ fn main() -> ExitCode {
         match (&token, &config.service_account_token) {
             (Some(given), Some(accepted)) if given == accepted => Ok(()),
             (Some(_), _) => Err(fail(BAD_TOKEN, 1)),
+            // Desktop app with several accounts: `op` refuses to guess
+            // (as 2.42.0 does, gate V1 FB-7).
+            (None, _) if config.accounts.len() > 1 && account.is_none() => {
+                Err(fail(MULTIPLE_ACCOUNTS, 1))
+            }
+            (None, _)
+                if account.as_ref().is_some_and(|a| {
+                    !config.accounts.is_empty() && !config.accounts.contains(a)
+                }) =>
+            {
+                Err(fail(UNKNOWN_ACCOUNT, 1))
+            }
             (None, _) if config.mode == OpStubMode::Locked => Err(fail(NOT_SIGNED_IN, 1)),
             (None, _) => Ok(()),
         }

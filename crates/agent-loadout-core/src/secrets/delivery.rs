@@ -378,16 +378,25 @@ impl std::fmt::Debug for DeliveryEnv {
     }
 }
 
+/// The `op` environment variable naming the account to use.
+pub const ACCOUNT_VAR: &str = "OP_ACCOUNT";
+
 /// `env` for an `op` child: with the service account token from the OS
-/// keyring (SPEC 11.5) unless `env` already has one. An unreadable keyring
-/// means no token.
-pub fn op_env(env: &Env, keyring: &dyn KeyringBackend) -> Env {
+/// keyring (SPEC 11.5) unless `env` already has one, and with `account`
+/// as `OP_ACCOUNT` unless `env` already names one (gate V1 FB-7: with
+/// several accounts signed in to the desktop app, `op` refuses to guess).
+/// An unreadable keyring means no token.
+pub fn op_env(env: &Env, keyring: &dyn KeyringBackend, account: Option<&str>) -> Env {
+    let env = match account {
+        Some(account) if env.var(ACCOUNT_VAR).is_none() => env.with_var(ACCOUNT_VAR, account),
+        _ => env.clone(),
+    };
     if env.var(SERVICE_ACCOUNT_VAR).is_some() {
-        return env.clone();
+        return env;
     }
     match keyring.get(brand::KEYRING_SERVICE, SERVICE_ACCOUNT_KEYRING_ACCOUNT) {
         Ok(Some(token)) => env.with_var(SERVICE_ACCOUNT_VAR, token.expose()),
-        _ => env.clone(),
+        _ => env,
     }
 }
 

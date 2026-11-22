@@ -27,6 +27,9 @@ pub const LOG_FILE: &str = "op-stub.log";
 pub const FORBIDDEN: &str = "FORBIDDEN";
 /// Log line of a call that had `OP_SERVICE_ACCOUNT_TOKEN` set.
 pub const SERVICE_ACCOUNT_SEEN: &str = "env OP_SERVICE_ACCOUNT_TOKEN";
+/// Log prefix of a call that had `OP_ACCOUNT` set (followed by its value,
+/// which is an account name, not a secret).
+pub const ACCOUNT_SEEN: &str = "env OP_ACCOUNT";
 /// What `op run` writes instead of a value without `--no-masking`.
 pub const CONCEALED: &str = "<concealed by 1Password>";
 
@@ -54,6 +57,11 @@ pub struct OpStubConfig {
     /// The service account token `op` accepts, if any.
     #[serde(default)]
     pub service_account_token: Option<String>,
+    /// Accounts signed in to the desktop app. With more than one, a call
+    /// without `OP_ACCOUNT` (and without a service account) fails, as real
+    /// `op` does; with any, an `OP_ACCOUNT` not among them fails.
+    #[serde(default)]
+    pub accounts: Vec<String>,
 }
 
 impl Default for OpStubConfig {
@@ -64,6 +72,7 @@ impl Default for OpStubConfig {
             items: BTreeMap::new(),
             environments: BTreeMap::new(),
             service_account_token: None,
+            accounts: Vec::new(),
         }
     }
 }
@@ -125,6 +134,12 @@ impl OpStub {
     /// even when the desktop app is locked; another token fails.
     pub fn set_service_account_token(&mut self, token: &str) -> &mut Self {
         self.config.service_account_token = Some(token.to_owned());
+        self.save()
+    }
+
+    /// Accounts signed in to the desktop app (see [`OpStubConfig::accounts`]).
+    pub fn set_accounts(&mut self, accounts: &[&str]) -> &mut Self {
+        self.config.accounts = accounts.iter().map(|a| (*a).to_owned()).collect();
         self.save()
     }
 

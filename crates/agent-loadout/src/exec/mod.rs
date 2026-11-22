@@ -2,7 +2,7 @@
 //! servers.
 //!
 //! ```text
-//! loadout exec [--ref NAME=REF]... [--op-env ID --map KEY=NAME...] -- <cmd> [args]
+//! loadout exec [--op-account ACCOUNT] [--ref NAME=REF]... [--op-env ID --map KEY=NAME...] -- <cmd> [args]
 //! ```
 //!
 //! - Self-contained: the references are in argv (references, never
@@ -16,7 +16,9 @@
 //! - Values live only in memory and in the child's environment.
 //!   `OP_SERVICE_ACCOUNT_TOKEN` (from the environment, else
 //!   `keyring://loadout/OP_SERVICE_ACCOUNT_TOKEN`) reaches `op` only, never
-//!   the server.
+//!   the server. `--op-account` becomes `OP_ACCOUNT` for `op` (unless the
+//!   environment names an account already), for machines whose desktop
+//!   app is signed in to several accounts.
 //! - Nothing is written to stdout: it is the server's JSON-RPC channel.
 //!   Errors go to stderr as `loadout-exec: ...`; exit 78 for configuration
 //!   errors, 77 for secrets that cannot be had; otherwise the server's own
@@ -33,8 +35,8 @@ use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 
 use agent_loadout_core::secrets::SecretValue;
-use agent_loadout_core::secrets::delivery::{SERVICE_ACCOUNT_VAR, op_env};
-use agent_loadout_core::secrets::grammar::{SecretRef, is_op_environment_id};
+use agent_loadout_core::secrets::delivery::{ACCOUNT_VAR, SERVICE_ACCOUNT_VAR, op_env};
+use agent_loadout_core::secrets::grammar::{SecretRef, is_op_account, is_op_environment_id};
 use agent_loadout_core::secrets::providers::onepassword::{OP_NOT_FOUND, OpCli, OpFeature};
 use agent_loadout_core::secrets::providers::{env as env_provider, keyring as keyring_provider};
 use agent_loadout_core::secrets::render::parse_binding;
@@ -56,7 +58,7 @@ const KEEP_VAR: &str = brand::EXEC_ENV_VAR;
 
 fn usage() -> String {
     format!(
-        "usage: {} exec [--ref NAME=REF]... [--op-env ID --map KEY=NAME...] -- <cmd> [args]",
+        "usage: {} exec [--op-account ACCOUNT] [--ref NAME=REF]... [--op-env ID --map KEY=NAME...] -- <cmd> [args]",
         brand::BIN_NAME
     )
 }
@@ -106,6 +108,8 @@ struct Invocation {
     stage2: bool,
     refs: Vec<(String, SecretRef)>,
     environment: Option<String>,
+    /// `--op-account`: the 1Password account `op` uses.
+    account: Option<String>,
     maps: Vec<(String, String)>,
     command: OsString,
     args: Vec<OsString>,
@@ -181,6 +185,15 @@ fn parse(args: &[OsString]) -> Result<Invocation, Failure> {
                     reference => invocation.refs.push((key, reference)),
                 }
             }
+            "--op-account" => {
+                let account = value(&mut rest)?;
+                if !is_op_account(&account) {
+                    return Err(Failure::config(format!(
+                        "invalid 1Password account {account:?}"
+                    )));
+                }
+                invocation.account = Some(account);
+            }
             "--op-env" => {
                 let id = value(&mut rest)?;
                 if !is_op_environment_id(&id) {
@@ -218,7 +231,10 @@ fn parse(args: &[OsString]) -> Result<Invocation, Failure> {
     invocation.command = command.clone();
     invocation.args = rest.cloned().collect();
     if invocation.stage2 {
-        if !invocation.refs.is_empty() || invocation.environment.is_some() {
+        if !invocation.refs.is_empty()
+            || invocation.environment.is_some()
+            || invocation.account.is_some()
+        {
             return Err(Failure::config("--stage2 takes only --map"));
         }
     } else if !invocation.maps.is_empty() && invocation.environment.is_none() {
@@ -250,7 +266,10 @@ fn stage1(invocation: Invocation) -> Result<i32, Failure> {
             .iter()
             .any(|(_, reference)| matches!(reference, SecretRef::OnePassword { .. }));
     let (op, op_child_env) = if needs_op {
-        (OpCli::detect(&env, &RealFs), op_env(&env, keyring.as_ref()))
+        (
+            OpCli::detect(&env, &RealFs),
+            op_env(&env, keyring.as_ref(), invocation.account.as_deref()),
+        )
     } else {
         (OpCli::NotFound, env.clone())
     };
@@ -312,6 +331,11 @@ fn stage1(invocation: Invocation) -> Result<i32, Failure> {
     op_vars.push((KEEP_VAR.into(), names.join("\n").into()));
     if let Some(token) = op_child_env.var(SERVICE_ACCOUNT_VAR) {
         op_vars.push((SERVICE_ACCOUNT_VAR.into(), token.to_owned()));
+    }
+    if let Some(account) = op_child_env.var(ACCOUNT_VAR)
+        && !op_vars.iter().any(|(name, _)| same_name(name, ACCOUNT_VAR))
+    {
+        op_vars.push((ACCOUNT_VAR.into(), account.to_owned()));
     }
     let this = std::env::current_exe()
         .map_err(|err| Failure::config(format!("cannot find this binary: {err}")))?;

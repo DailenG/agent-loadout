@@ -12,7 +12,7 @@ use crate::error::ErrorCode;
 use crate::model::ids::IdKind;
 use crate::model::validate::{Diagnostics, join};
 use crate::model::{SCHEMA_VERSION, StoreModel};
-use crate::secrets::grammar::is_op_environment_id;
+use crate::secrets::grammar::{is_op_account, is_op_environment_id};
 
 /// `store/secrets.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -42,6 +42,12 @@ pub struct OnePassword {
     /// identifier, not a secret).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+    /// The 1Password account Loadout's `op` calls use (sign-in address,
+    /// shorthand or account id), for machines whose desktop app is signed
+    /// in to several accounts (gate V1 FB-7). A service account token
+    /// names its own account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -86,6 +92,15 @@ impl SecretCatalog {
                 ErrorCode::InvalidValue,
                 "onepassword.environment",
                 format!("invalid 1Password Environment id {environment:?}"),
+            );
+        }
+        if let Some(account) = self.onepassword.as_ref().and_then(|op| op.account.as_ref())
+            && !is_op_account(account)
+        {
+            d.error(
+                ErrorCode::InvalidValue,
+                "onepassword.account",
+                format!("invalid 1Password account {account:?}"),
             );
         }
         for (alias, entry) in self.secrets.iter().flatten() {

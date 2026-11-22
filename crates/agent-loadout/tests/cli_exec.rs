@@ -14,7 +14,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use agent_loadout_testkit::TempHome;
-use agent_loadout_testkit::op_stub::{OpStub, OpStubMode, SERVICE_ACCOUNT_SEEN, built_binary};
+use agent_loadout_testkit::op_stub::{
+    ACCOUNT_SEEN, OpStub, OpStubMode, SERVICE_ACCOUNT_SEEN, built_binary,
+};
 use serde_json::{Value, json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_loadout");
@@ -824,6 +826,112 @@ fn map_op_env_creates_aliases_for_selected_names() {
     ]);
     assert_eq!(mapped["mapped"], json!(["THIRD_TOKEN"]));
     assert!(stub.calls().iter().all(|call| !call.contains(ENV_VALUE)));
+}
+
+#[test]
+fn one_account_is_named_when_several_are_signed_in() {
+    // Gate V1 FB-7: with two accounts in the desktop app, `op` refuses
+    // every call that does not name one.
+    let cli = Cli::new();
+    let mut stub = cli.op_stub();
+    stub.set_accounts(&["family.example.com", "work.example.com"]);
+    let (code, doc) = cli.json(&["secrets", "map-op-env", ENVIRONMENT, "--all"]);
+    assert_eq!(code, 1, "{doc:#}");
+    assert!(
+        doc["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("multiple accounts"),
+        "{doc:#}"
+    );
+    let (code, doc) = cli.json(&[
+        "secrets",
+        "map-op-env",
+        ENVIRONMENT,
+        "--all",
+        "--account",
+        "two words",
+    ]);
+    assert_eq!(
+        (code, doc["error"]["code"].as_str()),
+        (1, Some("invalid_value"))
+    );
+
+    // `--account` lists through that account and saves it.
+    cli.ok(&[
+        "secrets",
+        "map-op-env",
+        ENVIRONMENT,
+        "--all",
+        "--account",
+        "family.example.com",
+    ]);
+    assert_eq!(
+        cli.ok(&["secrets", "op-account"])["account"],
+        "family.example.com"
+    );
+    let check = cli.ok(&["secrets", "check"]);
+    assert!(
+        check["aliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| a["status"] == "resolved"),
+        "{check:#}"
+    );
+
+    // A launch entry carries the account to `loadout exec`, which hands it
+    // to `op run` (and never to the server).
+    let server = server();
+    let server = server.to_str().unwrap();
+    cli.ok(&[
+        "server",
+        "add",
+        "tracker",
+        "--env",
+        "SERVER_TOKEN=${secret:MCP_TOKEN}",
+        "--client",
+        "claude-code",
+        "--",
+        server,
+        "env",
+    ]);
+    let doc: Value =
+        serde_json::from_str(&std::fs::read_to_string(cli.th.home().join(".claude.json")).unwrap())
+            .unwrap();
+    let entry_args: Vec<&str> = doc["mcpServers"]["tracker"]["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        entry_args[..3],
+        ["exec", "--op-account", "family.example.com"]
+    );
+    let output = cli
+        .th
+        .command(doc["mcpServers"]["tracker"]["command"].as_str().unwrap())
+        .args(&entry_args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let env = server_env(&output);
+    assert_eq!(env["SERVER_TOKEN"], ENV_VALUE);
+    assert!(
+        !env.contains_key("OP_ACCOUNT"),
+        "OP_ACCOUNT reached the server"
+    );
+    assert!(
+        stub.calls()
+            .iter()
+            .any(|call| call == &format!("{ACCOUNT_SEEN} family.example.com"))
+    );
+
+    // Clearing it brings the refusal back.
+    cli.ok(&["secrets", "op-account", "--clear"]);
+    let (code, _) = cli.json(&["secrets", "check"]);
+    assert_eq!(code, 5);
 }
 
 #[test]

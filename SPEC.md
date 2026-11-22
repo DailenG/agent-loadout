@@ -283,6 +283,7 @@ schema = 1
 
 [onepassword]
 environment = "blgexucrwfr2dtsxe2q4uu7dp4"   # the one Environment holding MCP secrets (an id, not a secret; example id from 1Password docs)
+account = "example.1password.com"            # optional: the account every `op` call names (several accounts signed in; gate V1 FB-7)
 
 [secrets.GITHUB_PAT]
 ref = "op://Developer/GitHub PAT/credential"
@@ -958,6 +959,7 @@ Rendering examples for alias `GITHUB_PAT` (env name `GITHUB_PAT`) on `env.GITHUB
 - Unix: `execvp` (no extra process). Windows: spawns the child with inherited handles, attaches it to a Job Object with kill-on-close so the client killing `loadout exec` kills the server tree, and forwards the exit code.
 - Launcher path: user-scope and private targets reference the **absolute path** of the installed binary (resolved at apply; an install-path change re-plans those entries as updates), so another program named `loadout` on `PATH` cannot hijack server launch (Appendix C). Shared project files use bare `loadout` to stay portable.
 - Prompts and the service account option: with the 1Password desktop app integration, `op` may ask for approval when a client starts servers [verify how long one approval lasts per client process on Windows]. To avoid prompts, `loadout secrets service-account set` stores a 1Password service account token in the OS keyring (`keyring://loadout/OP_SERVICE_ACCOUNT_TOKEN`); exec passes it as `OP_SERVICE_ACCOUNT_TOKEN` to the `op` child only, never to the MCP server. Scope the account read-only to the MCP Environment and to the vaults that hold `op://` items; service accounts cannot read Personal/Private vaults [verify], so those items belong in a shared vault. Settings states the tradeoff: no prompts versus a long-lived token at rest in the keyring.
+- Several accounts (gate V1 FB-7): with more than one account signed in to the desktop app, `op` refuses any call that does not name one ("multiple accounts found"). `loadout secrets op-account <ACCOUNT>` (or `map-op-env --account <ACCOUNT>`) saves the sign-in address, shorthand or account id as `[onepassword] account` in `secrets.toml`; `--clear` removes it. Every `op` call Loadout makes gets it as `OP_ACCOUNT` unless the environment already sets `OP_ACCOUNT`. Launch entries that use 1Password render `loadout exec --op-account <ACCOUNT> ...`; exec passes it to `op` and `op run` only, never to the server. A service account token names its own account and needs no setting.
 
 ### 11.6 Environment export helper
 
@@ -1203,7 +1205,7 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 | `loadout project init [PATH] [--shared]`, `share ID`, `add PATH`, `ls`, `rm ID`, `trust PATH` | Projects; init is private unless `--shared`; `share` moves private entries into `project.toml` |
 | `loadout import [--scan] [--client C] [--scope ...]`, `loadout adopt [ENTRY...] [--all-identical]` | Import and adopt |
 | `loadout skills ls\|add <URL\|PATH>\|rm\|enable\|disable\|update\|scan` | Skills |
-| `loadout secrets ls\|check\|providers\|set <ALIAS> [--keyring]\|map-op-env <ENV-ID>\|service-account set\|clear` | Secrets |
+| `loadout secrets ls\|check\|providers\|set <ALIAS> [--keyring]\|map-op-env <ENV-ID> [--account A]\|op-account [A] [--clear]\|service-account set\|clear` | Secrets |
 | `loadout env --export [--shell ...] [--aliases ...]` | Print exports (§11.6) |
 | `loadout secret get --ref REF`, `loadout secret-header NAME=TEMPLATE...` | Internal, for client command hooks (omp/Pi `!command`, Claude Code `headersHelper`): print one resolved value or header JSON to stdout; never logged |
 | `loadout exec [--ref NAME=REF]... [--op-env ID] -- <cmd> [args]` | Launch-time secret injection (§11.5) |
@@ -1213,7 +1215,7 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 | `loadout --identify` | Prints `dev.dailen.loadout <version>` (used by `doctor` and adapters to detect a foreign `loadout` binary) |
 | `loadout completions <shell>` | Shell completions |
 
-Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout. A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
+Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout. A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
 
 ---
 

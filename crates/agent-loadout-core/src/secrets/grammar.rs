@@ -163,6 +163,19 @@ pub fn is_op_environment_id(value: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
 
+/// A value for `op --account`: a sign-in address (`example.1password.com`),
+/// an account shorthand, an account or user id, or an email address. Up to
+/// 128 characters of letters, digits, `.`, `-`, `_` and `@`, not starting
+/// with `-` (it is passed as an argument).
+pub fn is_op_account(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.starts_with('-')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@'))
+}
+
 /// A non-secret path variable usable in templates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathVar {

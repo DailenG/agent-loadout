@@ -89,9 +89,17 @@ struct Values<'a> {
 
 impl<'a> Values<'a> {
     fn new(ctx: &'a Context) -> Result<Self, CoreError> {
+        // `secret get` and `secret-header` run from a client's config: the
+        // store, when there is one, names the 1Password account.
+        let account = ctx
+            .open_store()
+            .ok()
+            .flatten()
+            .and_then(|store| Catalog::load(&store, None).ok())
+            .and_then(|catalog| catalog.op_account);
         Ok(Self {
             ctx,
-            op_env: op_env(&ctx.env, ctx.keyring()),
+            op_env: op_env(&ctx.env, ctx.keyring(), account.as_deref()),
             memory: Arc::new(SecretMemory::new()?),
         })
     }

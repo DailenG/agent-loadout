@@ -97,6 +97,18 @@ distribution with Claude Code 2.1.330, Codex 0.171.0 and omp 19.1.0, no
   `loadout-exec: T: locked: ...`; unlocked, SE-5, SE-6 and DX-9 still pass.
   New direct dependency on Linux: `secret-service` 5 (MIT OR Apache-2.0),
   already in the tree through `keyring`.
+- **FB-7 Several 1Password accounts (SE-1). Done.** With two accounts
+  signed in to the desktop app, `op` 2.42.0 refuses every call that does
+  not name one ("multiple accounts found"), so `secrets check`,
+  `map-op-env` and every launch entry failed (a service account token
+  names its own account and was not affected). `secrets.toml` now has
+  `[onepassword] account`, set with `loadout secrets op-account ACCOUNT`
+  (or `map-op-env --account ACCOUNT`) and cleared with `--clear`. Every
+  `op` call Loadout makes gets it as `OP_ACCOUNT` unless the environment
+  names one already; launch entries that use 1Password carry it as
+  `loadout exec --op-account ACCOUNT`, which hands it to `op` (and `op
+  run`) but never to the server. The op stub now models several accounts
+  (`one_account_is_named_when_several_are_signed_in`).
 
 ## Not run, and what it needs
 
