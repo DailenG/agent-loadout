@@ -1,5 +1,5 @@
-//! `loadout` CLI. Thin over `agent-loadout-core`; the only place that builds
-//! an [`Env`] from the running process.
+//! `loadout` CLI. Thin over `agent-loadout-core`; builds its [`Env`] from the
+//! running process with [`Env::from_process`].
 
 mod cmd;
 mod exec;
@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use agent_loadout_core::paths::{self, LoadoutHome, SyncRoot};
 use agent_loadout_core::store::{HistoryFinding, Store};
-use agent_loadout_core::{CoreError, Env, ErrorCode, KnownFolder, Os, RealFs, SystemClock, brand};
+use agent_loadout_core::{CoreError, Env, ErrorCode, KnownFolder, RealFs, brand};
 use clap::{Args, Parser, Subcommand};
 use serde_json::{Value, json};
 
@@ -116,7 +116,7 @@ fn main() -> ExitCode {
 
 /// Runs the command; the result is the exit code (SPEC 14).
 fn run(cli: &Cli) -> Result<u8, CoreError> {
-    let env = process_env()?;
+    let env = Env::from_process()?;
     let flag = cli.home.as_deref().map(absolute).transpose()?;
     let context = || -> Result<Context, CoreError> {
         Ok(Context {
@@ -153,69 +153,6 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         // `exec_args` takes every `loadout exec` command line before clap.
         Command::Exec(args) => exec::main(&args.args),
     }
-}
-
-/// Builds the core `Env` from the process. On Windows the profile and app
-/// data folders come from `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` when
-/// set (hermetic tests set them), else from the Known Folders; `HOME` is
-/// never used there.
-fn process_env() -> Result<Env, CoreError> {
-    let os = if cfg!(windows) {
-        Os::Windows
-    } else if cfg!(target_os = "macos") {
-        Os::MacOs
-    } else {
-        Os::Linux
-    };
-    let var_path = |name: &str| {
-        std::env::var_os(name)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    let (home, local_app_data, roaming_app_data) = match os {
-        Os::Windows => (
-            var_path("USERPROFILE").or_else(dirs::home_dir),
-            var_path("LOCALAPPDATA").or_else(dirs::data_local_dir),
-            var_path("APPDATA").or_else(dirs::data_dir),
-        ),
-        Os::Linux | Os::MacOs => (var_path("HOME").or_else(dirs::home_dir), None, None),
-    };
-    let home = home.ok_or_else(|| {
-        CoreError::new(
-            ErrorCode::ProfileNotFound,
-            "cannot determine the user profile directory",
-        )
-    })?;
-
-    let mut builder = Env::builder(os, home).clock(SystemClock);
-    if let Some(path) = local_app_data {
-        builder = builder.known_folder(KnownFolder::LocalAppData, path);
-    }
-    if let Some(path) = roaming_app_data {
-        builder = builder.known_folder(KnownFolder::RoamingAppData, path);
-    }
-    for (name, value) in std::env::vars_os() {
-        if let Some(name) = name.to_str() {
-            builder = builder.var(name, value);
-        }
-    }
-    if let Some(name) = hostname(os) {
-        builder = builder.hostname(name);
-    }
-    Ok(builder.build())
-}
-
-/// `COMPUTERNAME` on Windows; elsewhere `HOSTNAME`, then `/etc/hostname`.
-fn hostname(os: Os) -> Option<String> {
-    let var = |name: &str| std::env::var(name).ok();
-    let name = match os {
-        Os::Windows => var("COMPUTERNAME"),
-        Os::Linux | Os::MacOs => {
-            var("HOSTNAME").or_else(|| std::fs::read_to_string("/etc/hostname").ok())
-        }
-    }?;
-    let name = name.trim();
-    (!name.is_empty()).then(|| name.to_owned())
 }
 
 fn absolute(path: &Path) -> Result<PathBuf, CoreError> {

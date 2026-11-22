@@ -25,10 +25,12 @@ views, tags and restore: `loadout show|tag|restore|backup`,
 `loadout diff --rev`), M12 (folder remotes with per-entity pull merge:
 `loadout remote add|ls|rm|push|pull|machines`, `backup` pushes,
 `restore --from`), M13 (git remotes through the system git with `system`,
-`gh` or `token` auth; `loadout remote token|create-github`), M21 (Tier C
-adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and M22 (Tier D:
-Windsurf, Devin Desktop, format-preserving YAML and JSON5 editors, and the
-ported user-scope clients) are in place. Gates V1 (Tier A) and V2 (Tier B),
+`gh` or `token` auth; `loadout remote token|create-github`), M14 (desktop
+app shell: Tauri 2 with typed IPC, the SkillDock shell port, empty pages),
+M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build) and
+M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
+editors, and the ported user-scope clients) are in place. Gates V1 (Tier A)
+and V2 (Tier B),
 the real-client checks, are partly run; see
 [docs/verify/README.md](docs/verify/README.md).
 Nothing is released yet. JSON Schemas for store files, for editor completion,
@@ -44,6 +46,23 @@ cargo test --workspace
 cargo run -p agent-loadout -- --version
 cargo run -p agent-loadout -- doctor --paths
 ```
+
+The desktop app also needs Node.js and npm (dependencies install into
+`node_modules`; the Tauri CLI is a dev dependency):
+
+```sh
+npm install
+npm test                       # Vitest against the mock transport
+npx tsc --noEmit
+npm run dev:mock               # the frontend in a browser, mock backend
+npx tauri dev                  # the app
+npx tauri build --debug
+npm run bindings               # regenerate src/ipc/bindings.ts after command changes
+```
+
+`src-tauri` is a Cargo workspace of its own, so the root workspace builds
+and tests without WebView tooling; run its checks with
+`--manifest-path src-tauri/Cargo.toml`.
 
 Once published, install the CLI with `cargo install agent-loadout`; the binary
 is `loadout`. (The crates.io crate named `loadout` is an unrelated project.)
@@ -67,6 +86,8 @@ Resilio Sync); `loadout doctor` reports `sync_root_detected` when it is inside o
 | `crates/agent-loadout-core` | Core library; no process-global state, takes an injected `Env` and `Fs` |
 | `crates/agent-loadout` | CLI, binary `loadout` |
 | `crates/agent-loadout-testkit` | Hermetic test helpers (`TempHome`, `RootedFs`), unpublished |
+| `src-tauri` | Desktop app crate `agent-loadout-app` (Tauri 2), commands over the core |
+| `src` | React frontend: shell, typed IPC (`src/ipc`), English catalog (`src/i18n/en.ts`) |
 
 ## License
 

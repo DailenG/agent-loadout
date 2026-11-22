@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 getrandom.workspace = true
+# Known Folders for `Env::from_process` (the CLI and the app).
+dirs.workspace = true
 git2.workspace = true
 hmac.workspace = true
 json5.workspace = true
@@ -25,6 +27,9 @@ toml_edit.workspace = true
 zip.workspace = true
 # Only to select zip's deflate backend (miniz_oxide).
 flate2.workspace = true
+# Optional: `specta::Type` for IPC types the app sends (`agent-loadout-app`,
+# SPEC 4.3). Off for the CLI.
+specta = { workspace = true, optional = true }
 
 # User-only ACLs on backups and private state files, and the original DACL
 # on replaced client files (SPEC 8.4), without `unsafe` in this crate.

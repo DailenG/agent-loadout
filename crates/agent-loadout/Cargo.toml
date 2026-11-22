@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 agent-loadout-core.workspace = true
 clap.workspace = true
-dirs.workspace = true
 serde_json.workspace = true
 # `project trust` shows manifest changes as a unified diff.
 similar.workspace = true

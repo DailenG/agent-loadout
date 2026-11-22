@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use crate::error::{CoreError, ErrorCode};
+
 /// Operating system whose conventions apply (paths, variable name casing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Os {
@@ -145,6 +147,72 @@ impl Env {
             .as_deref()
             .filter(|name| !name.trim().is_empty())
     }
+}
+
+impl Env {
+    /// Builds the environment of the running process (the CLI and the app;
+    /// never tests). On Windows the profile and app data folders come from
+    /// `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` when set (hermetic tests
+    /// of the binaries set them), else from the Known Folders; `HOME` is
+    /// never used there.
+    pub fn from_process() -> Result<Env, CoreError> {
+        let os = if cfg!(windows) {
+            Os::Windows
+        } else if cfg!(target_os = "macos") {
+            Os::MacOs
+        } else {
+            Os::Linux
+        };
+        let var_path = |name: &str| {
+            std::env::var_os(name)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+        };
+        let (home, local_app_data, roaming_app_data) = match os {
+            Os::Windows => (
+                var_path("USERPROFILE").or_else(dirs::home_dir),
+                var_path("LOCALAPPDATA").or_else(dirs::data_local_dir),
+                var_path("APPDATA").or_else(dirs::data_dir),
+            ),
+            Os::Linux | Os::MacOs => (var_path("HOME").or_else(dirs::home_dir), None, None),
+        };
+        let home = home.ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::ProfileNotFound,
+                "cannot determine the user profile directory",
+            )
+        })?;
+
+        let mut builder = Env::builder(os, home).clock(SystemClock);
+        if let Some(path) = local_app_data {
+            builder = builder.known_folder(KnownFolder::LocalAppData, path);
+        }
+        if let Some(path) = roaming_app_data {
+            builder = builder.known_folder(KnownFolder::RoamingAppData, path);
+        }
+        for (name, value) in std::env::vars_os() {
+            if let Some(name) = name.to_str() {
+                builder = builder.var(name, value);
+            }
+        }
+        if let Some(name) = process_hostname(os) {
+            builder = builder.hostname(name);
+        }
+        Ok(builder.build())
+    }
+}
+
+/// `COMPUTERNAME` on Windows; elsewhere `HOSTNAME`, then `/etc/hostname`.
+fn process_hostname(os: Os) -> Option<String> {
+    let var = |name: &str| std::env::var(name).ok();
+    let name = match os {
+        Os::Windows => var("COMPUTERNAME"),
+        Os::Linux | Os::MacOs => {
+            var("HOSTNAME").or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        }
+    }?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// Builder for [`Env`]. The clock defaults to [`SystemClock`].

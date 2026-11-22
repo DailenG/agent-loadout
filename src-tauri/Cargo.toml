@@ -1,0 +1,40 @@
+[package]
+name = "agent-loadout-app"
+description = "Loadout desktop app (Tauri); commands are thin wrappers over agent-loadout-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+repository = "https://github.com/DailenG/agent-loadout"
+publish = false
+
+# A workspace of its own (SPEC 4.1 layout, M14 note): Tauri, WebView2 and
+# WebKitGTK stay out of the root workspace, so `cargo test --workspace` at
+# the root needs no WebView tooling. `npx tauri build` builds this crate;
+# its own gates run with `--manifest-path src-tauri/Cargo.toml`.
+[workspace]
+
+[[bin]]
+name = "agent-loadout-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+agent-loadout-core = { path = "../crates/agent-loadout-core", features = ["specta"] }
+serde = { version = "1", features = ["derive"] }
+# Pinned together: tauri-specta 2.0.0-rc.29 is built against specta rc.28.
+specta = { version = "=2.0.0-rc.28", features = ["derive"] }
+specta-typescript = "0.0.15"
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-process = "2.4"
+tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dev-dependencies]
+# Reads tauri.conf.json in the brand-string test.
+serde_json = "1"

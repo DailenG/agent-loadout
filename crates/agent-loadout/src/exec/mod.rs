@@ -41,7 +41,7 @@ use agent_loadout_core::secrets::providers::onepassword::{OP_NOT_FOUND, OpCli, O
 use agent_loadout_core::secrets::providers::{env as env_provider, keyring as keyring_provider};
 use agent_loadout_core::secrets::render::parse_binding;
 use agent_loadout_core::secrets::status::{Resolution, SecretStatus};
-use agent_loadout_core::{RealFs, brand};
+use agent_loadout_core::{Env, RealFs, brand};
 
 /// Prefix of every message `exec` writes (stderr only).
 pub const PREFIX: &str = brand::EXEC_PREFIX;
@@ -258,7 +258,7 @@ fn set_environment(invocation: &mut Invocation, id: String) -> Result<(), Failur
 /// Resolves the references and starts the server, or `op run` for an
 /// Environment.
 fn stage1(invocation: Invocation) -> Result<i32, Failure> {
-    let env = crate::process_env().map_err(|err| Failure::config(err.message()))?;
+    let env = Env::from_process().map_err(|err| Failure::config(err.message()))?;
     let keyring = crate::keyring::keyring(&env);
     let needs_op = invocation.environment.is_some()
         || invocation

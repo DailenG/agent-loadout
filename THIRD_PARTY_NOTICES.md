@@ -18,6 +18,17 @@ from the projects below. Every derived source file carries this header:
 | File in this repository | Origin | License | Copyright |
 |---|---|---|---|
 | `crates/agent-loadout-core/src/secrets/classify.rs` (`SENSITIVE_ARGUMENT_NAMES` and the argument-name rule of `is_sensitive_argument_name`, SPEC 11.7) | `src-tauri/src/mcp_manager.rs` (`SENSITIVE_ARGUMENT_NAMES`, `is_sensitive_name`) | MIT | Copyright (c) 2026 wanghuan |
+| `src/styles/tokens.css` (verbatim, plus a marked Loadout section at the end; the dark pre-paint color comes from SkillDock's inline `index.html` style) | `src/styles/tokens.css`, `index.html` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/App.tsx` (shell layout: grid, sidebar, brand block, nav and its icons, header, window chrome, route error boundary) | `src/app/App.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/AppSelect.tsx` (verbatim) | `src/app/components/AppSelect.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/AppTooltip.tsx` (verbatim) | `src/app/components/AppTooltip.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/BatchActions.tsx` (verbatim) | `src/app/components/BatchActions.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/SearchFieldIcon.tsx` (verbatim) | `src/app/components/SearchFieldIcon.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/ToolbarGoInstallButton.tsx` | `src/app/components/ToolbarGoInstallButton.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/ListGridViewToggle.tsx` | `src/features/skills/components/ListGridViewToggle.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/notifications.tsx` | `src/app/notifications.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/app/components/SettingsGroup.tsx` (settings group, form row and theme picker markup, `ThemeIcon`) | `src/app/routes/settings.tsx` | MIT | Copyright (c) 2026 wanghuan |
+| `src/i18n/en.ts` (shell strings of the `en` catalog) | `src/app/i18n.tsx` | MIT | Copyright (c) 2026 wanghuan |
 
 Each further port adds a row here with its origin path at
 `DailenG/skilldock@181b52b`.

@@ -43,6 +43,10 @@ serde_json = "1"
 sha2 = "0.11"
 # 2.x, the version insta already pulls in.
 similar = "2"
+# TypeScript types for the app's typed IPC (SPEC 4.3); pinned to the
+# release tauri-specta 2.0.0-rc.29 is built against. Core enables it only
+# behind its optional `specta` feature.
+specta = { version = "=2.0.0-rc.28", features = ["derive"] }
 tempfile = "3"
 toml = "1"
 toml_edit = "0.25"

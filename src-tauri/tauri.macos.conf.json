@@ -1,0 +1,18 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Loadout",
+        "width": 1088,
+        "height": 680,
+        "minWidth": 960,
+        "minHeight": 560,
+        "center": true,
+        "resizable": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay"
+      }
+    ]
+  }
+}

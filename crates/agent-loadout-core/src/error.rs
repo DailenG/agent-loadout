@@ -4,8 +4,11 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-/// Stable error code, serialized as `snake_case` (see [`ErrorCode::as_str`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Stable error code, serialized as `snake_case` (the same string as
+/// [`ErrorCode::as_str`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ErrorCode {
     /// A path argument, override or path field is unusable (for example

@@ -1,4 +1,8 @@
 *-TASK.md
 node_modules/
 target/
+# Vite output (`npm run build`), embedded by `tauri build`.
+/dist/
+# ACL schemas tauri-build regenerates on every build.
+/src-tauri/gen/
 
