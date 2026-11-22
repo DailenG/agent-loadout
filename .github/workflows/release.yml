@@ -250,22 +250,21 @@ jobs:
           set -euo pipefail
           bundle=src-tauri/target/release/bundle
           deb="$bundle/deb/agent-loadout_${VERSION}_amd64.deb"
-          # Read whole outputs first: `dpkg-deb -c ... | grep -q` lets grep
-          # exit at the first match, dpkg-deb then dies of SIGPIPE, and
-          # pipefail fails the step although the file is there.
           package=$(dpkg-deb -f "$deb" Package)
-          listing=$(dpkg-deb -c "$deb")
           if [ "$package" != agent-loadout ]; then
             echo "::error::deb Package is '$package', expected agent-loadout"; exit 1
           fi
-          for bin in loadout agent-loadout-app; do
-            if ! grep -q " ./usr/bin/$bin\$" <<<"$listing"; then
-              echo "::error::the deb has no /usr/bin/$bin"; grep ' ./usr/bin/' <<<"$listing" || true; exit 1
-            fi
-          done
           top="agent-loadout-${VERSION}-x86_64-linux"
           mkdir -p "stage/$top"
           dpkg-deb -x "$deb" "stage/$top"
+          # Check the extracted tree, not `dpkg-deb -c` text: Tauri writes
+          # entries without a leading ./, and the listing format is not a
+          # contract.
+          for bin in loadout agent-loadout-app; do
+            if [ ! -x "stage/$top/usr/bin/$bin" ]; then
+              echo "::error::the deb has no /usr/bin/$bin"; ls -la "stage/$top/usr/bin" || true; exit 1
+            fi
+          done
           "stage/$top/usr/bin/loadout" --version
           cp LICENSE THIRD_PARTY_NOTICES.md "stage/$top/"
           mkdir -p out
