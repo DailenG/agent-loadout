@@ -8,14 +8,19 @@
 //! are set through the secrets commands (`set_secret_keyring_value`,
 //! `set_secret_reference`).
 
+use agent_loadout_core::apply::resolve::{filter_of, fingerprint, resolve};
 use agent_loadout_core::apply::{
-    self, ApplyRequest, Decision, OnConflict, PlanOptions, placeholder_path,
+    self, Action, EntryState, OnConflict, PlanOptions, placeholder_path,
 };
-use agent_loadout_core::migrate::{self, ItemKind, ItemStatus, Offer, Report};
-use agent_loadout_core::model::applied::ApplyTrigger;
-use agent_loadout_core::store::Operation;
+use agent_loadout_core::migrate::{
+    self, ExtractionChoice, ExtractionTarget, ItemKind, ItemStatus, Offer, Report,
+};
+use agent_loadout_core::model::applied::Scope as TargetScope;
+use agent_loadout_core::model::ids::{self, IdKind};
+use agent_loadout_core::secrets::SecretValue;
+use agent_loadout_core::secrets::grammar::SecretRef;
 use agent_loadout_core::{CoreError, ErrorCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{AppState, ChangeResult, CmdResult, Core, IpcError, blocking, count, scrub, scrubbed};
@@ -234,12 +239,81 @@ pub fn plan(core: &Core) -> CmdResult<MigrationReport> {
     Ok(report_of(core, &migration.report, files))
 }
 
+/// Where the wizard sends one extracted value (SPEC 11.7). Deserialized
+/// only: a keyring value comes in once and never goes back out.
+#[derive(Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MigrationSecretChoice {
+    /// The value for the OS keyring (`keyring://loadout/<alias>`).
+    Keyring { alias: String, value: String },
+    /// A 1Password item reference: `op://vault/item/field`, or
+    /// `op://vault/item/section/field`.
+    Onepassword { alias: String, reference: String },
+    /// An environment variable name (`env:NAME`).
+    Env { alias: String, name: String },
+}
+
+fn invalid(message: &str) -> CoreError {
+    CoreError::new(ErrorCode::InvalidValue, message.to_owned())
+}
+
+/// The core choice of `choice`; references are checked here (an `op://`
+/// item reference of three or four non-empty parts, a valid variable name).
+fn choice_of(choice: MigrationSecretChoice) -> Result<ExtractionChoice, CoreError> {
+    Ok(match choice {
+        MigrationSecretChoice::Keyring { alias, value } => {
+            if value.is_empty() {
+                return Err(invalid("the value is empty"));
+            }
+            ExtractionChoice {
+                alias,
+                target: ExtractionTarget::Keyring(SecretValue::new(&value)),
+            }
+        }
+        MigrationSecretChoice::Onepassword { alias, reference } => {
+            let reference = reference.trim();
+            let parts: Vec<&str> = reference
+                .strip_prefix("op://")
+                .map(|rest| rest.split('/').collect())
+                .unwrap_or_default();
+            if !(3..=4).contains(&parts.len()) || parts.iter().any(|part| part.trim().is_empty()) {
+                return Err(invalid("a 1Password reference is op://vault/item/field"));
+            }
+            let parsed = SecretRef::parse(reference)?;
+            if !matches!(parsed, SecretRef::OnePassword { .. }) {
+                return Err(invalid("a 1Password reference is op://vault/item/field"));
+            }
+            ExtractionChoice {
+                alias,
+                target: ExtractionTarget::Reference(parsed),
+            }
+        }
+        MigrationSecretChoice::Env { alias, name } => {
+            let name = name.trim();
+            ids::check(IdKind::EnvVar, name)?;
+            ExtractionChoice {
+                alias,
+                target: ExtractionTarget::Reference(SecretRef::parse(&format!("env:{name}"))?),
+            }
+        }
+    })
+}
+
 /// Migrates (the wizard's confirmation was given): one commit, tagged
-/// before and after. No client file is written.
-pub fn apply_migration(core: &Core) -> CmdResult<MigrationApplied> {
+/// before and after, holding the chosen secret aliases too (keyring values
+/// written right before it). No client file is written.
+pub fn apply_migration(
+    core: &Core,
+    choices: Vec<MigrationSecretChoice>,
+) -> CmdResult<MigrationApplied> {
+    let choices = choices
+        .into_iter()
+        .map(choice_of)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| scrubbed(&core.env, &err, None))?;
     let store = core.open_store_for_change()?;
-    let applied =
-        migrate::apply(&store, &core.apply_env()).map_err(|err| scrubbed(&core.env, &err, None))?;
+    let applied = migrate::apply_with_choices(&store, &core.apply_env(), &choices)
+        .map_err(|err| scrubbed(&core.env, &err, None))?;
     Ok(MigrationApplied {
         report: report_of(core, &applied.report, Vec::new()),
         tag: applied.tag,
@@ -249,44 +323,74 @@ pub fn apply_migration(core: &Core) -> CmdResult<MigrationApplied> {
     })
 }
 
-/// "Replace SkillDock wrapper": the client's wrapped entry is overwritten
-/// with the store's native definition (`loadout adopt <client>/<name>`),
-/// in one commit with its apply.
+/// "Replace SkillDock wrapper": the user-scope entry `name` of `client`
+/// must be a collision whose native value is a SkillDock wrapper
+/// (`mcp-filter`, `mcp-remote`), else `invalid_value`; it is overwritten
+/// with the store's native definition, and only its file is applied (one
+/// commit, like the resolver's Overwrite). `not_found` when there is no
+/// such entry; `invalid_value` when the apply did not act on it.
 pub fn replace_wrapper(core: &Core, client: &str, name: &str) -> CmdResult<ChangeResult> {
+    let fail = |err: CoreError| scrubbed(&core.env, &err, None);
     if client.is_empty() || name.is_empty() {
-        return Err(IpcError::from(CoreError::new(
-            ErrorCode::InvalidValue,
-            "a client and an entry name are needed",
-        )));
+        return Err(fail(invalid("a client and an entry name are needed")));
     }
-    let store = core.open_store_for_change()?;
     let ax = core.apply_env();
-    let decisions = vec![Decision {
-        client: client.to_owned(),
-        name: name.to_owned(),
-        resolution: OnConflict::Overwrite,
-    }];
-    let committed = store
-        .transaction(Operation::new("entry.adopt", "adopt"), |tx| {
-            let request = ApplyRequest {
-                options: PlanOptions {
-                    clients: None,
-                    on_conflict: OnConflict::Ask,
-                    decisions: decisions.clone(),
-                    ..PlanOptions::default()
-                },
-                trigger: ApplyTrigger::Review,
-            };
-            let report = apply::apply_in(tx, &ax, &request)?;
-            tx.set_summary(format!("adopt: {client}/{name}"));
-            Ok(report)
+    let store = core.open_store()?.ok_or_else(|| {
+        IpcError::from(CoreError::new(ErrorCode::NotFound, "there is no store yet"))
+    })?;
+    let plan = apply::preview(Some(&store), &ax, &PlanOptions::default()).map_err(fail)?;
+    let (target, entry) = plan
+        .targets
+        .iter()
+        .filter(|target| target.scope == TargetScope::User)
+        .find_map(|target| {
+            target
+                .entries
+                .iter()
+                .find(|entry| entry.name == name && entry.client == Some(client))
+                .map(|entry| (target, entry))
         })
-        .map_err(|err| scrubbed(&core.env, &err, None))?;
-    Ok(ChangeResult::new(
-        &core.env,
-        committed.commit.as_ref(),
-        Some(&committed.value),
-    ))
+        .ok_or_else(|| {
+            fail(CoreError::new(
+                ErrorCode::NotFound,
+                format!("{client}/{name} is not in the pending plan"),
+            ))
+        })?;
+    let wrapped = entry
+        .observed
+        .as_ref()
+        .and_then(migrate::scan::native_wrapper)
+        .is_some();
+    if entry.state != EntryState::Collision || !wrapped {
+        return Err(fail(invalid(&format!(
+            "{client}/{name} is not a SkillDock wrapper that collides with a store server"
+        ))));
+    }
+    let shown = fingerprint(&ax, entry).map_err(fail)?;
+    drop(store);
+    let store = core.open_store_for_change()?;
+    let (report, commit) = resolve(
+        &store,
+        &ax,
+        filter_of(target),
+        client,
+        name,
+        entry.state,
+        OnConflict::Overwrite,
+        &shown,
+    )
+    .map_err(fail)?;
+    let acted = report.targets.iter().flat_map(|t| &t.entries).any(|e| {
+        e.name == name
+            && e.client == Some(client)
+            && !matches!(e.action, Action::None | Action::Skip)
+    });
+    if !acted {
+        return Err(fail(invalid(&format!(
+            "{client}/{name} could not be replaced; see Pending changes"
+        ))));
+    }
+    Ok(ChangeResult::new(&core.env, commit.as_ref(), Some(&report)))
 }
 
 #[tauri::command]
@@ -301,8 +405,9 @@ pub async fn plan_skilldock_migration(
 #[specta::specta]
 pub async fn apply_skilldock_migration(
     state: tauri::State<'_, AppState>,
+    choices: Vec<MigrationSecretChoice>,
 ) -> CmdResult<MigrationApplied> {
-    blocking(&state, apply_migration).await
+    blocking(&state, move |core| apply_migration(core, choices)).await
 }
 
 #[tauri::command]

@@ -18551,3 +18551,9 @@ button.settings-form-item:disabled {
   color: var(--heading);
   font: inherit;
 }
+
+.migrate-secret__problem {
+  grid-column: 1 / -1;
+  color: var(--danger, #d14343);
+  font-size: 0.78rem;
+}

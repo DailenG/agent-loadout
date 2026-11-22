@@ -51,7 +51,12 @@ use crate::model::settings::{NewItemEnable, Settings, Theme};
 use crate::model::skill_meta::{
     DistributionMethod, SkillEnable, SkillMeta, SkillSource, SkillSourceKind,
 };
+use crate::secrets::SecretValue;
+use crate::secrets::catalog::{self, AliasUpdate, SetScope};
 use crate::secrets::classify::{classify_import, find_in_text};
+use crate::secrets::grammar::SecretRef;
+use crate::secrets::providers::Resolver;
+use crate::secrets::providers::onepassword::OpCli;
 use crate::secrets::scanner::{ALLOWLIST_FILE, Allowlist, SecretMemory, scan_text};
 use crate::skills::install::Source;
 use crate::skills::link::{SkillLedger, SkillLink};
@@ -299,17 +304,72 @@ pub fn plan(store: Option<&Store<'_>>, ax: &ApplyEnv<'_>) -> Result<Migration, C
     build(ax, store.map(|s| s as &dyn StoreRead), memory)
 }
 
+/// Where the wizard sends a value the migration replaced by a reference
+/// (SPEC 11.7).
+pub enum ExtractionTarget {
+    /// The OS keyring, as `keyring://loadout/<alias>`; the value goes one
+    /// way and is never stored or returned.
+    Keyring(SecretValue),
+    /// A 1Password or environment reference (`op://...`, `op-env://...`,
+    /// `env:NAME`).
+    Reference(SecretRef),
+}
+
+/// The destination of one extraction, by alias.
+pub struct ExtractionChoice {
+    pub alias: String,
+    pub target: ExtractionTarget,
+}
+
+/// [`apply_with_choices`] without extraction choices (the CLI: values are
+/// set afterwards with `loadout secrets set`).
+pub fn apply(store: &Store<'_>, ax: &ApplyEnv<'_>) -> Result<Applied, CoreError> {
+    apply_with_choices(store, ax, &[])
+}
+
 /// Migrates: tags the store `auto/pre-migrate/<ts>`, commits the mapped
 /// files as one commit (tagged `auto/post-migrate/<ts>`), records the skill
 /// links into SkillDock's library
 /// as owned (re-pointed by the next skills sync) and bare-clones the
 /// backup repository. Confirmation is the caller's (CLI `--yes`, wizard).
-pub fn apply(store: &Store<'_>, ax: &ApplyEnv<'_>) -> Result<Applied, CoreError> {
+///
+/// `choices` (the wizard's extraction step) become `secrets.toml` aliases
+/// in the same commit; keyring values are written through the resolver
+/// (so the scanner refuses them in the store) right before the commit.
+/// Each alias must be one of this migration's extractions. No client file
+/// is written (no apply).
+pub fn apply_with_choices(
+    store: &Store<'_>,
+    ax: &ApplyEnv<'_>,
+    choices: &[ExtractionChoice],
+) -> Result<Applied, CoreError> {
     require_source(ax)?;
     let tag = store.create_auto_tag(TAG_KIND)?;
     let operation = Operation::new("migrate.skilldock", "migrate: skilldock");
     let committed = store.transaction(operation, |tx| {
         let migration = build(ax, Some(&*tx), store.secret_memory().clone())?;
+        for choice in choices {
+            if !migration
+                .report
+                .extractions
+                .iter()
+                .any(|extraction| extraction.alias == choice.alias)
+            {
+                return Err(CoreError::new(
+                    ErrorCode::InvalidValue,
+                    format!("{:?} is not a value this migration extracts", choice.alias),
+                ));
+            }
+            if matches!(
+                choice.target,
+                ExtractionTarget::Reference(SecretRef::Keyring { .. })
+            ) {
+                return Err(CoreError::new(
+                    ErrorCode::InvalidValue,
+                    "a keyring destination takes the value, not a reference",
+                ));
+            }
+        }
         for (relative, bytes) in &migration.files {
             tx.write(relative, bytes.clone())?;
         }
@@ -318,6 +378,37 @@ pub fn apply(store: &Store<'_>, ax: &ApplyEnv<'_>) -> Result<Applied, CoreError>
         }
         for id in &migration.report.skills {
             tx.add_entity(format!("skill/{id}"));
+        }
+        if !choices.is_empty() {
+            let resolver = Resolver::new(
+                ax.env,
+                ax.delivery.keyring(),
+                &OpCli::NotFound,
+                store.secret_memory().clone(),
+            );
+            for choice in choices {
+                let reference = match &choice.target {
+                    ExtractionTarget::Keyring(value) => {
+                        resolver
+                            .set_keyring(brand::KEYRING_SERVICE, &choice.alias, value)
+                            .map_err(|resolution| {
+                                resolution.into_error(&format!("cannot store {}", choice.alias))
+                            })?;
+                        SecretRef::Keyring {
+                            service: brand::KEYRING_SERVICE.to_owned(),
+                            account: choice.alias.clone(),
+                        }
+                    }
+                    ExtractionTarget::Reference(reference) => reference.clone(),
+                };
+                let update = AliasUpdate {
+                    reference,
+                    description: None,
+                    env_name: None,
+                };
+                catalog::stage_set(tx, &choice.alias, &update, SetScope::Store)?;
+            }
+            tx.add_entity("secrets".to_owned());
         }
         let plural = |n: usize| if n == 1 { "" } else { "s" };
         let (servers, skills) = (

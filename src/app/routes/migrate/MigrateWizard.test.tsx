@@ -67,7 +67,7 @@ describe("MigrateWizard", () => {
     expect(transport.calls).not.toContain("applySkilldockMigration");
   });
 
-  it("routes each flagged value, migrates once, then sets the secrets one way", async () => {
+  it("routes each flagged value and sends the choices with the one migration", async () => {
     const { user, transport } = renderWizard();
     await screen.findByRole("list", { name: "Migration report" });
     await user.click(screen.getByRole("button", { name: "Next" }));
@@ -93,20 +93,70 @@ describe("MigrateWizard", () => {
     await user.click(screen.getByRole("button", { name: "Migrate" }));
     expect(await screen.findByText(/Migrated 2 servers and 1 skills in one commit/)).toBeInTheDocument();
     expect(transport.calls.filter((call) => call === "applySkilldockMigration")).toHaveLength(1);
-    expect(transport.invocations).toContainEqual({
-      command: "setSecretKeyringValue",
-      args: ["NOTES_NOTES_API_KEY", "typed-value", "store"],
-    });
-    expect(transport.invocations).toContainEqual({
-      command: "setSecretReference",
-      args: ["NOTES_TOKEN", "env:NOTES_TOKEN", "store", null],
-    });
-    expect(transport.invocations).toContainEqual({
-      command: "setSecretReference",
-      args: ["ISSUES_AUTHORIZATION", "op://Dev/Issues/token", "store", null],
-    });
+    // The plan's answered extractions travel with the migration (one
+    // commit); no separate secret commands.
+    const apply = transport.invocations.find((call) => call.command === "applySkilldockMigration");
+    expect(apply?.args[0]).toEqual([
+      { kind: "keyring", alias: "NOTES_NOTES_API_KEY", value: "typed-value" },
+      { kind: "env", alias: "NOTES_TOKEN", name: "NOTES_TOKEN" },
+      { kind: "onepassword", alias: "ISSUES_AUTHORIZATION", reference: "op://Dev/Issues/token" },
+    ]);
+    expect(transport.calls).not.toContain("setSecretKeyringValue");
+    expect(transport.calls).not.toContain("setSecretReference");
     // The value is not on screen after the migration.
     expect(screen.queryByDisplayValue("typed-value")).toBeNull();
+  });
+
+  it("checks 1Password references and variable names before Next", async () => {
+    const { user } = renderWizard();
+    await screen.findByRole("list", { name: "Migration report" });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    const next = screen.getByRole("button", { name: "Next" });
+    await user.type(screen.getByLabelText("Value for notes env.NOTES_API_KEY"), "v");
+    await user.click(screen.getByRole("combobox", { name: "Destination for notes args[2]" }));
+    await user.click(await screen.findByRole("option", { name: /Environment variable/ }));
+    const env = screen.getByLabelText("Environment variable for notes args[2]");
+    await user.type(env, "1BAD NAME");
+    expect(screen.getByText(/Use a variable name/)).toBeInTheDocument();
+    await user.clear(env);
+    await user.type(env, "NOTES_TOKEN");
+    await user.click(screen.getByRole("combobox", { name: "Destination for issues headers.Authorization" }));
+    await user.click(await screen.findByRole("option", { name: /1Password reference/ }));
+    const op = screen.getByLabelText("1Password reference for issues headers.Authorization");
+    for (const bad of ["op://Dev/Issues", "op://Dev//token", "op://a/b/c/d/e", "Dev/Issues/token"]) {
+      await user.clear(op);
+      await user.type(op, bad);
+      expect(screen.getByText(/Use op:\/\/vault\/item\/field/)).toBeInTheDocument();
+      expect(next).toBeDisabled();
+    }
+    await user.clear(op);
+    await user.type(op, "op://Dev/Issues/section/token");
+    expect(screen.queryByText(/Use op:\/\/vault\/item\/field/)).toBeNull();
+    expect(next).toBeEnabled();
+  });
+
+  it("keeps the choices after a failed migration and retries", async () => {
+    let attempts = 0;
+    const { user, transport } = renderWizard({
+      applySkilldockMigration: async () => {
+        attempts += 1;
+        return attempts === 1 ? mockIpcError({ code: "secret_error", message: "keyring locked" }) : ok(APPLIED);
+      },
+    });
+    await screen.findByRole("list", { name: "Migration report" });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    for (const field of ["notes env.NOTES_API_KEY", "notes args[2]", "issues headers.Authorization"]) {
+      await user.type(screen.getByLabelText(`Value for ${field}`), "typed");
+    }
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Migrate" }));
+    expect(await screen.findByText(/Nothing was migrated: .* Your choices are kept/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Migrate" }));
+    expect(await screen.findByText(/Migrated 2 servers and 1 skills in one commit/)).toBeInTheDocument();
+    const calls = transport.invocations.filter((call) => call.command === "applySkilldockMigration");
+    expect(calls).toHaveLength(2);
+    expect(calls[1].args[0]).toEqual(calls[0].args[0]);
+    expect((calls[1].args[0] as unknown[]).length).toBe(3);
   });
 
   it("offers Replace SkillDock wrapper after the migration and opens Pending changes", async () => {

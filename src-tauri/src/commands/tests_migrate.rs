@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use agent_loadout_core::ErrorCode;
 use agent_loadout_core::store::LogFilter;
 
-use super::migrate::{self, MigrationItemStatus, MigrationOffer};
-use super::secrets::{self, SecretScope};
+use super::migrate::{self, MigrationItemStatus, MigrationOffer, MigrationSecretChoice};
 use super::tests::Fx;
 
 /// The fixture's plaintext values (SPEC 11.7): none may reach an IPC reply.
@@ -143,15 +142,36 @@ fn the_dry_run_reports_and_creates_nothing() {
     drop(source);
 }
 
-/// The migration is one commit after the pre-migrate tag; the fixture tree
-/// stays byte-identical; secrets set from the extraction step go one way;
-/// "Replace SkillDock wrapper" rewrites the wrapped Codex entry natively.
+/// The migration and the extraction choices are one commit after the
+/// pre-migrate tag; the whole home (client files and `~/.skilldock`) stays
+/// byte-identical; the keyring value goes one way; "Replace SkillDock
+/// wrapper" rewrites only Codex's file, and refuses anything else.
 #[test]
 fn the_migration_is_one_commit_and_leaves_skilldock_untouched() {
     let (fx, source) = setup();
-    let before = tree(&source);
-    let applied = migrate::apply_migration(&fx.core).unwrap();
-    assert_eq!(tree(&source), before, "~/.skilldock is byte-identical");
+    let home = fx.th.home();
+    let before = tree(&home);
+    let skilldock = tree(&source);
+    let plan = migrate::plan(&fx.core).unwrap();
+    let first = plan.extractions[0].alias.clone();
+    let second = plan.extractions[1].alias.clone();
+    let value = ["fixture-", "typed-", "value"].concat();
+    let choices = vec![
+        MigrationSecretChoice::Keyring {
+            alias: first.clone(),
+            value: value.clone(),
+        },
+        MigrationSecretChoice::Env {
+            alias: second.clone(),
+            name: "NOTES_TOKEN".to_owned(),
+        },
+    ];
+    let applied = migrate::apply_migration(&fx.core, choices).unwrap();
+    assert_eq!(
+        tree(&home),
+        before,
+        "every client file and ~/.skilldock byte-identical"
+    );
     let summaries = commits(&fx);
     let migrations: Vec<_> = summaries
         .iter()
@@ -162,6 +182,10 @@ fn the_migration_is_one_commit_and_leaves_skilldock_untouched() {
         summaries[0], *migrations[0],
         "the migration is the last commit"
     );
+    assert!(
+        !summaries.iter().any(|s| s.starts_with("secrets:")),
+        "the choices are in the migration commit: {summaries:?}"
+    );
     assert!(applied.commit.is_some());
     assert!(applied.tag.starts_with("auto/pre-migrate/"));
     assert!(
@@ -171,38 +195,66 @@ fn the_migration_is_one_commit_and_leaves_skilldock_untouched() {
             .is_some_and(|tag| tag.starts_with("auto/post-migrate/"))
     );
     assert!(!applied.report.servers.is_empty() && !applied.report.skills.is_empty());
-    assert_clean(&fx, &serde_json::to_string(&applied).unwrap());
-
-    // Extraction step: a keyring value (one way) and an env reference.
-    let first = &applied.report.extractions[0];
-    let value = ["fixture-", "typed-", "value"].concat();
-    let change =
-        secrets::set_keyring_value(&fx.core, &first.alias, &value, SecretScope::Store).unwrap();
-    let json = serde_json::to_string(&change).unwrap();
+    let json = serde_json::to_string(&applied).unwrap();
     assert!(!json.contains(&value));
+    assert_clean(&fx, &json);
     assert_eq!(
-        fx.keyring.peek("loadout", &first.alias).as_deref(),
+        fx.keyring.peek("loadout", &first).as_deref(),
         Some(value.as_str())
     );
-    let second = &applied.report.extractions[1];
-    secrets::set_reference(
-        &fx.core,
-        &second.alias,
-        "env:NOTES_TOKEN",
-        SecretScope::Store,
-        None,
-    )
-    .unwrap();
-    assert_eq!(tree(&source), before);
+    let store = fx.core.open_store().unwrap().unwrap();
+    let catalog = store.read_to_string("secrets.toml").unwrap().unwrap();
+    assert!(
+        catalog.contains(&format!("keyring://loadout/{first}")),
+        "{catalog}"
+    );
+    assert!(catalog.contains("env:NOTES_TOKEN"), "{catalog}");
+    assert!(!catalog.contains(&value));
+    drop(store);
+
+    // Bad references and aliases that are not extractions are refused.
+    let bad = |choice| {
+        migrate::apply_migration(&fx.core, vec![choice])
+            .unwrap_err()
+            .code
+    };
+    for reference in [
+        "op://vault/item",
+        "op://vault//field",
+        "op://a/b/c/d/e",
+        "vault/item/field",
+    ] {
+        let choice = MigrationSecretChoice::Onepassword {
+            alias: second.clone(),
+            reference: reference.to_owned(),
+        };
+        assert_eq!(bad(choice), ErrorCode::InvalidValue, "{reference}");
+    }
+    let choice = MigrationSecretChoice::Env {
+        alias: second.clone(),
+        name: "NOT A NAME".to_owned(),
+    };
+    assert_ne!(
+        migrate::apply_migration(&fx.core, vec![choice])
+            .map(drop)
+            .err()
+            .map(|e| e.code),
+        None
+    );
 
     // A second run changes nothing.
-    let again = migrate::apply_migration(&fx.core).unwrap();
+    let again = migrate::apply_migration(&fx.core, Vec::new()).unwrap();
     assert!(again.commit.is_none());
 
-    // Replace SkillDock wrapper: Codex's wrapped entry becomes native.
-    let codex = fx.th.home().join(".codex").join("config.toml");
-    let wrapped = std::fs::read_to_string(&codex).unwrap();
-    assert!(wrapped.contains("mcp-filter"), "{wrapped}");
+    // Replace SkillDock wrapper: a blocked wrapper and an unknown name are
+    // refused with nothing written; Codex's collision is replaced and only
+    // Codex's file changes.
+    let err = migrate::replace_wrapper(&fx.core, "claude-code", "context7").unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidValue);
+    let err = migrate::replace_wrapper(&fx.core, "codex", "no-such-entry").unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert_eq!(tree(&home), before);
+    let codex = home.join(".codex").join("config.toml");
     let change = migrate::replace_wrapper(&fx.core, "codex", "context7").unwrap();
     assert!(change.commit.is_some());
     let native = std::fs::read_to_string(&codex).unwrap();
@@ -210,7 +262,18 @@ fn the_migration_is_one_commit_and_leaves_skilldock_untouched() {
         native.contains("context7") && !native.contains("mcp-filter"),
         "{native}"
     );
-    assert_eq!(tree(&source), before);
+    let after = tree(&home);
+    let changed: Vec<&String> = after
+        .iter()
+        .filter(|(path, bytes)| before.get(*path) != Some(*bytes))
+        .map(|(path, _)| path)
+        .collect();
+    let codex_file = Path::new(".codex")
+        .join("config.toml")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(changed, [&codex_file], "only Codex's file is written");
+    assert_eq!(tree(&source), skilldock);
     assert_clean(&fx, &serde_json::to_string(&change).unwrap());
 }
 

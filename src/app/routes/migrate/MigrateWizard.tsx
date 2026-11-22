@@ -18,6 +18,7 @@ import type {
   MigrationExtraction,
   MigrationItemStatus,
   MigrationOffer,
+  MigrationSecretChoice,
 } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 import { SettingsDialog } from "../settings/SettingsDialog";
@@ -71,9 +72,38 @@ function offerText(offer: MigrationOffer): string {
   }
 }
 
-/** A choice with what it needs filled in. */
-function answerReady(answer: SecretAnswer) {
-  return answer.choice === "later" || answer.text.trim() !== "";
+/** `op://vault/item/field` or `op://vault/item/section/field` (SPEC 11.2). */
+const OP_REFERENCE = /^op:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+(\/[^/\s]+)?$/;
+/** An environment variable name. */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Why `answer` cannot be used yet, or null when it is complete and valid. */
+export function answerProblem(answer: SecretAnswer): MessageKey | null {
+  const text = answer.text.trim();
+  switch (answer.choice) {
+    case "later":
+      return null;
+    case "keyring":
+      return answer.text === "" ? "migrate.secret.missing" : null;
+    case "onepassword":
+      return text === "" ? "migrate.secret.missing" : OP_REFERENCE.test(text) ? null : "migrate.secret.badOp";
+    case "env":
+      return text === "" ? "migrate.secret.missing" : ENV_NAME.test(text) ? null : "migrate.secret.badEnv";
+  }
+}
+
+/** The command's choice for an answered extraction; none for "Set later". */
+function choiceOf(alias: string, answer: SecretAnswer): MigrationSecretChoice | null {
+  switch (answer.choice) {
+    case "keyring":
+      return { kind: "keyring", alias, value: answer.text };
+    case "onepassword":
+      return { kind: "onepassword", alias, reference: answer.text.trim() };
+    case "env":
+      return { kind: "env", alias, name: answer.text.trim() };
+    case "later":
+      return null;
+  }
 }
 
 type SecretRowProps = {
@@ -132,6 +162,9 @@ function SecretRow({ extraction, answer, onChange }: SecretRowProps) {
       ) : (
         <span className="migrate-secret__later">{t("migrate.secret.laterHint")}</span>
       )}
+      {answer.text.trim() !== "" && answerProblem(answer) ? (
+        <span className="migrate-secret__problem" role="alert">{t(answerProblem(answer)!)}</span>
+      ) : null}
     </li>
   );
 }
@@ -151,7 +184,7 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
   const [answers, setAnswers] = useState<Record<string, SecretAnswer>>({});
   const [isMigrating, setIsMigrating] = useState(false);
   const [applied, setApplied] = useState<MigrationApplied | null>(null);
-  const [secretFailures, setSecretFailures] = useState<string[]>([]);
+  const [migrateError, setMigrateError] = useState<string | null>(null);
   const [replaced, setReplaced] = useState<string[]>([]);
   const plan = useQuery({
     queryKey: MIGRATION_PLAN_KEY,
@@ -162,40 +195,31 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
   const report = plan.data;
   const extractions = report?.extractions ?? [];
   const answerOf = (alias: string): SecretAnswer => answers[alias] ?? { choice: "keyring", text: "" };
-  const allAnswered = extractions.every((extraction) => answerReady(answerOf(extraction.alias)));
+  const allAnswered = extractions.every((extraction) => answerProblem(answerOf(extraction.alias)) === null);
   const notFound = plan.error instanceof IpcFailure && plan.error.code === "not_found";
 
   async function migrate() {
     setIsMigrating(true);
+    setMigrateError(null);
     try {
-      const result = unwrap(await commands.applySkilldockMigration());
-      // Each value goes once, then leaves the wizard's state.
-      const failed: string[] = [];
-      for (const extraction of result.report.extractions) {
-        const answer = answerOf(extraction.alias);
-        try {
-          if (answer.choice === "keyring") {
-            unwrap(await commands.setSecretKeyringValue(extraction.alias, answer.text, "store"));
-          } else if (answer.choice === "onepassword") {
-            unwrap(await commands.setSecretReference(extraction.alias, answer.text.trim(), "store", null));
-          } else if (answer.choice === "env") {
-            unwrap(await commands.setSecretReference(extraction.alias, `env:${answer.text.trim()}`, "store", null));
-          }
-        } catch {
-          failed.push(extraction.alias);
-        }
-      }
+      // The answered extractions of the plan the user reviewed; their
+      // aliases and keyring values go into the migration's one commit.
+      const choices = extractions
+        .map((extraction) => choiceOf(extraction.alias, answerOf(extraction.alias)))
+        .filter((choice): choice is MigrationSecretChoice => choice !== null);
+      const result = unwrap(await commands.applySkilldockMigration(choices));
       setAnswers({});
-      setSecretFailures(failed);
       setApplied(result);
       setStep("done");
       notify({
-        tone: failed.length > 0 ? "info" : "success",
+        tone: "success",
         message: result.commit
           ? t("migrate.done.toast", { servers: result.report.servers.length, skills: result.report.skills.length })
           : t("migrate.done.nothing"),
       });
     } catch (error) {
+      // Nothing was committed: the answers stay for a retry.
+      setMigrateError(failureText(error));
       notify({ tone: "error", message: failureText(error) });
     } finally {
       setIsMigrating(false);
@@ -325,6 +349,9 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
           <li>{t("migrate.confirm.oneCommit")}</li>
           <li>{t("migrate.confirm.noClientFiles")}</li>
         </ul>
+        {migrateError ? (
+          <p className="migrate-note" role="alert">{t("migrate.confirm.failed", { error: migrateError })}</p>
+        ) : null}
       </>
     );
     actions = (
@@ -350,9 +377,6 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
             : t("migrate.done.nothing")}
         </p>
         {applied?.backupImported ? <p className="migrate-note">{t("migrate.done.backup")}</p> : null}
-        {secretFailures.length > 0 ? (
-          <p className="migrate-note" role="alert">{t("migrate.done.secretFailures", { aliases: secretFailures.join(", ") })}</p>
-        ) : null}
         <p className="migrate-note">{t("migrate.done.recommend")}</p>
         {wrapperOffers.length > 0 ? (
           <ul className="migrate-items" aria-label={t("migrate.wrapper.aria")}>

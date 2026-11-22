@@ -110,7 +110,7 @@ export const commands = {
 	setSkillClients: (id: string, clients: string[], enabled: boolean, method: SkillMethod | null, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_clients", { id, clients, enabled, method }, options)),
 	setSkillMethod: (id: string, method: SkillMethod, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_method", { id, method }, options)),
 	planSkilldockMigration: (options?: InvokeOptions) => typedError<MigrationReport, IpcError>(__TAURI_INVOKE("plan_skilldock_migration", undefined, options)),
-	applySkilldockMigration: (options?: InvokeOptions) => typedError<MigrationApplied, IpcError>(__TAURI_INVOKE("apply_skilldock_migration", undefined, options)),
+	applySkilldockMigration: (choices: MigrationSecretChoice[], options?: InvokeOptions) => typedError<MigrationApplied, IpcError>(__TAURI_INVOKE("apply_skilldock_migration", { choices }, options)),
 	replaceSkilldockWrapper: (client: string, name: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("replace_skilldock_wrapper", { client, name }, options)),
 	setProjectSkill: (project: string, skill: string, enabled: boolean, hash: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_project_skill", { project, skill, enabled, hash }, options)),
 	removeSkill: (id: string, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("remove_skill", { id }, options)),
@@ -1058,6 +1058,21 @@ export type MigrationReport = {
 	/**  Store files the migration writes (dry run). */
 	files: string[],
 };
+
+/**
+ *  Where the wizard sends one extracted value (SPEC 11.7). Deserialized
+ *  only: a keyring value comes in once and never goes back out.
+ */
+export type MigrationSecretChoice = 
+/**  The value for the OS keyring (`keyring://loadout/<alias>`). */
+{ kind: "keyring"; alias: string; value: string } | 
+/**
+ *  A 1Password item reference: `op://vault/item/field`, or
+ *  `op://vault/item/section/field`.
+ */
+{ kind: "onepassword"; alias: string; reference: string } | 
+/**  An environment variable name (`env:NAME`). */
+{ kind: "env"; alias: string; name: string };
 
 /**  A server that needs an alias, with the clients it is enabled for. */
 export type NeededBy = {
