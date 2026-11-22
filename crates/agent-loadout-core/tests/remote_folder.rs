@@ -422,8 +422,10 @@ struct FakeUnc {
 impl UncResolver for FakeUnc {
     fn universal_name(&self, path: &Path) -> Option<PathBuf> {
         self.asked.lock().unwrap().push(path.to_path_buf());
-        path.strip_prefix(&self.drive)
-            .ok()
+        // By text: off Windows, `Z:\loadout` is one path component, so
+        // `Path::strip_prefix` would never match the drive.
+        path.to_str()?
+            .strip_prefix(self.drive.to_str()?)
             .map(|rest| self.share.join(rest))
     }
 }
