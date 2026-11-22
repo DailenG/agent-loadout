@@ -3,10 +3,11 @@
 // ported from DailenG/skilldock@181b52b src/app/routes/mcp.tsx; the data layer is new
 // (typed commands over TanStack Query, SPEC 13.2).
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
+import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
 import { useNotifications } from "@/app/components/notifications";
@@ -23,7 +24,7 @@ import {
   visiblePills,
   type VisiblePill,
 } from "./ClientPill";
-import { AddIcon, DeleteIcon, EditIcon, PasteIcon, PowerToggleIcon, RefreshIcon } from "./icons";
+import { AddIcon, DeleteIcon, EditIcon, PasteIcon, PowerToggleIcon } from "./icons";
 import { ServerEditDialog, type EditTab } from "./ServerEditDialog";
 
 export type McpPageProps = {
@@ -153,7 +154,6 @@ function McpServerDetailContainer({ children, isGridLayout, row, active, onClose
 /** The MCP page (SPEC 13.2): one card per store server with its client pills. */
 export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
   const { commands } = useTransport();
-  const queryClient = useQueryClient();
   const changeNotice = useChangeNotice();
   const setServerClients = useSetServerClients();
   const { notify } = useNotifications();
@@ -255,17 +255,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
         />
       </label>
       <ListGridViewToggle value={viewMode} onChange={setViewMode} />
-      <button
-        className={`secondary-button secondary-button--compact skills-toolbar-button skills-toolbar-button--refresh${servers.isFetching ? " is-loading" : ""}`}
-        type="button"
-        onClick={() => void queryClient.invalidateQueries({ queryKey: storeQueryKeys.servers })}
-        disabled={servers.isFetching}
-      >
-        <span aria-hidden="true" className="skills-toolbar-button__icon">
-          <RefreshIcon isSpinning={servers.isFetching} />
-        </span>
-        <span>{t("mcp.toolbar.refresh")}</span>
-      </button>
+      <RefreshButton label={t("mcp.toolbar.refresh")} />
       <button
         className="secondary-button secondary-button--compact skills-toolbar-button"
         type="button"

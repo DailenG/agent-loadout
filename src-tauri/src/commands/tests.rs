@@ -822,7 +822,7 @@ const APP_MANIFEST: &str = "schema = 1\nid = \"app-a1b2\"\nname = \"app\"\n\n[de
                             command = \"docs-mcp\"\n";
 
 /// A folder with a shared manifest that this machine does not know yet.
-fn unbound_project(fx: &Fx) -> PathBuf {
+pub(super) fn unbound_project(fx: &Fx) -> PathBuf {
     let root = fx.th.projects().join("app");
     std::fs::create_dir_all(root.join(".loadout")).unwrap();
     std::fs::write(root.join(".loadout/project.toml"), APP_MANIFEST).unwrap();

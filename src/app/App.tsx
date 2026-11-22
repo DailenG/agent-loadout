@@ -20,6 +20,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { useDriftTriggers } from "@/app/apply/driftTriggers";
 import { PendingChangesPill } from "@/app/apply/PendingChangesPill";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { AppTooltip } from "@/app/components/AppTooltip";
@@ -165,6 +166,8 @@ export function createQueryClient() {
   return new QueryClient({
     defaultOptions: {
       // IPC is local: a retry only delays the error the user should see.
+      // Window focus rechecks only the views drift shows up in
+      // (`useDriftTriggers`), not every query.
       queries: { retry: false, refetchOnWindowFocus: false },
     },
   });
@@ -762,6 +765,7 @@ function AppContent(props: { features: FeatureFlags }) {
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   useQueryErrorToasts();
+  useDriftTriggers();
   useStartupUpdateCheck();
 
   const visibleRoutes = routes.filter((route) => !route.flag || props.features[route.flag]);

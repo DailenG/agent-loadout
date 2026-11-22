@@ -5,7 +5,7 @@
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createContext, useContext } from "react";
-import { commands, type ErrorCode, type IpcError } from "@/ipc/bindings";
+import { commands, events, type ErrorCode, type IpcError } from "@/ipc/bindings";
 
 /** The generated command accessors; a mock must match them exactly. */
 export type Commands = typeof commands;
@@ -18,11 +18,23 @@ export type WindowControls = {
   isMaximized(): Promise<boolean>;
   /** Calls `handler` after every resize; resolves to the unsubscribe. */
   onResized(handler: () => void): Promise<() => void>;
+  /** Calls `handler` each time the window gains focus; resolves to the unsubscribe. */
+  onFocused(handler: () => void): Promise<() => void>;
+};
+
+/** What the backend reports on its own (typed events). */
+export type TransportEvents = {
+  /**
+   * Calls `handler` when the drift watcher saw a client file, manifest or
+   * skill folder change (SPEC 8.5); resolves to the unsubscribe.
+   */
+  onTargetsChanged(handler: () => void): Promise<() => void>;
 };
 
 export type Transport = {
   commands: Commands;
   window: WindowControls;
+  events: TransportEvents;
 };
 
 export const tauriTransport: Transport = {
@@ -33,6 +45,15 @@ export const tauriTransport: Transport = {
     close: () => getCurrentWindow().close(),
     isMaximized: () => getCurrentWindow().isMaximized(),
     onResized: (handler) => getCurrentWindow().onResized(() => handler()),
+    onFocused: (handler) =>
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (focused) {
+          handler();
+        }
+      }),
+  },
+  events: {
+    onTargetsChanged: (handler) => events.targetsChanged.listen(() => handler()),
   },
 };
 

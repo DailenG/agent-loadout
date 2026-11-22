@@ -26,8 +26,11 @@ mod tests_migrate;
 mod tests_skills;
 #[cfg(test)]
 mod tests_versioning;
+#[cfg(test)]
+mod tests_watch;
 pub mod tools;
 pub mod updates;
+pub mod watch;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

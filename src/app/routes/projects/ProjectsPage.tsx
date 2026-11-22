@@ -6,6 +6,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
+import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { EffectiveMatrixView } from "@/app/routes/projects/EffectiveMatrix";
@@ -163,6 +164,7 @@ export function ProjectsPage() {
   return (
     <div className="projects-route">
       <HeaderToolbar>
+        <RefreshButton label={t("projects.action.refresh")} />
         <button
           className="secondary-button secondary-button--compact"
           type="button"

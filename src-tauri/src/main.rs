@@ -8,10 +8,13 @@
 mod commands;
 
 use agent_loadout_core::brand;
-use tauri_specta::{Builder, ErrorHandlingMode, collect_commands};
+use commands::watch::{DriftWatch, TargetsChanged};
+use tauri::Manager;
+use tauri_specta::{Builder, ErrorHandlingMode, Event, collect_commands, collect_events};
 
-/// Every command and constant the frontend sees. Commands that can fail
-/// resolve to `{ status: "ok", data } | { status: "error", error: IpcError }`.
+/// Every command, event and constant the frontend sees. Commands that can
+/// fail resolve to `{ status: "ok", data } | { status: "error", error:
+/// IpcError }`.
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
@@ -110,6 +113,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::updates::check_for_update,
             commands::updates::install_update,
         ])
+        .events(collect_events![TargetsChanged])
         .error_handling(ErrorHandlingMode::Result)
         // One TypeScript type per Rust type: the IPC types serialize and
         // deserialize alike, so the `_Serialize`/`_Deserialize` split adds
@@ -146,6 +150,20 @@ fn main() {
     app.invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            // SPEC 8.5: drift triggers. Without a core every command fails
+            // anyway; without a watcher, window focus and Refresh still
+            // recheck.
+            if let Ok(core) = app.state::<commands::AppState>().core() {
+                let handle = app.handle().clone();
+                match DriftWatch::start(core, move || {
+                    let _ = TargetsChanged.emit(&handle);
+                }) {
+                    Ok(watch) => {
+                        app.manage(watch);
+                    }
+                    Err(err) => eprintln!("the drift watcher did not start: {err}"),
+                }
+            }
             Ok(())
         })
         .run(context)

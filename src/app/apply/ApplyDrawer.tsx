@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { storeQueryKeys, useChangeNotice, useUndoApply } from "@/app/apply/changeNotice";
 import { STATE_KEYS, diffLineClass } from "@/app/apply/labels";
+import { RefreshButton } from "@/app/apply/RefreshButton";
 import { useNotifications } from "@/app/components/notifications";
 import { ResolverDialog } from "@/app/resolver/ResolverDialog";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -349,14 +350,17 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
               </p>
             ) : null}
           </div>
-          <button
-            className="tool-manage-dialog__close"
-            type="button"
-            onClick={onClose}
-            aria-label={t("apply.drawer.close")}
-          >
-            ×
-          </button>
+          <div className="apply-drawer__header-actions">
+            <RefreshButton label={t("apply.drawer.refresh")} />
+            <button
+              className="tool-manage-dialog__close"
+              type="button"
+              onClick={onClose}
+              aria-label={t("apply.drawer.close")}
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="apply-drawer__body">

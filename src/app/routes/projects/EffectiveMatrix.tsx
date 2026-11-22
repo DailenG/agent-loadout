@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { STATE_KEYS } from "@/app/apply/labels";
+import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { LAYER_KEYS, LAYER_LETTERS, failureText } from "@/app/routes/projects/labels";
 import { errorMessage, t } from "@/i18n/en";
@@ -141,6 +142,7 @@ export function EffectiveMatrixView({ projectId, onBack }: { projectId: string; 
   return (
     <div className="projects-route matrix-route">
       <HeaderToolbar>
+        <RefreshButton label={t("projects.action.refresh")} />
         <button className="secondary-button secondary-button--compact" type="button" onClick={onBack}>
           {t("matrix.back")}
         </button>

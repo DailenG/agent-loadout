@@ -47,6 +47,10 @@ export type MockTransport = Transport & {
   readonly windowCalls: string[];
   /** Fires the resize listeners, as a real window resize would. */
   resize(): void;
+  /** Fires the focus listeners, as the window gaining focus would. */
+  focus(): void;
+  /** Fires the drift watcher's listeners, as an outside file change would. */
+  changeTargets(): void;
 };
 
 export const MOCK_APP_INFO: AppInfo = { version: "0.0.0-mock", platform: "linux" };
@@ -173,6 +177,14 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
   const invocations: MockInvocation[] = [];
   const windowCalls: string[] = [];
   const resizeListeners = new Set<() => void>();
+  const focusListeners = new Set<() => void>();
+  const targetListeners = new Set<() => void>();
+  const subscribe = (listeners: Set<() => void>) => async (handler: () => void) => {
+    listeners.add(handler);
+    return () => {
+      listeners.delete(handler);
+    };
+  };
   let isMaximized = options.isMaximized ?? false;
 
   const defaults: Commands = {
@@ -299,6 +311,12 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     resize() {
       resizeListeners.forEach((listener) => listener());
     },
+    focus() {
+      focusListeners.forEach((listener) => listener());
+    },
+    changeTargets() {
+      targetListeners.forEach((listener) => listener());
+    },
     window: {
       minimize: async () => {
         windowCalls.push("minimize");
@@ -311,12 +329,11 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
         windowCalls.push("close");
       },
       isMaximized: async () => isMaximized,
-      onResized: async (handler) => {
-        resizeListeners.add(handler);
-        return () => {
-          resizeListeners.delete(handler);
-        };
-      },
+      onResized: subscribe(resizeListeners),
+      onFocused: subscribe(focusListeners),
+    },
+    events: {
+      onTargetsChanged: subscribe(targetListeners),
     },
   };
 }
