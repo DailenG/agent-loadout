@@ -26,7 +26,8 @@ use crate::model::server::{DeliveryMode, Transport};
 use crate::secrets::SecretValue;
 use crate::secrets::catalog::Catalog;
 use crate::secrets::delivery::{
-    DeliveryEnv, Mode, Policy, Slot, Source, check_available, field_name, op_env, source_of_alias,
+    DeliveryEnv, Mode, Policy, Sharing, Slot, Source, check_available, field_name, op_env,
+    source_of_alias,
 };
 use crate::secrets::grammar::{PathVar, SecretRef, TemplatePart, parse_template};
 use crate::secrets::providers::{Resolver, env};
@@ -471,8 +472,13 @@ impl<'a> Renderer<'a> {
 
     /// `--op-account` for a `loadout` command resolving `sources`: the
     /// configured 1Password account when any of them is a 1Password
-    /// reference (gate V1 FB-7).
+    /// reference (gate V1 FB-7). Never in a shared file: the account is
+    /// this machine's, so a committed file relies on `OP_ACCOUNT` or each
+    /// machine's own setting, which `loadout exec` reads at run time.
     fn op_account<'s>(&self, mut sources: impl Iterator<Item = &'s Source>) -> Option<&'a str> {
+        if self.policy.sharing == Sharing::Shared {
+            return None;
+        }
         let account = self.rx.catalog.op_account.as_deref()?;
         sources
             .any(|source| {

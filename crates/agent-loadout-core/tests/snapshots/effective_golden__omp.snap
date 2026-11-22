@@ -1,0 +1,159 @@
+---
+source: crates/agent-loadout-core/tests/effective_golden.rs
+assertion_line: 116
+expression: "golden(&fx, &root, &view)"
+---
+{
+  "project": {
+    "id": "effective-e7f8",
+    "root": "<P>"
+  },
+  "clients": {
+    "omp": [
+      {
+        "name": "docs",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.omp/mcp.json",
+          "source": "project:docs"
+        },
+        "shadowed": [
+          {
+            "layer": "client-compat:<P>/.mcp.json",
+            "file": "<P>/.mcp.json"
+          },
+          {
+            "layer": "client-compat:<P>/.codex/config.toml",
+            "file": "<P>/.codex/config.toml"
+          }
+        ],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": [
+          {
+            "code": "duplicate_via_compat",
+            "message": "oh-my-pi loads \"docs\" from <P>/.omp/mcp.json and also, as a compatibility source, from <P>/.mcp.json"
+          }
+        ]
+      },
+      {
+        "name": "github",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.omp/mcp.json",
+          "source": "store:github+project"
+        },
+        "shadowed": [
+          {
+            "layer": "system",
+            "file": "~/.omp/agent/mcp.json"
+          },
+          {
+            "layer": "client-compat:~/.claude.json",
+            "file": "~/.claude.json"
+          },
+          {
+            "layer": "client-compat:<P>/.mcp.json",
+            "file": "<P>/.mcp.json"
+          },
+          {
+            "layer": "client-compat:~/.codex/config.toml",
+            "file": "~/.codex/config.toml"
+          },
+          {
+            "layer": "client-compat:<P>/.codex/config.toml",
+            "file": "<P>/.codex/config.toml"
+          }
+        ],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": [
+          {
+            "code": "duplicate_via_compat",
+            "message": "oh-my-pi loads \"github\" from <P>/.omp/mcp.json and also, as a compatibility source, from ~/.claude.json"
+          }
+        ]
+      },
+      {
+        "name": "legacy",
+        "loaded": true,
+        "winner": {
+          "layer": "client-compat:~/.claude.json",
+          "file": "~/.claude.json",
+          "source": "foreign"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "claude-code"
+        ],
+        "status": "foreign",
+        "warnings": []
+      },
+      {
+        "name": "notes",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.omp/mcp.json",
+          "source": "project:notes"
+        },
+        "shadowed": [],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "scratch",
+        "loaded": true,
+        "winner": {
+          "layer": "client-compat:<P>/.mcp.json",
+          "file": "<P>/.mcp.json",
+          "source": "foreign"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "claude-code"
+        ],
+        "status": "foreign",
+        "warnings": []
+      },
+      {
+        "name": "slack",
+        "loaded": false,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.omp/mcp.json",
+          "source": "store:slack+project"
+        },
+        "shadowed": [
+          {
+            "layer": "system",
+            "file": "~/.omp/agent/mcp.json"
+          },
+          {
+            "layer": "client-compat:~/.claude.json",
+            "file": "~/.claude.json"
+          },
+          {
+            "layer": "client-compat:~/.codex/config.toml",
+            "file": "~/.codex/config.toml"
+          },
+          {
+            "layer": "client-compat:<P>/.codex/config.toml",
+            "file": "<P>/.codex/config.toml"
+          }
+        ],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": [
+          {
+            "code": "duplicate_via_compat",
+            "message": "oh-my-pi loads \"slack\" from <P>/.omp/mcp.json and also, as a compatibility source, from ~/.claude.json"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -27,12 +27,20 @@ fn git_error(err: git2::Error) -> CoreError {
 }
 
 impl ProjectRepo {
-    /// The repository whose work tree holds `root`; `None` when `root` is
-    /// not in a work tree (no repository, or a bare one).
-    pub fn discover(root: &Path) -> Option<Self> {
-        let repo = git2::Repository::discover(root).ok()?;
-        let workdir = repo.workdir()?.to_path_buf();
-        Some(Self { repo, workdir })
+    /// The repository whose work tree holds `root`; `None` when there is no
+    /// repository there or it is bare. Any other failure (a repository git
+    /// refuses to open, such as one owned by another user, or a broken
+    /// config) is `git_error`: whether a file is tracked is then unknown.
+    pub fn discover(root: &Path) -> Result<Option<Self>, CoreError> {
+        let repo = match git2::Repository::discover(root) {
+            Ok(repo) => repo,
+            Err(err) if err.code() == git2::ErrorCode::NotFound => return Ok(None),
+            Err(err) => return Err(git_error(err).with_path(root)),
+        };
+        let Some(workdir) = repo.workdir().map(Path::to_path_buf) else {
+            return Ok(None);
+        };
+        Ok(Some(Self { repo, workdir }))
     }
 
     /// The work tree root.

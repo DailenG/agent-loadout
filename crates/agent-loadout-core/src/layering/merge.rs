@@ -65,6 +65,11 @@ pub struct ProjectEntry {
     /// The merged `enabled` (`true` when absent).
     pub enabled: bool,
     pub body: EntryBody,
+    /// For a name both files define: the entry as `project.toml` alone
+    /// defines it (with its own `[defaults]`). It stays in the shared
+    /// project file of a client that holds the merged entry privately, so
+    /// a local override never changes the committed file.
+    pub shared: Option<Box<ProjectEntry>>,
 }
 
 /// Merges `over` into `base`: tables recursively, anything else replaces.
@@ -129,6 +134,12 @@ pub fn project_entries(
     overlay: Option<&MachineOverlay>,
 ) -> Vec<ProjectEntry> {
     let defaults = default_clients(project);
+    let shared_defaults = project
+        .shared
+        .as_ref()
+        .and_then(|file| file.manifest.defaults.as_ref())
+        .and_then(|defaults| defaults.clients.clone())
+        .unwrap_or(ClientSelection::AllDetected);
     let layer_servers = |file: Option<&ManifestFile>| {
         file.and_then(|file| file.manifest.servers.clone())
             .unwrap_or_default()
@@ -136,49 +147,99 @@ pub fn project_entries(
     let shared = layer_servers(project.shared.as_ref());
     let local = layer_servers(project.local.as_ref());
     let names: BTreeSet<&String> = shared.keys().chain(local.keys()).collect();
+    let resolver = Resolver {
+        servers,
+        env,
+        overlay,
+    };
+    let shared_path = project.shared.as_ref().map(|file| file.path.as_path());
+    let local_path = project.local.as_ref().map(|file| file.path.as_path());
     let mut entries = Vec::with_capacity(names.len());
     for name in names {
-        let (layer, file) = if local.contains_key(name) {
-            (EntryLayer::Local, project.local.as_ref())
-        } else {
-            (EntryLayer::Shared, project.shared.as_ref())
+        let (shared_table, local_table) = (shared.get(name), local.get(name));
+        let mut entry = match local_table {
+            Some(_) => resolver.entry(
+                name,
+                EntryLayer::Local,
+                [shared_table, local_table],
+                &defaults,
+                local_path,
+            ),
+            None => resolver.entry(
+                name,
+                EntryLayer::Shared,
+                [shared_table, None],
+                &defaults,
+                shared_path,
+            ),
         };
-        let path = file.map(|file| file.path.as_path());
-        let merged = match merge_layers(shared.get(name), local.get(name)) {
+        if local_table.is_some() && shared_table.is_some() {
+            entry.shared = Some(Box::new(resolver.entry(
+                name,
+                EntryLayer::Shared,
+                [shared_table, None],
+                &shared_defaults,
+                shared_path,
+            )));
+        }
+        entries.push(entry);
+    }
+    entries
+}
+
+/// Resolves merged entries against the store for this machine.
+struct Resolver<'a> {
+    servers: &'a BTreeMap<String, Server>,
+    env: &'a Env,
+    overlay: Option<&'a MachineOverlay>,
+}
+
+impl Resolver<'_> {
+    /// The entry `name` from `layers` (shared, local) merged in order;
+    /// errors name `path`.
+    fn entry(
+        &self,
+        name: &str,
+        layer: EntryLayer,
+        layers: [Option<&ProjectServer>; 2],
+        defaults: &ClientSelection,
+        path: Option<&std::path::Path>,
+    ) -> ProjectEntry {
+        let merged = match merge_layers(layers[0], layers[1]) {
             Ok(merged) => merged,
             Err(err) => {
-                entries.push(ProjectEntry {
-                    name: name.clone(),
+                return ProjectEntry {
+                    name: name.to_owned(),
                     layer,
                     clients: defaults.clone(),
                     from: None,
                     unset: Vec::new(),
                     enabled: true,
                     body: EntryBody::Server(Err(with_file(err, path))),
-                });
-                continue;
+                    shared: None,
+                };
             }
         };
         let body = if merged.is_suppression() {
             EntryBody::Suppression
         } else {
             EntryBody::Server(
-                resolve(name, &merged, servers, env, overlay)
+                resolve(name, &merged, self.servers, self.env, self.overlay)
                     .map(Box::new)
                     .map_err(|err| with_file(err, path)),
             )
         };
-        entries.push(ProjectEntry {
-            name: name.clone(),
+        ProjectEntry {
+            name: name.to_owned(),
             layer,
             clients: merged.clients.clone().unwrap_or_else(|| defaults.clone()),
             from: merged.from.clone(),
             unset: merged.unset.clone().unwrap_or_default(),
             enabled: merged.enabled != Some(false),
             body,
-        });
+            shared: None,
+        }
     }
-    entries
 }
 
 /// How `spec` hides a user server in a project; `cannot_suppress_in_project`

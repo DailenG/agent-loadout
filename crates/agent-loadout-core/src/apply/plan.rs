@@ -12,7 +12,9 @@ use crate::adapters::detect::replacing_extension;
 use crate::adapters::mapper::{Canonical, EntryMapper, WriteCx};
 use crate::adapters::spec::{ContainerPath, McpSpec};
 use crate::adapters::{ADAPTERS, AdapterSpec, Target, adapter};
-use crate::apply::ledger::{EntryKind, Ledger, LedgerEntry, LedgerKey, container_pointer};
+use crate::apply::ledger::{
+    EntryKind, Ledger, LedgerEntry, LedgerKey, LedgerSlot, container_pointer,
+};
 use crate::apply::render::{
     DesiredEntry, DesiredState, Detected, RenderCx, RenderTarget, Rendering, native_name,
     render_for, server_transport, system_entries, writable,
@@ -20,11 +22,13 @@ use crate::apply::render::{
 use crate::env::Os;
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
+use crate::layering::manifest::normalize_path_text;
 use crate::layering::{
     self, EntryBody, EntryLayer, KnownProject, Project, ProjectEntry, ProjectRepo, ProjectStatus,
     TrustStore,
 };
 use crate::model::applied::Scope;
+use crate::model::clients::ClientSelection;
 use crate::model::server::Server;
 use crate::paths::STATE_DIR;
 use crate::secrets::SecretValue;
@@ -251,7 +255,7 @@ impl PlanOptions {
         self.scope.project()
             && match &self.projects {
                 ProjectSelection::All => !matches!(project.status, ProjectStatus::Missing),
-                ProjectSelection::Only(root) => project.root == *root,
+                ProjectSelection::Only(root) => layering::same_path(&project.root, root),
             }
     }
 }
@@ -712,6 +716,7 @@ struct ProjectPlanner<'a, 'c> {
 
 /// One project being planned.
 struct ProjectCx<'p> {
+    id: &'p str,
     root: &'p Path,
     /// `trust_required` when the manifests are not trusted as they are.
     blocked: Option<CoreError>,
@@ -726,9 +731,17 @@ impl ProjectPlanner<'_, '_> {
             self.warnings.push(err);
             TrustStore::default()
         });
-        let known = layering::known_projects(self.cx.fs, self.desired.overlay.as_ref(), &trust);
+        let known = layering::known_projects(
+            self.cx.fs,
+            self.cx.env,
+            self.desired.overlay.as_ref(),
+            &trust,
+        );
         if let ProjectSelection::Only(root) = &self.options.projects {
-            match known.iter().find(|project| project.root == *root) {
+            match known
+                .iter()
+                .find(|project| layering::same_path(&project.root, root))
+            {
                 None => self.warnings.push(
                     CoreError::new(
                         ErrorCode::NotFound,
@@ -758,31 +771,36 @@ impl ProjectPlanner<'_, '_> {
                 } => {
                     self.warnings.extend(loaded.warnings.iter().cloned());
                     let pcx = ProjectCx {
+                        id: &project.id,
                         root: &project.root,
                         blocked: project.trust_error(),
                     };
                     let start = self.inputs.len();
-                    self.plan_project(&pcx, loaded);
+                    let held = self.plan_project(&pcx, loaded);
                     for input in &mut self.inputs[start..] {
                         input.project_id = Some(project.id.clone());
                         input.blocked.clone_from(&pcx.blocked);
+                        input.invalid_servers.extend(held.iter().cloned());
                     }
                     self.cleanup(
                         |id| id == project.id,
                         Some(&project.root),
                         pcx.blocked.as_ref(),
+                        &held,
                     );
                 }
             }
         }
         if self.options.projects == ProjectSelection::All {
             let known_ids: Vec<&str> = known.iter().map(|project| project.id.as_str()).collect();
-            self.cleanup(|id| !known_ids.contains(&id), None, None);
+            self.cleanup(|id| !known_ids.contains(&id), None, None, &[]);
         }
     }
 
-    /// The targets of a loaded project's entries.
-    fn plan_project(&mut self, pcx: &ProjectCx<'_>, project: &Project) {
+    /// The targets of a loaded project's entries. Returns the names of
+    /// entries that cannot be resolved: what this project owns for them is
+    /// left alone (never removed) until they are fixed.
+    fn plan_project(&mut self, pcx: &ProjectCx<'_>, project: &Project) -> Vec<String> {
         let entries = layering::project_entries(
             project,
             &self.desired.servers,
@@ -790,39 +808,111 @@ impl ProjectPlanner<'_, '_> {
             self.desired.overlay.as_ref(),
         );
         let mut warned: Vec<String> = Vec::new();
+        let mut held = Vec::new();
         for entry in &entries {
-            let transport = match &entry.body {
-                EntryBody::Server(Ok(server)) => server_transport(server, self.cx.env),
-                EntryBody::Server(Err(_)) => None,
-                EntryBody::Suppression => self
+            if matches!(entry.body, EntryBody::Server(Err(_))) {
+                held.push(entry.name.clone());
+            }
+            self.plan_entry(pcx, entry, false, &mut warned);
+            // A client holding the merged entry privately keeps the shared
+            // definition in the shared file, which stays as committed.
+            if let Some(shared) = entry
+                .shared
+                .as_deref()
+                .filter(|shared| matches!(shared.body, EntryBody::Server(_)))
+            {
+                self.plan_entry(pcx, shared, true, &mut warned);
+            }
+        }
+        held
+    }
+
+    /// Plans `entry` for each of its clients; with `private_only`, only for
+    /// clients that have a private project target.
+    fn plan_entry(
+        &mut self,
+        pcx: &ProjectCx<'_>,
+        entry: &ProjectEntry,
+        private_only: bool,
+        warned: &mut Vec<String>,
+    ) {
+        let clients = match &entry.body {
+            EntryBody::Server(Ok(server)) => {
+                let transport = server_transport(server, self.cx.env);
+                self.detected
+                    .select(self.cx, self.desired, &entry.clients, transport)
+            }
+            EntryBody::Server(Err(_)) => self.error_clients(pcx, entry),
+            EntryBody::Suppression => {
+                let transport = self
                     .desired
                     .servers
                     .get(&entry.name)
-                    .and_then(|server| server_transport(server, self.cx.env)),
-            };
-            let clients = self
-                .detected
-                .select(self.cx, self.desired, &entry.clients, transport);
-            for client in clients {
-                if !self.options.selects(&client) || self.desired.excluded(&client) {
+                    .and_then(|server| server_transport(server, self.cx.env));
+                self.detected
+                    .select(self.cx, self.desired, &entry.clients, transport)
+            }
+        };
+        for client in clients {
+            if !self.options.selects(&client) || self.desired.excluded(&client) {
+                continue;
+            }
+            let spec = match writable(&client, self.cx.env) {
+                Ok(spec) => spec,
+                Err(err) => {
+                    if !warned.contains(&client) {
+                        warned.push(client);
+                        self.warnings.push(err);
+                    }
                     continue;
                 }
-                let spec = match writable(&client, self.cx.env) {
-                    Ok(spec) => spec,
-                    Err(err) => {
-                        if !warned.contains(&client) {
-                            warned.push(client);
-                            self.warnings.push(err);
-                        }
-                        continue;
-                    }
-                };
-                match &entry.body {
-                    EntryBody::Server(server) => self.server_entry(pcx, entry, server, spec),
-                    EntryBody::Suppression => self.suppression(pcx, entry, spec),
-                }
+            };
+            if private_only
+                && spec
+                    .mcp
+                    .as_ref()
+                    .is_none_or(|mcp| mcp.project_local.is_empty())
+            {
+                continue;
+            }
+            match &entry.body {
+                EntryBody::Server(server) => self.server_entry(pcx, entry, server, spec),
+                EntryBody::Suppression => self.suppression(pcx, entry, spec),
             }
         }
+    }
+
+    /// The clients of an entry that cannot be resolved, so it is reported
+    /// blocked wherever it would go: its client list, or for
+    /// `all-detected` the detected clients with project files (no
+    /// transport to fit), plus every client this project owns an entry of
+    /// that name for.
+    fn error_clients(&mut self, pcx: &ProjectCx<'_>, entry: &ProjectEntry) -> Vec<String> {
+        let mut clients = match &entry.clients {
+            ClientSelection::List(ids) => ids.clone(),
+            ClientSelection::AllDetected => {
+                let mut ids = Vec::new();
+                for spec in ADAPTERS.iter().copied() {
+                    let has_files = spec.mcp.as_ref().is_some_and(|mcp| {
+                        mcp.oses.contains(&self.cx.env.os())
+                            && !(mcp.project.is_empty() && mcp.project_local.is_empty())
+                    });
+                    if has_files && self.detected.detected(self.cx, self.desired, spec) {
+                        ids.push(spec.id.to_owned());
+                    }
+                }
+                ids
+            }
+        };
+        for row in &self.ledger.entries {
+            let owns = row.kind == EntryKind::McpEntry
+                && row.project_id.as_deref() == Some(pcx.id)
+                && (row.server_id.as_deref() == Some(entry.name.as_str()) || row.key == entry.name);
+            if owns && !clients.contains(&row.client) {
+                clients.push(row.client.clone());
+            }
+        }
+        clients
     }
 
     /// The target file of an entry from `layer` for `spec` (SPEC 6.1, 6.5):
@@ -863,7 +953,7 @@ impl ProjectPlanner<'_, '_> {
         if target.scope != Scope::Project {
             return Ok(false);
         }
-        let Some(repo) = ProjectRepo::discover(pcx.root) else {
+        let Some(repo) = ProjectRepo::discover(pcx.root)? else {
             return Ok(false);
         };
         if repo.is_tracked(&target.file)? {
@@ -945,24 +1035,9 @@ impl ProjectPlanner<'_, '_> {
             rendered.enabled = entry.enabled;
             Ok(rendered)
         });
-        if want.server.is_ok()
-            && !entry.unset.is_empty()
-            && mcp.caps.project_semantics == ProjectSemantics::DeepMerge
-        {
-            want.warnings.push(
-                CoreError::new(
-                    ErrorCode::UnsetNotExpressible,
-                    format!(
-                        "{} merges project entries over user entries field by field, so `unset` \
-                         ({}) of {:?} cannot remove what the user entry sets; the entry is \
-                         written anyway",
-                        spec.display_name,
-                        entry.unset.join(", "),
-                        entry.name
-                    ),
-                )
-                .with_path(&target.file),
-            );
+        if want.server.is_ok() && mcp.caps.project_semantics == ProjectSemantics::DeepMerge {
+            want.warnings
+                .extend(unset_not_expressible(spec, entry, &target.file));
         }
         let native_disable = self.desired.prefs(spec.id).native_disable == Some(true);
         let input = self.input_for(target, spec.id, native_disable, EntryKind::McpEntry);
@@ -1111,19 +1186,25 @@ impl ProjectPlanner<'_, '_> {
     /// Targets for owned project entries that no planned target covers:
     /// entries of a project this machine no longer knows (`root` is
     /// `None`), or left in a file the project no longer uses. Unchanged
-    /// owned entries are removed there, like any entry no longer desired.
+    /// owned entries are removed there, like any entry no longer desired,
+    /// except those of the `held` names (entries that cannot be resolved
+    /// now), which are left alone.
     fn cleanup(
         &mut self,
         project: impl Fn(&str) -> bool,
         root: Option<&Path>,
         blocked: Option<&CoreError>,
+        held: &[String],
     ) {
-        let covered: Vec<(String, String, EntryKind)> = self
+        type Covered = (Scope, Option<String>, String, String, EntryKind);
+        let covered: Vec<Covered> = self
             .inputs
             .iter()
             .filter_map(|input| {
                 let keys = input.container_keys().ok()?;
                 Some((
+                    input.target.scope,
+                    input.project_id.clone(),
                     input.target.file.to_string_lossy().into_owned(),
                     container_pointer(&keys),
                     input.kind,
@@ -1138,9 +1219,16 @@ impl ProjectPlanner<'_, '_> {
             if row.scope == Scope::User || !project(id) {
                 continue;
             }
-            if covered.iter().any(|(file, pointer, kind)| {
-                *file == row.file && *pointer == row.container && *kind == row.kind
-            }) {
+            if covered
+                .iter()
+                .any(|(scope, project_id, file, pointer, kind)| {
+                    *scope == row.scope
+                        && project_id.as_deref() == Some(id)
+                        && *file == row.file
+                        && *pointer == row.container
+                        && *kind == row.kind
+                })
+            {
                 continue;
             }
             let Some(spec) = adapter(&row.client) else {
@@ -1154,7 +1242,9 @@ impl ProjectPlanner<'_, '_> {
             }
             let native_disable = self.desired.prefs(spec.id).native_disable == Some(true);
             let same = orphans.iter_mut().find(|input| {
-                input.target.file.to_string_lossy() == row.file
+                input.target.scope == row.scope
+                    && input.project_id.as_deref() == Some(id)
+                    && input.target.file.to_string_lossy() == row.file
                     && input.keys.as_deref().map(container_pointer).as_deref()
                         == Some(row.container.as_str())
                     && input.kind == row.kind
@@ -1183,10 +1273,37 @@ impl ProjectPlanner<'_, '_> {
             input.keys = Some(pointer_keys(&row.container));
             input.project_id = Some(id.to_owned());
             input.blocked = blocked.cloned();
+            input.invalid_servers = held.to_vec();
             orphans.push(input);
         }
         self.inputs.append(&mut orphans);
     }
+}
+
+/// `unset_not_expressible` for `entry` on `spec` (SPEC 6.3): a client that
+/// merges project entries over user entries field by field cannot drop
+/// what the user entry sets. `None` when the entry unsets nothing.
+pub(crate) fn unset_not_expressible(
+    spec: &AdapterSpec,
+    entry: &ProjectEntry,
+    file: &Path,
+) -> Option<CoreError> {
+    if entry.unset.is_empty() {
+        return None;
+    }
+    Some(
+        CoreError::new(
+            ErrorCode::UnsetNotExpressible,
+            format!(
+                "{} merges project entries over user entries field by field, so `unset` ({}) \
+                 of {:?} cannot remove what the user entry sets; the entry is written anyway",
+                spec.display_name,
+                entry.unset.join(", "),
+                entry.name
+            ),
+        )
+        .with_path(file),
+    )
 }
 
 /// The keys of an RFC 6901 JSON pointer ([`container_pointer`] reversed).
@@ -1201,19 +1318,8 @@ fn pointer_keys(pointer: &str) -> Vec<String> {
 /// Whether two Claude Code project keys name the same folder: equal after
 /// unifying separators, a trailing separator and, on Windows, case.
 fn same_folder(os: Os, a: &str, b: &str) -> bool {
-    let norm = |key: &str| {
-        let mut key = if os == Os::Windows {
-            key.replace('\\', "/").to_lowercase()
-        } else {
-            key.to_owned()
-        };
-        while key.len() > 1 && key.ends_with('/') && !(key.len() == 3 && key.as_bytes()[1] == b':')
-        {
-            key.pop();
-        }
-        key
-    };
-    norm(a) == norm(b)
+    let windows = os == Os::Windows;
+    normalize_path_text(windows, a) == normalize_path_text(windows, b)
 }
 
 /// The bytes of a target file; `None` when it does not exist.
@@ -1296,6 +1402,13 @@ pub(crate) fn plan_target(
         Err(err) => return blocked_target(plan, err.with_path(&target.file)),
     };
     let file = target.file.to_string_lossy().into_owned();
+    let (pointer, project_id) = (plan.pointer.clone(), plan.project_id.clone());
+    let slot = LedgerSlot {
+        scope: plan.scope,
+        project_id: project_id.as_deref(),
+        file: &file,
+        container: &pointer,
+    };
 
     // Names in file order, then new desired names, then ledger-only names.
     let mut names: Vec<String> = observed_names.clone();
@@ -1304,14 +1417,14 @@ pub(crate) fn plan_target(
             names.push(entry.name.clone());
         }
     }
-    for entry in ledger.in_container(&file, &plan.pointer) {
+    for entry in ledger.in_container(slot) {
         if entry.kind == EntryKind::McpEntry && !names.contains(&entry.key) {
             names.push(entry.key.clone());
         }
     }
     let foreign_names: Vec<String> = observed_names
         .iter()
-        .filter(|name| ledger.get(&file, &plan.pointer, name).is_none())
+        .filter(|name| ledger.get(&slot, name).is_none())
         .cloned()
         .collect();
 
@@ -1328,7 +1441,7 @@ pub(crate) fn plan_target(
             None
         };
         let owned = ledger
-            .get(&file, &plan.pointer, &name)
+            .get(&slot, &name)
             .filter(|entry| entry.kind == EntryKind::McpEntry);
         let wanted: Vec<&DesiredEntry> = input
             .desired
@@ -1659,13 +1772,20 @@ fn plan_list(
         }
     };
     let file = plan.file.to_string_lossy().into_owned();
+    let (pointer, project_id) = (plan.pointer.clone(), plan.project_id.clone());
+    let slot = LedgerSlot {
+        scope: plan.scope,
+        project_id: project_id.as_deref(),
+        file: &file,
+        container: &pointer,
+    };
     let mut names: Vec<String> = Vec::new();
     for member in &plan.input.members {
         if !names.contains(&member.name) {
             names.push(member.name.clone());
         }
     }
-    for row in ledger.in_container(&file, &plan.pointer) {
+    for row in ledger.in_container(slot) {
         if row.kind == EntryKind::ListMember && !names.contains(&row.key) {
             names.push(row.key.clone());
         }
@@ -1673,7 +1793,7 @@ fn plan_list(
     for name in names {
         let want = plan.input.members.iter().find(|member| member.name == name);
         let owned = ledger
-            .get(&file, &plan.pointer, &name)
+            .get(&slot, &name)
             .filter(|row| row.kind == EntryKind::ListMember);
         let client = match (want, owned) {
             (Some(member), _) => Some(member.client),

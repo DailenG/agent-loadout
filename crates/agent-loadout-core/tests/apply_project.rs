@@ -142,6 +142,19 @@ fn shared_and_private_entries_land_in_their_files() {
     assert!(!fx.plan().has_work());
     assert_eq!(exclude_lines(&repo), exclude);
 
+    // Hidden again when nothing is written: the exclude runs whenever the
+    // file holds private entries and git does not ignore it.
+    let info_exclude = repo.path().join("info").join("exclude");
+    let without: String = exclude
+        .iter()
+        .filter(|line| *line != "/.omp/mcp.json")
+        .map(|line| format!("{line}\n"))
+        .collect();
+    std::fs::write(&info_exclude, without).unwrap();
+    let (again, _) = fx.apply();
+    assert_eq!(again.writes(), 0, "{again:#?}");
+    assert!(exclude_lines(&repo).contains(&"/.omp/mcp.json".to_owned()));
+
     // A project this machine no longer knows: its owned entries go.
     fx.know_projects(&[]);
     let (report, _) = fx.apply();
@@ -425,4 +438,301 @@ fn another_spelling_of_the_project_key_warns() {
         entry(&plan, &fx.claude(), "notes").state,
         EntryState::PendingCreate
     );
+}
+
+/// A private-only project with one Claude Code entry, known and trusted.
+fn private_project(fx: &Fx, name: &str, id: &str) -> std::path::PathBuf {
+    let root = fx.th.projects().join(name);
+    fx.manifest(
+        &root,
+        LOCAL_FILE,
+        &format!(
+            "schema = 1\nid = \"{id}\"\n\n[servers.notes]\ntransport = \"stdio\"\n\
+             command = \"notes-mcp\"\nclients = [\"claude-code\"]\n"
+        ),
+    );
+    fx.know_projects(&[(id, &root)]);
+    fx.trust(&root);
+    root
+}
+
+#[test]
+fn a_broken_from_blocks_and_keeps_what_it_wrote() {
+    let fx = Fx::new();
+    // Detected through its user file; the entry has the default clients.
+    fx.write(&fx.claude(), "{}\n");
+    fx.put_server(stdio("api", &[], &["serve"]));
+    let root = fx.th.projects().join("broken");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"broken-a1b2\"\n\n[servers.api]\nfrom = \"api\"\n",
+    );
+    fx.know_projects(&[("broken-a1b2", &root)]);
+    fx.trust(&root);
+    fx.apply();
+    let mcp = root.join(".mcp.json");
+    let written = fx.read(&mcp);
+    assert!(json_entry(&written, "api").is_some());
+
+    // The template is deleted from the store: the entry is reported
+    // blocked, and what it wrote stays.
+    fx.remove_server("api");
+    let plan = fx.plan();
+    let api = entry(&plan, &mcp, "api");
+    assert_eq!(api.state, EntryState::Blocked, "{api:#?}");
+    assert_eq!(
+        api.problem.as_ref().unwrap().code(),
+        ErrorCode::UnknownTemplate
+    );
+    fx.apply();
+    assert_eq!(fx.read(&mcp), written);
+    assert_eq!(fx.ledger().entries.len(), 1);
+}
+
+#[test]
+fn git_errors_block_private_entries() {
+    let fx = Fx::new();
+    let root = fx.project_from("tracked", "broken-git");
+    git_init(&root);
+    // A repository git cannot open: whether files are tracked is unknown.
+    std::fs::write(root.join(".git").join("config"), "[[[ not a config\n").unwrap();
+    fx.know_projects(&[("tracked-e5f6", &root)]);
+    fx.trust(&root);
+    let omp_file = root.join(".omp").join("mcp.json");
+    let plan = fx.plan();
+    let notes = entry(&plan, &omp_file, "notes");
+    assert_eq!(notes.state, EntryState::Blocked, "{notes:#?}");
+    assert_eq!(notes.problem.as_ref().unwrap().code(), ErrorCode::GitError);
+    fx.apply();
+    assert!(!omp_file.exists());
+}
+
+#[test]
+fn a_local_override_leaves_the_shared_file_as_committed() {
+    let fx = Fx::new();
+    let root = fx.th.projects().join("override");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"override-a1b2\"\n\n[defaults]\nclients = [\"claude-code\", \"omp\"]\n\n\
+         [servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\nargs = [\"--shared\"]\n",
+    );
+    fx.know_projects(&[("override-a1b2", &root)]);
+    fx.trust(&root);
+    fx.apply();
+    let mcp = root.join(".mcp.json");
+    let shared = fx.read(&mcp);
+
+    fx.manifest(
+        &root,
+        LOCAL_FILE,
+        "schema = 1\n\n[servers.docs]\nargs = [\"--local\"]\n",
+    );
+    fx.trust(&root);
+    fx.apply();
+    // Claude Code: the shared file is unchanged; the merged entry is
+    // private, where it takes precedence.
+    assert_eq!(fx.read(&mcp), shared);
+    assert_eq!(
+        claude_project(&fx, &root)["mcpServers"]["docs"]["args"],
+        serde_json::json!(["--local"])
+    );
+    // omp has no private target: its project file holds the merged entry.
+    let omp = json_entry(&fx.read(&root.join(".omp").join("mcp.json")), "docs").unwrap();
+    assert_eq!(omp["args"], serde_json::json!(["--local"]));
+}
+
+#[test]
+fn missing_and_failed_projects_keep_their_entries() {
+    let fx = Fx::new();
+    let root = private_project(&fx, "kept", "kept-a1b2");
+    fx.apply();
+    let owned = fx.ledger();
+    assert_eq!(owned.entries.len(), 1);
+    let claude = fx.read(&fx.claude());
+    let kept = |fx: &Fx| {
+        assert_eq!(fx.read(&fx.claude()), claude);
+        assert_eq!(fx.ledger(), owned);
+    };
+
+    // Missing: the folder moved away.
+    let moved = fx.th.projects().join("moved");
+    std::fs::rename(&root, &moved).unwrap();
+    fx.apply();
+    kept(&fx);
+    std::fs::rename(&moved, &root).unwrap();
+
+    // Failed: a manifest that does not parse, one of another project, none.
+    for text in ["schema = [", "schema = 1\nid = \"other-a1b2\"\n"] {
+        fx.manifest(&root, LOCAL_FILE, text);
+        let plan = fx.plan();
+        assert!(
+            plan.targets.iter().all(|t| t.project_id.is_none()),
+            "{plan:#?}"
+        );
+        assert!(!plan.warnings.is_empty());
+        fx.apply();
+        kept(&fx);
+    }
+    std::fs::remove_file(root.join(".loadout").join(LOCAL_FILE)).unwrap();
+    let plan = fx.plan();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::NotFound)
+    );
+    fx.apply();
+    kept(&fx);
+}
+
+#[test]
+fn a_project_at_the_home_directory_is_never_planned() {
+    let fx = Fx::new();
+    let home = fx.th.home();
+    fx.manifest(
+        &home,
+        LOCAL_FILE,
+        "schema = 1\nid = \"home-a1b2\"\n\n[servers.notes]\ntransport = \"stdio\"\n\
+         command = \"notes-mcp\"\nclients = [\"claude-code\"]\n",
+    );
+    fx.know_projects(&[("home-a1b2", &home)]);
+    fx.trust(&home);
+    let plan = fx.plan();
+    assert!(
+        plan.targets.iter().all(|t| t.project_id.is_none()),
+        "{plan:#?}"
+    );
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::InvalidPath)
+    );
+}
+
+#[test]
+fn a_differently_spelled_root_is_the_same_project() {
+    let fx = Fx::new();
+    let root = fx.th.projects().join("spelling");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"spelling-a1b2\"\n\n[defaults]\nclients = [\"claude-code\"]\n\n\
+         [servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\n",
+    );
+    // Another case and separator for the folder itself (the test root keeps
+    // its spelling: the rooted test file system checks it exactly).
+    let other = if cfg!(windows) {
+        format!("{}/SPELLING/", fx.th.projects().to_string_lossy())
+    } else {
+        format!("{}/", root.to_string_lossy())
+    };
+    let other = Path::new(&other);
+    fx.know_projects(&[("spelling-a1b2", other)]);
+    // Trusted under the original spelling, selected under it too.
+    fx.trust(&root);
+    let only = fx.plan_with(&PlanOptions {
+        projects: ProjectSelection::Only(root.clone()),
+        ..PlanOptions::default()
+    });
+    let project: Vec<&TargetPlan> = only
+        .targets
+        .iter()
+        .filter(|t| t.project_id.as_deref() == Some("spelling-a1b2"))
+        .collect();
+    assert_eq!(project.len(), 1, "{only:#?}");
+    assert!(project[0].problem.is_none(), "{:#?}", project[0]);
+    assert!(
+        !only
+            .warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::NotFound)
+    );
+}
+
+#[test]
+fn an_unreadable_trust_file_blocks_projects_only() {
+    let fx = Fx::new();
+    fx.put_server(stdio("fetch", &["claude-code"], &["-y", "fetch-mcp"]));
+    private_project(&fx, "distrust", "distrust-a1b2");
+    fx.write(&fx.home.state_dir().join("trust.json"), "{ not json");
+    let plan = fx.plan();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::ParseError)
+    );
+    let project = plan
+        .targets
+        .iter()
+        .find(|t| t.project_id.is_some())
+        .unwrap();
+    assert_eq!(
+        project.problem.as_ref().unwrap().code(),
+        ErrorCode::TrustRequired
+    );
+    assert_eq!(
+        entry(&plan, &fx.claude(), "fetch").state,
+        EntryState::PendingCreate
+    );
+}
+
+#[test]
+fn the_project_folder_in_a_shared_file_warns() {
+    let fx = Fx::new();
+    let root = fx.th.projects().join("folder");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"folder-a1b2\"\n\n[defaults]\nclients = [\"claude-code\"]\n\n\
+         [servers.docs]\ntransport = \"stdio\"\ncommand = \"docs-mcp\"\nargs = [\"${project}\"]\n",
+    );
+    fx.know_projects(&[("folder-a1b2", &root)]);
+    fx.trust(&root);
+    let plan = fx.plan();
+    let mcp = root.join(".mcp.json");
+    assert!(
+        target(&plan, &mcp)
+            .warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::PersonalPathInSharedFile),
+        "{plan:#?}"
+    );
+    let docs = entry(&plan, &mcp, "docs");
+    assert_eq!(docs.state, EntryState::PendingCreate);
+    assert_eq!(
+        docs.desired
+            .as_ref()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("args"),
+        Some(&agent_loadout_core::formats::NativeValue::Array(vec![
+            agent_loadout_core::formats::NativeValue::String(root.to_string_lossy().into_owned())
+        ]))
+    );
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn a_client_without_a_mechanism_cannot_suppress() {
+    let fx = Fx::new();
+    fx.put_server(stdio("slack", &["claude-desktop"], &["-y", "slack-mcp"]));
+    let root = fx.th.projects().join("desktop");
+    fx.manifest(
+        &root,
+        SHARED_FILE,
+        "schema = 1\nid = \"desktop-a1b2\"\n\n[servers.slack]\nenabled = false\n\
+         clients = [\"claude-desktop\"]\n",
+    );
+    fx.know_projects(&[("desktop-a1b2", &root)]);
+    fx.trust(&root);
+    let plan = fx.plan();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|w| w.code() == ErrorCode::CannotSuppressInProject),
+        "{plan:#?}"
+    );
+    assert!(plan.targets.iter().all(|t| t.project_id.is_none()));
 }

@@ -84,9 +84,32 @@ pub struct LedgerEntry {
 }
 
 impl LedgerEntry {
-    fn is(&self, file: &str, container: &str, key: &str) -> bool {
-        self.file == file && self.container == container && self.key == key
+    /// The container this entry is owned in.
+    pub fn slot(&self) -> LedgerSlot<'_> {
+        LedgerSlot {
+            scope: self.scope,
+            project_id: self.project_id.as_deref(),
+            file: &self.file,
+            container: &self.container,
+        }
     }
+
+    fn is(&self, slot: &LedgerSlot<'_>, key: &str) -> bool {
+        self.slot() == *slot && self.key == key
+    }
+}
+
+/// Where owned entries live: one container (or list) of one file, in one
+/// scope and project (SPEC 8.1, decision 10 of M9). Two projects, or a
+/// project and the user scope, never own each other's entries, even in
+/// the same file and container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerSlot<'a> {
+    pub scope: Scope,
+    pub project_id: Option<&'a str>,
+    pub file: &'a str,
+    /// [`container_pointer`] of the container.
+    pub container: &'a str,
 }
 
 /// `state/ledger.json`.
@@ -154,29 +177,26 @@ impl Ledger {
         write_atomic(fs, &state_dir.join(LEDGER_FILE), text.as_bytes())
     }
 
-    pub fn get(&self, file: &str, container: &str, key: &str) -> Option<&LedgerEntry> {
-        self.entries
-            .iter()
-            .find(|entry| entry.is(file, container, key))
+    pub fn get(&self, slot: &LedgerSlot<'_>, key: &str) -> Option<&LedgerEntry> {
+        self.entries.iter().find(|entry| entry.is(slot, key))
     }
 
-    /// Entries of one container (or list) in one file.
+    /// Entries of one slot.
     pub fn in_container<'a>(
         &'a self,
-        file: &'a str,
-        container: &'a str,
+        slot: LedgerSlot<'a>,
     ) -> impl Iterator<Item = &'a LedgerEntry> + 'a {
         self.entries
             .iter()
-            .filter(move |entry| entry.file == file && entry.container == container)
+            .filter(move |entry| entry.slot() == slot)
     }
 
-    /// Replaces the entry with the same file, container and key, or appends.
+    /// Replaces the entry with the same slot and key, or appends.
     pub fn upsert(&mut self, entry: LedgerEntry) {
         match self
             .entries
             .iter_mut()
-            .find(|known| known.is(&entry.file, &entry.container, &entry.key))
+            .find(|known| known.slot() == entry.slot() && known.key == entry.key)
         {
             Some(slot) => *slot = entry,
             None => self.entries.push(entry),
@@ -184,9 +204,9 @@ impl Ledger {
     }
 
     /// Drops the entry; returns whether it was there.
-    pub fn remove(&mut self, file: &str, container: &str, key: &str) -> bool {
+    pub fn remove(&mut self, slot: &LedgerSlot<'_>, key: &str) -> bool {
         let before = self.entries.len();
-        self.entries.retain(|entry| !entry.is(file, container, key));
+        self.entries.retain(|entry| !entry.is(slot, key));
         self.entries.len() != before
     }
 }

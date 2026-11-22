@@ -27,7 +27,11 @@ dependencies = [
  "agent-loadout-testkit",
  "clap",
  "dirs",
+ "git2",
  "serde_json",
+ "similar",
+ "toml",
+ "toml_edit",
  "win32job",
 ]
 

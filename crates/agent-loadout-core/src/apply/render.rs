@@ -32,7 +32,7 @@ use crate::model::settings::{ApplyMode, Settings};
 use crate::secrets::SecretValue;
 use crate::secrets::catalog::Catalog;
 use crate::secrets::delivery::{DeliveryEnv, Mode, Policy, Sharing};
-use crate::secrets::grammar::{TemplatePart, parse_template};
+use crate::secrets::grammar::{PathVar, TemplatePart, parse_template};
 use crate::secrets::render::{EnvValue, HeaderValue, RenderEnv, Renderer};
 use crate::secrets::scanner::SecretMemory;
 use crate::store::StoreRead;
@@ -334,20 +334,30 @@ impl Detected {
             ClientSelection::AllDetected => ADAPTERS
                 .iter()
                 .filter(|spec| {
-                    let forced = desired.prefs(spec.id).enabled == Some(true);
-                    let found = *self
-                        .0
-                        .entry(spec.id)
-                        .or_insert_with(|| detect(spec, cx.env, cx.fs, cx.registry).detected());
                     let fits = spec.mcp.as_ref().is_some_and(|mcp| {
                         mcp.oses.contains(&cx.env.os())
                             && transport.is_some_and(|t| mcp.caps.transports.contains(t))
                     });
-                    (forced || found) && fits
+                    fits && self.detected(cx, desired, spec)
                 })
                 .map(|spec| spec.id.to_owned())
                 .collect(),
         }
+    }
+
+    /// Whether `spec` is forced on in `clients.toml` or detected here.
+    pub(crate) fn detected(
+        &mut self,
+        cx: &RenderCx<'_>,
+        desired: &DesiredState,
+        spec: &'static AdapterSpec,
+    ) -> bool {
+        let forced = desired.prefs(spec.id).enabled == Some(true);
+        forced
+            || *self
+                .0
+                .entry(spec.id)
+                .or_insert_with(|| detect(spec, cx.env, cx.fs, cx.registry).detected())
     }
 }
 
@@ -588,6 +598,20 @@ pub fn render_for(
             deny: tools.deny.clone(),
         })
         .unwrap_or_default();
+    let mut warnings = std::mem::take(&mut r.warnings);
+    if sharing == Sharing::Shared
+        && target.project.is_some()
+        && uses_project_path(&fields, server, spec.id)
+    {
+        warnings.push(CoreError::new(
+            ErrorCode::PersonalPathInSharedFile,
+            format!(
+                "`${{project}}` in {:?} is written as this machine's folder into a shared \
+                 file; teammates get a path that is not theirs",
+                server.id
+            ),
+        ));
+    }
     Ok(RenderOutput {
         server: RenderedServer {
             name: native_name(server, spec.id),
@@ -598,8 +622,44 @@ pub fn render_for(
         },
         delivery: r.delivery(),
         inline: std::mem::take(&mut r.inline),
-        warnings: std::mem::take(&mut r.warnings),
+        warnings,
     })
+}
+
+/// Whether a launch field (`fields`) or `client` passthrough value of
+/// `server` uses `${project}`.
+fn uses_project_path(fields: &ServerFields, server: &Server, client: &str) -> bool {
+    fn has(text: &str) -> bool {
+        parse_template(text).is_ok_and(|parts| {
+            parts
+                .iter()
+                .any(|part| matches!(part, TemplatePart::Var(PathVar::Project)))
+        })
+    }
+    fn in_value(value: &toml::Value) -> bool {
+        match value {
+            toml::Value::String(text) => has(text),
+            toml::Value::Array(items) => items.iter().any(in_value),
+            toml::Value::Table(table) => table.values().any(in_value),
+            _ => false,
+        }
+    }
+    let in_fields = fields
+        .command
+        .iter()
+        .chain(fields.cwd.iter())
+        .chain(fields.url.iter())
+        .chain(fields.args.iter().flatten())
+        .chain(fields.env.iter().flat_map(|env| env.values()))
+        .chain(fields.headers.iter().flat_map(|headers| headers.values()))
+        .any(|text| has(text));
+    in_fields
+        || server
+            .body
+            .client
+            .as_ref()
+            .and_then(|clients| clients.get(client))
+            .is_some_and(|table| table.values().any(in_value))
 }
 
 /// A passthrough value; strings may hold literals, path variables and

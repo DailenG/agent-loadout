@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::apply::write_atomic;
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
-use crate::layering::manifest::Project;
+use crate::layering::manifest::{Project, same_path};
 
 /// Trust file in `state/`.
 pub const TRUST_FILE: &str = "trust.json";
@@ -117,10 +117,10 @@ impl TrustStore {
         write_atomic(fs, &state_dir.join(TRUST_FILE), text.as_bytes())
     }
 
-    /// The trust state of `project`'s current manifests.
+    /// The trust state of `project`'s current manifests. The record is
+    /// found by folder, however its path is spelled ([`same_path`]).
     pub fn state(&self, project: &Project) -> TrustState {
-        let path = path_key(&project.root);
-        match self.projects.iter().find(|record| record.path == path) {
+        match self.record(&project.root) {
             None => TrustState::Untrusted,
             Some(record) if record.hash == project.hash() => TrustState::Trusted,
             Some(_) => TrustState::Changed,
@@ -130,19 +130,23 @@ impl TrustStore {
     /// Trusts `project`'s current manifests, replacing the record of its
     /// folder.
     pub fn trust(&mut self, project: &Project) {
-        let path = path_key(&project.root);
-        let record = TrustRecord {
-            id: project.id.clone(),
-            path: path.clone(),
-            hash: project.hash(),
-            extra: serde_json::Map::new(),
-        };
-        match self.projects.iter_mut().find(|known| known.path == path) {
+        let hash = project.hash();
+        match self
+            .projects
+            .iter_mut()
+            .find(|known| same_path(Path::new(&known.path), &project.root))
+        {
             Some(slot) => {
-                slot.id = record.id;
-                slot.hash = record.hash;
+                slot.id.clone_from(&project.id);
+                slot.path = project.root.to_string_lossy().into_owned();
+                slot.hash = hash;
             }
-            None => self.projects.push(record),
+            None => self.projects.push(TrustRecord {
+                id: project.id.clone(),
+                path: project.root.to_string_lossy().into_owned(),
+                hash,
+                extra: serde_json::Map::new(),
+            }),
         }
     }
 
@@ -152,8 +156,10 @@ impl TrustStore {
         self.projects.retain(|record| record.id != id);
         self.projects.len() != before
     }
-}
 
-fn path_key(root: &Path) -> String {
-    root.to_string_lossy().into_owned()
+    fn record(&self, root: &Path) -> Option<&TrustRecord> {
+        self.projects
+            .iter()
+            .find(|record| same_path(Path::new(&record.path), root))
+    }
 }

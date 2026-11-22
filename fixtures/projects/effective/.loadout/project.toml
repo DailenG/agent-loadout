@@ -1,0 +1,23 @@
+# The effective-view fixture (SPEC 6.4): an override, a project-only
+# server and a suppression of system servers `github` and `slack`.
+schema = 1
+id = "effective-e7f8"
+name = "Effective"
+
+[defaults]
+clients = ["claude-code", "omp", "codex"]
+
+# Starts from the system server and shadows its user entry.
+[servers.github]
+from = "github"
+args = ["--project"]
+
+# Defined only by the project.
+[servers.docs]
+transport = "stdio"
+command = "docs-mcp"
+
+# Hides the system server here; Claude Desktop has no way to.
+[servers.slack]
+enabled = false
+clients = ["claude-code", "omp", "codex", "claude-desktop"]

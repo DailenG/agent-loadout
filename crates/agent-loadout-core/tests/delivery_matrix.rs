@@ -379,6 +379,54 @@ fn environments_need_op_2_41() {
 }
 
 #[test]
+fn the_op_account_stays_out_of_shared_files() {
+    let fx = Fx::new();
+    store(&fx);
+    fx.edit("account", |tx| {
+        tx.write(
+            "secrets.toml",
+            SECRETS.replace(
+                "[onepassword]\n",
+                "[onepassword]\naccount = \"family.example.com\"\n",
+            ),
+        )
+    });
+    let desired = desired(&fx);
+    let env = synthetic_env(Os::Linux);
+    let delivery = DeliveryEnv::new(Some(launcher(Os::Linux)), keyring())
+        .with_op(op(OpVersion::new(2, 42, 0)));
+    let args = |sharing| {
+        let out = render_one(
+            &fx,
+            &desired,
+            &delivery,
+            &env,
+            "claude-code",
+            "github",
+            sharing,
+        )
+        .unwrap();
+        let agent_loadout_core::adapters::mapper::Launch::Stdio(stdio) = out.server.launch else {
+            panic!("stdio");
+        };
+        stdio.args
+    };
+    // This machine's account in its own file; a shared file relies on
+    // OP_ACCOUNT or each machine's setting.
+    assert_eq!(
+        args(Sharing::Private)[..3],
+        ["exec", "--op-account", "family.example.com"]
+    );
+    let shared = args(Sharing::Shared);
+    assert_eq!(shared[0], "exec");
+    assert!(
+        !shared
+            .iter()
+            .any(|arg| arg.contains("op-account") || arg.contains("family"))
+    );
+}
+
+#[test]
 fn inline_is_refused_for_shared_targets() {
     let fx = Fx::new();
     store(&fx);

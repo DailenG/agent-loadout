@@ -53,12 +53,45 @@ pub fn manifest_dir(root: &Path) -> PathBuf {
 pub fn discover(env: &Env, fs: &dyn Fs, folder: &Path) -> Option<PathBuf> {
     folder
         .ancestors()
-        .take_while(|dir| *dir != env.home())
+        .take_while(|dir| !same_path(dir, env.home()))
         .find(|dir| {
             let manifests = manifest_dir(dir);
             fs.exists(&manifests.join(SHARED_FILE)) || fs.exists(&manifests.join(LOCAL_FILE))
         })
         .map(Path::to_path_buf)
+}
+
+/// The spelling-independent key of a folder path on this machine, for
+/// comparing project roots (known projects, trust records, a selected
+/// folder). On Windows: without a `\\?\` prefix, `/` separators, lower
+/// case, no trailing separator. Elsewhere the path as it is, without a
+/// trailing separator.
+pub fn path_key(path: &Path) -> String {
+    normalize_path_text(cfg!(windows), &path.to_string_lossy())
+}
+
+/// Whether `a` and `b` name the same folder ([`path_key`]).
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    path_key(a) == path_key(b)
+}
+
+/// [`path_key`] of a path written as text, with Windows rules when
+/// `windows`; also compares Claude Code project keys.
+pub(crate) fn normalize_path_text(windows: bool, text: &str) -> String {
+    let mut key = if windows {
+        let text = match text.strip_prefix(r"\\?\UNC\") {
+            Some(rest) => format!(r"\\{rest}"),
+            None => text.strip_prefix(r"\\?\").unwrap_or(text).to_owned(),
+        };
+        text.replace('\\', "/").to_lowercase()
+    } else {
+        text.to_owned()
+    };
+    let drive_root = |key: &str| key.len() == 3 && key.as_bytes()[1] == b':';
+    while key.len() > 1 && key.ends_with('/') && !(windows && drive_root(&key)) {
+        key.pop();
+    }
+    key
 }
 
 /// `sha256:<hex>` over `shared\0<project.toml>\0local\0<project.local.toml>`,

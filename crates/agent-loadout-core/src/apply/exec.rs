@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use crate::apply::backup;
 use crate::apply::journal::{FileRecord, Journal, RecordedError};
-use crate::apply::ledger::{EntryKind, Ledger, LedgerEntry, LedgerKey, Origin};
+use crate::apply::ledger::{EntryKind, Ledger, LedgerEntry, LedgerKey, LedgerSlot, Origin};
 use crate::apply::plan::{
     self, Action, EntryPlan, EntryState, OpCounts, Plan, PlanOptions, TargetPlan, read_target,
 };
@@ -105,23 +105,52 @@ pub fn preview(
     ax: &ApplyEnv<'_>,
     options: &PlanOptions,
 ) -> Result<Plan, CoreError> {
-    let state_dir = ax.home.state_dir();
-    let machine = Machine::load(ax.fs, &state_dir)?;
-    let desired = match store {
-        Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
-        None => DesiredState::empty(),
-    };
-    let ledger = Ledger::load(ax.fs, &state_dir)?;
-    // Without a key file nothing was ever hashed: any key plans the same.
-    let key = match LedgerKey::load(ax.fs, &state_dir)? {
-        Some(key) => key,
-        None => LedgerKey::from_bytes([0; 32]),
-    };
-    let memory = match store {
-        Some(store) => store.secret_memory().clone(),
-        None => std::sync::Arc::new(crate::secrets::scanner::SecretMemory::new()?),
-    };
-    plan::plan(&ax.render_cx(memory), &desired, &ledger, &key, options)
+    let inputs = PlanInputs::load(store, ax)?;
+    plan::plan(
+        &ax.render_cx(inputs.memory),
+        &inputs.desired,
+        &inputs.ledger,
+        &inputs.key,
+        options,
+    )
+}
+
+/// What a read-only plan runs against: the desired state of the store's
+/// working tree, the ledger, its key and the secret memory.
+pub(crate) struct PlanInputs {
+    pub(crate) desired: DesiredState,
+    pub(crate) ledger: Ledger,
+    pub(crate) key: LedgerKey,
+    pub(crate) memory: std::sync::Arc<crate::secrets::scanner::SecretMemory>,
+}
+
+impl PlanInputs {
+    /// Loads the inputs without creating anything (no ledger key, lock or
+    /// file); an empty desired state when there is no store yet.
+    pub(crate) fn load(store: Option<&Store<'_>>, ax: &ApplyEnv<'_>) -> Result<Self, CoreError> {
+        let state_dir = ax.home.state_dir();
+        let machine = Machine::load(ax.fs, &state_dir)?;
+        let desired = match store {
+            Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
+            None => DesiredState::empty(),
+        };
+        let ledger = Ledger::load(ax.fs, &state_dir)?;
+        // Without a key file nothing was ever hashed: any key plans the same.
+        let key = match LedgerKey::load(ax.fs, &state_dir)? {
+            Some(key) => key,
+            None => LedgerKey::from_bytes([0; 32]),
+        };
+        let memory = match store {
+            Some(store) => store.secret_memory().clone(),
+            None => std::sync::Arc::new(crate::secrets::scanner::SecretMemory::new()?),
+        };
+        Ok(Self {
+            desired,
+            ledger,
+            key,
+            memory,
+        })
+    }
 }
 
 /// A standalone apply run in its own transaction: one commit when a file
@@ -356,6 +385,9 @@ impl Executor<'_> {
             if let Some(problem) = plan.problem.clone() {
                 return finished(plan, ApplyOutcome::Blocked, Some(problem), false, None);
             }
+            if let Err(err) = self.exclude(&plan) {
+                return failed(plan, err);
+            }
             let Some(after) = plan.after.clone() else {
                 // Ledger-only work (adopt, refresh, forget, release).
                 if let Err(err) = self.update_ledger(&plan, ledger) {
@@ -401,11 +433,8 @@ impl Executor<'_> {
                 result.backup = backup;
                 return result;
             }
-            let exclude = self.exclude(&plan);
             let outcome = entry_outcome(&plan, true);
-            let mut result = finished(plan, outcome, None, true, backup);
-            result.warnings.extend(exclude);
-            return result;
+            return finished(plan, outcome, None, true, backup);
         }
     }
 
@@ -419,15 +448,19 @@ impl Executor<'_> {
         swap_file(self.ax.fs, &plan.file, plan.before.as_deref(), after)
     }
 
-    /// SPEC 6.5: a project file written with private entries and not
-    /// tracked by the project's repository is hidden through its
-    /// `info/exclude`. A failure is a warning: the file is written.
-    fn exclude(&self, plan: &TargetPlan) -> Option<CoreError> {
-        if !plan.input.exclude {
-            return None;
+    /// SPEC 6.5: a project file that holds private entries and that the
+    /// project's repository does not track is hidden through its
+    /// `info/exclude`, before anything is written and also when nothing
+    /// is (an adopted entry, an earlier failure). A failure fails the
+    /// target: nothing private is written into a file git may pick up.
+    fn exclude(&self, plan: &TargetPlan) -> Result<(), CoreError> {
+        let (true, Some(root)) = (plan.input.exclude, plan.project.as_deref()) else {
+            return Ok(());
+        };
+        if let Some(repo) = ProjectRepo::discover(root)? {
+            repo.exclude(self.ax.fs, &plan.file)?;
         }
-        let repo = ProjectRepo::discover(plan.project.as_deref()?)?;
-        repo.exclude(self.ax.fs, &plan.file).err()
+        Ok(())
     }
 }
 
@@ -499,6 +532,12 @@ impl Executor<'_> {
     /// Records every entry's new ownership state and saves the ledger.
     fn update_ledger(&self, plan: &TargetPlan, ledger: &mut Ledger) -> Result<(), CoreError> {
         let file = plan.file.to_string_lossy().into_owned();
+        let slot = LedgerSlot {
+            scope: plan.scope,
+            project_id: plan.project_id.as_deref(),
+            file: &file,
+            container: &plan.pointer,
+        };
         let mut changed = false;
         for entry in &plan.entries {
             let origin = match entry.action {
@@ -506,12 +545,12 @@ impl Executor<'_> {
                 Action::Adopt | Action::AdoptOverwrite => Some(Origin::Adopted),
                 Action::Update | Action::Disable | Action::Refresh => Some(
                     ledger
-                        .get(&file, &plan.pointer, &entry.name)
+                        .get(&slot, &entry.name)
                         .and_then(|known| known.origin)
                         .unwrap_or(Origin::Created),
                 ),
                 Action::Remove | Action::Forget | Action::Release => {
-                    changed |= ledger.remove(&file, &plan.pointer, &entry.name);
+                    changed |= ledger.remove(&slot, &entry.name);
                     None
                 }
                 Action::None | Action::Import | Action::Skip => None,

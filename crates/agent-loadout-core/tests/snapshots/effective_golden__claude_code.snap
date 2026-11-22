@@ -1,0 +1,108 @@
+---
+source: crates/agent-loadout-core/tests/effective_golden.rs
+assertion_line: 100
+expression: "golden(&fx, &root, &view)"
+---
+{
+  "project": {
+    "id": "effective-e7f8",
+    "root": "<P>"
+  },
+  "clients": {
+    "claude-code": [
+      {
+        "name": "docs",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.mcp.json",
+          "source": "project:docs"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "github",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.mcp.json",
+          "source": "store:github+project"
+        },
+        "shadowed": [
+          {
+            "layer": "system",
+            "file": "~/.claude.json"
+          }
+        ],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "legacy",
+        "loaded": true,
+        "winner": {
+          "layer": "foreign:~/.claude.json",
+          "file": "~/.claude.json",
+          "source": "foreign"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "foreign",
+        "warnings": []
+      },
+      {
+        "name": "notes",
+        "loaded": true,
+        "winner": {
+          "layer": "project-local",
+          "file": "~/.claude.json",
+          "source": "project:notes"
+        },
+        "shadowed": [],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "scratch",
+        "loaded": true,
+        "winner": {
+          "layer": "foreign:<P>/.mcp.json",
+          "file": "<P>/.mcp.json",
+          "source": "foreign"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "foreign",
+        "warnings": []
+      },
+      {
+        "name": "slack",
+        "loaded": false,
+        "winner": {
+          "layer": "system",
+          "file": "~/.claude.json",
+          "source": "store:slack"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": []
+      }
+    ]
+  }
+}

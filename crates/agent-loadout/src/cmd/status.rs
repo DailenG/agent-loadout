@@ -1,6 +1,9 @@
-//! `loadout status [--client C]... [--check]` (SPEC 8.2, 14): the state of
-//! every desired, owned and foreign entry of the system scope, plus apply
-//! runs that never finished.
+//! `loadout status [PATH] [--client C]... [--scope S] [--check]` (SPEC
+//! 8.2, 14): the state of every desired, owned and foreign entry of the
+//! user scope and every known project (or only the project holding PATH),
+//! plus apply runs that never finished.
+
+use std::path::PathBuf;
 
 use agent_loadout_core::apply::journal::{self, Journal};
 use agent_loadout_core::apply::{self, Plan, PlanOptions};
@@ -8,13 +11,21 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use clap::Args;
 use serde_json::{Value, json};
 
+use super::apply::ScopeArg;
+use super::project::selection;
 use super::{Context, EXIT_PENDING, JSON_SCHEMA, entry_json, error_json, path_json, print_json};
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
+    /// A folder inside the project to show [default: the user scope and
+    /// every known project].
+    path: Option<PathBuf>,
     /// Only this client (repeatable).
     #[arg(long = "client", value_name = "CLIENT")]
     clients: Vec<String>,
+    /// Which scopes to show.
+    #[arg(long, value_enum, default_value = "all")]
+    scope: ScopeArg,
     /// Exit with code 3 when anything is pending or drifted.
     #[arg(long)]
     check: bool,
@@ -23,6 +34,8 @@ pub struct StatusArgs {
 pub fn run(ctx: &Context, args: &StatusArgs) -> Result<u8, CoreError> {
     let options = PlanOptions {
         clients: (!args.clients.is_empty()).then(|| args.clients.clone()),
+        scope: args.scope.into(),
+        projects: selection(ctx, args.path.as_deref())?,
         ..PlanOptions::default()
     };
     let store = ctx.open_store()?;
@@ -70,6 +83,7 @@ pub fn plan_json(plan: &Plan) -> Vec<Value> {
             json!({
                 "clients": target.clients,
                 "scope": target.scope,
+                "project_id": target.project_id,
                 "file": path_json(&target.file),
                 "problem": target.problem.as_ref().map(error_json),
                 "warnings": target.warnings.iter().map(error_json).collect::<Vec<_>>(),

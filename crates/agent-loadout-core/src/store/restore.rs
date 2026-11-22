@@ -548,7 +548,7 @@ fn refresh_ledger(ax: &ApplyEnv<'_>, ledger: &mut Ledger, file: &Path) -> Result
             }
         };
         if !present {
-            ledger.remove(&entry.file, &entry.container, &entry.key);
+            ledger.remove(&entry.slot(), &entry.key);
         }
     }
     Ok(())

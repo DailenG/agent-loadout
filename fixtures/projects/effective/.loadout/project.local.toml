@@ -1,0 +1,8 @@
+# Private: Claude Code's project entry in ~/.claude.json; omp's project
+# file (no git repository here).
+schema = 1
+
+[servers.notes]
+transport = "stdio"
+command = "notes-mcp"
+clients = ["claude-code", "omp"]

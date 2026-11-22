@@ -43,12 +43,16 @@ enum Command {
     Doctor(DoctorArgs),
     /// Manage MCP servers in the store.
     Server(cmd::server::ServerArgs),
+    /// Project manifests: create, register, trust, share, list, forget.
+    Project(cmd::project::ProjectArgs),
     /// List store commits.
     History(cmd::history::HistoryArgs),
     /// Show the state of every owned and desired entry.
     Status(cmd::status::StatusArgs),
     /// Show the apply plan as file diffs.
     Diff(cmd::diff::DiffArgs),
+    /// Show what each client loads in a folder, and from where.
+    Effective(cmd::effective::EffectiveArgs),
     /// Reconcile client files with the store (one commit per run).
     Apply(cmd::apply::ApplyArgs),
     /// Roll back an apply run.
@@ -127,9 +131,11 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
     match &cli.command {
         Command::Doctor(args) => done(doctor(&env, flag.as_deref(), args, cli.json)),
         Command::Server(args) => cmd::server::run(&context()?, args),
+        Command::Project(args) => cmd::project::run(&context()?, args),
         Command::History(args) => done(cmd::history::run(&context()?, args)),
         Command::Status(args) => cmd::status::run(&context()?, args),
         Command::Diff(args) => cmd::diff::run(&context()?, args),
+        Command::Effective(args) => done(cmd::effective::run(&context()?, args)),
         Command::Apply(args) => cmd::apply::run(&context()?, args),
         Command::Rollback(args) => cmd::rollback::run(&context()?, args),
         Command::Show(args) => done(cmd::show::run(&context()?, args)),

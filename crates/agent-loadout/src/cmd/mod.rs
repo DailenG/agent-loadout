@@ -5,11 +5,13 @@ pub mod adopt;
 pub mod apply;
 pub mod backup;
 pub mod diff;
+pub mod effective;
 pub mod env;
 pub mod exec;
 pub mod git_credential;
 pub mod history;
 pub mod import;
+pub mod project;
 pub mod remote;
 pub mod restore;
 pub mod rollback;
@@ -49,6 +51,9 @@ pub const EXIT_UNRESOLVED: u8 = 4;
 pub const EXIT_MISSING_SECRETS: u8 = 5;
 /// Exit code for a lock timeout (SPEC 14).
 const EXIT_LOCKED: u8 = 6;
+/// Exit code for project targets blocked until the manifest is trusted
+/// (`trust_required`, SPEC 14 and 17).
+pub const EXIT_TRUST_REQUIRED: u8 = 7;
 
 static REAL_FS: RealFs = RealFs;
 /// The CLI has no Windows registry probe yet (M4 note); detection uses
@@ -130,12 +135,14 @@ pub fn client_name() -> String {
 }
 
 /// Process exit code for a failed command: 4 for a needed confirmation,
-/// 5 for a missing secret, 6 for `locked`, else 1.
+/// 5 for a missing secret, 6 for `locked`, 7 for an untrusted project
+/// manifest, else 1.
 pub fn exit_code(err: &CoreError) -> u8 {
     match err.code() {
         ErrorCode::Locked => EXIT_LOCKED,
         ErrorCode::ConfirmationRequired => EXIT_UNRESOLVED,
         ErrorCode::MissingSecret => EXIT_MISSING_SECRETS,
+        ErrorCode::TrustRequired => EXIT_TRUST_REQUIRED,
         _ => 1,
     }
 }
@@ -173,7 +180,8 @@ pub fn instant_apply(
 }
 
 /// The exit code of an apply run: 1 when a file failed, 4 when entries
-/// need a decision, 5 when entries are blocked by missing secrets, else 0.
+/// need a decision, 5 when entries are blocked by missing secrets, 7 when
+/// a project waits for `loadout project trust`, else 0.
 pub fn apply_exit_code(report: &ApplyReport) -> u8 {
     if report
         .targets
@@ -190,6 +198,13 @@ pub fn apply_exit_code(report: &ApplyReport) -> u8 {
         .any(blocked_by_secret)
     {
         EXIT_MISSING_SECRETS
+    } else if report.targets.iter().any(|target| {
+        target
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code() == ErrorCode::TrustRequired)
+    }) {
+        EXIT_TRUST_REQUIRED
     } else {
         0
     }
@@ -220,6 +235,7 @@ pub fn entry_json(entry: &EntryPlan) -> Value {
 fn target_result_json(target: &TargetResult) -> Value {
     json!({
         "clients": target.clients,
+        "project_id": target.project_id,
         "file": path_json(&target.file),
         "outcome": outcome_str(target.outcome),
         "written": target.written,

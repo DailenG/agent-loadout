@@ -1,22 +1,32 @@
-//! `loadout apply [--client C]... [--dry-run] [--on-conflict MODE]`
-//! (SPEC 8.4, 8.7, 14): reconcile the system scope with the store. A run
-//! that writes a file is one store commit; a run without writes is none.
-//! Project scopes arrive with project manifests.
+//! `loadout apply [PATH] [--client C]... [--scope S] [--dry-run]
+//! [--on-conflict MODE]` (SPEC 8.4, 8.7, 14): reconcile client files with
+//! the store. Without PATH the user scope and every known project are
+//! applied; PATH selects the project holding it. A run that writes a file
+//! is one store commit; a run without writes is none.
+
+use std::path::PathBuf;
 
 use agent_loadout_core::CoreError;
-use agent_loadout_core::apply::{self, ApplyRequest, OnConflict, PlanOptions};
+use agent_loadout_core::apply::{self, ApplyRequest, OnConflict, PlanOptions, ScopeFilter};
 use agent_loadout_core::model::applied::ApplyTrigger;
 use clap::{Args, ValueEnum};
 use serde_json::json;
 
+use super::project::selection;
 use super::status::{plan_json, print_plan};
 use super::{Context, JSON_SCHEMA, apply_exit_code, print_json, print_report, report_json};
 
 #[derive(Debug, Args)]
 pub struct ApplyArgs {
+    /// A folder inside the project to apply [default: the user scope and
+    /// every known project].
+    path: Option<PathBuf>,
     /// Only this client (repeatable).
     #[arg(long = "client", value_name = "CLIENT")]
     clients: Vec<String>,
+    /// Which scopes to apply.
+    #[arg(long, value_enum, default_value = "all")]
+    scope: ScopeArg,
     /// Print the plan and its diffs; change nothing.
     #[arg(long)]
     dry_run: bool,
@@ -45,12 +55,31 @@ impl From<OnConflictArg> for OnConflict {
     }
 }
 
+/// `--scope`: user files, project files, or both.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ScopeArg {
+    System,
+    Project,
+    All,
+}
+
+impl From<ScopeArg> for ScopeFilter {
+    fn from(arg: ScopeArg) -> Self {
+        match arg {
+            ScopeArg::System => ScopeFilter::System,
+            ScopeArg::Project => ScopeFilter::Project,
+            ScopeArg::All => ScopeFilter::All,
+        }
+    }
+}
+
 pub fn run(ctx: &Context, args: &ApplyArgs) -> Result<u8, CoreError> {
     let options = PlanOptions {
         clients: (!args.clients.is_empty()).then(|| args.clients.clone()),
         on_conflict: args.on_conflict.into(),
         decisions: Vec::new(),
-        ..PlanOptions::default()
+        scope: args.scope.into(),
+        projects: selection(ctx, args.path.as_deref())?,
     };
     if args.dry_run {
         let store = ctx.open_store()?;

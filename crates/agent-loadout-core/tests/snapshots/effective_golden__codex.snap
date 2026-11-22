@@ -1,0 +1,70 @@
+---
+source: crates/agent-loadout-core/tests/effective_golden.rs
+assertion_line: 130
+expression: "golden(&fx, &root, &view)"
+---
+{
+  "project": {
+    "id": "effective-e7f8",
+    "root": "<P>"
+  },
+  "clients": {
+    "codex": [
+      {
+        "name": "docs",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.codex/config.toml",
+          "source": "project:docs"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "github",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.codex/config.toml",
+          "source": "store:github+project"
+        },
+        "shadowed": [
+          {
+            "layer": "system",
+            "file": "~/.codex/config.toml"
+          }
+        ],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "slack",
+        "loaded": false,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.codex/config.toml",
+          "source": "store:slack+project"
+        },
+        "shadowed": [
+          {
+            "layer": "system",
+            "file": "~/.codex/config.toml"
+          }
+        ],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": []
+      }
+    ]
+  }
+}

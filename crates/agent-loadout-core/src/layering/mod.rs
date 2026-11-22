@@ -8,25 +8,34 @@
 //!   sets and the layer each entry comes from.
 //! - [`trust`]: `state/trust.json` (SPEC 17).
 //! - [`git`]: the project's repository, for the private-file rules of 6.5.
+//! - [`effective`]: what a client loads in a folder, and from where (6.4).
 //!
 //! The planner ([`crate::apply::plan`]) turns known projects into project
 //! and project-local targets.
 
+pub mod effective;
 pub mod git;
 pub mod manifest;
 pub mod merge;
 pub mod trust;
 
+pub use effective::{
+    EffectiveEntry, EffectiveView, Layer, ProjectRef, Shadowed, Winner, effective,
+};
+
 use std::path::{Path, PathBuf};
 
 pub use git::ProjectRepo;
-pub use manifest::{LOCAL_FILE, ManifestFile, Project, SHARED_FILE, content_hash, discover};
+pub use manifest::{
+    LOCAL_FILE, ManifestFile, Project, SHARED_FILE, content_hash, discover, path_key, same_path,
+};
 pub use merge::{
     EntryBody, EntryLayer, ProjectEntry, deep_merge, default_clients, project_entries, remove_path,
     suppression_mechanism,
 };
 pub use trust::{TRUST_FILE, TrustRecord, TrustState, TrustStore};
 
+use crate::env::Env;
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::model::machine::MachineOverlay;
@@ -68,30 +77,37 @@ impl KnownProject {
         let ProjectStatus::Loaded { project, trust } = &self.status else {
             return None;
         };
-        let why = match trust {
-            TrustState::Trusted => return None,
-            TrustState::Untrusted => "is not trusted on this machine",
-            TrustState::Changed => "changed since it was trusted",
-        };
-        Some(
-            CoreError::new(
-                ErrorCode::TrustRequired,
-                format!(
-                    "project {:?} {why}; review its manifests, then run `{} project trust {}`",
-                    project.name(),
-                    crate::brand::BIN_NAME,
-                    self.root.display()
-                ),
-            )
-            .with_path(manifest::manifest_dir(&self.root)),
-        )
+        trust_required(project, &self.root, *trust)
     }
+}
+
+/// `trust_required` for `project` in `root` when `trust` is not
+/// [`TrustState::Trusted`].
+pub fn trust_required(project: &Project, root: &Path, trust: TrustState) -> Option<CoreError> {
+    let why = match trust {
+        TrustState::Trusted => return None,
+        TrustState::Untrusted => "is not trusted on this machine",
+        TrustState::Changed => "changed since it was trusted",
+    };
+    Some(
+        CoreError::new(
+            ErrorCode::TrustRequired,
+            format!(
+                "project {:?} {why}; review its manifests, then run `{} project trust {}`",
+                project.name(),
+                crate::brand::BIN_NAME,
+                root.display()
+            ),
+        )
+        .with_path(manifest::manifest_dir(root)),
+    )
 }
 
 /// The projects of this machine's overlay, in id order, with their
 /// manifests and trust state.
 pub fn known_projects(
     fs: &dyn Fs,
+    env: &Env,
     overlay: Option<&MachineOverlay>,
     trust: &TrustStore,
 ) -> Vec<KnownProject> {
@@ -102,7 +118,7 @@ pub fn known_projects(
         .iter()
         .map(|(id, known)| {
             let root = PathBuf::from(&known.path);
-            let status = load_status(fs, id, &root, trust);
+            let status = load_status(fs, env, id, &root, trust);
             KnownProject {
                 id: id.clone(),
                 root,
@@ -112,9 +128,23 @@ pub fn known_projects(
         .collect()
 }
 
-fn load_status(fs: &dyn Fs, id: &str, root: &Path, trust: &TrustStore) -> ProjectStatus {
+fn load_status(fs: &dyn Fs, env: &Env, id: &str, root: &Path, trust: &TrustStore) -> ProjectStatus {
     if !fs.is_dir(root) {
         return ProjectStatus::Missing;
+    }
+    // A manifest directly in the home directory is ignored (SPEC 6.1):
+    // there, project files are the user files of several clients.
+    if same_path(root, env.home()) {
+        return ProjectStatus::Failed(
+            CoreError::new(
+                ErrorCode::InvalidPath,
+                format!(
+                    "project {id:?} is the home directory, which cannot be a project; its \
+                     entries are left alone"
+                ),
+            )
+            .with_path(root),
+        );
     }
     match Project::load(fs, root) {
         Ok(Some(project)) if project.id != id => ProjectStatus::Failed(

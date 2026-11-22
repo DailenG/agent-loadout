@@ -354,6 +354,8 @@ share = false                       # false: link + .git/info/exclude; true: cop
 
 `<P>/.loadout/project.local.toml` has the same schema and is personal. **New manifests default to private** (Decision 8): `loadout project init` and the GUI create only `.loadout/project.local.toml`, which then carries the `id`, and append `.loadout/` to `<P>/.git/info/exclude`, so nothing is visible to teammates. **Shared** (on request, `--shared`) creates `.loadout/project.toml` with the `id` plus `.loadout/.gitignore` listing `project.local.toml`; the shared file is committed with the project. When both exist, `id` comes from `project.toml` and the local file layers on top. "Share manifest" (`loadout project share`) moves selected entries from the local file into `project.toml` as one commit.
 
+The folder is the source of truth: apply reads `<P>/.loadout/*.toml` for every project this machine knows (`[projects.<id>] path` in its overlay). The store mirror `projects/<id>/` is written when Loadout trusts the content (`project init`, `trust`, `share`), so mirrored content is always trusted content. `project add` registers a folder without trusting it; `project rm` forgets it, and the next apply removes the entries Loadout owns for it (only unchanged owned entries, §8.4). A known folder that is missing, unreadable, invalid or rooted at `~` keeps its entries and is not planned (M9).
+
 ### 5.6 Machine overlay (`store/machines/<machine-id>.toml`)
 
 Written only by the machine it describes (so merges never conflict on it).
@@ -436,7 +438,7 @@ Layers reported: `system`, `project`, `project-local`, `foreign:<file>` (entries
 
 Some files are read by several clients. Workspace-root `<P>/.mcp.json` is read by Claude Code (project scope), GitHub Copilot (native workspace file), Grok (compat) and omp (fallback). The apply engine treats a **file** as the unit: the entries written are the union for every client mapped to it, and the effective view lists all readers. Enabling a server at project scope "for Claude Code only" therefore also exposes it to Copilot; the UI shows that before apply.
 
-A project-local layer entry must not land in a file that is tracked by the project's git repo (checked with `git ls-files` via git2). If the client has no private project target, the user picks: put it in the shared file and add that file to `.git/info/exclude`, or skip that client.
+A project-local layer entry must not land in a file that is tracked by the project's git repo (checked against the git2 index). As built in M9: a client with a private target (Claude Code) gets the merged entry there and keeps the shared-only definition in the shared file; a client without one gets the merged entry in its project file when that file is untracked, and Loadout adds the file to the repo's `info/exclude` (anchored `/<path>`, through `commondir` for worktrees) before writing, also on runs that write nothing; a tracked file blocks the entry with `private_in_tracked_file` (fix: remove the client from the entry's `clients`, or untrack the file). Any git error other than "no repository" blocks the private entries of that file (`git_error`). `--op-account` is never written into shared files, and a `${project}` path in a shared file warns `personal_path_in_shared_file`.
 
 ---
 
@@ -1202,7 +1204,7 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 | `loadout tag <NAME> [REV] [-m MSG]`, `loadout tag --list`, `loadout tag --delete NAME` | Tags |
 | `loadout remote add folder <NAME> <PATH> [--mode repo-per-machine\|mirror\|archive]` / `add git <NAME> <URL> [--auth system\|gh\|token] [--username U]` / `ls` / `rm` / `push [NAME]` / `pull [NAME]` / `machines NAME` | Remotes (none by default); `machines` lists a folder remote's machine subfolders |
 | `loadout server ls\|show\|add\|edit\|rm <ID>`, `loadout server enable\|disable <ID> --client C... [--project PATH [--shared]]` | Server CRUD and enablement (project writes default to the private layer) |
-| `loadout project init [PATH] [--shared]`, `share ID`, `add PATH`, `ls`, `rm ID`, `trust PATH` | Projects; init is private unless `--shared`; `share` moves private entries into `project.toml` |
+| `loadout project init [PATH] [--shared] [--name NAME]`, `share ID [--server NAME]...`, `add PATH`, `ls`, `rm ID`, `trust PATH` | Projects; init is private unless `--shared`; `share` moves private servers (all, or each `--server`) into `project.toml`; `trust` shows the manifests (or their diff against the content last trusted) and trusts them |
 | `loadout import [--scan] [--client C] [--scope ...]`, `loadout adopt [ENTRY...] [--all-identical]` | Import and adopt |
 | `loadout skills ls\|add <URL\|PATH>\|rm\|enable\|disable\|update\|scan` | Skills |
 | `loadout secrets ls\|check\|providers\|set <ALIAS> [--keyring]\|map-op-env <ENV-ID> [--account A]\|op-account [A] [--clear]\|service-account set\|clear` | Secrets |
@@ -1215,7 +1217,7 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 | `loadout --identify` | Prints `dev.dailen.loadout <version>` (used by `doctor` and adapters to detect a foreign `loadout` binary) |
 | `loadout completions <shell>` | Shell completions |
 
-Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout. A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
+Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout; 7 a project manifest needs `loadout project trust` (untrusted or changed since trusted; checked after 1, 4 and 5). A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`, `project rm`, `project trust`, `project share`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
 
 ---
 
@@ -1285,7 +1287,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 
 ## 17. Security
 
-- Project manifests can define stdio commands, so binding a folder is like running its code. Trust is per manifest content hash (`state/trust.json`); a changed manifest (e.g. after `git pull`) shows its diff and needs re-trust before project apply.
+- Project manifests can define stdio commands, so binding a folder is like running its code. Trust is per manifest content hash (`state/trust.json`: `{schema, projects: [{id, path, hash}]}`, `hash` = SHA-256 over both files with an absent-file marker); a changed manifest (e.g. after `git pull`) shows its diff (`loadout project trust PATH`) and needs re-trust before project apply. Until then every target of that project plans as `blocked: trust_required` (apply exits 7) while user scope and other projects apply normally.
 - Tauri: CSP on, minimal capabilities, every command validates paths (must be inside known targets, project roots or `LOADOUT_HOME`).
 - Zip-slip and symlink-escape checks on skill import (SkillDock's `marketplace_package.rs` limits kept: 500 files, 5 MB per file, 20 MB total for archives).
 - Logs: redaction layer for any string that equals a resolved secret or matches the classifier.

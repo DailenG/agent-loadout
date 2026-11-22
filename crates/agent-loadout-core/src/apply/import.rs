@@ -239,7 +239,13 @@ pub fn scan(
                 }
             };
             for name in names {
-                if ledger.get(&file, &pointer, &name).is_some() {
+                let slot = crate::apply::ledger::LedgerSlot {
+                    scope: Scope::User,
+                    project_id: None,
+                    file: &file,
+                    container: &pointer,
+                };
+                if ledger.get(&slot, &name).is_some() {
                     continue;
                 }
                 let Some(value) = doc.get(&container, &name)? else {

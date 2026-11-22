@@ -1,0 +1,46 @@
+---
+source: crates/agent-loadout-core/tests/effective_golden.rs
+assertion_line: 148
+expression: "golden(&fx, &root, &view)"
+---
+{
+  "project": {
+    "id": "effective-e7f8",
+    "root": "<P>"
+  },
+  "clients": {
+    "claude-desktop": [
+      {
+        "name": "github",
+        "loaded": true,
+        "winner": {
+          "layer": "system",
+          "file": "<claude-desktop>",
+          "source": "store:github"
+        },
+        "shadowed": [],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": []
+      },
+      {
+        "name": "slack",
+        "loaded": true,
+        "winner": {
+          "layer": "system",
+          "file": "<claude-desktop>",
+          "source": "store:slack"
+        },
+        "shadowed": [],
+        "also_visible_to": [],
+        "status": "synced",
+        "warnings": [
+          {
+            "code": "cannot_suppress_in_project",
+            "message": "Claude Desktop cannot hide the system server \"slack\" in a project; remove claude-desktop from the system enable list and add the server to the projects that need it"
+          }
+        ]
+      }
+    ]
+  }
+}

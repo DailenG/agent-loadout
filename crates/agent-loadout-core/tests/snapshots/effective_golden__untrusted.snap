@@ -1,0 +1,146 @@
+---
+source: crates/agent-loadout-core/tests/effective_golden.rs
+assertion_line: 173
+expression: "golden(&fx, &root, &view)"
+---
+{
+  "project": {
+    "id": "effective-e7f8",
+    "root": "<P>"
+  },
+  "clients": {
+    "claude-code": [
+      {
+        "name": "docs",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.mcp.json",
+          "source": "project:docs"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "blocked",
+        "warnings": [
+          {
+            "code": "trust_required",
+            "message": "project \"Effective\" changed since it was trusted; review its manifests, then run `loadout project trust <P>`"
+          }
+        ]
+      },
+      {
+        "name": "extra",
+        "loaded": false,
+        "winner": {
+          "layer": "project-local",
+          "file": "~/.claude.json",
+          "source": "project:extra"
+        },
+        "shadowed": [],
+        "also_visible_to": [],
+        "status": "blocked",
+        "warnings": [
+          {
+            "code": "trust_required",
+            "message": "project \"Effective\" changed since it was trusted; review its manifests, then run `loadout project trust <P>`"
+          }
+        ]
+      },
+      {
+        "name": "github",
+        "loaded": true,
+        "winner": {
+          "layer": "project",
+          "file": "<P>/.mcp.json",
+          "source": "store:github+project"
+        },
+        "shadowed": [
+          {
+            "layer": "system",
+            "file": "~/.claude.json"
+          }
+        ],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "blocked",
+        "warnings": [
+          {
+            "code": "trust_required",
+            "message": "project \"Effective\" changed since it was trusted; review its manifests, then run `loadout project trust <P>`"
+          }
+        ]
+      },
+      {
+        "name": "legacy",
+        "loaded": true,
+        "winner": {
+          "layer": "foreign:~/.claude.json",
+          "file": "~/.claude.json",
+          "source": "foreign"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "foreign",
+        "warnings": []
+      },
+      {
+        "name": "notes",
+        "loaded": true,
+        "winner": {
+          "layer": "project-local",
+          "file": "~/.claude.json",
+          "source": "project:notes"
+        },
+        "shadowed": [],
+        "also_visible_to": [],
+        "status": "blocked",
+        "warnings": [
+          {
+            "code": "trust_required",
+            "message": "project \"Effective\" changed since it was trusted; review its manifests, then run `loadout project trust <P>`"
+          }
+        ]
+      },
+      {
+        "name": "scratch",
+        "loaded": true,
+        "winner": {
+          "layer": "foreign:<P>/.mcp.json",
+          "file": "<P>/.mcp.json",
+          "source": "foreign"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "foreign",
+        "warnings": []
+      },
+      {
+        "name": "slack",
+        "loaded": false,
+        "winner": {
+          "layer": "system",
+          "file": "~/.claude.json",
+          "source": "store:slack"
+        },
+        "shadowed": [],
+        "also_visible_to": [
+          "omp"
+        ],
+        "status": "synced",
+        "warnings": [
+          {
+            "code": "trust_required",
+            "message": "project \"Effective\" changed since it was trusted; review its manifests, then run `loadout project trust <P>`"
+          }
+        ]
+      }
+    ]
+  }
+}

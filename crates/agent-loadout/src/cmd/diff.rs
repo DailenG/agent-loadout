@@ -1,10 +1,13 @@
-//! `loadout diff [--client C]... [--exit-code]` (SPEC 8.3, 14): the apply
-//! plan as unified diffs of each client file, with values of `inline`
-//! delivery masked (`TargetPlan::diff`).
+//! `loadout diff [PATH] [--client C]... [--exit-code]` (SPEC 8.3, 14): the
+//! apply plan as unified diffs of each client file, with values of
+//! `inline` delivery masked (`TargetPlan::diff`). PATH limits it to the
+//! project holding that folder.
 //!
 //! `loadout diff --rev A..B [--raw]` (SPEC 9.3): the semantic store diff
 //! between two revisions (`A..` is up to the latest commit), or the
 //! unified git diff with `--raw`.
+
+use std::path::PathBuf;
 
 use agent_loadout_core::apply::{self, PlanOptions};
 use agent_loadout_core::store::diff;
@@ -12,11 +15,16 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use clap::Args;
 use serde_json::json;
 
+use super::project::selection;
 use super::show::changes_json;
 use super::{Context, EXIT_PENDING, JSON_SCHEMA, path_json, print_json, require_store};
 
 #[derive(Debug, Args)]
 pub struct DiffArgs {
+    /// A folder inside the project to diff [default: the user scope and
+    /// every known project].
+    #[arg(conflicts_with = "rev")]
+    path: Option<PathBuf>,
     /// Only this client (repeatable).
     #[arg(long = "client", value_name = "CLIENT", conflicts_with = "rev")]
     clients: Vec<String>,
@@ -38,6 +46,7 @@ pub fn run(ctx: &Context, args: &DiffArgs) -> Result<u8, CoreError> {
     }
     let options = PlanOptions {
         clients: (!args.clients.is_empty()).then(|| args.clients.clone()),
+        projects: selection(ctx, args.path.as_deref())?,
         ..PlanOptions::default()
     };
     let store = ctx.open_store()?;
@@ -53,6 +62,7 @@ pub fn run(ctx: &Context, args: &DiffArgs) -> Result<u8, CoreError> {
             "files": changed.iter().map(|target| json!({
                 "file": path_json(&target.file),
                 "clients": target.clients,
+                "project_id": target.project_id,
                 "created": target.before.is_none(),
                 "diff": target.diff(),
             })).collect::<Vec<_>>(),

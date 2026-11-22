@@ -181,6 +181,9 @@ pub enum ErrorCode {
     /// under another spelling of its path (case or separators), so the
     /// client may read the other key (gate V1 FB-1).
     ProjectKeySpelling,
+    /// Warning: a shared project file gets `${project}` as this machine's
+    /// absolute folder; teammates see a path that is not theirs.
+    PersonalPathInSharedFile,
 }
 
 impl ErrorCode {
@@ -245,6 +248,7 @@ impl ErrorCode {
             ErrorCode::DuplicateViaCompat => "duplicate_via_compat",
             ErrorCode::PrivateInTrackedFile => "private_in_tracked_file",
             ErrorCode::ProjectKeySpelling => "project_key_spelling",
+            ErrorCode::PersonalPathInSharedFile => "personal_path_in_shared_file",
         }
     }
 }

@@ -11,7 +11,8 @@ use agent_loadout_core::adapters::adapter;
 use agent_loadout_core::adapters::caps::ProjectDisable;
 use agent_loadout_core::layering::{
     EntryBody, EntryLayer, LOCAL_FILE, Project, ProjectRepo, SHARED_FILE, TrustState, TrustStore,
-    content_hash, deep_merge, discover, project_entries, remove_path, suppression_mechanism,
+    content_hash, deep_merge, discover, path_key, project_entries, remove_path,
+    suppression_mechanism,
 };
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::machine::MachineOverlay;
@@ -100,6 +101,23 @@ fn local_merges_over_shared_and_unset_removes_inherited_keys() {
     // Arrays replace; tables merge; `unset` runs last.
     assert_eq!(db.body.args, Some(vec!["--rw".to_owned()]));
     assert_eq!(env_of(db), vec![("URL", "${env:MY_DB}")]);
+    // The shared file's own definition, for clients that hold the merged
+    // entry privately.
+    let entry = entries.iter().find(|entry| entry.name == "db").unwrap();
+    let shared = entry.shared.as_deref().unwrap();
+    assert_eq!(shared.layer, EntryLayer::Shared);
+    assert_eq!(
+        shared.clients,
+        ClientSelection::List(vec!["claude-code".to_owned()])
+    );
+    let EntryBody::Server(Ok(shared)) = &shared.body else {
+        panic!("{shared:#?}");
+    };
+    assert_eq!(
+        shared.body.args,
+        Some(vec!["--ro".to_owned(), "--x".to_owned()])
+    );
+    assert_eq!(env_of(shared), vec![("DEBUG", "1"), ("URL", "${env:DB}")]);
 
     let shared = entries
         .iter()
@@ -264,6 +282,20 @@ fn trust_is_keyed_by_folder_and_content_hash() {
     assert_eq!(store.state(&changed), TrustState::Trusted);
     assert!(store.forget("trusted-a1b2"));
     assert_eq!(store.state(&changed), TrustState::Untrusted);
+
+    // Found by folder however the path is spelled.
+    store.trust(&changed);
+    let mut respelled = changed.clone();
+    let text = root.to_string_lossy().into_owned();
+    respelled.root = if cfg!(windows) {
+        format!(r"\\?\{}\", text.to_uppercase()).into()
+    } else {
+        format!("{text}/").into()
+    };
+    assert_eq!(store.state(&respelled), TrustState::Trusted);
+    assert_eq!(path_key(&respelled.root), path_key(&root));
+    store.trust(&respelled);
+    assert_eq!(store.projects.len(), 1);
 }
 
 #[test]
@@ -271,11 +303,11 @@ fn git_helpers_track_ignore_and_exclude() {
     let fx = Fx::new();
     let root = fx.th.projects().join("repo");
     std::fs::create_dir_all(&root).unwrap();
-    assert!(ProjectRepo::discover(&root).is_none());
+    assert!(ProjectRepo::discover(&root).unwrap().is_none());
     let repo = git_init(&root);
     fx.write(&root.join(".mcp.json"), "{}\n");
     git_commit(&repo, ".mcp.json");
-    let project = ProjectRepo::discover(&root).unwrap();
+    let project = ProjectRepo::discover(&root).unwrap().unwrap();
     let omp = root.join(".omp").join("mcp.json");
     assert!(project.is_tracked(&root.join(".mcp.json")).unwrap());
     assert!(!project.is_tracked(&omp).unwrap());
@@ -291,6 +323,39 @@ fn git_helpers_track_ignore_and_exclude() {
     assert_eq!(
         project.exclude_file(),
         repo.path().join("info").join("exclude")
+    );
+}
+
+#[test]
+fn a_linked_worktree_excludes_through_the_common_dir() {
+    let fx = Fx::new();
+    let root = fx.th.projects().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    let repo = git_init(&root);
+    fx.write(&root.join("README"), "x\n");
+    git_commit(&repo, "README");
+    let tree = fx.th.projects().join("tree");
+    repo.worktree("tree", &tree, None).unwrap();
+
+    let project = ProjectRepo::discover(&tree).unwrap().unwrap();
+    let common = repo.path().join("info").join("exclude");
+    assert_eq!(
+        path_key(&project.exclude_file()),
+        path_key(&common),
+        "{:?}",
+        project.exclude_file()
+    );
+    let omp = tree.join(".omp").join("mcp.json");
+    assert!(project.exclude(&fx.fs, &omp).unwrap());
+    assert!(!project.exclude(&fx.fs, &omp).unwrap());
+    let text = std::fs::read_to_string(&common).unwrap();
+    assert_eq!(text.matches("/.omp/mcp.json").count(), 1, "{text}");
+    assert!(
+        ProjectRepo::discover(&tree)
+            .unwrap()
+            .unwrap()
+            .is_ignored(&omp)
+            .unwrap()
     );
 }
 
