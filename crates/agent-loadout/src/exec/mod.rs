@@ -323,8 +323,16 @@ fn stage1(invocation: Invocation) -> Result<i32, Failure> {
             Failure::resolution(key, &resolution)
         })?
         .to_path_buf();
+    // `op` gets the account `op_env` chose. When that is not the value the
+    // client passed (an empty `OP_ACCOUNT` counts as unset), the server
+    // does not get it back through stage 2.
+    let account = op_child_env.var(ACCOUNT_VAR);
+    let replaced = |name: &OsStr, value: &OsStr| {
+        same_name(name, ACCOUNT_VAR) && account.is_some_and(|a| value != OsStr::new(a))
+    };
     let names: Vec<String> = child
         .iter()
+        .filter(|(name, value)| !replaced(name, value))
         .map(|(name, _)| name.to_string_lossy().into_owned())
         .collect();
     let mut op_vars = child.clone();
@@ -332,9 +340,8 @@ fn stage1(invocation: Invocation) -> Result<i32, Failure> {
     if let Some(token) = op_child_env.var(SERVICE_ACCOUNT_VAR) {
         op_vars.push((SERVICE_ACCOUNT_VAR.into(), token.to_owned()));
     }
-    if let Some(account) = op_child_env.var(ACCOUNT_VAR)
-        && !op_vars.iter().any(|(name, _)| same_name(name, ACCOUNT_VAR))
-    {
+    if let Some(account) = account {
+        op_vars.retain(|(name, _)| !same_name(name, ACCOUNT_VAR));
         op_vars.push((ACCOUNT_VAR.into(), account.to_owned()));
     }
     let this = std::env::current_exe()

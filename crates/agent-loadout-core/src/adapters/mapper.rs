@@ -448,8 +448,11 @@ impl EntryMapper for McpServersJson {
 
     fn skipped_by_client(&self, value: &NativeValue) -> Option<&'static str> {
         let entry = value.as_object()?;
-        (!self.url_implies_http && entry.contains_key("url") && !entry.contains_key(TYPE))
-            .then_some("has a `url` but no `type`, so the client skips it")
+        // An entry with a `command` is stdio whatever else it holds.
+        (entry.contains_key("url")
+            && !entry.contains_key(TYPE)
+            && self.inferred_type(entry).is_none())
+        .then_some("has a `url` but no `type`, so the client skips it")
     }
 }
 

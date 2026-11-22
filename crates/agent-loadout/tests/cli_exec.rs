@@ -928,6 +928,80 @@ fn one_account_is_named_when_several_are_signed_in() {
             .any(|call| call == &format!("{ACCOUNT_SEEN} family.example.com"))
     );
 
+    // A client that passes an empty OP_ACCOUNT: the configured account
+    // still reaches `op run`, and the server does not get it.
+    let output = cli
+        .th
+        .command(doc["mcpServers"]["tracker"]["command"].as_str().unwrap())
+        .args(&entry_args)
+        .env("OP_ACCOUNT", "")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let env = server_env(&output);
+    assert_eq!(env["SERVER_TOKEN"], ENV_VALUE);
+    assert!(!env.contains_key("OP_ACCOUNT"), "{env:?}");
+
+    // `op://` items get the account too, and an account the client sets
+    // itself wins over the configured one.
+    let item = args(
+        &[
+            "--op-account",
+            "family.example.com",
+            "--ref",
+            &format!("PAT={ITEM}"),
+        ],
+        &["env"],
+    );
+    assert_eq!(server_env(&cli.exec(&item, b"", &[]))["PAT"], ITEM_VALUE);
+    let output = cli.exec(&item, b"", &[("OP_ACCOUNT", "work.example.com")]);
+    let env = server_env(&output);
+    assert_eq!(env["PAT"], ITEM_VALUE);
+    assert_eq!(env["OP_ACCOUNT"], "work.example.com");
+    assert_eq!(
+        stub.calls().last().map(String::as_str),
+        Some("env OP_ACCOUNT work.example.com")
+    );
+
+    // Command hooks (omp `!command` headers) carry it in argv as well.
+    cli.ok(&["secrets", "set", "PAT", "--ref", ITEM]);
+    cli.ok(&[
+        "server",
+        "add",
+        "remote",
+        "--url",
+        "https://example.com/mcp",
+        "--header",
+        "Authorization=Bearer ${secret:PAT}",
+        "--client",
+        "omp",
+    ]);
+    let omp = std::fs::read_to_string(cli.th.home().join(".omp/agent/mcp.json")).unwrap();
+    let hook = omp
+        .lines()
+        .find(|line| line.contains("secret get"))
+        .unwrap_or_else(|| panic!("{omp}"));
+    assert!(
+        hook.contains("--op-account") && hook.contains("family.example.com"),
+        "{hook}"
+    );
+    let output = cli.run(&[
+        "secret",
+        "get",
+        "--op-account",
+        "family.example.com",
+        "--ref",
+        ITEM,
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(output.stdout, ITEM_VALUE.as_bytes());
+    let output = cli.run(&["secret", "get", "--ref", ITEM]);
+    assert!(
+        stderr(&output).contains("multiple accounts"),
+        "{}",
+        stderr(&output)
+    );
+
     // Clearing it brings the refusal back.
     cli.ok(&["secrets", "op-account", "--clear"]);
     let (code, _) = cli.json(&["secrets", "check"]);

@@ -7,7 +7,8 @@
 //!   secret-header [--ref KEY=REF]... NAME=TEMPLATE...` (SPEC 14): run by
 //!   omp and Pi `!command` values and by Claude Code `headersHelper` at
 //!   connect time (`command` delivery, SPEC 11.4). Self-contained like
-//!   `loadout exec`: the references are in argv, the store is not read.
+//!   `loadout exec`: the references (and `--op-account`) are in argv, the
+//!   store is not read.
 //!
 //! Values go to stdout and nowhere else: never into a log, an error or the
 //! store. 1Password Environment variables are never read here (only `op
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::secrets::catalog::{CATALOG_FILE, Catalog};
 use agent_loadout_core::secrets::delivery::op_env;
-use agent_loadout_core::secrets::grammar::SecretRef;
+use agent_loadout_core::secrets::grammar::{SecretRef, is_op_account};
 use agent_loadout_core::secrets::providers::Resolver;
 use agent_loadout_core::secrets::render::{fill_template, parse_binding};
 use agent_loadout_core::secrets::scanner::SecretMemory;
@@ -66,6 +67,9 @@ enum SecretCommand {
         /// Text to print, with `{secret:KEY}` for each bound value.
         #[arg(long)]
         template: Option<String>,
+        /// The 1Password account `op` uses (unless OP_ACCOUNT is set).
+        #[arg(long, value_name = "ACCOUNT", value_parser = parse_op_account)]
+        op_account: Option<String>,
     },
 }
 
@@ -74,9 +78,20 @@ pub struct SecretHeaderArgs {
     /// `KEY=REF`: a provider reference for `{secret:KEY}` in templates.
     #[arg(long = "ref", value_name = "KEY=REF")]
     refs: Vec<String>,
+    /// The 1Password account `op` uses (unless OP_ACCOUNT is set).
+    #[arg(long, value_name = "ACCOUNT", value_parser = parse_op_account)]
+    op_account: Option<String>,
     /// `NAME=TEMPLATE`: a header and its value.
     #[arg(value_name = "NAME=TEMPLATE", required = true)]
     headers: Vec<String>,
+}
+
+fn parse_op_account(value: &str) -> Result<String, String> {
+    if is_op_account(value) {
+        Ok(value.to_owned())
+    } else {
+        Err(format!("invalid 1Password account {value:?}"))
+    }
 }
 
 /// Resolves references with this machine's providers; a 1Password service
@@ -88,18 +103,12 @@ struct Values<'a> {
 }
 
 impl<'a> Values<'a> {
-    fn new(ctx: &'a Context) -> Result<Self, CoreError> {
-        // `secret get` and `secret-header` run from a client's config: the
-        // store, when there is one, names the 1Password account.
-        let account = ctx
-            .open_store()
-            .ok()
-            .flatten()
-            .and_then(|store| Catalog::load(&store, None).ok())
-            .and_then(|catalog| catalog.op_account);
+    /// `account`: the 1Password account `op` uses unless the environment
+    /// names one (gate V1 FB-7).
+    fn new(ctx: &'a Context, account: Option<&str>) -> Result<Self, CoreError> {
         Ok(Self {
             ctx,
-            op_env: op_env(&ctx.env, ctx.keyring(), account.as_deref()),
+            op_env: op_env(&ctx.env, ctx.keyring(), account),
             memory: Arc::new(SecretMemory::new()?),
         })
     }
@@ -128,8 +137,12 @@ impl<'a> Values<'a> {
 }
 
 pub fn run_secret(ctx: &Context, args: &SecretArgs) -> Result<u8, CoreError> {
-    let SecretCommand::Get { refs, template } = &args.command;
-    let values = Values::new(ctx)?;
+    let SecretCommand::Get {
+        refs,
+        template,
+        op_account,
+    } = &args.command;
+    let values = Values::new(ctx, op_account.as_deref())?;
     let value = match (refs.as_slice(), template) {
         ([text], None) => {
             let reference = SecretRef::parse(text)?;
@@ -148,7 +161,7 @@ pub fn run_secret(ctx: &Context, args: &SecretArgs) -> Result<u8, CoreError> {
 }
 
 pub fn run_header(ctx: &Context, args: &SecretHeaderArgs) -> Result<u8, CoreError> {
-    let values = Values::new(ctx)?;
+    let values = Values::new(ctx, args.op_account.as_deref())?;
     let bound = values.bindings(&args.refs)?;
     let mut headers = Map::new();
     for header in &args.headers {
@@ -184,7 +197,7 @@ pub fn run_env(ctx: &Context, args: &EnvArgs) -> Result<u8, CoreError> {
         Os::Windows => Shell::Pwsh,
         Os::Linux | Os::MacOs => Shell::Bash,
     });
-    let values = Values::new(ctx)?;
+    let values = Values::new(ctx, catalog.op_account.as_deref())?;
     let mut failed = false;
     for name in &selected {
         let Some(alias) = catalog.get(name) else {
