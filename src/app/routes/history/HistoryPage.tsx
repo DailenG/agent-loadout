@@ -1,9 +1,10 @@
 // History page (SPEC 13.5): every store commit newest first, filtered by
 // scope and entity, with per-commit actions (Show diff, Undo this apply,
 // Restore this version, Restore entity..., Tag, Download zip), user tags,
-// the client file backups tab, and the remotes and conflicts strip.
+// the client file backups tab, and the remotes and conflicts strip. The list
+// loads in pages of `HISTORY_PAGE_SIZE` with "Load more".
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { storeQueryKeys, useInvalidateStore, useUndoApply } from "@/app/apply/changeNotice";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
@@ -47,6 +48,12 @@ const SCOPE_OPTIONS: AppSelectOption<HistoryScope>[] = (["all", "user", "project
 }));
 
 type Dialog = { kind: "tag" | "restore" | "restoreEntity"; entry: HistoryEntry };
+
+/** Commits per page: a large store has thousands, and every row is rendered. */
+export const HISTORY_PAGE_SIZE = 100;
+
+/** The scope and entity the user picked; the page adds the limit. */
+type ListFilter = Omit<HistoryFilter, "limit">;
 
 type RowProps = {
   entry: HistoryEntry;
@@ -144,14 +151,27 @@ function HistoryRow({
   );
 }
 
-function ChangesTab({ filter, onOpenPending }: { filter: HistoryFilter; onOpenPending: () => void }) {
+function ChangesTab({ filter, onOpenPending }: { filter: ListFilter; onOpenPending: () => void }) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
   const invalidate = useInvalidateStore();
   const undo = useUndoApply();
+  // A new filter starts again at the first page.
+  const filterKey = `${filter.scope}\n${filter.entity ?? ""}`;
+  const [shownFilterKey, setShownFilterKey] = useState(filterKey);
+  const [pages, setPages] = useState(1);
+  if (shownFilterKey !== filterKey) {
+    setShownFilterKey(filterKey);
+    setPages(1);
+  }
+  const shown = pages * HISTORY_PAGE_SIZE;
+  // One commit more than shown tells whether "Load more" has anything to load.
+  const request: HistoryFilter = { ...filter, limit: shown + 1 };
   const history = useQuery({
-    queryKey: [...storeQueryKeys.history, filter],
-    queryFn: async () => unwrap(await commands.listHistory(filter)),
+    queryKey: [...storeQueryKeys.history, request],
+    queryFn: async () => unwrap(await commands.listHistory(request)),
+    // "Load more" keeps the loaded rows on screen while the longer page loads.
+    placeholderData: pages > 1 ? keepPreviousData : undefined,
   });
   const [selectedId, setSelectedId] = useState("");
   const [diffOpen, setDiffOpen] = useState(false);
@@ -201,7 +221,8 @@ function ChangesTab({ filter, onOpenPending }: { filter: HistoryFilter; onOpenPe
   }
 
   const filtered = filter.scope !== "all" || filter.entity !== null;
-  const rows = history.data ?? [];
+  const rows = (history.data ?? []).slice(0, shown);
+  const hasMore = (history.data?.length ?? 0) > shown;
   return (
     <>
       {history.isPending ? <p className="history-note">{t("history.loading")}</p> : null}
@@ -241,6 +262,18 @@ function ChangesTab({ filter, onOpenPending }: { filter: HistoryFilter; onOpenPe
             />
           ))}
         </ul>
+      ) : null}
+      {hasMore ? (
+        <div className="history-load-more">
+          <button
+            className="secondary-button secondary-button--compact"
+            type="button"
+            disabled={history.isPlaceholderData}
+            onClick={() => setPages((current) => current + 1)}
+          >
+            {history.isPlaceholderData ? t("history.loading") : t("history.loadMore")}
+          </button>
+        </div>
       ) : null}
       {dialog?.kind === "tag" ? <TagDialog entry={dialog.entry} onClose={() => setDialog(null)} /> : null}
       {dialog && dialog.kind !== "tag" ? (
@@ -322,7 +355,7 @@ export function HistoryPage({ onOpenPending, onOpenSettings }: HistoryPageProps)
   const [entity, setEntity] = useState("");
   const [tab, setTab] = useState<Tab>("changes");
   const [taggingCurrent, setTaggingCurrent] = useState(false);
-  const filter: HistoryFilter = { scope, entity: entity === "" ? null : entity, limit: null };
+  const filter: ListFilter = { scope, entity: entity === "" ? null : entity };
 
   return (
     <div className="history-route">

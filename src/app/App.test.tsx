@@ -195,7 +195,8 @@ describe("App shell", () => {
 
     await user.click(within(primaryNav()).getByRole("button", { name: "Projects" }));
     expect(within(header()).getByRole("heading", { level: 1 })).toHaveTextContent("Projects");
-    expect(screen.getByText(t("page.empty.projects"))).toBeInTheDocument();
+    // Pages after Skills load on their first visit (lazy routes).
+    expect(await screen.findByText(t("page.empty.projects"))).toBeInTheDocument();
     expect(within(primaryNav()).getByRole("button", { name: "Projects" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -203,7 +204,7 @@ describe("App shell", () => {
 
     await user.click(within(primaryNav()).getByRole("button", { name: "History" }));
     expect(within(header()).getByRole("heading", { level: 1 })).toHaveTextContent("History");
-    expect(screen.getByText(t("page.empty.history"))).toBeInTheDocument();
+    expect(await screen.findByText(t("page.empty.history"))).toBeInTheDocument();
   });
 
   it("first run: Not now leaves no remote and Settings shows No backup remote", async () => {
@@ -235,7 +236,7 @@ describe("App shell", () => {
     const { user } = renderApp();
 
     await user.click(within(primaryNav()).getByRole("button", { name: "MCP" }));
-    const install = within(header()).getByRole("button", { name: t("toolbar.goInstall") });
+    const install = await within(header()).findByRole("button", { name: t("toolbar.goInstall") });
 
     await user.click(install);
     expect(within(header()).getByRole("heading", { level: 1 })).toHaveTextContent("Install");

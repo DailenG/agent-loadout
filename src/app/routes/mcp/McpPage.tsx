@@ -5,13 +5,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
+import { useEventCallback } from "@/app/components/useEventCallback";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { errorMessage, t } from "@/i18n/en";
@@ -134,6 +135,280 @@ function McpServerDetailContainer({ children, isGridLayout, row, active, onClose
   );
 }
 
+type McpServerCardProps = {
+  row: ServerRow;
+  clients: ClientInfo[];
+  isGrid: boolean;
+  isExpanded: boolean;
+  isBulk: boolean;
+  isDeleteConfirming: boolean;
+  isDeleting: boolean;
+  /** Some card is deleting: every delete and edit waits for it. */
+  anyDeleting: boolean;
+  deleteActionRef: MutableRefObject<HTMLButtonElement | null>;
+  // Stable across renders (the card is memoized), so they take the row or its ID.
+  /** Sets the expanded card: the row's ID, or "" to collapse. */
+  onExpandedChange: (serverId: string) => void;
+  onDelete: (row: ServerRow) => void;
+  onToggleAll: (row: ServerRow, enable: boolean) => void;
+  onEdit: (serverId: string, tab: EditTab) => void;
+  onOpenPending: () => void;
+};
+
+/** One store server; memoized, so expanding one card or a search keystroke re-renders only the cards that changed. */
+const McpServerCard = memo(function McpServerCard({
+  row,
+  clients,
+  isGrid,
+  isExpanded,
+  isBulk,
+  isDeleteConfirming,
+  isDeleting,
+  anyDeleting,
+  deleteActionRef,
+  onExpandedChange,
+  onDelete,
+  onToggleAll,
+  onEdit,
+  onOpenPending,
+}: McpServerCardProps) {
+  const name = serverName(row);
+  const pills = visiblePills(row, clients);
+  const enabledPills = pills.filter((entry) => entry.pill.selected);
+  const readyPills = pills.filter(
+    (entry: VisiblePill) => entry.client.detected && entry.client.supported && entry.pill.state !== "not_supported",
+  );
+  const allReadyEnabled = readyPills.length > 0 && readyPills.every((entry) => entry.pill.selected);
+  const partial = enabledPills.length > 0 && !allReadyEnabled;
+  const powerTooltip = allReadyEnabled
+    ? t("mcp.card.disableAllApps", { name })
+    : partial
+      ? t("mcp.card.bulkToggle.partial", { enabled: enabledPills.length, total: readyPills.length })
+      : t("mcp.card.enableAllApps", { name });
+  const enabledSummary = enabledPills.length > 0
+    ? t("mcp.summary.enabledApps", { apps: enabledPills.map((entry) => entry.client.name).join(", ") })
+    : t("mcp.summary.disabled");
+  const subtitle = row.invalid
+    ? errorMessage(row.invalid.code)
+    : row.description ?? row.launch;
+  const handleClose = useCallback(() => onExpandedChange(""), [onExpandedChange]);
+
+  const deleteButton = isDeleteConfirming || isDeleting ? (
+    <button
+      ref={deleteActionRef}
+      className="skill-card__delete-confirm-button"
+      type="button"
+      onClick={() => onDelete(row)}
+      aria-label={t("mcp.card.deleteConfirmAria", {
+        state: isDeleting ? t("mcp.card.deleting") : t("mcp.card.deleteConfirm"),
+        name,
+      })}
+      data-tooltip={isDeleting ? t("mcp.card.deleting") : t("mcp.card.deleteConfirmTooltip")}
+      disabled={isDeleting}
+    >
+      {isDeleting ? t("mcp.card.deleting") : t("mcp.card.deleteConfirm")}
+    </button>
+  ) : (
+    <button
+      className="skill-card__icon-button skill-card__icon-button--delete"
+      type="button"
+      onClick={() => onDelete(row)}
+      aria-label={t("mcp.card.delete", { name })}
+      data-tooltip={t("mcp.card.deleteTooltip")}
+      disabled={anyDeleting}
+    >
+      <DeleteIcon />
+    </button>
+  );
+
+  const editButton = (
+    <button
+      className="skill-card__icon-button"
+      type="button"
+      onClick={() => onEdit(row.id, row.invalid ? "toml" : "form")}
+      aria-label={t("mcp.card.edit", { name })}
+      data-tooltip={t("mcp.card.editTooltip")}
+      disabled={anyDeleting}
+    >
+      <EditIcon />
+    </button>
+  );
+
+  return (
+    <article
+      className={`mcp-server-card${isGrid ? " mcp-server-card--grid" : ""}${isExpanded ? " is-expanded" : ""}${row.invalid ? " is-invalid" : ""}`}
+      aria-label={name}
+    >
+      <div className="mcp-server-card__header">
+        <div
+          className="mcp-server-card__summary-button"
+          role={row.invalid ? undefined : "button"}
+          tabIndex={row.invalid ? undefined : 0}
+          onClick={() => {
+            if (!row.invalid) {
+              onExpandedChange(isExpanded ? "" : row.id);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (!row.invalid && (event.key === "Enter" || event.key === " ")) {
+              event.preventDefault();
+              onExpandedChange(isExpanded ? "" : row.id);
+            }
+          }}
+          aria-expanded={row.invalid ? undefined : isExpanded}
+          aria-label={row.invalid
+            ? undefined
+            : t(isExpanded ? "mcp.card.collapseAria" : "mcp.card.expandAria", { name })}
+        >
+          <div className="mcp-server-card__main">
+            <div className="mcp-server-card__identity">
+              <McpServerMonogram name={name} active={enabledPills.length > 0} />
+              <div className="mcp-server-card__title-stack">
+                <div className="mcp-server-card__title-row">
+                  <strong>{name}</strong>
+                  {row.invalid ? (
+                    <span className="status-badge tone-danger">{t("mcp.card.invalid")}</span>
+                  ) : (
+                    <>
+                      {row.transport ? (
+                        <span className="status-badge tone-neutral mcp-server-card__tool-summary-badge">
+                          {t(TRANSPORT_LABELS[row.transport])}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`status-badge ${enabledPills.length > 0 ? "tone-info" : "tone-neutral"} skill-card__enabled-toggle${enabledPills.length > 0 ? "" : " is-empty"}`}
+                        aria-label={enabledSummary}
+                        data-tooltip={enabledSummary}
+                      >
+                        {enabledPills.length > 0
+                          ? t("mcp.summary.enabledCount", { count: enabledPills.length })
+                          : t("mcp.summary.disabled")}
+                      </span>
+                    </>
+                  )}
+                  <span className="status-badge tone-neutral mcp-layer-chip">{t("scope.user")}</span>
+                </div>
+                <div className="mcp-server-card__subtitle">{subtitle}</div>
+                {row.problems.map((problem, index) => (
+                  <div key={`${index}-${problem.code}`} className="mcp-server-card__problem" role="note">
+                    <span aria-hidden="true">!</span> {errorMessage(problem.code)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="skill-card__list-actions mcp-server-card__actions">
+          {isGrid && row.transport ? (
+            <span className="skill-card__grid-source-label">{t(TRANSPORT_LABELS[row.transport])}</span>
+          ) : null}
+          {row.invalid ? null : (
+            <button
+              className={`skill-card__icon-button plugins-page__toggle-icon-button ${allReadyEnabled ? "is-enabled" : partial ? "is-partial" : "is-disabled"}`}
+              type="button"
+              onClick={() => onToggleAll(row, !allReadyEnabled)}
+              aria-label={powerTooltip}
+              data-tooltip={powerTooltip}
+              disabled={isBulk || isDeleting || (readyPills.length === 0 && enabledPills.length === 0)}
+            >
+              <PowerToggleIcon isSpinning={isBulk} />
+            </button>
+          )}
+          {editButton}
+          {deleteButton}
+          {isGrid || row.invalid ? null : (
+            <span className="skill-card__chevron mcp-server-card__chevron" aria-hidden="true">
+              {isExpanded ? "⌄" : "›"}
+            </span>
+          )}
+        </div>
+      </div>
+      {isExpanded ? (
+        <McpServerDetailContainer
+          isGridLayout={isGrid}
+          row={row}
+          active={enabledPills.length > 0}
+          onClose={handleClose}
+          onEdit={() => {
+            onExpandedChange("");
+            onEdit(row.id, "form");
+          }}
+        >
+          <section>
+            <div className="skill-card__section-header">
+              <h4>{t("mcp.card.basicInfo")}</h4>
+            </div>
+            <dl className="detail-grid detail-grid--single">
+              <div>
+                <dt>{t("mcp.card.description")}</dt>
+                <dd>{row.description ?? t("mcp.card.noDescription")}</dd>
+              </div>
+            </dl>
+            <dl className="detail-grid detail-grid--single">
+              <div>
+                <dt>{t("mcp.card.command")}</dt>
+                <dd className="detail-grid__single-line" data-tooltip={row.launch}>{row.launch}</dd>
+              </div>
+            </dl>
+            <dl className="detail-grid detail-grid--mcp-meta">
+              <div>
+                <dt>{t("mcp.card.origin")}</dt>
+                <dd className="detail-grid__single-line">{row.origin ?? t("mcp.card.originNone")}</dd>
+              </div>
+              <div>
+                <dt>{t("mcp.card.scope")}</dt>
+                <dd className="detail-grid__single-line">{t("scope.user")}</dd>
+              </div>
+            </dl>
+          </section>
+          <section>
+            <div className="skill-card__section-header">
+              <h4>{t("mcp.card.enableApps")}</h4>
+              {readyPills.length > 0 || enabledPills.length > 0 ? (
+                <div className="tool-sync-panel__actions">
+                  <button
+                    className="secondary-button secondary-button--compact semantic-action semantic-action--enable"
+                    type="button"
+                    onClick={() => onToggleAll(row, true)}
+                    disabled={isBulk || allReadyEnabled}
+                    aria-label={t("mcp.card.enableAllApps", { name })}
+                  >
+                    {t("mcp.card.enableAll")}
+                  </button>
+                  <button
+                    className="secondary-button secondary-button--compact semantic-action semantic-action--disable"
+                    type="button"
+                    onClick={() => onToggleAll(row, false)}
+                    disabled={isBulk || enabledPills.length === 0}
+                    aria-label={t("mcp.card.disableAllApps", { name })}
+                  >
+                    {t("mcp.card.disableAll")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            {pills.length > 0 ? (
+              <div className="tool-pill-grid">
+                {pills.map((entry) => (
+                  <ClientPill
+                    key={entry.client.id}
+                    row={row}
+                    entry={entry}
+                    busy={isBulk}
+                    onOpenPending={onOpenPending}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="mcp-server-card__tool-empty">{t("mcp.card.noClients")}</p>
+            )}
+          </section>
+        </McpServerDetailContainer>
+      ) : null}
+    </article>
+  );
+});
+
 /**
  * The MCP page (SPEC 13.2): one card per store server with its client pills, or at project
  * scope the servers of that project's manifests.
@@ -194,8 +469,10 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
 
   const list = servers.data;
   const clients: ClientInfo[] = list?.clients ?? [];
+  // Typing stays responsive: the list filters on the deferred query in a background render.
+  const deferredQuery = useDeferredValue(query);
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
+    const needle = deferredQuery.trim().toLowerCase();
     const rows = list?.servers ?? [];
     if (!needle) {
       return rows;
@@ -203,9 +480,9 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
     return rows.filter((row) =>
       [row.id, row.displayName ?? "", row.launch].some((field) => field.toLowerCase().includes(needle)),
     );
-  }, [list, query]);
+  }, [list, deferredQuery]);
 
-  async function handleDelete(row: ServerRow) {
+  const handleDelete = useEventCallback(async (row: ServerRow) => {
     if (deletingId) {
       return;
     }
@@ -222,9 +499,9 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
     } finally {
       setDeletingId("");
     }
-  }
+  });
 
-  async function handleToggleAll(row: ServerRow, enable: boolean) {
+  const handleToggleAll = useEventCallback(async (row: ServerRow, enable: boolean) => {
     setBulkId(row.id);
     try {
       await setServerClients(
@@ -235,7 +512,12 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
     } finally {
       setBulkId("");
     }
-  }
+  });
+
+  const handleEdit = useCallback(
+    (serverId: string, tab: EditTab) => setDialog({ mode: "edit", serverId, tab }),
+    [],
+  );
 
   const toolbar = (
     <section className="mcp-toolbar skills-header-bar__tools" aria-label={t("mcp.toolbar.aria")}>
@@ -296,7 +578,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
         <HeaderToolbar>{toolbar}</HeaderToolbar>
         <ProjectServersView
           projectId={projectId}
-          query={query}
+          query={deferredQuery}
           onOpenPending={onOpenPending}
           dialog={projectDialog}
           onDialog={setProjectDialog}
@@ -326,248 +608,25 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
       {servers.isPending ? <p className="mcp-page-loading">{t("mcp.loading")}</p> : null}
 
       <section className={`mcp-server-list card-list${viewMode === "grid" ? " tool-card-grid" : ""}`}>
-        {filtered.map((row) => {
-          const name = serverName(row);
-          const isGrid = viewMode === "grid";
-          const isExpanded = expandedId === row.id && !row.invalid;
-          const pills = visiblePills(row, clients);
-          const enabledPills = pills.filter((entry) => entry.pill.selected);
-          const readyPills = pills.filter(
-            (entry: VisiblePill) => entry.client.detected && entry.client.supported && entry.pill.state !== "not_supported",
-          );
-          const allReadyEnabled = readyPills.length > 0 && readyPills.every((entry) => entry.pill.selected);
-          const partial = enabledPills.length > 0 && !allReadyEnabled;
-          const powerTooltip = allReadyEnabled
-            ? t("mcp.card.disableAllApps", { name })
-            : partial
-              ? t("mcp.card.bulkToggle.partial", { enabled: enabledPills.length, total: readyPills.length })
-              : t("mcp.card.enableAllApps", { name });
-          const isBulk = bulkId === row.id;
-          const isDeleteConfirming = deleteConfirmingId === row.id;
-          const isDeleting = deletingId === row.id;
-          const enabledSummary = enabledPills.length > 0
-            ? t("mcp.summary.enabledApps", { apps: enabledPills.map((entry) => entry.client.name).join(", ") })
-            : t("mcp.summary.disabled");
-          const subtitle = row.invalid
-            ? errorMessage(row.invalid.code)
-            : row.description ?? row.launch;
-
-          const deleteButton = isDeleteConfirming || isDeleting ? (
-            <button
-              ref={deleteActionRef}
-              className="skill-card__delete-confirm-button"
-              type="button"
-              onClick={() => void handleDelete(row)}
-              aria-label={t("mcp.card.deleteConfirmAria", {
-                state: isDeleting ? t("mcp.card.deleting") : t("mcp.card.deleteConfirm"),
-                name,
-              })}
-              data-tooltip={isDeleting ? t("mcp.card.deleting") : t("mcp.card.deleteConfirmTooltip")}
-              disabled={isDeleting}
-            >
-              {isDeleting ? t("mcp.card.deleting") : t("mcp.card.deleteConfirm")}
-            </button>
-          ) : (
-            <button
-              className="skill-card__icon-button skill-card__icon-button--delete"
-              type="button"
-              onClick={() => void handleDelete(row)}
-              aria-label={t("mcp.card.delete", { name })}
-              data-tooltip={t("mcp.card.deleteTooltip")}
-              disabled={Boolean(deletingId)}
-            >
-              <DeleteIcon />
-            </button>
-          );
-
-          const editButton = (
-            <button
-              className="skill-card__icon-button"
-              type="button"
-              onClick={() => setDialog({ mode: "edit", serverId: row.id, tab: row.invalid ? "toml" : "form" })}
-              aria-label={t("mcp.card.edit", { name })}
-              data-tooltip={t("mcp.card.editTooltip")}
-              disabled={Boolean(deletingId)}
-            >
-              <EditIcon />
-            </button>
-          );
-
-          return (
-            <article
-              key={row.id}
-              className={`mcp-server-card${isGrid ? " mcp-server-card--grid" : ""}${isExpanded ? " is-expanded" : ""}${row.invalid ? " is-invalid" : ""}`}
-              aria-label={name}
-            >
-              <div className="mcp-server-card__header">
-                <div
-                  className="mcp-server-card__summary-button"
-                  role={row.invalid ? undefined : "button"}
-                  tabIndex={row.invalid ? undefined : 0}
-                  onClick={() => {
-                    if (!row.invalid) {
-                      setExpandedId(isExpanded ? "" : row.id);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (!row.invalid && (event.key === "Enter" || event.key === " ")) {
-                      event.preventDefault();
-                      setExpandedId(isExpanded ? "" : row.id);
-                    }
-                  }}
-                  aria-expanded={row.invalid ? undefined : isExpanded}
-                  aria-label={row.invalid
-                    ? undefined
-                    : t(isExpanded ? "mcp.card.collapseAria" : "mcp.card.expandAria", { name })}
-                >
-                  <div className="mcp-server-card__main">
-                    <div className="mcp-server-card__identity">
-                      <McpServerMonogram name={name} active={enabledPills.length > 0} />
-                      <div className="mcp-server-card__title-stack">
-                        <div className="mcp-server-card__title-row">
-                          <strong>{name}</strong>
-                          {row.invalid ? (
-                            <span className="status-badge tone-danger">{t("mcp.card.invalid")}</span>
-                          ) : (
-                            <>
-                              {row.transport ? (
-                                <span className="status-badge tone-neutral mcp-server-card__tool-summary-badge">
-                                  {t(TRANSPORT_LABELS[row.transport])}
-                                </span>
-                              ) : null}
-                              <span
-                                className={`status-badge ${enabledPills.length > 0 ? "tone-info" : "tone-neutral"} skill-card__enabled-toggle${enabledPills.length > 0 ? "" : " is-empty"}`}
-                                aria-label={enabledSummary}
-                                data-tooltip={enabledSummary}
-                              >
-                                {enabledPills.length > 0
-                                  ? t("mcp.summary.enabledCount", { count: enabledPills.length })
-                                  : t("mcp.summary.disabled")}
-                              </span>
-                            </>
-                          )}
-                          <span className="status-badge tone-neutral mcp-layer-chip">{t("scope.user")}</span>
-                        </div>
-                        <div className="mcp-server-card__subtitle">{subtitle}</div>
-                        {row.problems.map((problem, index) => (
-                          <div key={`${index}-${problem.code}`} className="mcp-server-card__problem" role="note">
-                            <span aria-hidden="true">!</span> {errorMessage(problem.code)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="skill-card__list-actions mcp-server-card__actions">
-                  {isGrid && row.transport ? (
-                    <span className="skill-card__grid-source-label">{t(TRANSPORT_LABELS[row.transport])}</span>
-                  ) : null}
-                  {row.invalid ? null : (
-                    <button
-                      className={`skill-card__icon-button plugins-page__toggle-icon-button ${allReadyEnabled ? "is-enabled" : partial ? "is-partial" : "is-disabled"}`}
-                      type="button"
-                      onClick={() => void handleToggleAll(row, !allReadyEnabled)}
-                      aria-label={powerTooltip}
-                      data-tooltip={powerTooltip}
-                      disabled={isBulk || isDeleting || (readyPills.length === 0 && enabledPills.length === 0)}
-                    >
-                      <PowerToggleIcon isSpinning={isBulk} />
-                    </button>
-                  )}
-                  {editButton}
-                  {deleteButton}
-                  {isGrid || row.invalid ? null : (
-                    <span className="skill-card__chevron mcp-server-card__chevron" aria-hidden="true">
-                      {isExpanded ? "⌄" : "›"}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {isExpanded ? (
-                <McpServerDetailContainer
-                  isGridLayout={isGrid}
-                  row={row}
-                  active={enabledPills.length > 0}
-                  onClose={() => setExpandedId("")}
-                  onEdit={() => {
-                    setExpandedId("");
-                    setDialog({ mode: "edit", serverId: row.id, tab: "form" });
-                  }}
-                >
-                  <section>
-                    <div className="skill-card__section-header">
-                      <h4>{t("mcp.card.basicInfo")}</h4>
-                    </div>
-                    <dl className="detail-grid detail-grid--single">
-                      <div>
-                        <dt>{t("mcp.card.description")}</dt>
-                        <dd>{row.description ?? t("mcp.card.noDescription")}</dd>
-                      </div>
-                    </dl>
-                    <dl className="detail-grid detail-grid--single">
-                      <div>
-                        <dt>{t("mcp.card.command")}</dt>
-                        <dd className="detail-grid__single-line" data-tooltip={row.launch}>{row.launch}</dd>
-                      </div>
-                    </dl>
-                    <dl className="detail-grid detail-grid--mcp-meta">
-                      <div>
-                        <dt>{t("mcp.card.origin")}</dt>
-                        <dd className="detail-grid__single-line">{row.origin ?? t("mcp.card.originNone")}</dd>
-                      </div>
-                      <div>
-                        <dt>{t("mcp.card.scope")}</dt>
-                        <dd className="detail-grid__single-line">{t("scope.user")}</dd>
-                      </div>
-                    </dl>
-                  </section>
-                  <section>
-                    <div className="skill-card__section-header">
-                      <h4>{t("mcp.card.enableApps")}</h4>
-                      {readyPills.length > 0 || enabledPills.length > 0 ? (
-                        <div className="tool-sync-panel__actions">
-                          <button
-                            className="secondary-button secondary-button--compact semantic-action semantic-action--enable"
-                            type="button"
-                            onClick={() => void handleToggleAll(row, true)}
-                            disabled={isBulk || allReadyEnabled}
-                            aria-label={t("mcp.card.enableAllApps", { name })}
-                          >
-                            {t("mcp.card.enableAll")}
-                          </button>
-                          <button
-                            className="secondary-button secondary-button--compact semantic-action semantic-action--disable"
-                            type="button"
-                            onClick={() => void handleToggleAll(row, false)}
-                            disabled={isBulk || enabledPills.length === 0}
-                            aria-label={t("mcp.card.disableAllApps", { name })}
-                          >
-                            {t("mcp.card.disableAll")}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                    {pills.length > 0 ? (
-                      <div className="tool-pill-grid">
-                        {pills.map((entry) => (
-                          <ClientPill
-                            key={entry.client.id}
-                            row={row}
-                            entry={entry}
-                            busy={isBulk}
-                            onOpenPending={onOpenPending}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="mcp-server-card__tool-empty">{t("mcp.card.noClients")}</p>
-                    )}
-                  </section>
-                </McpServerDetailContainer>
-              ) : null}
-            </article>
-          );
-        })}
+        {filtered.map((row) => (
+          <McpServerCard
+            key={row.id}
+            row={row}
+            clients={clients}
+            isGrid={viewMode === "grid"}
+            isExpanded={expandedId === row.id && !row.invalid}
+            isBulk={bulkId === row.id}
+            isDeleteConfirming={deleteConfirmingId === row.id}
+            isDeleting={deletingId === row.id}
+            anyDeleting={Boolean(deletingId)}
+            deleteActionRef={deleteActionRef}
+            onExpandedChange={setExpandedId}
+            onDelete={handleDelete}
+            onToggleAll={handleToggleAll}
+            onEdit={handleEdit}
+            onOpenPending={onOpenPending}
+          />
+        ))}
         {list && filtered.length === 0 ? (
           <div className="panel-card empty-state">
             {list.servers.length === 0 ? (

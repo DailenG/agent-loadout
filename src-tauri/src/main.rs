@@ -270,6 +270,24 @@ mod tests {
         assert!(!csp.contains("unsafe-eval"), "{csp}");
     }
 
+    /// Setting `additionalBrowserArgs` replaces Tauri's default WebView2
+    /// arguments, so they are repeated; `--disable-component-update` stops
+    /// the runtime downloading Widevine, speech and other components into
+    /// every new profile (#10).
+    #[test]
+    fn webview2_args_keep_tauris_defaults_and_skip_component_updates() {
+        let config = read_config("tauri.conf.json");
+        let args = config["app"]["windows"][0]["additionalBrowserArgs"]
+            .as_str()
+            .expect("additionalBrowserArgs is set");
+        let args: Vec<&str> = args.split_whitespace().collect();
+        assert!(
+            args.contains(&"--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"),
+            "{args:?}"
+        );
+        assert!(args.contains(&"--disable-component-update"), "{args:?}");
+    }
+
     /// The platform files replace `app.windows` whole (JSON Merge Patch), so
     /// each window must equal the base one apart from its chrome keys
     /// (SPEC 13.1), title included.

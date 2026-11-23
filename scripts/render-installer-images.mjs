@@ -25,7 +25,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "src-tauri", "windows");
 
 // The icon's own gradient stops; the background uses its dark end.
-const BRAND_DARK = "#22184f";
+const BRAND_DARK = "#1f1548";
 const BRAND_DEEP = "#140e33";
 const BRAND_VIOLET = "#5a3fd0";
 

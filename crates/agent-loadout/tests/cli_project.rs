@@ -398,6 +398,43 @@ fn add_registers_without_trust() {
 }
 
 #[test]
+fn trust_exits_on_its_own_project_not_on_another_untrusted_one() {
+    let cli = Cli::new();
+    let mut roots = Vec::new();
+    for id in ["first-ab12", "second-cd34"] {
+        let (root, _) = cli.folder(id, false);
+        std::fs::create_dir_all(root.join(".loadout")).unwrap();
+        std::fs::write(
+            manifest(&root, "project.toml"),
+            format!(
+                "schema = 1\nid = \"{id}\"\n\n[servers.docs]\ntransport = \"stdio\"\n\
+                 command = \"docs-mcp\"\nclients = [\"claude-code\"]\n"
+            ),
+        )
+        .unwrap();
+        cli.ok(&["project", "add", root.to_str().unwrap()]);
+        roots.push(root);
+    }
+
+    // The instant apply after the trust still reports the other project as
+    // blocked, but that is not this command's failure (#10).
+    let trusted = cli.ok(&["project", "trust", roots[0].to_str().unwrap()]);
+    let targets = &trusted["apply"]["targets"];
+    assert!(
+        project_targets(targets, "second-cd34")
+            .iter()
+            .any(|target| target["error"]["code"] == "trust_required"),
+        "{trusted:#}"
+    );
+    let docs: Value = serde_json::from_str(&read(&roots[0].join(".mcp.json"))).unwrap();
+    assert_eq!(docs["mcpServers"]["docs"]["command"], "docs-mcp");
+
+    // A whole-machine apply still exits 7 for the untrusted project.
+    let (code, _) = cli.json(&["apply"]);
+    assert_eq!(code, 7);
+}
+
+#[test]
 fn share_moves_private_servers_into_project_toml_with_comments() {
     let cli = Cli::new();
     let (root, repo) = cli.folder("shareable", true);

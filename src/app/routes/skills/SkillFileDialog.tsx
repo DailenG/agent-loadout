@@ -5,13 +5,15 @@
 // The data layer is new: `list_skill_files`/`read_skill_file` and `skill_update_diff`.
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useId, useState, type ReactNode } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { t } from "@/i18n/en";
 import type { SkillFileChange, SkillInfo, SkillUpdateCheck } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
 import { CHANGE_KIND_KEYS, failureText, fileTreeRows, formatSize } from "./labels";
-import { SkillDiffView } from "./SkillDiffView";
+
+// CodeMirror is most of the bundle and only the update diff needs it: load it on first use.
+const SkillDiffView = lazy(() => import("./SkillDiffView").then((module) => ({ default: module.SkillDiffView })));
 
 type FileItemProps = {
   path: string;
@@ -220,11 +222,13 @@ export function SkillUpdateDialog({ skill, check, isUpdating, onUpdate, onClose 
       ) : diff.data.binary ? (
         <div className="skill-file-dialog__empty">{t("skill.update.binary")}</div>
       ) : (
-        <SkillDiffView
-          before={diff.data.before ?? ""}
-          after={diff.data.after ?? ""}
-          ariaLabel={t("skill.diff.aria", { path: diff.data.path })}
-        />
+        <Suspense fallback={<div className="skill-file-dialog__empty">{t("skill.update.loading")}</div>}>
+          <SkillDiffView
+            before={diff.data.before ?? ""}
+            after={diff.data.after ?? ""}
+            ariaLabel={t("skill.diff.aria", { path: diff.data.path })}
+          />
+        </Suspense>
       )}
     </DialogShell>
   );

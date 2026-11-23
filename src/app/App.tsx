@@ -5,6 +5,9 @@
 
 import {
   Component,
+  lazy,
+  Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -20,6 +23,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { useDriftTriggers } from "@/app/apply/driftTriggers";
 import { PendingChangesPill } from "@/app/apply/PendingChangesPill";
 import { AppTooltip } from "@/app/components/AppTooltip";
@@ -28,17 +32,12 @@ import { HeaderToolbarProvider } from "@/app/components/HeaderSlots";
 import { NotificationProvider, useNotifications } from "@/app/components/notifications";
 import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/SettingsGroup";
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
-import { HistoryPage } from "@/app/routes/history/HistoryPage";
-import { InstallPage } from "@/app/routes/install/InstallPage";
 import { MigrateSection } from "@/app/routes/migrate/MigrateSection";
-import { McpPage } from "@/app/routes/mcp/McpPage";
-import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
 import { SkillsPage } from "@/app/routes/skills/SkillsPage";
 import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRemoteStep";
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
 import { UpdatesSection, useStartupUpdateCheck } from "@/app/routes/settings/updates/UpdatesSection";
-import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import { ActiveScopeProvider } from "@/app/scope/ActiveScope";
 import { ScopeSwitcher } from "@/app/scope/ScopeSwitcher";
 import { dataHomeSourceLabels, errorMessage, platformLabels, t, type MessageKey } from "@/i18n/en";
@@ -50,6 +49,36 @@ import {
   useTransport,
   type Transport,
 } from "@/ipc/transport";
+
+// Skills is the start page and loads with the shell; the other pages load on
+// their first visit, so startup parses less.
+const HistoryPage = lazy(() =>
+  import("@/app/routes/history/HistoryPage").then((module) => ({ default: module.HistoryPage })),
+);
+const InstallPage = lazy(() =>
+  import("@/app/routes/install/InstallPage").then((module) => ({ default: module.InstallPage })),
+);
+const McpPage = lazy(() => import("@/app/routes/mcp/McpPage").then((module) => ({ default: module.McpPage })));
+const ProjectsPage = lazy(() =>
+  import("@/app/routes/projects/ProjectsPage").then((module) => ({ default: module.ProjectsPage })),
+);
+const ToolsPage = lazy(() => import("@/app/routes/tools/ToolsPage").then((module) => ({ default: module.ToolsPage })));
+
+/** Shown only when a page takes longer than this to load, so a fast load never flashes it. */
+const ROUTE_LOADING_DELAY_MS = 300;
+
+function RouteLoading() {
+  const [isShown, setIsShown] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsShown(true), ROUTE_LOADING_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div aria-busy="true">
+      {isShown ? <p className="mcp-page-loading">{t("app.route.loading")}</p> : null}
+    </div>
+  );
+}
 
 export type RouteKey =
   | "skills"
@@ -155,7 +184,7 @@ export const queryKeys = {
 } as const;
 
 export function createQueryClient() {
-  return new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       // IPC is local: a retry only delays the error the user should see.
       // Window focus rechecks only the views drift shows up in
@@ -163,6 +192,13 @@ export function createQueryClient() {
       queries: { retry: false, refetchOnWindowFocus: false },
     },
   });
+  // The plan and the server pills cost a whole plan run each. The watcher,
+  // window focus, Refresh and every store change invalidate them explicitly,
+  // so a mount (opening the apply drawer, revisiting MCP) reads the cache.
+  for (const queryKey of [storeQueryKeys.pendingPlan, storeQueryKeys.servers]) {
+    client.setQueryDefaults(queryKey, { staleTime: Infinity });
+  }
+  return client;
 }
 
 function useAppInfo() {
@@ -416,22 +452,22 @@ function BrandIcon() {
       <defs>
         <linearGradient
           id="brand-gradient"
-          x1="24"
-          y1="24"
-          x2="204"
-          y2="204"
+          x1="30"
+          y1="18"
+          x2="200"
+          y2="212"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#22184f" />
-          <stop offset="0.55" stopColor="#5a3fd0" />
-          <stop offset="1" stopColor="#ee8a3a" />
+          <stop offset="0" stopColor="#1f1548" />
+          <stop offset="0.52" stopColor="#5a3fd0" />
+          <stop offset="1" stopColor="#f28b3c" />
         </linearGradient>
       </defs>
-      <rect x="18" y="18" width="192" height="192" rx="50" fill="url(#brand-gradient)" stroke="none" />
-      <rect x="60" y="60" width="108" height="26" rx="13" fill="#ffffff" stroke="none" />
-      <rect x="60" y="101" width="108" height="26" rx="13" fill="#ffffff" fillOpacity="0.78" stroke="none" />
-      <rect x="60" y="142" width="66" height="26" rx="13" fill="#ffffff" fillOpacity="0.56" stroke="none" />
-      <circle cx="153" cy="155" r="15" fill="#ffd8b0" stroke="none" />
+      <rect x="14" y="14" width="200" height="200" rx="54" fill="url(#brand-gradient)" stroke="none" />
+      <rect x="56" y="56" width="116" height="30" rx="15" fill="#ffffff" stroke="none" />
+      <rect x="56" y="99" width="116" height="30" rx="15" fill="#ebe5ff" stroke="none" />
+      <rect x="56" y="142" width="72" height="30" rx="15" fill="#d5c9ff" stroke="none" />
+      <circle cx="157" cy="157" r="17" fill="#ffd8b0" stroke="none" />
     </svg>
   );
 }
@@ -732,6 +768,8 @@ function AppContent(props: { features: FeatureFlags }) {
   const [sidebarHandleTop, setSidebarHandleTop] = useState<number | null>(null);
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  // Stable: the memoized MCP cards take it, so opening the drawer does not re-render them.
+  const openPending = useCallback(() => setIsDrawerOpen(true), []);
   useQueryErrorToasts();
   useDriftTriggers();
   useStartupUpdateCheck();
@@ -855,7 +893,7 @@ function AppContent(props: { features: FeatureFlags }) {
           >
             <div className="page-header__row" data-tauri-drag-region={macOSDragRegion}>
               <h1>{t(activeDefinition.labelKey)}</h1>
-              <PendingChangesPill onOpen={() => setIsDrawerOpen(true)} />
+              <PendingChangesPill onOpen={openPending} />
               <div className="mcp-header-toolbar-slot" ref={setToolbarHost} />
             </div>
             <p>{t(activeDefinition.descriptionKey)}</p>
@@ -865,13 +903,15 @@ function AppContent(props: { features: FeatureFlags }) {
         <section ref={pageContentRef} className="page-content">
           <HeaderToolbarProvider value={toolbarHost}>
             <RouteErrorBoundary route={activeDefinition.key}>
-              <RoutePage
-                route={activeDefinition}
-                onNavigate={navigate}
-                onOpenPending={() => setIsDrawerOpen(true)}
-                theme={theme}
-                onThemeChange={setTheme}
-              />
+              <Suspense fallback={<RouteLoading />}>
+                <RoutePage
+                  route={activeDefinition}
+                  onNavigate={navigate}
+                  onOpenPending={openPending}
+                  theme={theme}
+                  onThemeChange={setTheme}
+                />
+              </Suspense>
             </RouteErrorBoundary>
           </HeaderToolbarProvider>
         </section>

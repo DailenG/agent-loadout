@@ -103,31 +103,44 @@ impl ApplyReport {
     /// codes 1, 4, 5 and 7; the CLI maps it to its exit code, the app to
     /// its notice).
     pub fn status(&self) -> ApplyStatus {
-        if self
-            .targets
-            .iter()
-            .any(|target| target.outcome == ApplyOutcome::Failed)
-        {
-            ApplyStatus::FileFailed
-        } else if self.unresolved() > 0 {
-            ApplyStatus::NeedsDecision
-        } else if self
-            .targets
-            .iter()
-            .flat_map(|target| &target.entries)
-            .any(EntryPlan::blocked_by_secret)
-        {
-            ApplyStatus::MissingSecrets
-        } else if self.targets.iter().any(|target| {
-            target
-                .error
-                .as_ref()
-                .is_some_and(|error| error.code() == ErrorCode::TrustRequired)
-        }) {
-            ApplyStatus::TrustRequired
-        } else {
-            ApplyStatus::Done
-        }
+        status_of(self.targets.iter())
+    }
+
+    /// [`Self::status`] over project `id`'s own targets: what trusting that
+    /// project left, whatever another project still waits for. The instant
+    /// apply after a trust covers the whole machine (#10).
+    pub fn project_status(&self, id: &str) -> ApplyStatus {
+        status_of(
+            self.targets
+                .iter()
+                .filter(|target| target.project_id.as_deref() == Some(id)),
+        )
+    }
+}
+
+fn status_of<'a>(mut targets: impl Iterator<Item = &'a TargetResult> + Clone) -> ApplyStatus {
+    if targets
+        .clone()
+        .any(|target| target.outcome == ApplyOutcome::Failed)
+    {
+        ApplyStatus::FileFailed
+    } else if targets.clone().any(|target| target.unresolved() > 0) {
+        ApplyStatus::NeedsDecision
+    } else if targets
+        .clone()
+        .flat_map(|target| &target.entries)
+        .any(EntryPlan::blocked_by_secret)
+    {
+        ApplyStatus::MissingSecrets
+    } else if targets.any(|target| {
+        target
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code() == ErrorCode::TrustRequired)
+    }) {
+        ApplyStatus::TrustRequired
+    } else {
+        ApplyStatus::Done
     }
 }
 

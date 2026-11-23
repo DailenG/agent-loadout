@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 228 228" width="1024" height="1024">
   <defs>
-    <linearGradient id="loadout-bg" x1="24" y1="24" x2="204" y2="204" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#22184f"/>
-      <stop offset="0.55" stop-color="#5a3fd0"/>
-      <stop offset="1" stop-color="#ee8a3a"/>
+    <linearGradient id="loadout-bg" x1="30" y1="18" x2="200" y2="212" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f1548"/>
+      <stop offset="0.52" stop-color="#5a3fd0"/>
+      <stop offset="1" stop-color="#f28b3c"/>
     </linearGradient>
   </defs>
-  <rect x="18" y="18" width="192" height="192" rx="50" fill="url(#loadout-bg)"/>
-  <rect x="60" y="60" width="108" height="26" rx="13" fill="#ffffff"/>
-  <rect x="60" y="101" width="108" height="26" rx="13" fill="#ffffff" fill-opacity="0.78"/>
-  <rect x="60" y="142" width="66" height="26" rx="13" fill="#ffffff" fill-opacity="0.56"/>
-  <circle cx="153" cy="155" r="15" fill="#ffd8b0"/>
+  <rect x="14" y="14" width="200" height="200" rx="54" fill="url(#loadout-bg)"/>
+  <rect x="56" y="56" width="116" height="30" rx="15" fill="#ffffff"/>
+  <rect x="56" y="99" width="116" height="30" rx="15" fill="#ebe5ff"/>
+  <rect x="56" y="142" width="72" height="30" rx="15" fill="#d5c9ff"/>
+  <circle cx="157" cy="157" r="17" fill="#ffd8b0"/>
 </svg>

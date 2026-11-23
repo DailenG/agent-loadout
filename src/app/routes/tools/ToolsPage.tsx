@@ -4,12 +4,13 @@
 // are the Recommended badge and the "Get" action for an undetected recommended client (#2), and
 // the project view: at project scope the cards name that project's files (SPEC 13.1).
 
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
+import { memo, useMemo, useState } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { recommendedFirst } from "@/app/clients";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
+import { useEventCallback } from "@/app/components/useEventCallback";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { projectRelativePath } from "@/app/routes/projects/labels";
@@ -82,12 +83,30 @@ type ToolCardProps = {
   project: ProjectRow | null;
   isOpening: boolean;
   openDisabled: boolean;
-  onOpenFolder: () => void;
-  onManage: () => void;
-  onGet: () => void;
+  /** Stable across renders (the card is memoized), so these take the tool's ID. */
+  onOpenFolder: (toolId: string) => void;
+  onManage: (toolId: string) => void;
+  onGet: (toolId: string) => void;
 };
 
-function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
+/** Reads the fetching state itself, so a refetch re-renders this button and not every card. */
+function ToolsRefreshButton() {
+  const queryClient = useQueryClient();
+  const isFetching = useIsFetching({ queryKey: storeQueryKeys.tools }) > 0;
+  return (
+    <button
+      className={`ghost-button tools-refresh-button${isFetching ? " is-loading" : ""}`}
+      type="button"
+      onClick={() => void queryClient.refetchQueries({ queryKey: storeQueryKeys.tools })}
+      disabled={isFetching}
+      aria-label={t("tools.refresh")}
+    >
+      <RefreshIcon spinning={isFetching} />
+    </button>
+  );
+}
+
+const ToolCard = memo(function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
   const yesNo = (value: boolean) => (value ? t("tools.capability.yes") : t("tools.capability.no"));
 
   return (
@@ -124,7 +143,7 @@ function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onMana
             <button
               className="secondary-button secondary-button--compact tool-card__get-button"
               type="button"
-              onClick={onGet}
+              onClick={() => onGet(tool.id)}
               aria-label={t("tools.getAria", { name: tool.name })}
             >
               {t("tools.get", { name: tool.name })}
@@ -133,7 +152,7 @@ function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onMana
           <button
             className="primary-button primary-button--compact tool-card__manage-button"
             type="button"
-            onClick={onManage}
+            onClick={() => onManage(tool.id)}
             aria-label={t("tools.manageAria", { name: tool.name })}
           >
             {t("tools.manage")}
@@ -164,7 +183,7 @@ function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onMana
           <button
             className="tool-card__path-button"
             type="button"
-            onClick={onOpenFolder}
+            onClick={() => onOpenFolder(tool.id)}
             aria-label={t("tools.openFolderAria", { name: tool.name })}
             data-tooltip={t("tools.openFolder")}
             disabled={openDisabled || tool.userFiles.length === 0}
@@ -215,7 +234,7 @@ function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onMana
       </div>
     </article>
   );
-}
+});
 
 export type ToolsPageProps = {
   /** Opens the MCP page, where inherited servers are changed. */
@@ -242,7 +261,7 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
   const [openingToolId, setOpeningToolId] = useState("");
   const managingTool = sortedTools.find((tool) => tool.id === managingToolId) ?? null;
 
-  async function handleOpenFolder(toolId: string) {
+  const handleOpenFolder = useEventCallback(async (toolId: string) => {
     if (openingToolId) {
       return;
     }
@@ -257,9 +276,9 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
     } finally {
       setOpeningToolId("");
     }
-  }
+  });
 
-  async function handleGet(toolId: string) {
+  const handleGet = useEventCallback(async (toolId: string) => {
     try {
       unwrap(await commands.openToolHomepage(toolId));
     } catch (error) {
@@ -268,20 +287,12 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
         message: error instanceof IpcFailure ? errorMessage(error.code) : t("tools.error.openHomepage"),
       });
     }
-  }
+  });
 
   return (
     <div className="tools-route">
       <HeaderToolbar>
-        <button
-          className={`ghost-button tools-refresh-button${tools.isFetching ? " is-loading" : ""}`}
-          type="button"
-          onClick={() => void tools.refetch()}
-          disabled={tools.isFetching}
-          aria-label={t("tools.refresh")}
-        >
-          <RefreshIcon spinning={tools.isFetching} />
-        </button>
+        <ToolsRefreshButton />
       </HeaderToolbar>
       <section className="tools-section">
         {tools.isPending ? <p className="tools-note">{t("tools.loading")}</p> : null}
@@ -312,9 +323,9 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
               project={project}
               isOpening={openingToolId === tool.id}
               openDisabled={Boolean(openingToolId)}
-              onOpenFolder={() => void handleOpenFolder(tool.id)}
-              onManage={() => setManagingToolId(tool.id)}
-              onGet={() => void handleGet(tool.id)}
+              onOpenFolder={handleOpenFolder}
+              onManage={setManagingToolId}
+              onGet={handleGet}
             />
           ))}
         </div>

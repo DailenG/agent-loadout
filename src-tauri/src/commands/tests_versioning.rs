@@ -158,6 +158,34 @@ fn the_user_filter_lists_the_user_scope_commits() {
 }
 
 #[test]
+fn a_limit_lists_the_newest_commits_as_a_first_page() {
+    let fx = Fx::new();
+    for id in ["one", "two", "three"] {
+        servers::save(&fx.core, &draft(id, &["claude-code"]), true).unwrap();
+    }
+    let filter = |scope, limit| HistoryFilter {
+        scope,
+        entity: None,
+        limit,
+    };
+    let ids =
+        |entries: Vec<history::HistoryEntry>| entries.into_iter().map(|e| e.id).collect::<Vec<_>>();
+
+    let everything = ids(history::history(&fx.core, &all()).unwrap());
+    assert!(everything.len() > 2, "{everything:?}");
+    let page = ids(history::history(&fx.core, &filter(HistoryScope::All, Some(2))).unwrap());
+    assert_eq!(page, everything[..2]);
+
+    let user = ids(history::history(&fx.core, &filter(HistoryScope::User, None)).unwrap());
+    let user_page = ids(history::history(&fx.core, &filter(HistoryScope::User, Some(1))).unwrap());
+    assert_eq!(user_page, user[..1]);
+
+    // `Projects` filters after the walk, so a limit never cuts its matches short.
+    let projects = history::history(&fx.core, &filter(HistoryScope::Projects, Some(1))).unwrap();
+    assert!(projects.is_empty(), "{projects:?}");
+}
+
+#[test]
 fn undo_this_apply_from_history_is_one_click_for_the_latest() {
     let fx = Fx::new();
     servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();

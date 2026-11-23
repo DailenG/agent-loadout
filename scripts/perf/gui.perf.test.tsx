@@ -90,6 +90,17 @@ function nav(label: string) {
 test("GUI baseline over the perf dataset", async () => {
   const transport = createMockTransport({ appInfo: { version: "0.0.0-perf", platform: "windows" }, ...buildPerfDataset() });
   const user = userEvent.setup({ delay: null });
+  // Pages after Skills are lazy routes. Vitest transforms a module on its
+  // first import, which takes longer than `settle` waits; a WebView reads the
+  // built chunk from disk in milliseconds. Load them up front, so each page
+  // switch measures the page, not the transform.
+  await Promise.all([
+    import("@/app/routes/history/HistoryPage"),
+    import("@/app/routes/install/InstallPage"),
+    import("@/app/routes/mcp/McpPage"),
+    import("@/app/routes/projects/ProjectsPage"),
+    import("@/app/routes/tools/ToolsPage"),
+  ]);
 
   await measure("startup (mount to settled)", transport, () => {
     render(<App transport={transport} queryClient={createQueryClient()} />);

@@ -5,6 +5,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useId,
   useRef,
@@ -30,7 +32,9 @@ import {
   type TransportKind,
 } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
-import { TomlEditor } from "./TomlEditor";
+
+// CodeMirror is most of the bundle and only this tab needs it: load it on first use.
+const TomlEditor = lazy(() => import("./TomlEditor").then((module) => ({ default: module.TomlEditor })));
 
 export type EditTab = "form" | "toml" | "preview";
 
@@ -323,7 +327,10 @@ function ServerEditor(props: ServerEditorProps) {
                   </div>
                 ) : null}
                 <span>{t("mcp.dialog.toml.label")}</span>
-                <TomlEditor value={tomlText} onChange={editToml} ariaLabel={t("mcp.dialog.toml.label")} />
+                {/* The empty host keeps the editor's box while CodeMirror loads, so nothing flashes. */}
+                <Suspense fallback={<div className="mcp-toml-editor" />}>
+                  <TomlEditor value={tomlText} onChange={editToml} ariaLabel={t("mcp.dialog.toml.label")} />
+                </Suspense>
                 <p className="mcp-form-hint">{t("mcp.dialog.toml.hint")}</p>
               </div>
             )

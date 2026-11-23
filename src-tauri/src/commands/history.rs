@@ -381,23 +381,29 @@ pub fn history(core: &Core, filter: &HistoryFilter) -> CmdResult<Vec<HistoryEntr
         .as_deref()
         .map(str::trim)
         .filter(|entity| !entity.is_empty());
+    let limit = filter.limit.map(|n| n as usize);
     let entries = store.log(&LogFilter {
         entity: entity.map(str::to_owned),
         scope: match filter.scope {
             HistoryScope::User => Some(TrailerScope::System),
             HistoryScope::All | HistoryScope::Projects => None,
         },
-        limit: None,
+        // The walk stops at the limit, except for `Projects`, which filters
+        // the walked commits afterwards.
+        limit: if filter.scope == HistoryScope::Projects {
+            None
+        } else {
+            limit
+        },
     })?;
     let marks = Marks::load(core, &store)?;
-    let limit = filter.limit.map_or(usize::MAX, |n| n as usize);
     Ok(entries
         .iter()
         .filter(|entry| {
             filter.scope != HistoryScope::Projects
                 || matches!(entry.trailers.scope, Some(TrailerScope::Project(_)))
         })
-        .take(limit)
+        .take(limit.unwrap_or(usize::MAX))
         .map(|entry| marks.entry(entry))
         .collect())
 }

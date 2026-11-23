@@ -1003,6 +1003,46 @@ fn add_then_trust_review_shows_the_manifest_and_its_diff() {
     assert!(!fx.read(&root.join(".mcp.json")).contains("docs-mcp"));
 }
 
+/// The trust notice reports the trusted project's own files: another
+/// project that still waits for trust is listed, but is not its status (#10).
+#[test]
+fn trust_status_ignores_another_untrusted_project() {
+    let fx = Fx::new();
+    fx.stage(&[(
+        "servers/github.toml",
+        &server_file(
+            "github",
+            "transport = \"stdio\"\ncommand = \"github-mcp\"",
+            &["claude-code"],
+        ),
+    )]);
+    let root = unbound_project(&fx);
+    let other = fx.th.projects().join("other");
+    std::fs::create_dir_all(other.join(".loadout")).unwrap();
+    std::fs::write(
+        other.join(".loadout/project.toml"),
+        "schema = 1\nid = \"other-c3d4\"\nname = \"other\"\n\n[defaults]\n\
+         clients = [\"claude-code\"]\n\n[servers.notes]\ntransport = \"stdio\"\n\
+         command = \"notes-mcp\"\n",
+    )
+    .unwrap();
+    projects::add(&fx.core, &root).unwrap();
+    projects::add(&fx.core, &other).unwrap();
+
+    let review = projects::review(&fx.core, "app-a1b2").unwrap();
+    let trusted = projects::trust(&fx.core, "app-a1b2", &review.hash).unwrap();
+    let run = trusted.change.apply.expect("instant mode applies");
+    assert!(
+        run.files.iter().any(|file| file
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code == agent_loadout_core::ErrorCode::TrustRequired)),
+        "{run:?}"
+    );
+    assert_eq!(run.status, ApplyStatusKind::Done);
+    assert!(fx.read(&root.join(".mcp.json")).contains("docs-mcp"));
+}
+
 /// The matrix cell carries the effective view's provenance: winner,
 /// shadowed entries, other readers of the file, warnings, the snippet.
 #[test]

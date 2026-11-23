@@ -1223,7 +1223,7 @@ The filter is not a scope (History is cross-scope): **All**, **User** (commits o
 | `loadout --identify` | Prints `dev.dailen.loadout <version>` (used by `doctor` and adapters to detect a foreign `loadout` binary) |
 | `loadout completions <shell>` | Shell completions |
 
-Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout; 7 a project manifest needs `loadout project trust` (untrusted or changed since trusted; checked after 1, 4 and 5). A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`, `project rm`, `project trust`, `project share`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
+Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout; 7 a project manifest needs `loadout project trust` (untrusted or changed since trusted; checked after 1, 4 and 5). A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`, `project rm`, `project share`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `project trust` exits the same way over the trusted project's own targets only: another project that still waits for trust does not fail it (#10). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
 
 ---
 

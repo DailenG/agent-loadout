@@ -480,10 +480,16 @@ pub fn trust(core: &Core, id: &str, hash: &str) -> CmdResult<ProjectChange> {
     let (report, commit) =
         projects::trust(&store, &core.apply_env(), project, Some(hash)).map_err(scrub_err)?;
     drop(store);
+    let mut change = ChangeResult::new(&core.env, commit.as_ref(), report.as_ref());
+    // As `loadout project trust`: the notice reports this project's own
+    // targets, not another project that still waits for trust (#10).
+    if let (Some(run), Some(report)) = (change.apply.as_mut(), report.as_ref()) {
+        run.status = report.project_status(id).into();
+    }
     Ok(ProjectChange {
         id: id.to_owned(),
         trust: trust_now(core, id)?,
-        change: ChangeResult::new(&core.env, commit.as_ref(), report.as_ref()),
+        change,
     })
 }
 

@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { HistoryPage } from "@/app/routes/history/HistoryPage";
+import { HISTORY_PAGE_SIZE, HistoryPage } from "@/app/routes/history/HistoryPage";
 import { errorMessage, t } from "@/i18n/en";
 import type {
   BackupRunEntry,
@@ -150,7 +150,9 @@ describe("HistoryPage", () => {
     const older = screen.getByRole("listitem", { name: OLDER_APPLY.summary });
     expect(within(older).getByText(t("history.outcome.partial"))).toBeInTheDocument();
     expect(within(older).getByText(/laptop/)).toBeInTheDocument();
-    expect(argsOf(transport, "listHistory")[0]).toEqual([{ scope: "all", entity: null, limit: null }]);
+    // The first page asks one commit more, to know whether "Load more" is needed.
+    expect(argsOf(transport, "listHistory")[0]).toEqual([{ scope: "all", entity: null, limit: HISTORY_PAGE_SIZE + 1 }]);
+    expect(screen.queryByRole("button", { name: t("history.loadMore") })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: t("history.tag.delete", { name: "pre-change" }) }));
     await waitFor(() => expect(argsOf(transport, "deleteTag")).toEqual([["pre-change"]]));
@@ -162,14 +164,40 @@ describe("HistoryPage", () => {
     await user.click(screen.getByRole("combobox", { name: t("history.toolbar.scope") }));
     await user.click(await screen.findByRole("option", { name: t("history.scope.user") }));
     await waitFor(() =>
-      expect(argsOf(transport, "listHistory")).toContainEqual([{ scope: "user", entity: null, limit: null }]),
+      expect(argsOf(transport, "listHistory")).toContainEqual([
+        { scope: "user", entity: null, limit: HISTORY_PAGE_SIZE + 1 },
+      ]),
     );
     await user.type(screen.getByRole("searchbox", { name: t("history.toolbar.entity") }), "server/github{Enter}");
     await waitFor(() =>
       expect(argsOf(transport, "listHistory")).toContainEqual([
-        { scope: "user", entity: "server/github", limit: null },
+        { scope: "user", entity: "server/github", limit: HISTORY_PAGE_SIZE + 1 },
       ]),
     );
+  });
+
+  it("loads the list a page at a time", async () => {
+    const many = Array.from({ length: HISTORY_PAGE_SIZE * 2 + 5 }, (_, index) => ({
+      ...SERVER_EDIT,
+      id: index.toString(16).padStart(40, "0"),
+      summary: `commit ${index}`,
+      tags: [],
+    }));
+    const { user, transport } = renderPage({
+      commands: { listHistory: async (filter) => ok(many.slice(0, filter.limit ?? many.length)) },
+    });
+    await screen.findByRole("listitem", { name: "commit 0" });
+    expect(screen.getAllByRole("listitem")).toHaveLength(HISTORY_PAGE_SIZE);
+
+    await user.click(screen.getByRole("button", { name: t("history.loadMore") }));
+    await screen.findByRole("listitem", { name: `commit ${HISTORY_PAGE_SIZE * 2 - 1}` });
+    expect(screen.getAllByRole("listitem")).toHaveLength(HISTORY_PAGE_SIZE * 2);
+    expect(argsOf(transport, "listHistory").at(-1)).toEqual([{ scope: "all", entity: null, limit: HISTORY_PAGE_SIZE * 2 + 1 }]);
+
+    await user.click(screen.getByRole("button", { name: t("history.loadMore") }));
+    await screen.findByRole("listitem", { name: `commit ${HISTORY_PAGE_SIZE * 2 + 4}` });
+    expect(screen.getAllByRole("listitem")).toHaveLength(many.length);
+    expect(screen.queryByRole("button", { name: t("history.loadMore") })).toBeNull();
   });
 
   it("shows an empty state for an empty store", async () => {

@@ -6,7 +6,7 @@
 // frontmatter field, the source, owned links and problems (SPEC 12.1, 13.7), and a project
 // scope shows the project toggle instead of the tool pills (SPEC 12.3).
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { orderByRecommended } from "@/app/clients";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
@@ -39,17 +39,20 @@ export type SkillCardProps = {
   project: SkillProject | null;
   layout?: "list" | "grid";
   expanded: boolean;
-  onExpandedChange: (expanded: boolean) => void;
+  /** Stable across renders (the card is memoized), so it takes the skill's ID. */
+  onExpandedChange: (skillId: string, expanded: boolean) => void;
   /** The last update check of this skill, if any. */
   update?: SkillUpdateCheck;
-  /** The update of `update` went through: its entry is stale now. */
-  onUpdated: () => void;
+  /** The update of `update` went through: its entry is stale now. Stable, like `onExpandedChange`. */
+  onUpdated: (skillId: string) => void;
   /** Every tag in the store, for the tag editor's suggestions. */
   allTags: string[];
 };
 
-export function SkillCard(props: SkillCardProps) {
-  const { skill, clients, project, layout = "list", expanded, onExpandedChange, update, onUpdated, allTags } = props;
+// Memoized: a refetch or a search keystroke re-renders only the cards whose props changed.
+export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
+  const { skill, clients, project, layout = "list", expanded, update, allTags } = props;
+  const onExpandedChange = (open: boolean) => props.onExpandedChange(skill.id, open);
   const actions = useSkillActions();
   const isGrid = layout === "grid";
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
@@ -130,18 +133,19 @@ export function SkillCard(props: SkillCardProps) {
     };
   }, [showTagEditor]);
 
+  const { onExpandedChange: onExpandedChangeById } = props;
   useEffect(() => {
     if (!isGrid || !expanded) {
       return;
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape" && dialog === null) {
-        onExpandedChange(false);
+        onExpandedChangeById(skill.id, false);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dialog, expanded, isGrid, onExpandedChange]);
+  }, [dialog, expanded, isGrid, onExpandedChangeById, skill.id]);
 
   async function handleDelete() {
     if (isDeleting) {
@@ -183,7 +187,7 @@ export function SkillCard(props: SkillCardProps) {
     try {
       await actions.update(skill.id, skill.name, update?.latest ?? "");
       setDialog(null);
-      onUpdated();
+      props.onUpdated(skill.id);
     } catch {
       // Reported by the action.
     } finally {
@@ -670,4 +674,4 @@ export function SkillCard(props: SkillCardProps) {
       ) : null}
     </>
   );
-}
+});

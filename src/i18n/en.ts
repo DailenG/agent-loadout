@@ -46,6 +46,7 @@ const messages = {
   "app.action.retry": "Retry",
   "app.error.loadFailed": "Page failed to load",
   "app.error.unknown": "An unknown error occurred",
+  "app.route.loading": "Loading…",
   "scope.label": "Scope",
   "scope.switcher.aria": "Configuration scope",
   /* M26 scope switcher (SPEC 13.1) */
@@ -835,6 +836,7 @@ const messages = {
   "history.tabs.changes": "Changes",
   "history.tabs.backups": "Client file backups",
   "history.list.aria": "Commits",
+  "history.loadMore": "Load more",
   "history.empty.filtered": "No commits match this filter.",
   "history.row.meta": "{machine} · {time} · {id}",
   "history.outcome.ok": "Applied",

@@ -70,3 +70,10 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# `loadout` (the CLI): smaller and faster than the default profile (#10).
+# The app is its own workspace (`src-tauri/Cargo.toml`), with the same profile.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

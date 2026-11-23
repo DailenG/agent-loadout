@@ -5,8 +5,8 @@
 // layer is new: typed commands over TanStack Query; scope-aware (SPEC 13.7: a project scope lists
 // the skills enabled in that project); update checks run on request (SPEC 12.4).
 
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useIsFetching, useQuery } from "@tanstack/react-query";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { storeQueryKeys, useInvalidateStore } from "@/app/apply/changeNotice";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
@@ -14,7 +14,7 @@ import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { errorMessage, t } from "@/i18n/en";
-import type { SkillInfo, SkillUpdateCheck } from "@/ipc/bindings";
+import type { SkillInfo, SkillScope, SkillUpdateCheck } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
 import { RefreshIcon } from "../mcp/icons";
 import { GridIcon, GroupIcon, ListIcon, UpdateAllIcon } from "./icons";
@@ -55,6 +55,31 @@ function groupBySource(skills: SkillInfo[]): SkillGroup[] {
   return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/**
+ * Reads the page's fetching state itself, so a refetch re-renders this button
+ * and not the page with its 300 cards.
+ */
+function SkillsRefreshButton({ scope }: { scope: SkillScope }) {
+  const invalidate = useInvalidateStore();
+  const isFetching =
+    useIsFetching({ queryKey: [...storeQueryKeys.skills, scope] })
+    + useIsFetching({ queryKey: [...storeQueryKeys.skillToolDirs, scope] }) > 0;
+  return (
+    <button
+      className={`secondary-button secondary-button--compact skills-toolbar-button skills-toolbar-button--refresh${isFetching ? " is-loading" : ""}`}
+      type="button"
+      onClick={() => void invalidate()}
+      disabled={isFetching}
+      {...collapsibleAction(t("skills.refresh"), "early")}
+    >
+      <span aria-hidden="true" className="skills-toolbar-button__icon">
+        <RefreshIcon isSpinning={isFetching} />
+      </span>
+      <span className={HEADER_ACTION_LABEL}>{t("skills.refresh")}</span>
+    </button>
+  );
+}
+
 export type SkillsPageProps = {
   /** Opens the Install page. */
   onOpenInstall: () => void;
@@ -63,7 +88,6 @@ export type SkillsPageProps = {
 export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
-  const invalidate = useInvalidateStore();
   const actions = useSkillActions();
   const { confirmRename, dialog: renameDialog } = useRenameConfirm();
   // The sidebar's scope (SPEC 13.1); a switch closes the open card and returns to the store tab.
@@ -101,7 +125,9 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
     () => [...new Set(skills.flatMap((skill) => skill.tags))].sort((a, b) => a.localeCompare(b)),
     [skills],
   );
-  const needle = query.trim().toLowerCase();
+  // Typing stays responsive: the list filters on the deferred query in a background render.
+  const deferredQuery = useDeferredValue(query);
+  const needle = deferredQuery.trim().toLowerCase();
   const filtered = skills.filter(
     (skill) =>
       !needle
@@ -181,6 +207,13 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
     setExpandedId(skillId);
   }
 
+  const handleExpandedChange = useCallback((skillId: string, open: boolean) => setExpandedId(open ? skillId : ""), []);
+  const handleUpdated = useCallback(
+    (skillId: string) =>
+      setUpdates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== skillId))),
+    [],
+  );
+
   function renderCard(skill: SkillInfo, layout: "list" | "grid" = "list") {
     return (
       <SkillCard
@@ -190,17 +223,14 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
         project={project}
         layout={layout}
         expanded={expandedId === skill.id}
-        onExpandedChange={(open) => setExpandedId(open ? skill.id : "")}
+        onExpandedChange={handleExpandedChange}
         update={updates[skill.id]}
-        onUpdated={() =>
-          setUpdates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== skill.id)))
-        }
+        onUpdated={handleUpdated}
         allTags={allTags}
       />
     );
   }
 
-  const isFetching = list.isFetching || toolDirs.isFetching;
   const toolbar = (
     <section className="mcp-toolbar skills-header-bar__tools" aria-label={t("skills.toolbar.aria")}>
       <label className="search-field search-field--header mcp-toolbar__search">
@@ -231,18 +261,7 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
           </button>
         ))}
       </div>
-      <button
-        className={`secondary-button secondary-button--compact skills-toolbar-button skills-toolbar-button--refresh${isFetching ? " is-loading" : ""}`}
-        type="button"
-        onClick={() => void invalidate()}
-        disabled={isFetching}
-        {...collapsibleAction(t("skills.refresh"), "early")}
-      >
-        <span aria-hidden="true" className="skills-toolbar-button__icon">
-          <RefreshIcon isSpinning={isFetching} />
-        </span>
-        <span className={HEADER_ACTION_LABEL}>{t("skills.refresh")}</span>
-      </button>
+      <SkillsRefreshButton scope={scope} />
       {available.length > 0 ? (
         <button
           className="secondary-button secondary-button--compact skills-toolbar-button skills-toolbar-button--update-all"
@@ -280,10 +299,10 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
 
   let body: JSX.Element;
   if (activeSource === AGENTS_SOURCE && data?.agentsCli) {
-    body = <AgentsCliListView list={data.agentsCli} query={query} confirmRename={confirmRename} />;
+    body = <AgentsCliListView list={data.agentsCli} query={deferredQuery} confirmRename={confirmRename} />;
   } else if (activeDir) {
     body = (
-      <ToolSkillList dir={activeDir} scope={scope} query={query} onShowManaged={showManaged} confirmRename={confirmRename} />
+      <ToolSkillList dir={activeDir} scope={scope} query={deferredQuery} onShowManaged={showManaged} confirmRename={confirmRename} />
     );
   } else if (list.isPending) {
     body = (

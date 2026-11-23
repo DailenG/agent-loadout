@@ -37,6 +37,24 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 - The per-page scope selects on Skills and MCP are replaced by the sidebar
   switcher.
 - Header toolbars are one aligned row with one control height (#1).
+- Faster GUI on large stores (#10): skill, MCP and tool cards re-render only
+  when their own data changes (a window focus no longer re-renders all
+  cards); search filters in the background while you type; CodeMirror and
+  every page but Skills load on first use (the startup script is less than
+  half its former size); the apply drawer reads the plan and the server list
+  from the cache; tooltips are opaque, without a backdrop blur.
+- History shows the newest 100 commits, with **Load more** for the next 100.
+- The WebView2 runtime no longer downloads browser components (Widevine,
+  speech recognition and others) into the app's profile after install
+  (`--disable-component-update`).
+- Release builds use thin LTO, one codegen unit and stripped symbols:
+  smaller `agent-loadout-app.exe` and `loadout.exe`.
+
+### Fixed
+
+- `loadout project trust <path>` exits 0 when that project applied cleanly,
+  even if another known project still waits for trust; the app's trust
+  notice reports the same.
 
 ## [0.1.3] - 2026-11-22
 

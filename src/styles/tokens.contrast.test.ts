@@ -121,3 +121,15 @@ describe("primary buttons", () => {
     }
   });
 });
+
+describe("tooltips", () => {
+  // `[data-tooltip]::before` and `.app-tooltip` draw this text on an opaque `--tooltip-surface`, with no blur.
+  it.each<[Theme, string]>([
+    ["light", "#374151"],
+    ["dark", "#ededed"],
+  ])("%s tooltip text %s is at least 4.5:1 on an opaque surface", (theme, text) => {
+    const surface = color(theme, "--tooltip-surface");
+    expect(surface[3]).toBe(1);
+    expect(ratio(color(theme, text), surface)).toBeGreaterThanOrEqual(4.5);
+  });
+});

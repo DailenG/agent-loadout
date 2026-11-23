@@ -49,3 +49,10 @@ unsafe_code = "forbid"
 [dev-dependencies]
 # Temp homes and the rooted file system for the command tests (SPEC 19).
 agent-loadout-testkit = { path = "../crates/agent-loadout-testkit" }
+
+# A workspace of its own, so the root profile does not apply here: the same
+# release profile as the CLI (#10).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

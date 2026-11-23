@@ -38,7 +38,8 @@
   --focus-ring: #3b82f6;
   --shadow: 0 8px 24px rgba(23, 35, 63, 0.08);
   --tooltip-delay: 600ms;
-  --tooltip-surface: rgba(255, 255, 255, 0.76);
+  /* Opaque, so tooltips need no backdrop blur (#10). */
+  --tooltip-surface: #ffffff;
   --tooltip-border: rgba(15, 23, 42, 0.1);
   --scrollbar-thumb: rgba(148, 163, 184, 0.58);
   --scrollbar-thumb-hover: rgba(100, 116, 139, 0.66);
@@ -85,7 +86,7 @@
   --danger-text: #ff7b7b;
   --focus-ring: #ffc21a;
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
-  --tooltip-surface: rgba(45, 45, 45, 0.96);
+  --tooltip-surface: #2d2d2d;
   --tooltip-border: rgba(255, 255, 255, 0.12);
   --scrollbar-thumb: rgba(255, 255, 255, 0.17);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
@@ -494,7 +495,6 @@ code {
   background: var(--tooltip-surface);
   color: #374151;
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(10px) saturate(1.08);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.25;
@@ -631,7 +631,6 @@ code {
   background: var(--tooltip-surface);
   color: #374151;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
-  backdrop-filter: blur(10px) saturate(1.08);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.35;
@@ -17839,6 +17838,12 @@ button.settings-form-item:disabled {
 .history-mono {
   font-family: "SF Mono", "JetBrains Mono", monospace;
   font-size: 0.76rem;
+}
+
+.history-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
 }
 
 .history-list {

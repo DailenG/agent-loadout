@@ -19,7 +19,8 @@
         "minWidth": 960,
         "minHeight": 560,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-component-update"
       }
     ],
     "security": {

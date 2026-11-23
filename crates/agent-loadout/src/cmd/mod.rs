@@ -146,12 +146,16 @@ pub fn exit_code(err: &CoreError) -> u8 {
     }
 }
 
-/// The exit code of an apply run ([`ApplyReport::status`]): 1 when a file
-/// failed, 4 when entries need a decision, 5 when entries are blocked by
-/// missing secrets, 7 when a project waits for `loadout project trust`,
-/// else 0.
+/// The exit code of an apply run ([`ApplyReport::status`]).
 pub fn apply_exit_code(report: &ApplyReport) -> u8 {
-    match report.status() {
+    status_exit_code(report.status())
+}
+
+/// 1 when a file failed, 4 when entries need a decision, 5 when entries are
+/// blocked by missing secrets, 7 when a project waits for `loadout project
+/// trust`, else 0.
+pub fn status_exit_code(status: ApplyStatus) -> u8 {
+    match status {
         ApplyStatus::Done => 0,
         ApplyStatus::FileFailed => 1,
         ApplyStatus::NeedsDecision => EXIT_UNRESOLVED,

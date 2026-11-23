@@ -31,7 +31,7 @@ use toml_edit::{DocumentMut, Item, Table};
 
 use super::{
     Context, JSON_SCHEMA, apply_exit_code, error_json, path_json, print_json, print_report,
-    report_json, require_store,
+    report_json, require_store, status_exit_code,
 };
 
 #[derive(Debug, Args)]
@@ -331,7 +331,11 @@ fn trust(ctx: &Context, path: &Path) -> Result<u8, CoreError> {
             print_report(report, commit.as_ref());
         }
     }
-    Ok(report.as_ref().map_or(0, apply_exit_code))
+    // The instant apply covers every project; another project waiting for
+    // trust is not this command's failure (#10).
+    Ok(report
+        .as_ref()
+        .map_or(0, |report| status_exit_code(report.project_status(&id))))
 }
 
 fn share(ctx: &Context, id: &str, servers: &[String]) -> Result<u8, CoreError> {
