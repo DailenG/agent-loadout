@@ -10,7 +10,7 @@
 
 pkgname=agent-loadout-bin
 _pkgname=agent-loadout
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc='Manage MCP servers, skills and secret references for AI coding clients (prebuilt)'
 arch=('x86_64')
