@@ -6,14 +6,14 @@
     <title>Loadout</title>
     <authors>Dailen Gunter</authors>
     <owners>DailenG</owners>
-    <projectUrl>https://github.com/DailenG/agent-loadout</projectUrl>
+    <projectUrl>https://daileng.github.io/agent-loadout/</projectUrl>
     <packageSourceUrl>https://github.com/DailenG/agent-loadout/tree/main/packaging/chocolatey</packageSourceUrl>
     <projectSourceUrl>https://github.com/DailenG/agent-loadout</projectSourceUrl>
-    <docsUrl>https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md</docsUrl>
+    <docsUrl>https://github.com/DailenG/agent-loadout/blob/main/docs/README.md</docsUrl>
     <bugTrackerUrl>https://github.com/DailenG/agent-loadout/issues</bugTrackerUrl>
     <licenseUrl>https://github.com/DailenG/agent-loadout/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <iconUrl>https://cdn.jsdelivr.net/gh/DailenG/agent-loadout@v0.1.2/src-tauri/icons/128x128.png</iconUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/DailenG/agent-loadout@c635c933824477fb2617efee4faba8dc1833f488/src-tauri/icons/128x128.png</iconUrl>
     <copyright>Copyright (c) 2026 Dailen Gunter</copyright>
     <tags>loadout agent-loadout mcp mcp-server ai claude-code codex cursor copilot skills developer-tools cli foss</tags>
     <summary>Manage MCP servers, skills and secret references for AI coding clients from one versioned, offline store.</summary>
