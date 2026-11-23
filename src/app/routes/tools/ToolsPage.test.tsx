@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import { t } from "@/i18n/en";
 import type { ProjectRow, ProjectServerList, ServerList, ServerRow, ToolInfo, TrustReview } from "@/ipc/bindings";
@@ -392,5 +393,52 @@ describe("ToolsPage", () => {
     await user.click(within(dialog).getByRole("button", { name: t("mcp.project.review") }));
     expect(await screen.findByRole("button", { name: t("projects.review.trust") })).toBeInTheDocument();
     expect(transport.calls).not.toContain("setProjectServerClients");
+  });
+
+  it("moves focus into Manage and back to its button (#11)", async () => {
+    const { user } = renderPage();
+    const manage = await screen.findByRole("button", { name: t("tools.manageAria", { name: "Claude Code" }) });
+    await expectModalKeyboard(user, {
+      trigger: manage,
+      name: t("tools.dialog.title", { name: "Claude Code" }),
+      initial: (dialog) => within(dialog).getByRole("searchbox"),
+    });
+  });
+
+  it("stacks the trust review over Manage: Escape closes one at a time and focus walks back (#11)", async () => {
+    const review: TrustReview = {
+      id: PROJECT.id,
+      name: "web",
+      path: "~/Code/web",
+      trust: "untrusted",
+      hash: "sha256:reviewed",
+      files: [],
+      warnings: [],
+    };
+    const { user } = renderPage(
+      {
+        listProjectServers: async () =>
+          ok({ ...PROJECT_SERVERS, project: { ...PROJECT_SERVERS.project, trust: "untrusted" } }),
+        reviewProject: async () => ok(review),
+      },
+      { scope: { kind: "project", id: PROJECT.id } },
+    );
+    const manage = await screen.findByRole("button", { name: t("tools.manageAria", { name: "Claude Code" }) });
+    manage.focus();
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: t("tools.dialog.title", { name: "Claude Code" }) });
+    const reviewButton = await within(dialog).findByRole("button", { name: t("mcp.project.review") });
+
+    await expectModalKeyboard(user, {
+      trigger: reviewButton,
+      name: t("projects.review.title", { name: "web" }),
+      initial: (reviewDialog) => reviewDialog,
+    });
+    // Only the review closed; Manage has the keyboard again.
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.closest("[inert]")).toBeNull();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(manage).toHaveFocus();
   });
 });

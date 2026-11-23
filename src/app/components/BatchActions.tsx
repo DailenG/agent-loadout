@@ -1,7 +1,8 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
 // Ported from DailenG/skilldock@181b52b src/app/components/BatchActions.tsx.
 
-import { useEffect, useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { Modal } from "@/app/components/Modal";
 
 export type BatchAction = {
   key: string;
@@ -134,70 +135,44 @@ export function BatchActionBar(props: BatchActionBarProps) {
 }
 
 export function BatchDeleteDialog(props: BatchDeleteDialogProps) {
-  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (!props.isOpen) {
-      return;
-    }
-    cancelButtonRef.current?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !props.isBusy) {
-        props.onCancel();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [props.isBusy, props.isOpen, props.onCancel]);
-
   if (!props.isOpen) {
     return null;
   }
 
   return (
-    <div
-      className="dialog-backdrop batch-delete-dialog__backdrop"
-      role="presentation"
-      onClick={() => {
-        if (!props.isBusy) {
-          props.onCancel();
-        }
-      }}
+    <Modal
+      className="batch-delete-dialog"
+      backdropClassName="dialog-backdrop batch-delete-dialog__backdrop"
+      element="section"
+      labelledBy="batch-delete-dialog-title"
+      describedBy="batch-delete-dialog-description"
+      dismissible={!props.isBusy}
+      onClose={props.onCancel}
     >
-      <section
-        className="batch-delete-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="batch-delete-dialog-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="batch-delete-dialog__icon" aria-hidden="true">!</div>
-        <div className="batch-delete-dialog__copy">
-          <h3 id="batch-delete-dialog-title">{props.title}</h3>
-          <p>{props.description}</p>
-        </div>
-        <div className="batch-delete-dialog__actions">
-          <button
-            ref={cancelButtonRef}
-            className="secondary-button secondary-button--compact"
-            type="button"
-            disabled={props.isBusy}
-            onClick={props.onCancel}
-          >
-            {props.cancelLabel}
-          </button>
-          <button
-            className="batch-delete-dialog__confirm"
-            type="button"
-            disabled={props.isBusy}
-            onClick={props.onConfirm}
-          >
-            {props.confirmLabel}
-          </button>
-        </div>
-      </section>
-    </div>
+      <div className="batch-delete-dialog__icon" aria-hidden="true">!</div>
+      <div className="batch-delete-dialog__copy">
+        <h3 id="batch-delete-dialog-title">{props.title}</h3>
+        <p id="batch-delete-dialog-description">{props.description}</p>
+      </div>
+      <div className="batch-delete-dialog__actions">
+        <button
+          className="secondary-button secondary-button--compact"
+          type="button"
+          disabled={props.isBusy}
+          onClick={props.onCancel}
+          data-autofocus
+        >
+          {props.cancelLabel}
+        </button>
+        <button
+          className="batch-delete-dialog__confirm"
+          type="button"
+          disabled={props.isBusy}
+          onClick={props.onConfirm}
+        >
+          {props.confirmLabel}
+        </button>
+      </div>
+    </Modal>
   );
 }

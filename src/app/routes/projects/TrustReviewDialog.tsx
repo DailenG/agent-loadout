@@ -3,9 +3,10 @@
 // was last trusted); Trust accepts exactly the content shown.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { diffLineClass } from "@/app/apply/labels";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { failureText, projectRelativePath } from "@/app/routes/projects/labels";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -65,16 +66,6 @@ export function TrustReviewDialog({ projectId, onClose, onTrusted }: TrustReview
     gcTime: 0,
   });
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const trust = useMutation({
     mutationFn: async (hash: string) => unwrap(await commands.trustProject(projectId, hash)),
     onSuccess: (change) => {
@@ -90,50 +81,47 @@ export function TrustReviewDialog({ projectId, onClose, onTrusted }: TrustReview
 
   const data = review.data;
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="tool-manage-dialog project-dialog project-review"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="tool-manage-dialog__header">
-          <div className="tool-manage-dialog__title">
-            <h3 id={titleId}>{t("projects.review.title", { name: data?.name ?? projectId })}</h3>
-            {data ? <p title={data.path}>{data.path}</p> : null}
-          </div>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("projects.cancel")}>
-            ×
-          </button>
+    <Modal
+      className="tool-manage-dialog project-dialog project-review"
+      labelledBy={titleId}
+      initialFocus="dialog"
+      onClose={onClose}
+    >
+      <div className="tool-manage-dialog__header">
+        <div className="tool-manage-dialog__title">
+          <h3 id={titleId}>{t("projects.review.title", { name: data?.name ?? projectId })}</h3>
+          {data ? <p title={data.path}>{data.path}</p> : null}
         </div>
-        <div className="project-dialog__body project-review__body">
-          <p className="project-review__intro" role="note">
-            {t("projects.review.intro")}
-          </p>
-          {review.isPending ? <p>{t("projects.review.loading")}</p> : null}
-          {review.isError ? <p role="alert">{failureText(review.error)}</p> : null}
-          {data?.files.map((file) => <ReviewedFileView key={file.file} file={file} />)}
-          {data?.warnings.map((warning, index) => (
-            <p key={index} className="project-dialog__hint">
-              {errorMessage(warning.code)}
-            </p>
-          ))}
-        </div>
-        <div className="tool-manage-dialog__actions">
-          <button className="secondary-button secondary-button--compact" type="button" onClick={onClose}>
-            {t("projects.cancel")}
-          </button>
-          <button
-            className="primary-button primary-button--compact"
-            type="button"
-            disabled={!data || trust.isPending || review.isFetching}
-            onClick={() => data && trust.mutate(data.hash)}
-          >
-            {t("projects.review.trust")}
-          </button>
-        </div>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("projects.cancel")}>
+          ×
+        </button>
       </div>
-    </div>
+      <div className="project-dialog__body project-review__body">
+        <p className="project-review__intro" role="note">
+          {t("projects.review.intro")}
+        </p>
+        {review.isPending ? <p>{t("projects.review.loading")}</p> : null}
+        {review.isError ? <p role="alert">{failureText(review.error)}</p> : null}
+        {data?.files.map((file) => <ReviewedFileView key={file.file} file={file} />)}
+        {data?.warnings.map((warning, index) => (
+          <p key={index} className="project-dialog__hint">
+            {errorMessage(warning.code)}
+          </p>
+        ))}
+      </div>
+      <div className="tool-manage-dialog__actions">
+        <button className="secondary-button secondary-button--compact" type="button" onClick={onClose}>
+          {t("projects.cancel")}
+        </button>
+        <button
+          className="primary-button primary-button--compact"
+          type="button"
+          disabled={!data || trust.isPending || review.isFetching}
+          onClick={() => data && trust.mutate(data.hash)}
+        >
+          {t("projects.review.trust")}
+        </button>
+      </div>
+    </Modal>
   );
 }

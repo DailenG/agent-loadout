@@ -1,7 +1,8 @@
 // Dialog shell and one-way password input of the Settings sections
 // (SPEC 13.6): the dialog markup of the Projects page, sized to its content.
 
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { Modal } from "@/app/components/Modal";
 
 export type SettingsDialogProps = {
   title: string;
@@ -11,6 +12,8 @@ export type SettingsDialogProps = {
   onClose: () => void;
   /** `alertdialog` for confirmations. */
   role?: "dialog" | "alertdialog";
+  /** Id of the text in `children` that says what a confirmation asks. */
+  describedBy?: string;
   wide?: boolean;
   children: ReactNode;
   actions: ReactNode;
@@ -22,44 +25,33 @@ export function SettingsDialog({
   closeLabel,
   onClose,
   role = "dialog",
+  describedBy,
   wide = false,
   children,
   actions,
 }: SettingsDialogProps) {
   const titleId = useId();
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className={`tool-manage-dialog project-dialog settings-dialog${wide ? " settings-dialog--wide" : ""}`}
-        role={role}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="tool-manage-dialog__header">
-          <div className="tool-manage-dialog__title">
-            <h3 id={titleId}>{title}</h3>
-            {subtitle ? <p title={subtitle}>{subtitle}</p> : null}
-          </div>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={closeLabel}>
-            ×
-          </button>
+    <Modal
+      className={`tool-manage-dialog project-dialog settings-dialog${wide ? " settings-dialog--wide" : ""}`}
+      role={role}
+      labelledBy={titleId}
+      describedBy={describedBy}
+      onClose={onClose}
+    >
+      <div className="tool-manage-dialog__header">
+        <div className="tool-manage-dialog__title">
+          <h3 id={titleId}>{title}</h3>
+          {subtitle ? <p title={subtitle}>{subtitle}</p> : null}
         </div>
-        <div className="project-dialog__body settings-dialog__body">{children}</div>
-        <div className="tool-manage-dialog__actions">{actions}</div>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={closeLabel}>
+          ×
+        </button>
       </div>
-    </div>
+      <div className="project-dialog__body settings-dialog__body">{children}</div>
+      <div className="tool-manage-dialog__actions">{actions}</div>
+    </Modal>
   );
 }
 

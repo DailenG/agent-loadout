@@ -5965,20 +5965,6 @@ code {
   text-align: center;
 }
 
-.skill-detail-modal__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(10, 14, 22, 0.55);
-  backdrop-filter: blur(6px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  animation: dialog-backdrop-in var(--motion-base) var(--ease-standard);
-}
-
 .skill-detail-modal {
   width: min(640px, calc(100vw - 40px));
   max-height: min(78vh, 820px);
@@ -7936,17 +7922,6 @@ code {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-}
-
-.skill-revert-confirmation__backdrop {
-  position: absolute;
-  z-index: 4;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(15, 23, 42, 0.24);
-  backdrop-filter: blur(2px);
 }
 
 .skill-revert-confirmation {
@@ -10777,10 +10752,6 @@ button.settings-form-item:disabled {
   outline-offset: 2px;
 }
 
-.settings-backup-confirm-dialog__backdrop {
-  z-index: 40;
-}
-
 .settings-backup-confirm-dialog {
   width: min(460px, calc(100vw - 40px));
 }
@@ -13050,10 +13021,6 @@ button.settings-form-item:disabled {
   outline-offset: 3px;
 }
 
-.plugins-page__preview-backdrop {
-  z-index: 80;
-}
-
 .plugins-page__preview-dialog.plugins-page__confirm-dialog {
   width: min(480px, calc(100vw - 40px));
   height: auto;
@@ -14258,8 +14225,7 @@ button.settings-form-item:disabled {
     width: auto;
   }
 
-  .dialog-backdrop,
-  .skill-detail-modal__backdrop {
+  .dialog-backdrop {
     padding: 12px;
   }
 
@@ -15667,10 +15633,6 @@ button.settings-form-item:disabled {
   background: #272727;
 }
 
-:root[data-theme="dark"] .skill-revert-confirmation__backdrop {
-  background: rgba(0, 0, 0, 0.48);
-}
-
 :root[data-theme="dark"] .skill-revert-confirmation {
   border-color: #464646;
   background: #292929;
@@ -15919,10 +15881,6 @@ button.settings-form-item:disabled {
   border-color: rgba(255, 194, 26, 0.52);
   background: #34312a;
   color: #f3f3f3;
-}
-
-:root[data-theme="dark"] .skill-detail-modal__backdrop {
-  background: rgba(0, 0, 0, 0.68);
 }
 
 :root[data-theme="dark"] .skill-detail-modal {
@@ -18997,3 +18955,12 @@ button.settings-form-item:disabled {
   opacity: 1;
 }
 /* end M28c */
+
+/* M29 shared modal (#11): focus moves into the dialog surface itself when it
+   has no field (read-and-review dialogs); the surface is the context, not a
+   control, so it draws no focus ring. Controls inside keep theirs. */
+[role="dialog"][aria-modal="true"]:focus,
+[role="alertdialog"][aria-modal="true"]:focus {
+  outline: none;
+}
+/* end M29 */

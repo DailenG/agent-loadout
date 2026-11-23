@@ -1,5 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
+import { t } from "@/i18n/en";
 import type { ProjectRow, SkillInfo, SkillList, SkillScope, ToolSkillDir } from "@/ipc/bindings";
 import {
   MOCK_SKILL_CHANGE,
@@ -281,6 +283,42 @@ describe("SkillsPage", () => {
     expect(await within(dialog).findByText("# Repo notes")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "check.sh" }));
     expect(await within(dialog).findByText("echo ok")).toBeInTheDocument();
+  });
+
+  it("moves focus into the files dialog and back to its button (#11)", async () => {
+    const { user } = renderPage({ listSkillFiles: async () => ok([{ path: "SKILL.md", bytes: 40 }]) });
+    const notes = await screen.findByRole("article", { name: "repo-notes" });
+    await expectModalKeyboard(user, {
+      trigger: within(notes).getByRole("button", { name: "View repo-notes files" }),
+      name: "repo-notes files",
+      initial: (dialog) => dialog,
+    });
+  });
+
+  it("hands focus from the grid detail modal to its files dialog and back to the card (#11)", async () => {
+    const { user } = renderPage({ listSkillFiles: async () => ok([{ path: "SKILL.md", bytes: 40 }]) });
+    await screen.findByRole("article", { name: "repo-notes" });
+    await user.click(screen.getByRole("button", { name: t("skills.view.grid") }));
+    const summary = (await screen.findByRole("article", { name: "repo-notes" })).querySelector<HTMLElement>(
+      ".skill-card__summary-button",
+    )!;
+    const modalName = t("skill.card.modal.aria", { name: "repo-notes" });
+    await expectModalKeyboard(user, { trigger: summary, name: modalName, initial: (dialog) => dialog });
+
+    // View files replaces the detail modal; closing the files returns to the modal, then to the card.
+    summary.focus();
+    await user.keyboard("{Enter}");
+    const modal = await screen.findByRole("dialog", { name: modalName });
+    within(modal).getByRole("button", { name: t("skill.card.action.viewFiles") }).focus();
+    await user.keyboard("{Enter}");
+    const files = await screen.findByRole("dialog", { name: "repo-notes files" });
+    expect(files).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
+    const back = await screen.findByRole("dialog", { name: modalName });
+    expect(back).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(summary).toHaveFocus();
   });
 
   it("classifies a tool folder and imports or trashes unmanaged entries", async () => {

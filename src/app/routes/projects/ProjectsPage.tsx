@@ -4,10 +4,11 @@
 // config matrix of a project.
 
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
 import { EffectiveMatrixView } from "@/app/routes/projects/EffectiveMatrix";
@@ -107,6 +108,7 @@ export function ProjectsPage() {
   const flow = useAddFolderFlow({ onAdded: (change) => setScope({ kind: "project", id: change.id }) });
   const [matrixOf, setMatrixOf] = useState<string | null>(null);
   const [removing, setRemoving] = useState<ProjectRow | null>(null);
+  const removeQuestionId = useId();
 
   const apply = useMutation({
     mutationFn: async (project: ProjectRow) => ({
@@ -209,30 +211,33 @@ export function ProjectsPage() {
       </section>
       {flow.dialogs}
       {removing ? (
-        <div className="dialog-backdrop" role="presentation" onClick={() => setRemoving(null)}>
-          <div
-            className="tool-manage-dialog project-dialog"
-            role="alertdialog"
-            aria-modal="true"
-            aria-label={t("projects.action.remove")}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <p>{t("projects.remove.confirm", { name: removing.name })}</p>
-            <div className="tool-manage-dialog__actions">
-              <button className="secondary-button secondary-button--compact" type="button" onClick={() => setRemoving(null)}>
-                {t("projects.cancel")}
-              </button>
-              <button
-                className="primary-button primary-button--compact"
-                type="button"
-                disabled={remove.isPending}
-                onClick={() => remove.mutate(removing)}
-              >
-                {t("projects.remove.confirmAction")}
-              </button>
-            </div>
+        <Modal
+          className="tool-manage-dialog project-dialog"
+          role="alertdialog"
+          label={t("projects.action.remove")}
+          describedBy={removeQuestionId}
+          onClose={() => setRemoving(null)}
+        >
+          <p id={removeQuestionId}>{t("projects.remove.confirm", { name: removing.name })}</p>
+          <div className="tool-manage-dialog__actions">
+            <button
+              className="secondary-button secondary-button--compact"
+              type="button"
+              onClick={() => setRemoving(null)}
+              data-autofocus
+            >
+              {t("projects.cancel")}
+            </button>
+            <button
+              className="primary-button primary-button--compact"
+              type="button"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(removing)}
+            >
+              {t("projects.remove.confirmAction")}
+            </button>
           </div>
-        </div>
+        </Modal>
       ) : null}
     </div>
   );

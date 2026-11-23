@@ -17,6 +17,7 @@ import {
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { Modal } from "@/app/components/Modal";
 import { RecommendedBadge, recommendedReasonId } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -145,16 +146,6 @@ export function ServerEditDialog(props: ServerEditDialogProps) {
     gcTime: 0,
   });
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const title = mode === "edit" ? t("mcp.dialog.editTitle") : t("mcp.dialog.createTitle");
 
   let body;
@@ -190,23 +181,15 @@ export function ServerEditDialog(props: ServerEditDialogProps) {
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="mcp-edit-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mcp-edit-dialog__header">
-          <h3>{title}</h3>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("mcp.dialog.close")}>
-            ×
-          </button>
-        </div>
-        {body}
+    <Modal className="mcp-edit-dialog" label={title} onClose={onClose}>
+      <div className="mcp-edit-dialog__header">
+        <h3>{title}</h3>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("mcp.dialog.close")}>
+          ×
+        </button>
       </div>
-    </div>
+      {body}
+    </Modal>
   );
 }
 

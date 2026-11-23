@@ -100,7 +100,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   return (
     <NotificationContext.Provider value={value}>
       {children}
-      <div className="app-notification-stack" aria-live="polite" aria-relevant="additions">
+      {/* Stays live while a dialog makes the shell inert (M29), so toasts are still announced. */}
+      <div className="app-notification-stack" aria-live="polite" aria-relevant="additions" data-modal-exempt>
         {notifications.map((notification) => (
           <div
             key={notification.id}

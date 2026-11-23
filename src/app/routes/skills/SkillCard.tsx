@@ -9,6 +9,7 @@
 import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { orderByRecommended } from "@/app/clients";
+import { Modal } from "@/app/components/Modal";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { errorMessage, t } from "@/i18n/en";
 import type { SkillClient, SkillInfo, SkillProject, SkillUpdateCheck } from "@/ipc/bindings";
@@ -123,6 +124,8 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setShowTagEditor(false);
+        // The editor (a popover, not a modal) took focus: give it back to its button.
+        tagActionRef.current?.focus();
       }
     }
     document.addEventListener("pointerdown", handlePointerDown);
@@ -132,20 +135,6 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [showTagEditor]);
-
-  const { onExpandedChange: onExpandedChangeById } = props;
-  useEffect(() => {
-    if (!isGrid || !expanded) {
-      return;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && dialog === null) {
-        onExpandedChangeById(skill.id, false);
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dialog, expanded, isGrid, onExpandedChangeById, skill.id]);
 
   async function handleDelete() {
     if (isDeleting) {
@@ -599,69 +588,66 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
             document.body,
           )
         : null}
-      {expanded && isGrid && dialog === null
-        ? createPortal(
-            <div className="skill-card-detail-modal__backdrop" role="presentation" onClick={() => onExpandedChange(false)}>
-              <section
-                className="skill-card-detail-modal"
-                role="dialog"
-                aria-modal="true"
-                aria-label={t("skill.card.modal.aria", { name: skill.name })}
-                onClick={(event) => event.stopPropagation()}
+      {expanded && isGrid && dialog === null ? (
+        <Modal
+          className="skill-card-detail-modal"
+          backdropClassName="skill-card-detail-modal__backdrop"
+          element="section"
+          label={t("skill.card.modal.aria", { name: skill.name })}
+          initialFocus="dialog"
+          portal
+          onClose={() => onExpandedChange(false)}
+        >
+          <header className="skill-card-detail-modal__header">
+            <div className="skill-card-detail-modal__identity">
+              <SkillMonogram label={monogram(skill.name)} />
+              <div className="skill-card-detail-modal__copy">
+                <div className="skill-card-detail-modal__title">
+                  <h3>{skill.name}</h3>
+                  {updateBadge}
+                </div>
+              </div>
+            </div>
+            <div className="skill-card-detail-modal__actions">
+              {updateAvailable ? (
+                <button
+                  className="secondary-button secondary-button--compact skill-card-detail-modal__action is-primary"
+                  type="button"
+                  onClick={() => setDialog("update")}
+                >
+                  <RefreshIcon isSpinning={isUpdating} />
+                  <span>{t("skill.card.action.update")}</span>
+                </button>
+              ) : null}
+              <button
+                className="secondary-button secondary-button--compact skill-card-detail-modal__action"
+                type="button"
+                onClick={() => setDialog("files")}
               >
-                <header className="skill-card-detail-modal__header">
-                  <div className="skill-card-detail-modal__identity">
-                    <SkillMonogram label={monogram(skill.name)} />
-                    <div className="skill-card-detail-modal__copy">
-                      <div className="skill-card-detail-modal__title">
-                        <h3>{skill.name}</h3>
-                        {updateBadge}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="skill-card-detail-modal__actions">
-                    {updateAvailable ? (
-                      <button
-                        className="secondary-button secondary-button--compact skill-card-detail-modal__action is-primary"
-                        type="button"
-                        onClick={() => setDialog("update")}
-                      >
-                        <RefreshIcon isSpinning={isUpdating} />
-                        <span>{t("skill.card.action.update")}</span>
-                      </button>
-                    ) : null}
-                    <button
-                      className="secondary-button secondary-button--compact skill-card-detail-modal__action"
-                      type="button"
-                      onClick={() => setDialog("files")}
-                    >
-                      <ViewFileIcon />
-                      <span>{t("skill.card.action.viewFiles")}</span>
-                    </button>
-                    <button
-                      className="secondary-button secondary-button--compact skill-card-detail-modal__action"
-                      type="button"
-                      onClick={() => void actions.revealSkill(skill.id).catch(() => undefined)}
-                    >
-                      <OpenFolderIcon />
-                      <span>{t("skill.card.action.openFolder")}</span>
-                    </button>
-                    <button
-                      className="skill-card-detail-modal__close"
-                      type="button"
-                      onClick={() => onExpandedChange(false)}
-                      aria-label={t("skill.card.modal.close", { name: skill.name })}
-                    >
-                      <span aria-hidden="true">×</span>
-                    </button>
-                  </div>
-                </header>
-                <div className="skill-card__details skill-card-detail-modal__body">{details}</div>
-              </section>
-            </div>,
-            document.body,
-          )
-        : null}
+                <ViewFileIcon />
+                <span>{t("skill.card.action.viewFiles")}</span>
+              </button>
+              <button
+                className="secondary-button secondary-button--compact skill-card-detail-modal__action"
+                type="button"
+                onClick={() => void actions.revealSkill(skill.id).catch(() => undefined)}
+              >
+                <OpenFolderIcon />
+                <span>{t("skill.card.action.openFolder")}</span>
+              </button>
+              <button
+                className="skill-card-detail-modal__close"
+                type="button"
+                onClick={() => onExpandedChange(false)}
+                aria-label={t("skill.card.modal.close", { name: skill.name })}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+          </header>
+          <div className="skill-card__details skill-card-detail-modal__body">{details}</div>
+        </Modal>
+      ) : null}
       {dialog === "files" ? <SkillFileDialog skill={skill} onClose={() => setDialog(null)} /> : null}
       {dialog === "update" && update ? (
         <SkillUpdateDialog

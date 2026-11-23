@@ -892,7 +892,10 @@ function AppContent(props: { features: FeatureFlags }) {
             data-tauri-drag-region={macOSDragRegion}
           >
             <div className="page-header__row" data-tauri-drag-region={macOSDragRegion}>
-              <h1>{t(activeDefinition.labelKey)}</h1>
+              {/* Where focus goes when a closed dialog's opener is gone (M29). */}
+              <h1 tabIndex={-1} data-focus-fallback>
+                {t(activeDefinition.labelKey)}
+              </h1>
               <PendingChangesPill onOpen={openPending} />
               <div className="mcp-header-toolbar-slot" ref={setToolbarHost} />
             </div>

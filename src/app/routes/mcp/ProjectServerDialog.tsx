@@ -3,9 +3,10 @@
 // chip and key/value editors and the client grid are the store editor's (ServerEditDialog).
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { Modal } from "@/app/components/Modal";
 import { errorMessage, t } from "@/i18n/en";
 import type {
   ClientInfo,
@@ -113,16 +114,6 @@ export function ProjectServerDialog(props: ProjectServerDialogProps) {
     gcTime: 0,
   });
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const title = editing ? t("mcp.project.dialog.editTitle") : t("mcp.project.dialog.createTitle");
   const fallbackLayer = props.layers.includes("shared") ? "shared" : "local";
   let body;
@@ -150,23 +141,15 @@ export function ProjectServerDialog(props: ProjectServerDialogProps) {
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="mcp-edit-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mcp-edit-dialog__header">
-          <h3>{title}</h3>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("mcp.dialog.close")}>
-            ×
-          </button>
-        </div>
-        {body}
+    <Modal className="mcp-edit-dialog" label={title} onClose={onClose}>
+      <div className="mcp-edit-dialog__header">
+        <h3>{title}</h3>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("mcp.dialog.close")}>
+          ×
+        </button>
       </div>
-    </div>
+      {body}
+    </Modal>
   );
 }
 

@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { t } from "@/i18n/en";
@@ -244,5 +245,36 @@ describe("ProjectsPage", () => {
 
     await waitFor(() => expect(screen.getByTestId("scope")).toHaveTextContent(CHANGED.id));
     await screen.findByRole("dialog", { name: t("projects.review.title", { name: "home-lab" }) });
+  });
+
+  it("moves focus into the folder dialog and back to Add folder (#11)", async () => {
+    const { user } = renderPage({ commands: { pickProjectFolder: async () => ok(EMPTY_FOLDER) } });
+    await expectModalKeyboard(user, {
+      trigger: await screen.findByRole("button", { name: t("projects.action.addFolder") }),
+      name: t("projects.folder.titleAdd"),
+      initial: (dialog) => within(dialog).getByRole("radio", { name: new RegExp(t("projects.folder.private")) }),
+    });
+  });
+
+  it("moves focus into the trust review and back to Review (#11)", async () => {
+    const { user } = renderPage();
+    const changed = await screen.findByRole("article", { name: "home-lab" });
+    await expectModalKeyboard(user, {
+      trigger: within(changed).getByRole("button", { name: t("projects.action.review") }),
+      name: t("projects.review.title", { name: "home-lab" }),
+      initial: (dialog) => dialog,
+    });
+  });
+
+  it("moves focus to Cancel in the remove confirm and back to Remove (#11)", async () => {
+    const { user } = renderPage();
+    const card = await screen.findByRole("article", { name: "app" });
+    await expectModalKeyboard(user, {
+      trigger: within(card).getByRole("button", { name: t("projects.action.remove") }),
+      name: t("projects.action.remove"),
+      role: "alertdialog",
+      description: t("projects.remove.confirm", { name: "app" }),
+      initial: (dialog) => within(dialog).getByRole("button", { name: t("projects.cancel") }),
+    });
   });
 });

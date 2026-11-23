@@ -5,7 +5,7 @@
 // a remote the store is local-only: "No backup remote".
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { storeQueryKeys, useInvalidateStore } from "@/app/apply/changeNotice";
 import { SettingsGroup, SettingsItem } from "@/app/components/SettingsGroup";
 import { useNotifications } from "@/app/components/notifications";
@@ -44,6 +44,7 @@ export function VersioningSection({ onOpenPending }: VersioningSectionProps) {
   const [adding, setAdding] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [removing, setRemoving] = useState<RemoteEntry | null>(null);
+  const removeQuestionId = useId();
   const [tokenFor, setTokenFor] = useState<string | null>(null);
   const [pulled, setPulled] = useState<{ servers: number; skills: number } | null>(null);
 
@@ -332,6 +333,7 @@ export function VersioningSection({ onOpenPending }: VersioningSectionProps) {
       {removing ? (
         <SettingsDialog
           role="alertdialog"
+          describedBy={removeQuestionId}
           title={t("settings.versioning.remove.title", { name: removing.name })}
           closeLabel={t("settings.versioning.cancel")}
           onClose={() => setRemoving(null)}
@@ -341,6 +343,7 @@ export function VersioningSection({ onOpenPending }: VersioningSectionProps) {
                 className="secondary-button secondary-button--compact"
                 type="button"
                 onClick={() => setRemoving(null)}
+                data-autofocus
               >
                 {t("settings.versioning.cancel")}
               </button>
@@ -355,7 +358,7 @@ export function VersioningSection({ onOpenPending }: VersioningSectionProps) {
             </>
           }
         >
-          <p>{t("settings.versioning.remove.body", { name: removing.name })}</p>
+          <p id={removeQuestionId}>{t("settings.versioning.remove.body", { name: removing.name })}</p>
         </SettingsDialog>
       ) : null}
     </SettingsGroup>

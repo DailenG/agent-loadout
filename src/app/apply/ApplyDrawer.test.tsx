@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { t } from "@/i18n/en";
 import type { AppliedRun, PendingPlan, PendingStoreChange, PlannedFile } from "@/ipc/bindings";
 import {
@@ -226,6 +228,58 @@ describe("ApplyDrawer", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     await user.click(container.querySelector(".apply-drawer-backdrop") as HTMLElement);
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  describe("keyboard (#11)", () => {
+    function DrawerHarness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Pending
+          </button>
+          <ApplyDrawer open={open} onClose={() => setOpen(false)} />
+        </>
+      );
+    }
+
+    function renderHarness() {
+      return renderWithProviders(<DrawerHarness />, {
+        commands: {
+          pendingPlan: async () => ok(PLAN),
+          listServers: async () => ok({ servers: [], clients: MOCK_CLIENTS, warnings: [] }),
+        },
+      });
+    }
+
+    it("moves focus into the drawer and back to its trigger", async () => {
+      const { user } = renderHarness();
+      await expectModalKeyboard(user, {
+        trigger: screen.getByRole("button", { name: "Pending" }),
+        name: t("apply.drawer.title"),
+        initial: (drawer) => drawer,
+      });
+    });
+
+    it("stacks the resolver over the drawer and gives the drawer the keyboard back", async () => {
+      const { user } = renderHarness();
+      const pending = screen.getByRole("button", { name: "Pending" });
+      pending.focus();
+      await user.keyboard("{Enter}");
+      const drawer = await screen.findByRole("dialog", { name: t("apply.drawer.title") });
+      const fileName = new RegExp(USER_FILE.file.replace(/\./g, "\\."));
+      await user.click(await within(drawer).findByRole("button", { name: fileName }));
+
+      await expectModalKeyboard(user, {
+        trigger: within(drawer).getByRole("button", { name: t("apply.entries.resolveAria", { name: "drifty" }) }),
+        name: t("resolver.title", { name: "drifty" }),
+      });
+      expect(drawer).toBeInTheDocument();
+      expect(drawer.closest("[inert]")).toBeNull();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(drawer).not.toBeInTheDocument());
+      expect(pending).toHaveFocus();
+    });
   });
 
   it("undoes a recent apply", async () => {

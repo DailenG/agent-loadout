@@ -5,8 +5,9 @@
 // The data layer is new: `list_skill_files`/`read_skill_file` and `skill_update_diff`.
 
 import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useId, useState, type ReactNode } from "react";
+import { lazy, Suspense, useId, useState, type ReactNode } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
+import { Modal } from "@/app/components/Modal";
 import { t } from "@/i18n/en";
 import type { SkillFileChange, SkillInfo, SkillUpdateCheck } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
@@ -68,44 +69,33 @@ type DialogShellProps = {
 
 function DialogShell({ title, onClose, sidebar, children, footer }: DialogShellProps) {
   const titleId = useId();
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   return (
-    <div className="dialog-backdrop skill-file-dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="skill-file-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="skill-file-dialog__header">
-          <div className="skill-file-dialog__title">
-            <h3 id={titleId}>{title}</h3>
-          </div>
-          <div className="skill-file-dialog__toolbar">
-            <button className="skill-file-dialog__close" type="button" onClick={onClose} aria-label={t("skill.files.close")}>
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
+    <Modal
+      className="skill-file-dialog"
+      backdropClassName="dialog-backdrop skill-file-dialog-backdrop"
+      labelledBy={titleId}
+      initialFocus="dialog"
+      onClose={onClose}
+    >
+      <div className="skill-file-dialog__header">
+        <div className="skill-file-dialog__title">
+          <h3 id={titleId}>{title}</h3>
         </div>
-        <div className="skill-file-dialog__body">
-          <aside className="skill-file-dialog__sidebar" aria-label={t("skill.files.list")}>
-            {sidebar}
-          </aside>
-          <section className="skill-file-dialog__editor">{children}</section>
+        <div className="skill-file-dialog__toolbar">
+          <button className="skill-file-dialog__close" type="button" onClick={onClose} aria-label={t("skill.files.close")}>
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
-        {footer ? <div className="skill-file-dialog__footer">{footer}</div> : null}
       </div>
-    </div>
+      <div className="skill-file-dialog__body">
+        <aside className="skill-file-dialog__sidebar" aria-label={t("skill.files.list")}>
+          {sidebar}
+        </aside>
+        <section className="skill-file-dialog__editor">{children}</section>
+      </div>
+      {footer ? <div className="skill-file-dialog__footer">{footer}</div> : null}
+    </Modal>
   );
 }
 

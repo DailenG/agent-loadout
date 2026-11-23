@@ -4,12 +4,12 @@
 // (typed commands over TanStack Query, SPEC 13.2), and so is the project scope (M24).
 
 import { useQuery } from "@tanstack/react-query";
-import { createPortal } from "react-dom";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useEventCallback } from "@/app/components/useEventCallback";
@@ -72,66 +72,58 @@ function McpServerDetailContainer({ children, isGridLayout, row, active, onClose
       return;
     }
     const previousOverflow = document.body.style.overflow;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
     document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isGridLayout, onClose]);
+  }, [isGridLayout]);
 
   if (!isGridLayout) {
     return <div className="mcp-server-card__details">{children}</div>;
   }
 
   const name = serverName(row);
-  return createPortal(
-    <div className="skill-card-detail-modal__backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="skill-card-detail-modal mcp-server-card__detail-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${t("mcp.card.basicInfo")} ${name}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="skill-card-detail-modal__header">
-          <div className="skill-card-detail-modal__identity">
-            <McpServerMonogram name={serverName(row)} active={active} />
-            <div className="skill-card-detail-modal__copy">
-              <div className="skill-card-detail-modal__title">
-                <h3>{name}</h3>
-              </div>
+  return (
+    <Modal
+      className="skill-card-detail-modal mcp-server-card__detail-modal"
+      backdropClassName="skill-card-detail-modal__backdrop"
+      element="section"
+      label={`${t("mcp.card.basicInfo")} ${name}`}
+      initialFocus="dialog"
+      portal
+      onClose={onClose}
+    >
+      <header className="skill-card-detail-modal__header">
+        <div className="skill-card-detail-modal__identity">
+          <McpServerMonogram name={serverName(row)} active={active} />
+          <div className="skill-card-detail-modal__copy">
+            <div className="skill-card-detail-modal__title">
+              <h3>{name}</h3>
             </div>
           </div>
-          <div className="skill-card-detail-modal__actions">
-            <button
-              className="secondary-button secondary-button--compact skill-card-detail-modal__action is-primary"
-              type="button"
-              onClick={onEdit}
-              aria-label={t("mcp.card.edit", { name })}
-            >
-              <EditIcon />
-              <span>{t("mcp.card.editTooltip")}</span>
-            </button>
-            <button
-              className="skill-card-detail-modal__close"
-              type="button"
-              onClick={onClose}
-              aria-label={t("mcp.card.collapseAria", { name })}
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        </header>
-        <div className="mcp-server-card__details skill-card-detail-modal__body">{children}</div>
-      </section>
-    </div>,
-    document.body,
+        </div>
+        <div className="skill-card-detail-modal__actions">
+          <button
+            className="secondary-button secondary-button--compact skill-card-detail-modal__action is-primary"
+            type="button"
+            onClick={onEdit}
+            aria-label={t("mcp.card.edit", { name })}
+          >
+            <EditIcon />
+            <span>{t("mcp.card.editTooltip")}</span>
+          </button>
+          <button
+            className="skill-card-detail-modal__close"
+            type="button"
+            onClick={onClose}
+            aria-label={t("mcp.card.collapseAria", { name })}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+      </header>
+      <div className="mcp-server-card__details skill-card-detail-modal__body">{children}</div>
+    </Modal>
   );
 }
 
@@ -192,6 +184,14 @@ const McpServerCard = memo(function McpServerCard({
     ? errorMessage(row.invalid.code)
     : row.description ?? row.launch;
   const handleClose = useCallback(() => onExpandedChange(""), [onExpandedChange]);
+  // A drifted pill opens Pending changes; the grid's detail modal closes first
+  // so the drawer is the only dialog (focus returns to the card's trigger).
+  const openPendingFromDetail = () => {
+    if (isGrid) {
+      onExpandedChange("");
+    }
+    onOpenPending();
+  };
 
   const deleteButton = isDeleteConfirming || isDeleting ? (
     <button
@@ -395,7 +395,7 @@ const McpServerCard = memo(function McpServerCard({
                     row={row}
                     entry={entry}
                     busy={isBulk}
-                    onOpenPending={onOpenPending}
+                    onOpenPending={openPendingFromDetail}
                   />
                 ))}
               </div>

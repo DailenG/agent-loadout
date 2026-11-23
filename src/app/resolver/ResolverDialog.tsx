@@ -4,9 +4,10 @@
 // file in one store commit.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { STATE_KEYS } from "@/app/apply/labels";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { failureText } from "@/app/routes/projects/labels";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -64,16 +65,6 @@ export function ResolverDialog({ entry, clientName, onClose }: ResolverDialogPro
     gcTime: 0,
   });
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const resolve = useMutation({
     // The fingerprint of the versions shown: the backend refuses
     // (`entry_changed`) when the entry changed since.
@@ -98,74 +89,71 @@ export function ResolverDialog({ entry, clientName, onClose }: ResolverDialogPro
   const lastWrittenEmpty =
     data?.state === "collision" ? t("resolver.column.neverWritten") : t("resolver.column.unknown");
   return (
-    <div className="dialog-backdrop resolver-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="tool-manage-dialog resolver-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="tool-manage-dialog__header">
-          <div className="tool-manage-dialog__title">
-            <h3 id={titleId}>{t("resolver.title", { name: entry.name })}</h3>
-            <p>
-              {t("resolver.subtitle", {
-                client: clientName(entry.client),
-                file: data?.project ? `${data.project}: ${data.file}` : entry.file.file,
-              })}
-              {data ? (
-                <span className="status-badge tone-warning resolver-dialog__state">
-                  {t(STATE_KEYS[data.state])}
-                </span>
-              ) : null}
-            </p>
-          </div>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("resolver.close")}>
-            ×
-          </button>
-        </div>
-
-        {detail.isPending ? <p className="resolver-dialog__note">{t("resolver.loading")}</p> : null}
-        {detail.isError ? (
-          <p className="resolver-dialog__note" role="alert">
-            {failureText(detail.error)}
-          </p>
-        ) : null}
-        {data ? (
-          <>
-            <div className="resolver-columns">
-              <Column title={t("resolver.column.lastWritten")} text={data.lastWritten} empty={lastWrittenEmpty} />
-              <Column title={t("resolver.column.current")} text={data.current} empty={t("resolver.column.deleted")} />
-              <Column title={t("resolver.column.desired")} text={data.desired} empty={t("resolver.column.notDesired")} />
-            </div>
-            {data.problem ? (
-              <p className="resolver-dialog__note" role="alert">
-                {errorMessage(data.problem.code)}
-              </p>
+    <Modal
+      className="tool-manage-dialog resolver-dialog"
+      backdropClassName="dialog-backdrop resolver-backdrop"
+      labelledBy={titleId}
+      onClose={onClose}
+    >
+      <div className="tool-manage-dialog__header">
+        <div className="tool-manage-dialog__title">
+          <h3 id={titleId}>{t("resolver.title", { name: entry.name })}</h3>
+          <p>
+            {t("resolver.subtitle", {
+              client: clientName(entry.client),
+              file: data?.project ? `${data.project}: ${data.file}` : entry.file.file,
+            })}
+            {data ? (
+              <span className="status-badge tone-warning resolver-dialog__state">
+                {t(STATE_KEYS[data.state])}
+              </span>
             ) : null}
-            <p className="resolver-dialog__note">{t("resolver.note.file")}</p>
-            <div className="resolver-actions" role="group" aria-label={t("resolver.actions")}>
-              {data.actions.map((action, index) => (
-                <button
-                  key={action}
-                  type="button"
-                  className={
-                    index === 0
-                      ? "primary-button primary-button--compact"
-                      : "secondary-button secondary-button--compact"
-                  }
-                  title={t(HINT_KEYS[action])}
-                  disabled={resolve.isPending || detail.isFetching}
-                  onClick={() => resolve.mutate({ action, fingerprint: data.fingerprint })}
-                >
-                  {t(ACTION_KEYS[action])}
-                </button>
-              ))}
-            </div>
-          </>
-        ) : null}
+          </p>
+        </div>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("resolver.close")}>
+          ×
+        </button>
       </div>
-    </div>
+
+      {detail.isPending ? <p className="resolver-dialog__note">{t("resolver.loading")}</p> : null}
+      {detail.isError ? (
+        <p className="resolver-dialog__note" role="alert">
+          {failureText(detail.error)}
+        </p>
+      ) : null}
+      {data ? (
+        <>
+          <div className="resolver-columns">
+            <Column title={t("resolver.column.lastWritten")} text={data.lastWritten} empty={lastWrittenEmpty} />
+            <Column title={t("resolver.column.current")} text={data.current} empty={t("resolver.column.deleted")} />
+            <Column title={t("resolver.column.desired")} text={data.desired} empty={t("resolver.column.notDesired")} />
+          </div>
+          {data.problem ? (
+            <p className="resolver-dialog__note" role="alert">
+              {errorMessage(data.problem.code)}
+            </p>
+          ) : null}
+          <p className="resolver-dialog__note">{t("resolver.note.file")}</p>
+          <div className="resolver-actions" role="group" aria-label={t("resolver.actions")}>
+            {data.actions.map((action, index) => (
+              <button
+                key={action}
+                type="button"
+                className={
+                  index === 0
+                    ? "primary-button primary-button--compact"
+                    : "secondary-button secondary-button--compact"
+                }
+                title={t(HINT_KEYS[action])}
+                disabled={resolve.isPending || detail.isFetching}
+                onClick={() => resolve.mutate({ action, fingerprint: data.fingerprint })}
+              >
+                {t(ACTION_KEYS[action])}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </Modal>
   );
 }

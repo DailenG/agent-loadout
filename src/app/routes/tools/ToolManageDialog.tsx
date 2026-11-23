@@ -9,6 +9,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
+import { Modal } from "@/app/components/Modal";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useNotifications } from "@/app/components/notifications";
@@ -98,20 +99,6 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManag
     setPendingServerIds(new Set());
     setReviewing(false);
   }, [isOpen, tool.id, projectId]);
-
-  useEffect(() => {
-    // The trust review on top handles its own Escape.
-    if (!isOpen || reviewing) {
-      return;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose, reviewing]);
 
   const listsClient = inProject
     ? (projectData?.clients.some((client) => client.id === tool.id && client.supported) ?? false)
@@ -219,168 +206,160 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManag
 
   return (
     <>
-      <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-        <div
-          className="tool-manage-dialog tool-manage-dialog--tools"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={dialogTitleId}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="tool-manage-dialog__header">
-            <div className="tool-manage-dialog__title">
-              <div className="tool-manage-dialog__title-row">
-                <h3 id={dialogTitleId}>{t("tools.dialog.title", { name: tool.name })}</h3>
-                <RecommendedBadge clientId={tool.id} />
-              </div>
-              <p>{t("tools.dialog.summary", { enabled: enabledCount, total: allRows.length })}</p>
+      <Modal className="tool-manage-dialog tool-manage-dialog--tools" labelledBy={dialogTitleId} onClose={onClose}>
+        <div className="tool-manage-dialog__header">
+          <div className="tool-manage-dialog__title">
+            <div className="tool-manage-dialog__title-row">
+              <h3 id={dialogTitleId}>{t("tools.dialog.title", { name: tool.name })}</h3>
+              <RecommendedBadge clientId={tool.id} />
             </div>
+            <p>{t("tools.dialog.summary", { enabled: enabledCount, total: allRows.length })}</p>
+          </div>
+          <button
+            className="tool-manage-dialog__close"
+            type="button"
+            onClick={onClose}
+            aria-label={t("tools.dialog.close")}
+          >
+            ×
+          </button>
+        </div>
+
+        {project ? (
+          <p className="skills-scope-note tool-manage-dialog__scope-note" role="note">
+            {t("tools.dialog.projectNote", { name: project.name })}
+          </p>
+        ) : null}
+        {project && readOnly ? (
+          <div className="mcp-page-warning mcp-project-trust tool-manage-dialog__trust" role="alert">
+            <span>{t(project.trust === "changed" ? "mcp.project.changed" : "mcp.project.untrusted")}</span>
             <button
-              className="tool-manage-dialog__close"
+              className="secondary-button secondary-button--compact"
               type="button"
-              onClick={onClose}
-              aria-label={t("tools.dialog.close")}
+              onClick={() => setReviewing(true)}
             >
-              ×
+              {t("mcp.project.review")}
             </button>
           </div>
+        ) : null}
 
-          {project ? (
-            <p className="skills-scope-note tool-manage-dialog__scope-note" role="note">
-              {t("tools.dialog.projectNote", { name: project.name })}
-            </p>
-          ) : null}
-          {project && readOnly ? (
-            <div className="mcp-page-warning mcp-project-trust tool-manage-dialog__trust" role="alert">
-              <span>{t(project.trust === "changed" ? "mcp.project.changed" : "mcp.project.untrusted")}</span>
-              <button
-                className="secondary-button secondary-button--compact"
-                type="button"
-                onClick={() => setReviewing(true)}
-              >
-                {t("mcp.project.review")}
-              </button>
-            </div>
-          ) : null}
-
-          <div className="tool-manage-dialog__toolbar">
-            <div className="tool-manage-dialog__search-wrap">
-              <SearchFieldIcon />
-              <input
-                className="tool-manage-dialog__search"
-                type="search"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                placeholder={t("tools.dialog.searchMcp")}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </div>
-            <label className="tool-manage-dialog__toggle">
-              <button
-                className={`switch-button${showEnabledOnly ? " is-enabled" : ""}`}
-                type="button"
-                onClick={() => setShowEnabledOnly((current) => !current)}
-                aria-pressed={showEnabledOnly}
-                aria-label={t("tools.dialog.enabledOnly")}
-              >
-                <span className="switch-button__thumb" />
-              </button>
-              <span>{t("tools.dialog.enabledOnly")}</span>
-            </label>
+        <div className="tool-manage-dialog__toolbar">
+          <div className="tool-manage-dialog__search-wrap">
+            <SearchFieldIcon />
+            <input
+              className="tool-manage-dialog__search"
+              type="search"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder={t("tools.dialog.searchMcp")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
           </div>
+          <label className="tool-manage-dialog__toggle">
+            <button
+              className={`switch-button${showEnabledOnly ? " is-enabled" : ""}`}
+              type="button"
+              onClick={() => setShowEnabledOnly((current) => !current)}
+              aria-pressed={showEnabledOnly}
+              aria-label={t("tools.dialog.enabledOnly")}
+            >
+              <span className="switch-button__thumb" />
+            </button>
+            <span>{t("tools.dialog.enabledOnly")}</span>
+          </label>
+        </div>
 
-          <div className="tool-manage-dialog__list">
-            {source.isPending ? (
-              <div className="tool-manage-dialog__empty">
-                {t(inProject ? "tools.dialog.loadingProject" : "tools.dialog.loadingMcp")}
-              </div>
-            ) : null}
-            {source.isError ? (
-              <div className="tool-manage-dialog__empty">
-                {source.error instanceof IpcFailure
-                  ? errorMessage(source.error.code)
-                  : t("tools.dialog.loadMcpFailed")}
-              </div>
-            ) : null}
-            {source.isSuccess && !listsClient ? (
-              <div className="tool-manage-dialog__empty">
-                {t(inProject ? "tools.dialog.noProjectMcp" : "tools.dialog.noMcpSupport", { name: tool.name })}
-              </div>
-            ) : null}
-            {showRows
-              ? activeRows.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`tool-manage-dialog__item${item.isEnabled ? " is-enabled" : ""}`}
+        <div className="tool-manage-dialog__list">
+          {source.isPending ? (
+            <div className="tool-manage-dialog__empty">
+              {t(inProject ? "tools.dialog.loadingProject" : "tools.dialog.loadingMcp")}
+            </div>
+          ) : null}
+          {source.isError ? (
+            <div className="tool-manage-dialog__empty">
+              {source.error instanceof IpcFailure
+                ? errorMessage(source.error.code)
+                : t("tools.dialog.loadMcpFailed")}
+            </div>
+          ) : null}
+          {source.isSuccess && !listsClient ? (
+            <div className="tool-manage-dialog__empty">
+              {t(inProject ? "tools.dialog.noProjectMcp" : "tools.dialog.noMcpSupport", { name: tool.name })}
+            </div>
+          ) : null}
+          {showRows
+            ? activeRows.map((item) => (
+                <div
+                  key={item.id}
+                  className={`tool-manage-dialog__item${item.isEnabled ? " is-enabled" : ""}`}
+                >
+                  <span className="tool-manage-dialog__item-name" title={item.name}>
+                    {item.name}
+                  </span>
+                  <button
+                    className={`switch-button${item.isEnabled ? " is-enabled" : ""}${projectBusy === item.id ? " is-loading" : ""}`}
+                    type="button"
+                    onClick={() =>
+                      void (inProject
+                        ? handleToggleProject(item.id, !item.isEnabled)
+                        : handleToggleMcp(item.id, !item.isEnabled))}
+                    aria-pressed={item.isEnabled}
+                    aria-label={
+                      item.isEnabled
+                        ? t("tools.dialog.item.disable", { name: item.name })
+                        : t("tools.dialog.item.enable", { name: item.name })
+                    }
+                    disabled={rowDisabled(item)}
                   >
-                    <span className="tool-manage-dialog__item-name" title={item.name}>
-                      {item.name}
+                    <span className="switch-button__thumb" />
+                  </button>
+                </div>
+              ))
+            : null}
+          {showRows && activeRows.length === 0 ? (
+            <div className="tool-manage-dialog__empty">{t("tools.dialog.emptyMcp")}</div>
+          ) : null}
+          {showRows && inherited.length > 0 ? (
+            <section className="tool-manage-dialog__inherited" aria-labelledby={`${dialogTitleId}-inherited`}>
+              <h4 id={`${dialogTitleId}-inherited`} className="apply-drawer__section-title">
+                {t("tools.dialog.inherited.title")}
+              </h4>
+              <p className="apply-drawer__note">{t("tools.dialog.inherited.description")}</p>
+              {inherited.map((server) => {
+                const name = server.displayName ?? server.id;
+                return (
+                  <div key={server.id} className="tool-manage-dialog__item is-inherited">
+                    <span className="tool-manage-dialog__item-name" title={server.launch}>
+                      {name}
                     </span>
                     <button
-                      className={`switch-button${item.isEnabled ? " is-enabled" : ""}${projectBusy === item.id ? " is-loading" : ""}`}
+                      className="secondary-button secondary-button--compact"
                       type="button"
-                      onClick={() =>
-                        void (inProject
-                          ? handleToggleProject(item.id, !item.isEnabled)
-                          : handleToggleMcp(item.id, !item.isEnabled))}
-                      aria-pressed={item.isEnabled}
-                      aria-label={
-                        item.isEnabled
-                          ? t("tools.dialog.item.disable", { name: item.name })
-                          : t("tools.dialog.item.enable", { name: item.name })
-                      }
-                      disabled={rowDisabled(item)}
+                      aria-label={t("tools.dialog.inherited.openAria", { name })}
+                      onClick={onOpenMcp}
                     >
-                      <span className="switch-button__thumb" />
+                      {t("tools.dialog.inherited.open")}
                     </button>
                   </div>
-                ))
-              : null}
-            {showRows && activeRows.length === 0 ? (
-              <div className="tool-manage-dialog__empty">{t("tools.dialog.emptyMcp")}</div>
-            ) : null}
-            {showRows && inherited.length > 0 ? (
-              <section className="tool-manage-dialog__inherited" aria-labelledby={`${dialogTitleId}-inherited`}>
-                <h4 id={`${dialogTitleId}-inherited`} className="apply-drawer__section-title">
-                  {t("tools.dialog.inherited.title")}
-                </h4>
-                <p className="apply-drawer__note">{t("tools.dialog.inherited.description")}</p>
-                {inherited.map((server) => {
-                  const name = server.displayName ?? server.id;
-                  return (
-                    <div key={server.id} className="tool-manage-dialog__item is-inherited">
-                      <span className="tool-manage-dialog__item-name" title={server.launch}>
-                        {name}
-                      </span>
-                      <button
-                        className="secondary-button secondary-button--compact"
-                        type="button"
-                        aria-label={t("tools.dialog.inherited.openAria", { name })}
-                        onClick={onOpenMcp}
-                      >
-                        {t("tools.dialog.inherited.open")}
-                      </button>
-                    </div>
-                  );
-                })}
-              </section>
-            ) : null}
-          </div>
-
-          <div className="tool-manage-dialog__actions">
-            <button
-              className="primary-button primary-button--compact tool-manage-dialog__done-button"
-              type="button"
-              onClick={onClose}
-            >
-              {t("tools.dialog.done")}
-            </button>
-          </div>
+                );
+              })}
+            </section>
+          ) : null}
         </div>
-      </div>
+
+        <div className="tool-manage-dialog__actions">
+          <button
+            className="primary-button primary-button--compact tool-manage-dialog__done-button"
+            type="button"
+            onClick={onClose}
+          >
+            {t("tools.dialog.done")}
+          </button>
+        </div>
+      </Modal>
       {reviewing && project ? (
         <TrustReviewDialog
           projectId={projectId}

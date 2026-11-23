@@ -5,8 +5,9 @@
 // only when the user applies it from Pending changes.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { useInvalidateStore } from "@/app/apply/changeNotice";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { failureText } from "@/app/routes/history/labels";
 import { t, type MessageKey } from "@/i18n/en";
@@ -35,16 +36,6 @@ export function RestoreDialog({ entry, pick, onClose, onRestored }: RestoreDialo
   const titleId = useId();
   const [picked, setPicked] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState(false);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   // A commit that names no entity (a merge, a commit made outside the app):
   // the entities to pick from are those the whole restore would touch.
@@ -100,122 +91,114 @@ export function RestoreDialog({ entry, pick, onClose, onRestored }: RestoreDialo
     (!pick || picked.length > 0);
 
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="tool-manage-dialog project-dialog history-restore"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="tool-manage-dialog__header">
-          <div className="tool-manage-dialog__title">
-            <h3 id={titleId}>
-              {t(pick ? "history.restore.titleEntity" : "history.restore.titleVersion", { id: entry.shortId })}
-            </h3>
-            <p>{entry.summary}</p>
-          </div>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("history.close")}>
-            ×
-          </button>
+    <Modal className="tool-manage-dialog project-dialog history-restore" labelledBy={titleId} onClose={onClose}>
+      <div className="tool-manage-dialog__header">
+        <div className="tool-manage-dialog__title">
+          <h3 id={titleId}>
+            {t(pick ? "history.restore.titleEntity" : "history.restore.titleVersion", { id: entry.shortId })}
+          </h3>
+          <p>{entry.summary}</p>
         </div>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("history.close")}>
+          ×
+        </button>
+      </div>
 
-        <div className="project-dialog__body history-restore__body">
-          {pick ? (
-            <fieldset className="history-restore__pick">
-              <legend>{t("history.restore.pick")}</legend>
-              {needsCandidates && whole.isPending ? <p className="project-dialog__hint">{t("history.restore.loading")}</p> : null}
-              {needsCandidates && whole.isError ? (
-                <p className="history-dialog__error" role="alert">
-                  {failureText(whole.error)}
-                </p>
-              ) : null}
-              {candidates.map((entity) => (
-                <label key={entity} className="project-dialog__choice">
-                  <input
-                    type="checkbox"
-                    checked={picked.includes(entity)}
-                    onChange={(event) => toggle(entity, event.target.checked)}
-                  />
-                  <span>{entity}</span>
-                </label>
-              ))}
-              {picked.length === 0 ? <p className="project-dialog__hint">{t("history.restore.pickHint")}</p> : null}
-            </fieldset>
-          ) : null}
-
-          {preview.isFetching ? <p className="project-dialog__hint">{t("history.restore.loading")}</p> : null}
-          {preview.isError ? (
-            <p className="history-dialog__error" role="alert">
-              {failureText(preview.error)}
-            </p>
-          ) : null}
-          {data ? (
-            <section className="history-restore__preview" aria-label={t("history.restore.previewAria")}>
-              <p className="history-restore__counts">
-                {t("history.restore.counts", {
-                  added: data.added.length,
-                  changed: data.changed.length,
-                  removed: data.removed.length,
-                })}
+      <div className="project-dialog__body history-restore__body">
+        {pick ? (
+          <fieldset className="history-restore__pick">
+            <legend>{t("history.restore.pick")}</legend>
+            {needsCandidates && whole.isPending ? <p className="project-dialog__hint">{t("history.restore.loading")}</p> : null}
+            {needsCandidates && whole.isError ? (
+              <p className="history-dialog__error" role="alert">
+                {failureText(whole.error)}
               </p>
-              {GROUPS.map(([group, label]) => {
-                const names = data[group];
-                return names.length > 0 ? (
-                  <div key={group} className="history-restore__group">
-                    <h4>{t(label)}</h4>
-                    <ul aria-label={t(label)}>
-                      {names.map((name) => (
-                        <li key={name}>{name}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null;
+            ) : null}
+            {candidates.map((entity) => (
+              <label key={entity} className="project-dialog__choice">
+                <input
+                  type="checkbox"
+                  checked={picked.includes(entity)}
+                  onChange={(event) => toggle(entity, event.target.checked)}
+                />
+                <span>{entity}</span>
+              </label>
+            ))}
+            {picked.length === 0 ? <p className="project-dialog__hint">{t("history.restore.pickHint")}</p> : null}
+          </fieldset>
+        ) : null}
+
+        {preview.isFetching ? <p className="project-dialog__hint">{t("history.restore.loading")}</p> : null}
+        {preview.isError ? (
+          <p className="history-dialog__error" role="alert">
+            {failureText(preview.error)}
+          </p>
+        ) : null}
+        {data ? (
+          <section className="history-restore__preview" aria-label={t("history.restore.previewAria")}>
+            <p className="history-restore__counts">
+              {t("history.restore.counts", {
+                added: data.added.length,
+                changed: data.changed.length,
+                removed: data.removed.length,
               })}
-              {data.unplaced.length > 0 ? (
-                <p className="project-dialog__hint">
-                  {t("history.restore.unplaced", { names: data.unplaced.join(", ") })}
-                </p>
-              ) : null}
-              {needsConfirmation ? (
-                <div className="history-restore__shared">
-                  <p>{t("history.restore.shared")}</p>
-                  <ul>
-                    {data.sharedManifests.map((file) => (
-                      <li key={file} className="history-mono">
-                        {file}
-                      </li>
+            </p>
+            {GROUPS.map(([group, label]) => {
+              const names = data[group];
+              return names.length > 0 ? (
+                <div key={group} className="history-restore__group">
+                  <h4>{t(label)}</h4>
+                  <ul aria-label={t(label)}>
+                    {names.map((name) => (
+                      <li key={name}>{name}</li>
                     ))}
                   </ul>
-                  <label className="project-dialog__choice">
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                    />
-                    <span>{t("history.restore.sharedConfirm")}</span>
-                  </label>
                 </div>
-              ) : null}
-              <p className="project-dialog__hint">{t("history.restore.applyHint")}</p>
-            </section>
-          ) : null}
-        </div>
-
-        <div className="tool-manage-dialog__actions">
-          <button className="secondary-button secondary-button--compact" type="button" onClick={onClose}>
-            {t("history.cancel")}
-          </button>
-          <button
-            className="primary-button primary-button--compact"
-            type="button"
-            disabled={!ready || restore.isPending}
-            onClick={() => restore.mutate()}
-          >
-            {t("history.restore.action")}
-          </button>
-        </div>
+              ) : null;
+            })}
+            {data.unplaced.length > 0 ? (
+              <p className="project-dialog__hint">
+                {t("history.restore.unplaced", { names: data.unplaced.join(", ") })}
+              </p>
+            ) : null}
+            {needsConfirmation ? (
+              <div className="history-restore__shared">
+                <p>{t("history.restore.shared")}</p>
+                <ul>
+                  {data.sharedManifests.map((file) => (
+                    <li key={file} className="history-mono">
+                      {file}
+                    </li>
+                  ))}
+                </ul>
+                <label className="project-dialog__choice">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(event) => setConfirmed(event.target.checked)}
+                  />
+                  <span>{t("history.restore.sharedConfirm")}</span>
+                </label>
+              </div>
+            ) : null}
+            <p className="project-dialog__hint">{t("history.restore.applyHint")}</p>
+          </section>
+        ) : null}
       </div>
-    </div>
+
+      <div className="tool-manage-dialog__actions">
+        <button className="secondary-button secondary-button--compact" type="button" onClick={onClose}>
+          {t("history.cancel")}
+        </button>
+        <button
+          className="primary-button primary-button--compact"
+          type="button"
+          disabled={!ready || restore.isPending}
+          onClick={() => restore.mutate()}
+        >
+          {t("history.restore.action")}
+        </button>
+      </div>
+    </Modal>
   );
 }

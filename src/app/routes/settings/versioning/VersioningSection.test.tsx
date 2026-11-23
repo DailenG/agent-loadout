@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
 import { errorMessage, t } from "@/i18n/en";
 import type { RemoteEntry, RemoteStatusDto } from "@/ipc/bindings";
@@ -189,5 +190,28 @@ describe("VersioningSection", () => {
     await waitFor(() =>
       expect(transport.invocations.find((call) => call.command === "removeRemote")?.args).toEqual(["nas"]),
     );
+  });
+
+  it("moves focus into the token dialog and back to its button (#11)", async () => {
+    const { user } = renderSection();
+    const origin = await screen.findByRole("article", { name: "origin" });
+    await expectModalKeyboard(user, {
+      trigger: within(origin).getByRole("button", { name: "Set token…" }),
+      name: t("settings.versioning.token.title", { name: "origin" }),
+      initial: (dialog) => within(dialog).getByLabelText(t("settings.versioning.token.label")),
+    });
+  });
+
+  it("moves focus to Cancel in the remove confirm and back to Remove (#11)", async () => {
+    const { user } = renderSection();
+    const nas = await screen.findByRole("article", { name: "nas" });
+    await expectModalKeyboard(user, {
+      trigger: within(nas).getByRole("button", { name: "Remove" }),
+      name: t("settings.versioning.remove.title", { name: "nas" }),
+      role: "alertdialog",
+      description: t("settings.versioning.remove.body", { name: "nas" }),
+      // The footer Cancel, not the × (whose accessible name is Cancel too).
+      initial: (dialog) => within(dialog).getByText(t("settings.versioning.cancel"), { selector: "button" }),
+    });
   });
 });

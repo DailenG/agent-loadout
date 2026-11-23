@@ -5,10 +5,11 @@
 // that need a decision, and the recent apply runs with "Undo this apply".
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { storeQueryKeys, useChangeNotice, useInvalidateStore, useUndoApply } from "@/app/apply/changeNotice";
 import { STATE_KEYS, diffLineClass } from "@/app/apply/labels";
 import { RefreshButton } from "@/app/apply/RefreshButton";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { ResolverDialog } from "@/app/resolver/ResolverDialog";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -391,16 +392,6 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
     .filter((file) => selectedFiles.has(fileKey(file)))
     .map(({ projectId, scope, file }) => ({ projectId, scope, file }));
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !resolving) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, resolving]);
-
   function setSelected(key: string, selected: boolean) {
     setSelectedFiles((current) => {
       const next = new Set(current);
@@ -414,13 +405,14 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="dialog-backdrop apply-drawer-backdrop" role="presentation" onClick={onClose}>
-      <aside
+    <>
+      <Modal
         className="apply-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
+        backdropClassName="dialog-backdrop apply-drawer-backdrop"
+        element="aside"
+        labelledBy={titleId}
+        initialFocus="dialog"
+        onClose={onClose}
       >
         <div className="apply-drawer__header">
           <div className="apply-drawer__title">
@@ -554,13 +546,12 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
             {apply.isPending ? t("apply.action.applying") : t("apply.action.all")}
           </button>
         </div>
-      </aside>
+      </Modal>
+      {/* Over the drawer, which takes the keyboard back when it closes. */}
       {resolving ? (
-        <div onClick={(event) => event.stopPropagation()} role="presentation">
-          <ResolverDialog entry={resolving} clientName={clientName} onClose={() => setResolving(null)} />
-        </div>
+        <ResolverDialog entry={resolving} clientName={clientName} onClose={() => setResolving(null)} />
       ) : null}
-    </div>
+    </>
   );
 }
 

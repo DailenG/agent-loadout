@@ -1,9 +1,12 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
+import { t } from "@/i18n/en";
 import type { MigrationApplied, MigrationReport } from "@/ipc/bindings";
 import { MOCK_CHANGE, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
+import { MigrateSection } from "./MigrateSection";
 import { MigrateWizard } from "./MigrateWizard";
 
 const REPORT: MigrationReport = {
@@ -195,5 +198,15 @@ describe("MigrateWizard", () => {
     renderWizard({ planSkilldockMigration: async () => mockIpcError({ code: "not_found", message: "none" }) });
     expect(await screen.findByText("No SkillDock data was found in ~/.skilldock.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  });
+
+  it("moves focus into the wizard from Settings and back to its button (#11)", async () => {
+    const { user } = renderWithProviders(<MigrateSection onOpenPending={vi.fn()} />, {
+      commands: { planSkilldockMigration: async () => ok(REPORT) },
+    });
+    await expectModalKeyboard(user, {
+      trigger: screen.getByRole("button", { name: t("migrate.section.open") }),
+      name: t("migrate.title"),
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { t } from "@/i18n/en";
 import type { ChangeResult, ProjectRow, ProjectServerList, ProjectServerRow, TrustReview } from "@/ipc/bindings";
 import type { CommandResult } from "@/ipc/transport";
@@ -430,6 +431,29 @@ describe("McpPage at project scope", () => {
     await waitFor(() => expect(trustProject).toHaveBeenCalledWith(PROJECT.id, REVIEW.hash));
     const edits = ["saveProjectServer", "removeProjectServer", "setProjectServerClients"];
     expect(transport.calls.some((command) => edits.includes(command))).toBe(false);
+  });
+
+  it("moves focus into the project server dialog and back to Add (#11)", async () => {
+    const { user } = await renderProjectScope();
+    await screen.findByRole("article", { name: "docs" });
+    await expectModalKeyboard(user, {
+      trigger: screen.getByRole("button", { name: t("mcp.toolbar.add") }),
+      name: t("mcp.project.dialog.createTitle"),
+      initial: (dialog) => within(dialog).getByLabelText(t("mcp.project.dialog.name")),
+    });
+  });
+
+  it("moves focus into the trust review and back to Review (#11)", async () => {
+    const { user } = await renderProjectScope({
+      listProjectServers: async () => ok({ ...LIST, project: { ...LIST.project, trust: "changed" } }),
+      reviewProject: async () => ok(REVIEW),
+    });
+    await screen.findByRole("article", { name: "docs" });
+    await expectModalKeyboard(user, {
+      trigger: screen.getByRole("button", { name: t("mcp.project.review") }),
+      name: t("projects.review.title", { name: REVIEW.name }),
+      initial: (dialog) => dialog,
+    });
   });
 
   it("follows the sidebar back to User and closes an open editor", async () => {

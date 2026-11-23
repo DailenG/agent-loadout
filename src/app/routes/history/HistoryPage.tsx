@@ -5,10 +5,11 @@
 // loads in pages of `HISTORY_PAGE_SIZE` with "Load more".
 
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { storeQueryKeys, useInvalidateStore, useUndoApply } from "@/app/apply/changeNotice";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { CommitDetailPanel } from "@/app/routes/history/CommitDetailPanel";
@@ -178,6 +179,7 @@ function ChangesTab({ filter, onOpenPending }: { filter: ListFilter; onOpenPendi
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [confirming, setConfirming] = useState<HistoryEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const undoQuestionId = useId();
 
   const removeTag = useMutation({
     mutationFn: async (name: string) => {
@@ -288,35 +290,34 @@ function ChangesTab({ filter, onOpenPending }: { filter: ListFilter; onOpenPendi
         />
       ) : null}
       {confirming ? (
-        <div className="dialog-backdrop" role="presentation" onClick={() => setConfirming(null)}>
-          <div
-            className="tool-manage-dialog project-dialog"
-            role="alertdialog"
-            aria-modal="true"
-            aria-label={t("apply.undo.action")}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <p>{t("apply.undo.confirmMessage")}</p>
-            <p className="project-dialog__hint">{confirming.summary}</p>
-            <div className="tool-manage-dialog__actions">
-              <button
-                className="secondary-button secondary-button--compact"
-                type="button"
-                onClick={() => setConfirming(null)}
-              >
-                {t("history.cancel")}
-              </button>
-              <button
-                className="primary-button primary-button--compact"
-                type="button"
-                disabled={undoing}
-                onClick={() => void handleUndo(confirming, true)}
-              >
-                {t("apply.undo.confirmAction")}
-              </button>
-            </div>
+        <Modal
+          className="tool-manage-dialog project-dialog"
+          role="alertdialog"
+          label={t("apply.undo.action")}
+          describedBy={undoQuestionId}
+          onClose={() => setConfirming(null)}
+        >
+          <p id={undoQuestionId}>{t("apply.undo.confirmMessage")}</p>
+          <p className="project-dialog__hint">{confirming.summary}</p>
+          <div className="tool-manage-dialog__actions">
+            <button
+              className="secondary-button secondary-button--compact"
+              type="button"
+              onClick={() => setConfirming(null)}
+              data-autofocus
+            >
+              {t("history.cancel")}
+            </button>
+            <button
+              className="primary-button primary-button--compact"
+              type="button"
+              disabled={undoing}
+              onClick={() => void handleUndo(confirming, true)}
+            >
+              {t("apply.undo.confirmAction")}
+            </button>
           </div>
-        </div>
+        </Modal>
       ) : null}
     </>
   );

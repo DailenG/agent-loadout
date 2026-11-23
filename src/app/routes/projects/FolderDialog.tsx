@@ -3,8 +3,9 @@
 // without one gets a new manifest, Private preselected, Shared on request.
 
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
+import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { LAYOUT_KEYS, failureText } from "@/app/routes/projects/labels";
 import { t } from "@/i18n/en";
@@ -28,16 +29,6 @@ export function FolderDialog({ folder, intent, onClose, onDone }: FolderDialogPr
   const [shared, setShared] = useState(false);
   const [name, setName] = useState(folder.name);
   const manifest = folder.manifest;
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   const add = useMutation({
     mutationFn: async () => unwrap(await commands.addProject(folder.token)),
@@ -66,88 +57,81 @@ export function FolderDialog({ folder, intent, onClose, onDone }: FolderDialogPr
 
   const busy = add.isPending || init.isPending;
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="tool-manage-dialog project-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="tool-manage-dialog__header">
-          <div className="tool-manage-dialog__title">
-            <h3 id={titleId}>
-              {t(intent === "init" ? "projects.folder.titleInit" : "projects.folder.titleAdd")}
-            </h3>
-            <p title={folder.path}>{folder.path}</p>
-          </div>
-          <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("projects.cancel")}>
-            ×
-          </button>
+    <Modal className="tool-manage-dialog project-dialog" labelledBy={titleId} onClose={onClose}>
+      <div className="tool-manage-dialog__header">
+        <div className="tool-manage-dialog__title">
+          <h3 id={titleId}>
+            {t(intent === "init" ? "projects.folder.titleInit" : "projects.folder.titleAdd")}
+          </h3>
+          <p title={folder.path}>{folder.path}</p>
         </div>
-
-        {manifest ? (
-          <div className="project-dialog__body">
-            <p>{t("projects.folder.found", { name: manifest.name, id: manifest.id })}</p>
-            <p className="project-dialog__hint">{t(LAYOUT_KEYS[manifest.layout])}</p>
-            <p className="project-dialog__hint">
-              {manifest.known ? t("projects.folder.known") : t("projects.folder.addHint")}
-            </p>
-          </div>
-        ) : (
-          <fieldset className="project-dialog__body">
-            <legend>{t("projects.folder.none")}</legend>
-            <label className="project-dialog__choice">
-              <input type="radio" name="layout" checked={!shared} onChange={() => setShared(false)} />
-              <span>
-                <strong>{t("projects.folder.private")}</strong>
-                <span className="project-dialog__hint">{t("projects.folder.privateHint")}</span>
-              </span>
-            </label>
-            <label className="project-dialog__choice">
-              <input type="radio" name="layout" checked={shared} onChange={() => setShared(true)} />
-              <span>
-                <strong>{t("projects.folder.shared")}</strong>
-                <span className="project-dialog__hint">{t("projects.folder.sharedHint")}</span>
-              </span>
-            </label>
-            <label className="project-dialog__field">
-              <span>{t("projects.folder.name")}</span>
-              <input
-                className="tool-manage-dialog__search"
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-          </fieldset>
-        )}
-
-        <div className="tool-manage-dialog__actions">
-          <button className="secondary-button secondary-button--compact" type="button" onClick={onClose}>
-            {t("projects.cancel")}
-          </button>
-          {manifest ? (
-            <button
-              className="primary-button primary-button--compact"
-              type="button"
-              disabled={busy}
-              onClick={() => add.mutate()}
-            >
-              {t("projects.folder.add")}
-            </button>
-          ) : (
-            <button
-              className="primary-button primary-button--compact"
-              type="button"
-              disabled={busy}
-              onClick={() => init.mutate()}
-            >
-              {t("projects.folder.create")}
-            </button>
-          )}
-        </div>
+        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={t("projects.cancel")}>
+          ×
+        </button>
       </div>
-    </div>
+
+      {manifest ? (
+        <div className="project-dialog__body">
+          <p>{t("projects.folder.found", { name: manifest.name, id: manifest.id })}</p>
+          <p className="project-dialog__hint">{t(LAYOUT_KEYS[manifest.layout])}</p>
+          <p className="project-dialog__hint">
+            {manifest.known ? t("projects.folder.known") : t("projects.folder.addHint")}
+          </p>
+        </div>
+      ) : (
+        <fieldset className="project-dialog__body">
+          <legend>{t("projects.folder.none")}</legend>
+          <label className="project-dialog__choice">
+            <input type="radio" name="layout" checked={!shared} onChange={() => setShared(false)} />
+            <span>
+              <strong>{t("projects.folder.private")}</strong>
+              <span className="project-dialog__hint">{t("projects.folder.privateHint")}</span>
+            </span>
+          </label>
+          <label className="project-dialog__choice">
+            <input type="radio" name="layout" checked={shared} onChange={() => setShared(true)} />
+            <span>
+              <strong>{t("projects.folder.shared")}</strong>
+              <span className="project-dialog__hint">{t("projects.folder.sharedHint")}</span>
+            </span>
+          </label>
+          <label className="project-dialog__field">
+            <span>{t("projects.folder.name")}</span>
+            <input
+              className="tool-manage-dialog__search"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+        </fieldset>
+      )}
+
+      <div className="tool-manage-dialog__actions">
+        <button className="secondary-button secondary-button--compact" type="button" onClick={onClose}>
+          {t("projects.cancel")}
+        </button>
+        {manifest ? (
+          <button
+            className="primary-button primary-button--compact"
+            type="button"
+            disabled={busy}
+            onClick={() => add.mutate()}
+            data-autofocus
+          >
+            {t("projects.folder.add")}
+          </button>
+        ) : (
+          <button
+            className="primary-button primary-button--compact"
+            type="button"
+            disabled={busy}
+            onClick={() => init.mutate()}
+          >
+            {t("projects.folder.create")}
+          </button>
+        )}
+      </div>
+    </Modal>
   );
 }

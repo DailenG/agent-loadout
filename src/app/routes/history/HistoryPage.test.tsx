@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { HISTORY_PAGE_SIZE, HistoryPage } from "@/app/routes/history/HistoryPage";
 import { errorMessage, t } from "@/i18n/en";
 import type {
@@ -488,5 +489,40 @@ describe("HistoryPage", () => {
     expect(await within(strip).findByText(t("history.conflicts.label", { count: 1 }))).toBeInTheDocument();
     expect(within(strip).getByText("secrets GITHUB_PAT")).toBeInTheDocument();
     expect(within(strip).getByText(t("history.conflicts.hint"))).toBeInTheDocument();
+  });
+
+  it("moves focus into the tag dialog and back to its button (#11)", async () => {
+    const { user } = renderPage();
+    await expectModalKeyboard(user, {
+      trigger: await screen.findByRole("button", { name: t("history.toolbar.tagCurrent") }),
+      name: t("history.tag.titleCurrent"),
+      initial: (dialog) => within(dialog).getByRole("textbox", { name: t("history.tag.name") }),
+    });
+  });
+
+  it("moves focus into the restore dialog and back to its button (#11)", async () => {
+    const { user } = renderPage();
+    const { actions } = await selectRow(user, SERVER_EDIT.summary);
+    await expectModalKeyboard(user, {
+      trigger: within(actions).getByRole("button", { name: t("history.action.restoreVersion") }),
+      name: t("history.restore.titleVersion", { id: SERVER_EDIT.shortId }),
+    });
+  });
+
+  it("moves focus to Cancel in the undo confirm and back to Undo (#11)", async () => {
+    const { user } = renderPage({
+      commands: {
+        undoApply: async () =>
+          mockIpcError({ code: "confirmation_required", message: "later applies changed the same entries" }),
+      },
+    });
+    const { actions } = await selectRow(user, OLDER_APPLY.summary);
+    await expectModalKeyboard(user, {
+      trigger: within(actions).getByRole("button", { name: t("apply.undo.action") }),
+      name: t("apply.undo.action"),
+      role: "alertdialog",
+      description: t("apply.undo.confirmMessage"),
+      initial: (dialog) => within(dialog).getByRole("button", { name: t("history.cancel") }),
+    });
   });
 });

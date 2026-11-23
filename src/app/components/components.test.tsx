@@ -8,6 +8,7 @@ import {
   ListGridViewToggle,
   type ListGridViewMode,
 } from "@/app/components/ListGridViewToggle";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { NotificationProvider, useNotifications } from "@/app/components/notifications";
 import { t } from "@/i18n/en";
 
@@ -82,6 +83,57 @@ describe("ported components", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("BatchDeleteDialog takes focus from its trigger and gives it back (#11)", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Delete selected
+          </button>
+          <BatchDeleteDialog
+            cancelLabel="Cancel"
+            confirmLabel="Delete"
+            description="This cannot be undone."
+            isBusy={false}
+            isOpen={open}
+            title="Delete 2 items?"
+            onCancel={() => setOpen(false)}
+            onConfirm={() => undefined}
+          />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    await expectModalKeyboard(user, {
+      trigger: screen.getByRole("button", { name: "Delete selected" }),
+      name: "Delete 2 items?",
+      description: "This cannot be undone.",
+      initial: () => screen.getByRole("button", { name: "Cancel" }),
+    });
+  });
+
+  it("BatchDeleteDialog stays open on Escape and the backdrop while busy", async () => {
+    const onCancel = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <BatchDeleteDialog
+        cancelLabel="Cancel"
+        confirmLabel="Delete"
+        description="This cannot be undone."
+        isBusy
+        isOpen
+        title="Delete 2 items?"
+        onCancel={onCancel}
+        onConfirm={() => undefined}
+      />,
+    );
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("dialog").parentElement!);
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it("AppTooltip shows data-tooltip text after the hover delay", () => {

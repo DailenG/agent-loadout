@@ -1,5 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { errorMessage, t } from "@/i18n/en";
 import type { ServerList, ServerRow } from "@/ipc/bindings";
 import { MOCK_APPLY_RUN, MOCK_CLIENTS, ok } from "@/test/mockTransport";
@@ -156,5 +159,64 @@ describe("McpPage", () => {
     expect(screen.getByRole("button", { name: "Add server" })).toBeInTheDocument();
     const toolbar = screen.getByTestId("header-toolbar");
     expect(screen.getAllByRole("button", { name: "Paste config" }).some((button) => !toolbar.contains(button))).toBe(true);
+  });
+
+  it("moves focus into the edit dialog and back to Edit (#11)", async () => {
+    const { user } = renderPage();
+    const files = await screen.findByRole("article", { name: "files" });
+    await expectModalKeyboard(user, {
+      trigger: within(files).getByRole("button", { name: t("mcp.card.edit", { name: "files" }) }),
+      name: t("mcp.dialog.editTitle"),
+    });
+  });
+
+  it("moves focus into the grid detail modal and back to its card (#11)", async () => {
+    const { user } = renderPage();
+    await screen.findByRole("article", { name: "files" });
+    await user.click(screen.getByRole("button", { name: t("skills.view.grid") }));
+    const files = screen.getByRole("article", { name: "files" });
+    await expectModalKeyboard(user, {
+      trigger: within(files).getByRole("button", { name: t("mcp.card.expandAria", { name: "files" }) }),
+      name: `${t("mcp.card.basicInfo")} files`,
+      initial: (dialog) => dialog,
+    });
+  });
+
+  it("closes the grid detail modal before a drifted pill opens Pending changes (#11 review)", async () => {
+    function PageWithDrawer() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <McpPage onOpenPending={() => setOpen(true)} onOpenInstall={vi.fn()} />
+          <ApplyDrawer open={open} onClose={() => setOpen(false)} />
+        </>
+      );
+    }
+    const drifted = makeRow({
+      id: "drifty",
+      pills: [{ client: "codex", selected: true, state: "drift", reason: null }],
+      clients: { allDetected: false, clients: ["codex"] },
+    });
+    const { user } = renderWithProviders(<PageWithDrawer />, {
+      commands: { listServers: async () => ok({ ...LIST, servers: [drifted] }) },
+    });
+    await screen.findByRole("article", { name: "drifty" });
+    await user.click(screen.getByRole("button", { name: t("skills.view.grid") }));
+    const expand = screen.getByRole("button", { name: t("mcp.card.expandAria", { name: "drifty" }) });
+    expand.focus();
+    await user.keyboard("{Enter}");
+    const detail = await screen.findByRole("dialog", { name: `${t("mcp.card.basicInfo")} drifty` });
+    await user.click(within(detail).getByRole("button", { name: /^Codex:/ }));
+
+    const drawer = await screen.findByRole("dialog", { name: t("apply.drawer.title") });
+    expect(detail).not.toBeInTheDocument();
+    expect(drawer).toContainElement(document.activeElement as HTMLElement);
+    // No dialog is left on screen under an inert shell.
+    for (const dialog of document.querySelectorAll('[aria-modal="true"]')) {
+      expect(dialog.closest("[inert]")).toBeNull();
+    }
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(drawer).not.toBeInTheDocument());
+    expect(expand).toHaveFocus();
   });
 });
