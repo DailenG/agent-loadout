@@ -1,5 +1,8 @@
 # Weekly version updates, one grouped pull request per ecosystem and folder.
-# Security updates are separate (Settings, Code security).
+# Security updates are separate (Settings, Code security). Major versions of
+# cargo and npm dependencies are left to deliberate upgrades (they need code
+# changes: React 19, similar 3, dirs 7), so they are ignored here; security
+# updates still arrive for them.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -10,6 +13,10 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps(cargo)"
 
@@ -22,6 +29,10 @@ updates:
     groups:
       cargo-app:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps(app)"
 
@@ -33,6 +44,10 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps(npm)"
 
