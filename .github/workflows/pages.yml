@@ -1,0 +1,64 @@
+# Builds the product site from site/ and deploys it to GitHub Pages.
+# site/tools/build.mjs copies site/ without design/, tools/ and previews/,
+# fills in the site URL from site/data/site.json and renders the package
+# channels from site/data/channels.json.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Check the site URL
+        env:
+          PAGES_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          site_url=$(node -p "require('./site/data/site.json').url")
+          if [ "${PAGES_URL%/}/" != "$site_url" ]; then
+            echo "::warning file=site/data/site.json::url is $site_url but GitHub Pages serves ${PAGES_URL%/}/"
+          fi
+
+      - name: Check color contrast
+        run: node site/tools/contrast.mjs
+
+      - name: Build
+        run: node site/tools/build.mjs --out _site
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

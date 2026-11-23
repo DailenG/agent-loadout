@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loadout: every agent's config, on the record</title>
+  <meta name="description" content="Loadout keeps MCP servers, skills and secret references in one versioned, offline store and writes each AI coding client's native config. Open source, MIT.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="../shared/loadout-mark.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/fraunces-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="mast">
+    <div class="mast__row">
+      <a class="word" href="#top">Loadout</a>
+      <p class="mast__meta">MCP servers, skills and secret references for AI coding clients</p>
+      <nav aria-label="Primary">
+        <ul class="nav">
+          <li><a href="#dialects">How it works</a></li>
+          <li><a href="#terms">Safety</a></li>
+          <li><a href="#get">Install</a></li>
+          <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md">Docs</a></li>
+          <li><a href="https://github.com/DailenG/agent-loadout">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero__text">
+        <p class="kicker">Open source · MIT · Windows and Linux</p>
+        <h1 id="hero-title">Every agent's config, <em class="mark">on the record.</em></h1>
+        <p class="lede">Loadout keeps your MCP servers, skills and secret references in one versioned, offline store, and writes them into each AI coding client's own config file. Every change is a commit. Every apply can be undone. Entries it didn't write are never touched.<sup><a href="#n1" id="r1" aria-label="Note 1">1</a></sup></p>
+        <div class="cta">
+          <a class="btn" href="#get">Download Loadout</a>
+          <a class="link" href="https://github.com/DailenG/agent-loadout">Read the source on GitHub</a>
+        </div>
+      </div>
+
+      <figure class="ledger" aria-labelledby="ledger-cap">
+        <figcaption id="ledger-cap" class="ledger__cap"><span>History</span><span class="mono">store · local git</span></figcaption>
+        <ol class="log" role="list">
+          <li class="log__entry log__entry--open">
+            <p class="log__line"><code class="hash">0cc3f1a</code> <b>Enable context7 for omp and Codex</b></p>
+            <p class="log__meta mono">desktop · Apply: 2 files written</p>
+            <div class="diff" role="group" aria-label="Changes in this commit">
+              <p class="diff__file mono">~/.omp/agent/mcp.json</p>
+              <pre class="diff__body"><code><span class="ctx">  "mcpServers": {</span>
+<span class="add">+   "context7": {</span>
+<span class="add">+     "url": "https://mcp.context7.com/mcp"</span>
+<span class="add">+   },</span>
+<span class="ctx">    "my-notes": { … }   <i>// yours, untouched</i></span></code></pre>
+              <p class="diff__file mono">~/.codex/config.toml</p>
+              <pre class="diff__body"><code><span class="add">+ [mcp_servers.context7]</span>
+<span class="add">+ url = "https://mcp.context7.com/mcp"</span></code></pre>
+              <p class="undo"><span class="undo__btn">Undo this apply</span><sup><a href="#n2" id="r2" aria-label="Note 2">2</a></sup></p>
+            </div>
+          </li>
+          <li class="log__entry">
+            <p class="log__line"><code class="hash">0ac3f1a</code> <b>Add project server storybook</b></p>
+            <p class="log__meta mono">desktop · api-gateway</p>
+          </li>
+          <li class="log__entry">
+            <p class="log__line"><code class="hash">09c3f1a</code> <b>Install skill frontend-design</b> <span class="tagname mono">before-redesign</span></p>
+            <p class="log__meta mono">desktop</p>
+          </li>
+          <li class="log__entry">
+            <p class="log__line"><code class="hash">07c3f1a</code> <b>Edit server github</b></p>
+            <p class="log__meta mono">laptop</p>
+          </li>
+        </ol>
+      </figure>
+    </section>
+
+    <section class="dialects" id="dialects" aria-labelledby="dialects-title">
+      <header class="sec">
+        <p class="sec__n">§ 1</p>
+        <h2 id="dialects-title">One entry, <em>many dialects.</em></h2>
+        <p class="sec__lede">You write a server once. Loadout renders it into each client's own file, in that client's own syntax, down to how it spells a secret reference. Comments and key order in the file stay as they were.</p>
+      </header>
+      <div class="rosetta">
+        <article class="src">
+          <h3 class="rosetta__h"><span>Source</span> <code>store/servers/github.toml</code></h3>
+          <pre><code>id = "github"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = <mark>"${secret:GITHUB_PAT}"</mark>
+
+[enable]
+clients = ["omp", "cursor", "opencode"]</code></pre>
+        </article>
+        <div class="renders">
+          <article class="render">
+            <h3 class="rosetta__h"><span>omp</span> <code>~/.omp/agent/mcp.json</code></h3>
+            <pre><code>"github": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": <mark>"${GITHUB_PAT}"</mark> }
+}</code></pre>
+          </article>
+          <article class="render">
+            <h3 class="rosetta__h"><span>Cursor</span> <code>~/.cursor/mcp.json</code></h3>
+            <pre><code>"github": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": <mark>"${env:GITHUB_PAT}"</mark> }
+}</code></pre>
+          </article>
+          <article class="render">
+            <h3 class="rosetta__h"><span>OpenCode</span> <code>opencode.jsonc</code></h3>
+            <pre><code>"github": {
+  "type": "local",
+  "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+  "environment": { "GITHUB_PERSONAL_ACCESS_TOKEN": <mark>"{env:GITHUB_PAT}"</mark> }
+}</code></pre>
+          </article>
+        </div>
+      </div>
+      <p class="aside">Where a client can't expand a reference, Loadout starts the server through <code>loadout exec</code>, which fetches the value from the keyring or 1Password at launch and never writes it to disk.</p>
+    </section>
+
+    <section class="terms" id="terms" aria-labelledby="terms-title">
+      <header class="sec">
+        <p class="sec__n">§ 2</p>
+        <h2 id="terms-title">Terms of <em>engagement.</em></h2>
+        <p class="sec__lede">What Loadout promises your config files, and the people who wrote them.</p>
+      </header>
+      <div class="terms__body">
+        <ol class="articles" role="list">
+          <li><span class="num" aria-hidden="true">I</span><h3>It owns only what it wrote.</h3><p>A ledger on your machine records every entry Loadout wrote. Anything else is foreign: shown, never edited or removed unless you adopt it.</p></li>
+          <li><span class="num" aria-hidden="true">II</span><h3>Secrets stay references.</h3><p>Env vars, the OS keyring or 1Password. A leak scanner checks every commit, so no value reaches the store, a snapshot or a remote.</p></li>
+          <li><span class="num" aria-hidden="true">III</span><h3>Every change is a commit.</h3><p>History, semantic diffs, named tags and restore, all in a local git repository. Remotes are optional: any git URL or a plain folder.</p></li>
+          <li><span class="num" aria-hidden="true">IV</span><h3>Projects ask first.</h3><p>A project manifest can run commands, so it stays read only until you review its diff and trust it.</p></li>
+        </ol>
+        <figure class="plate">
+          <img src="../shared/screens/M28-projects-trust.png" width="1632" height="1020" loading="lazy" alt="Loadout's trust review dialog for a project named api-gateway, showing a warning that manifests can run commands, a diff of the changed project.toml, and a Trust and apply button.">
+          <figcaption><span class="mono">Plate 1.</span> The trust review for a project manifest that changed since it was last trusted.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="get" id="get" aria-labelledby="get-title">
+      <header class="sec">
+        <p class="sec__n">§ 3</p>
+        <h2 id="get-title">Where to <em>get it.</em></h2>
+      </header>
+      <div class="get__body">
+        <div class="get__primary">
+          <p>Signed releases for Windows and Linux, with SHA-256 sums for every asset.</p>
+          <a class="btn" href="https://github.com/DailenG/agent-loadout/releases/latest">Latest release on GitHub</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Install methods by operating system</caption>
+            <thead><tr><th scope="col">System</th><th scope="col">Method</th><th scope="col">Command or file</th><th scope="col">Status</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Windows</th><td>Installer</td><td><code>Loadout_X.Y.Z_x64-setup.exe</code></td><td><span class="st st--ok">Available</span></td></tr>
+              <tr><th scope="row">Windows</th><td>winget</td><td><code>winget install DailenG.AgentLoadout</code></td><td><span class="st">Pending</span></td></tr>
+              <tr><th scope="row">Windows</th><td>Chocolatey</td><td><code>choco install agent-loadout</code></td><td><span class="st">Pending</span></td></tr>
+              <tr><th scope="row">Linux</th><td>AppImage, .deb, .rpm</td><td><code>agent-loadout_X.Y.Z_amd64.AppImage</code></td><td><span class="st st--ok">Available</span></td></tr>
+              <tr><th scope="row">Arch Linux</th><td>AUR</td><td><code>yay -S agent-loadout-bin</code></td><td><span class="st">Pending</span></td></tr>
+              <tr><th scope="row">Any, incl. macOS</th><td>CLI from source</td><td><code>cargo install agent-loadout</code></td><td><span class="st">Pending</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="notes" aria-labelledby="notes-title">
+      <h2 id="notes-title" class="notes__h">Notes</h2>
+      <ol>
+        <li id="n1">An entry Loadout did not write is "foreign". It shows up in the plan, and stays exactly as it is. <a href="#r1" aria-label="Back to text">↩</a></li>
+        <li id="n2">Each apply backs up every file first and lands as one commit, so undo restores the files and the store together. <a href="#r2" aria-label="Back to text">↩</a></li>
+      </ol>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    <p class="word word--foot">Loadout</p>
+    <ul class="foot__links">
+      <li><a href="https://github.com/DailenG/agent-loadout">GitHub</a></li>
+      <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md">User guide</a></li>
+      <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/adapters.md">Client adapters</a></li>
+      <li><a href="https://deepwiki.com/DailenG/agent-loadout">DeepWiki</a></li>
+      <li><a href="https://github.com/DailenG/agent-loadout/releases">Releases</a></li>
+    </ul>
+    <p class="foot__fine">MIT licensed. Built and tested with omp first. Not affiliated with any AI client vendor. Set in Fraunces, IBM Plex Sans and IBM Plex Mono.</p>
+  </footer>
+
+  <script src="ledger.js" defer></script>
+</body>
+</html>

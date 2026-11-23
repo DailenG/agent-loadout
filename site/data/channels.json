@@ -1,0 +1,55 @@
+{
+  "_doc": "Package channels shown in the Install section. site/tools/build.mjs renders them into index.html between the <!-- channels:OS --> markers. To flip a channel live, set \"status\" to \"live\" (and \"url\" to its package page), then run `node site/tools/build.mjs --sync` or push to main.",
+  "channels": [
+    {
+      "id": "winget",
+      "os": "windows",
+      "name": "winget",
+      "prompt": "PS>",
+      "command": "winget install --id DailenG.AgentLoadout",
+      "status": "pending",
+      "pending": "The manifest is waiting to be accepted into winget-pkgs.",
+      "url": ""
+    },
+    {
+      "id": "chocolatey",
+      "os": "windows",
+      "name": "Chocolatey",
+      "prompt": "PS>",
+      "command": "choco install agent-loadout",
+      "status": "pending",
+      "pending": "The package is waiting for approval on the Chocolatey Community Repository. It installs per user, like the installer.",
+      "url": ""
+    },
+    {
+      "id": "aur-bin",
+      "os": "linux",
+      "name": "AUR: agent-loadout-bin",
+      "prompt": "$",
+      "command": "yay -S agent-loadout-bin",
+      "status": "pending",
+      "pending": "Not published to the AUR yet. Until then, build it from the repository (below).",
+      "url": ""
+    },
+    {
+      "id": "aur",
+      "os": "linux",
+      "name": "AUR: agent-loadout (source)",
+      "prompt": "$",
+      "command": "yay -S agent-loadout",
+      "status": "pending",
+      "pending": "Not published to the AUR yet.",
+      "url": ""
+    },
+    {
+      "id": "crates",
+      "os": "cli",
+      "name": "crates.io",
+      "prompt": "$",
+      "command": "cargo install agent-loadout",
+      "status": "pending",
+      "pending": "Not on crates.io yet; use the git install above. The crates.io crate named loadout is an unrelated project.",
+      "url": ""
+    }
+  ]
+}

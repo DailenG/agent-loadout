@@ -1,0 +1,5 @@
+{
+  "_doc": "The site's public address. Every absolute URL (canonical, Open Graph, sitemap, robots, 404 page) is built from `url` by site/tools/build.mjs. For a custom domain, change `url` here and add a CNAME file to site/.",
+  "url": "https://daileng.github.io/agent-loadout/",
+  "repo": "DailenG/agent-loadout"
+}

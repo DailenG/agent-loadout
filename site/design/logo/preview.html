@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Loadout mark options</title>
+  <style>
+    @font-face { font-family: "Bricolage"; src: url(../../fonts/bricolage-grotesque-latin-standard-normal.woff2) format("woff2-variations"); font-weight: 200 800; font-stretch: 75% 100%; }
+    @font-face { font-family: "Martian Mono"; src: url(../../fonts/martian-mono-latin-400-normal.woff2) format("woff2"); }
+    body { margin: 0; background: #0b081c; color: #f1edff; font: 400 15px/1.5 "Bricolage", system-ui, sans-serif; }
+    .opt { width: 1480px; padding: 28px 32px 32px; box-sizing: border-box; background: #120d2b; border-bottom: 1px solid #3b307a; }
+    h2 { margin: 0 0 4px; font-size: 26px; font-weight: 800; font-stretch: 80%; }
+    .sub { margin: 0 0 18px; color: #b9b0de; font: 12px/1.5 "Martian Mono", monospace; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 300px; gap: 16px; }
+    .bg { border-radius: 14px; padding: 18px; display: flex; align-items: flex-end; gap: 22px; }
+    .dark { background: #1c1540; }
+    .light { background: #f7f4ff; color: #19133a; }
+    .size { display: grid; justify-items: center; gap: 8px; font: 11px/1 "Martian Mono", monospace; color: inherit; }
+    .size span { opacity: .8; }
+    .size img { display: block; }
+    .tile { border-radius: 14px; padding: 18px; background: linear-gradient(135deg, #2b5fa8, #1a2f5a 60%, #0e1730); display: grid; align-content: center; justify-items: center; gap: 18px; }
+    .dock { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 18px; background: rgba(255, 255, 255, .16); }
+    .dock span { width: 48px; height: 48px; border-radius: 12px; background: rgba(255, 255, 255, .25); }
+    .app { display: grid; justify-items: center; gap: 8px; color: #fff; font-size: 13px; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+    .app img { filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .35)); }
+  </style>
+</head>
+<body>
+  <template id="row">
+    <section class="opt">
+      <h2></h2>
+      <p class="sub"></p>
+      <div class="grid">
+        <div class="bg dark"></div>
+        <div class="bg light"></div>
+        <div class="tile">
+          <div class="app"><img width="128" height="128" alt=""><span>Loadout</span></div>
+          <div class="dock"><span></span><img width="48" height="48" alt=""><span></span><img width="24" height="24" alt=""></div>
+        </div>
+      </div>
+    </section>
+  </template>
+  <script>
+    const OPTIONS = [
+      { id: "current", name: "Current mark", file: "current.svg", small: "current.svg", note: "src-tauri/icons/icon.svg, unchanged. One drawing at every size." },
+      { id: "a", name: "A. Refined", file: "option-a-refined.svg", small: "option-a-refined-small.svg", note: "Same composition, optically tuned: thicker bars, solid tints instead of transparency, larger tile; a bolder drawing for 16 and 32 px." },
+      { id: "b", name: "B. Stepped", file: "option-b-stepped.svg", small: "option-b-stepped-small.svg", note: "Bars step down in length toward the signal dot, so the mark reads as a list loading out; rounder tile; warm tint on the last bar." },
+      { id: "c", name: "C. Night", file: "option-c-night.svg", small: "option-c-night-small.svg", note: "The site's night panel as the tile, with the gradient moved into the bars; one shape that holds up on both dark and light backgrounds." },
+    ];
+    const tpl = document.getElementById("row");
+    for (const o of OPTIONS) {
+      const row = tpl.content.firstElementChild.cloneNode(true);
+      row.id = `opt-${o.id}`;
+      row.querySelector("h2").textContent = o.name;
+      row.querySelector(".sub").textContent = `${o.file} (16 and 32 px: ${o.small}) · ${o.note}`;
+      for (const bg of row.querySelectorAll(".bg")) {
+        for (const size of [16, 32, 64, 256]) {
+          const cell = document.createElement("div");
+          cell.className = "size";
+          const img = new Image(size, size);
+          img.src = size <= 32 ? o.small : o.file;
+          img.alt = "";
+          const label = document.createElement("span");
+          label.textContent = `${size}`;
+          cell.append(img, label);
+          bg.append(cell);
+        }
+      }
+      const [app, d1, d2] = row.querySelectorAll(".tile img");
+      app.src = o.file; d1.src = o.file; d2.src = o.small;
+      document.body.append(row);
+    }
+  </script>
+</body>
+</html>

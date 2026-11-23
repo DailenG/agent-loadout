@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en" data-repo="DailenG/agent-loadout">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://api.github.com; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Loadout: one store for every AI coding agent's MCP servers and skills</title>
+  <meta name="description" content="Loadout keeps MCP servers, skills and secret references in one versioned, offline store and writes each AI coding client's native config file, without touching entries it did not write. Open source, MIT.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#120d2b" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f4ff" media="(prefers-color-scheme: light)">
+  <link rel="canonical" href="%SITE_URL%">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Loadout">
+  <meta property="og:title" content="Loadout: patch every AI coding agent from one store">
+  <meta property="og:description" content="MCP servers, skills and secret references in one versioned, offline store, written into each client's own config file. 38 client adapters. Open source, MIT.">
+  <meta property="og:url" content="%SITE_URL%">
+  <meta property="og:image" content="%SITE_URL%img/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Loadout: one store patched into omp, Claude Code, Codex, Cursor and more.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Loadout: patch every AI coding agent from one store">
+  <meta name="twitter:description" content="MCP servers, skills and secret references in one versioned, offline store, written into each client's own config file. Open source, MIT.">
+  <meta name="twitter:image" content="%SITE_URL%img/og.png">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="icon" href="img/mark-small.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="preload" href="fonts/bricolage-grotesque-latin-standard-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/site.css">
+  <script src="js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="top">
+    <a class="brand" href="./" aria-label="Loadout home">
+      <img class="brand__mark" src="img/mark.svg" width="32" height="32" alt="">
+      <span>Loadout</span>
+    </a>
+    <nav class="top__nav" aria-label="Primary">
+      <ul class="nav">
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#clients">Clients</a></li>
+        <li><a href="#safety">Safety</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/tree/main/docs">Docs</a></li>
+        <li><a class="nav__gh" href="https://github.com/DailenG/agent-loadout">GitHub</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero__copy">
+        <p class="readout"><span class="led led--on" aria-hidden="true"></span>Open source · MIT · Windows and Linux · Early development</p>
+        <h1 id="hero-title">Patch every agent<br>from <em>one store.</em></h1>
+        <p class="lede">Loadout keeps your MCP servers, skills and secret references in one versioned, offline store and writes them into each AI coding client's own config file. It changes only the entries it wrote, and secret values stay out of the store.</p>
+        <div class="cta">
+          <div class="cta__row">
+            <a class="btn btn--signal" id="hero-download" href="#install">Download Loadout</a>
+            <a class="btn btn--line" href="https://github.com/DailenG/agent-loadout">View source</a>
+          </div>
+          <p class="cta__meta mono" id="hero-meta">Windows and Linux apps, and a CLI for macOS. <a href="#install">All install options</a></p>
+        </div>
+      </div>
+
+      <!-- The patch bay. Lists are real content; cables are drawn by js/site.js. -->
+      <figure class="bay" aria-labelledby="bay-cap">
+        <div class="bay__rack">
+          <section class="module module--store" aria-label="Store">
+            <header class="module__head"><span>Store</span><span class="mono">git · 0cc3f1a</span></header>
+            <ul class="jacks jacks--out" role="list">
+              <li class="c1" data-src="github"><span class="jack" aria-hidden="true"></span><b>github</b><span class="mono">stdio</span></li>
+              <li class="c2" data-src="context7"><span class="jack" aria-hidden="true"></span><b>context7</b><span class="mono">http</span></li>
+              <li class="c3" data-src="playwright"><span class="jack" aria-hidden="true"></span><b>playwright</b><span class="mono">stdio</span></li>
+              <li class="c4" data-src="sentry"><span class="jack" aria-hidden="true"></span><b>sentry</b><span class="mono">http</span></li>
+              <li class="c5" data-src="code-review"><span class="jack" aria-hidden="true"></span><b>code-review</b><span class="mono">skill</span></li>
+            </ul>
+            <div class="vault">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="4.5" y="10" width="15" height="11" rx="2" fill="currentColor"/></svg>
+              <p><b>Secrets</b> <span class="mono">GITHUB_PAT · SENTRY_TOKEN</span><br>Aliases only. Values stay in env vars, the OS keyring or 1Password.</p>
+            </div>
+          </section>
+
+          <div class="bay__gap" aria-hidden="true"></div>
+
+          <section class="module module--clients" aria-label="Clients">
+            <header class="module__head"><span>Clients</span><span class="mono">38 adapters</span></header>
+            <ul class="jacks jacks--in" role="list">
+              <li data-dst="omp"><span class="jack" aria-hidden="true"></span><b>omp</b><span class="chip">Recommended</span><span class="led" aria-hidden="true"></span></li>
+              <li data-dst="claude-code"><span class="jack" aria-hidden="true"></span><b>Claude Code</b><span class="led" aria-hidden="true"></span></li>
+              <li data-dst="codex"><span class="jack" aria-hidden="true"></span><b>Codex</b><span class="led" aria-hidden="true"></span></li>
+              <li data-dst="cursor"><span class="jack" aria-hidden="true"></span><b>Cursor</b><span class="foreign mono">+1 foreign, untouched</span><span class="led" aria-hidden="true"></span></li>
+              <li data-dst="copilot"><span class="jack" aria-hidden="true"></span><b>GitHub Copilot</b><span class="led" aria-hidden="true"></span></li>
+              <li data-dst="gemini"><span class="jack" aria-hidden="true"></span><b>Gemini CLI</b><span class="led" aria-hidden="true"></span></li>
+              <li class="jacks__more"><span class="mono">Claude Desktop · Pi · OpenCode · Grok Build · Windsurf · and 27 more</span></li>
+            </ul>
+          </section>
+          <svg class="cables" aria-hidden="true"></svg>
+        </div>
+        <figcaption id="bay-cap" class="bay__cap mono">Each cable is one native entry Loadout wrote and owns. Hand-written entries stay where they are.</figcaption>
+      </figure>
+    </section>
+
+    <section class="sec problem" id="problem" aria-labelledby="problem-title">
+      <header class="sec-head">
+        <p class="readout">The problem</p>
+        <h2 id="problem-title">One server. Six clients. Six files.</h2>
+        <p class="sec-lede">Every AI coding client keeps its MCP servers in its own file, in its own format, under its own key. Running several of them side by side means doing every change by hand, several times.</p>
+      </header>
+      <ul class="files" role="list">
+        <li><b>omp</b><code>~/.omp/agent/mcp.json</code><span class="fmt mono">JSON · mcpServers</span></li>
+        <li><b>Claude Code</b><code>~/.claude.json</code><span class="fmt mono">JSON · mcpServers</span></li>
+        <li><b>Codex</b><code>~/.codex/config.toml</code><span class="fmt mono">TOML · mcp_servers</span></li>
+        <li><b>Cursor</b><code>~/.cursor/mcp.json</code><span class="fmt mono">JSON · mcpServers</span></li>
+        <li><b>OpenCode</b><code>~/.config/opencode/opencode.jsonc</code><span class="fmt mono">JSONC · mcp</span></li>
+        <li><b>Goose</b><code>~/.config/goose/config.yaml</code><span class="fmt mono">YAML · extensions</span></li>
+      </ul>
+      <ul class="pains" role="list">
+        <li><b>Adding a server</b> means editing each file by hand, in four formats, with four ways to spell an environment variable.</li>
+        <li><b>A token</b> ends up pasted into every file that needs it, including files that a sync tool copies to other machines.</li>
+        <li><b>Cleaning up</b> is guesswork: nothing records which entries you added, which a tool wrote, and which a teammate's project brought in.</li>
+      </ul>
+    </section>
+
+    <section class="sec how" id="how" aria-labelledby="how-title">
+      <header class="sec-head">
+        <p class="readout">How it works</p>
+        <h2 id="how-title">Store. Plan. Apply. Undo.</h2>
+      </header>
+      <ol class="path" role="list">
+        <li class="unit">
+          <p class="unit__n mono">01 / Store</p>
+          <h3>Define it once</h3>
+          <pre class="screen" tabindex="0" aria-label="Example store file"><code><span class="c">store/servers/github.toml</span>
+transport = <span class="s">"stdio"</span>
+command = <span class="s">"npx"</span>
+args = [<span class="s">"-y"</span>,
+  <span class="s">"@modelcontextprotocol/server-github"</span>]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN =
+  <span class="k">"${secret:GITHUB_PAT}"</span></code></pre>
+          <p>Plain TOML files in a local git repository. Turn each server on for the clients you want. Secrets are aliases that point at an env var, the OS keyring or 1Password.</p>
+        </li>
+        <li class="unit">
+          <p class="unit__n mono">02 / Plan</p>
+          <h3>See every write first</h3>
+          <pre class="screen" tabindex="0" aria-label="Example pending changes"><code><span class="c">pending changes</span>
+~/.omp/agent/mcp.json  <span class="a">+1</span> ~0 -0
+~/.codex/config.toml   <span class="a">+1</span> ~0 -0
+~/.cursor/mcp.json     +0 <span class="m">~1</span> -0
+<span class="c">not managed (foreign)  2 · skipped</span></code></pre>
+          <p>The plan compares what the store wants, what each file holds and what Loadout last wrote, per file and per entry. <code>loadout diff</code> shows the exact file diffs.</p>
+        </li>
+        <li class="unit">
+          <p class="unit__n mono">03 / Apply</p>
+          <h3>Write it, safely</h3>
+          <pre class="screen" tabindex="0" aria-label="Example apply result"><code><span class="c">apply</span>
+Apply: 3 files written
+backups   3 · taken before each write
+commit    <span class="k">0cc3f1a</span></code></pre>
+          <p>Each file is backed up, edited in place, checked and written atomically. Comments, key order and indentation stay as they were. One apply is one commit.</p>
+        </li>
+        <li class="unit">
+          <p class="unit__n mono">04 / Undo</p>
+          <h3>Keep the way back</h3>
+          <pre class="screen" tabindex="0" aria-label="Example undo"><code><span class="c">history</span>
+<span class="k">0cc3f1a</span>  Apply: 3 files written
+         <span class="undo">Undo this apply</span>
+
+<span class="c">or on the command line</span>
+$ loadout rollback last</code></pre>
+          <p><b>Undo this apply</b> in History, or <code>loadout rollback last</code>. Entries you edited by hand since are not overwritten without asking.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="sec dialects" id="dialects" aria-labelledby="dialects-title">
+      <header class="sec-head">
+        <p class="readout">One entry, many dialects</p>
+        <h2 id="dialects-title">Written the way each client reads it.</h2>
+        <p class="sec-lede">You define a server once. Loadout renders it into each client's own file, in that client's own syntax, down to how it spells a secret reference. Here the alias <code>GITHUB_PAT</code> points at an environment variable.</p>
+      </header>
+      <div class="rosetta">
+        <article class="rosetta__src">
+          <h3 class="rosetta__h"><span>Store</span> <code>store/servers/github.toml</code></h3>
+          <pre tabindex="0" aria-label="Store definition"><code>transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[env]
+GITHUB_PERSONAL_ACCESS_TOKEN = <mark>"${secret:GITHUB_PAT}"</mark>
+
+[enable]
+clients = ["omp", "cursor", "opencode"]</code></pre>
+        </article>
+        <div class="rosetta__out">
+          <article class="render">
+            <h3 class="rosetta__h"><span>omp</span> <code>~/.omp/agent/mcp.json</code></h3>
+            <pre tabindex="0" aria-label="omp entry"><code>"github": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": <mark>"${GITHUB_PAT}"</mark> }
+}</code></pre>
+          </article>
+          <article class="render">
+            <h3 class="rosetta__h"><span>Cursor</span> <code>~/.cursor/mcp.json</code></h3>
+            <pre tabindex="0" aria-label="Cursor entry"><code>"github": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": <mark>"${env:GITHUB_PAT}"</mark> }
+}</code></pre>
+          </article>
+          <article class="render">
+            <h3 class="rosetta__h"><span>OpenCode</span> <code>opencode.jsonc</code></h3>
+            <pre tabindex="0" aria-label="OpenCode entry"><code>"github": {
+  "type": "local",
+  "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+  "environment": { "GITHUB_PERSONAL_ACCESS_TOKEN": <mark>"{env:GITHUB_PAT}"</mark> }
+}</code></pre>
+          </article>
+        </div>
+      </div>
+      <p class="aside">When the alias points at the OS keyring or 1Password, or a client cannot expand references, Loadout starts the server through <code>loadout exec</code>, which fetches the value in memory at launch. A secret that cannot be resolved on a machine blocks that server there instead of writing an empty value.</p>
+    </section>
+
+    <section class="sec clients" id="clients" aria-labelledby="clients-title">
+      <header class="sec-head">
+        <p class="readout">Clients</p>
+        <h2 id="clients-title">38 client adapters, native formats.</h2>
+        <p class="sec-lede">JSON, JSONC, JSON5, TOML and YAML, edited in place. Client names are trademarks of their owners; Loadout is not affiliated with any of them.</p>
+      </header>
+      <div class="tiers">
+        <section class="tier tier--daily" aria-labelledby="tier-daily">
+          <header class="tier__head"><h3 id="tier-daily">Daily</h3><p class="mono">Tiers A and B · checked against the real clients</p></header>
+          <table class="paths">
+            <caption class="visually-hidden">Daily clients and their user config files</caption>
+            <thead><tr><th scope="col">Client</th><th scope="col">User file</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">omp <span class="chip">Recommended</span></th><td><code>~/.omp/agent/mcp.json</code></td></tr>
+              <tr><th scope="row">Claude Code</th><td><code>~/.claude.json</code></td></tr>
+              <tr><th scope="row">Codex</th><td><code>~/.codex/config.toml</code></td></tr>
+              <tr><th scope="row">Claude Desktop <span class="mono os">Windows, macOS</span></th><td><code>&lt;AppData&gt;/Claude/claude_desktop_config.json</code></td></tr>
+              <tr><th scope="row">Pi</th><td><code>~/.pi/agent/mcp.json</code></td></tr>
+              <tr><th scope="row">GitHub Copilot</th><td><code>~/.copilot/mcp-config.json</code></td></tr>
+              <tr><th scope="row">Cursor</th><td><code>~/.cursor/mcp.json</code></td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="tier" aria-labelledby="tier-supported">
+          <header class="tier__head"><h3 id="tier-supported">Supported</h3><p class="mono">Tier C</p></header>
+          <ul class="names" role="list">
+            <li>Gemini CLI</li><li>Antigravity</li><li>OpenCode</li><li>Grok Build</li>
+          </ul>
+        </section>
+        <section class="tier" aria-labelledby="tier-best">
+          <header class="tier__head"><h3 id="tier-best">Best effort</h3><p class="mono">Tier D</p></header>
+          <ul class="names names--dense" role="list">
+            <li>Windsurf</li><li>Devin Desktop</li><li>Augment</li><li>Cline</li><li>Roo Code</li><li>Kilo Code</li><li>Kiro</li><li>Junie</li><li>Factory Droid</li><li>Command Code</li><li>Crush</li><li>Qoder</li><li>Trae</li><li>Trae CN</li><li>CodeBuddy</li><li>iFlow CLI</li><li>Qwen Code</li><li>Zencoder</li><li>OpenClaw</li><li>MiMo Code</li><li>WorkBuddy</li><li>ZCode</li><li>Continue</li><li>Goose</li><li>Hermes Agent</li><li>VS Code (legacy mcp.json, read only)</li><li>IntelliJ IDEA (detection only)</li>
+          </ul>
+        </section>
+      </div>
+      <p class="aside">omp is listed first because Loadout is built and tested with omp first. Tiers C and D are built from each client's documentation and covered by automated tests; their checks against the real clients are still open. Every file path, format and capability: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/adapters.md">docs/adapters.md</a>.</p>
+    </section>
+
+    <section class="sec safety" id="safety" aria-labelledby="safety-title">
+      <header class="sec-head">
+        <p class="readout">Safety and trust</p>
+        <h2 id="safety-title">Built so it can't make a mess.</h2>
+      </header>
+      <ul class="mods" role="list">
+        <li class="mod"><span class="sw" aria-hidden="true"></span><h3>Owns only what it wrote</h3><p>A machine-local ledger records every entry Loadout wrote. Everything else is foreign: never edited, disabled or removed, unless you import or adopt it.</p></li>
+        <li class="mod"><span class="sw" aria-hidden="true"></span><h3>Secrets by reference</h3><p>Env vars, the OS keyring or 1Password. A leak scanner checks every store commit and refuses anything that looks like a secret value.</p></li>
+        <li class="mod"><span class="sw" aria-hidden="true"></span><h3>Every change is a commit</h3><p>Local git history with diffs, tags and restore. Client files are backed up before each write and can be put back byte for byte.</p></li>
+        <li class="mod"><span class="sw" aria-hidden="true"></span><h3>Projects need trust</h3><p>A project manifest can start programs, so Loadout applies it only after you review its diff and trust that exact content.</p></li>
+        <li class="mod"><span class="sw" aria-hidden="true"></span><h3>Format-preserving edits</h3><p>Comments, key order, indentation and every entry Loadout does not own stay byte for byte the same.</p></li>
+        <li class="mod"><span class="sw" aria-hidden="true"></span><h3>No vendor in the loop</h3><p>Offline by default, no account. Optional remotes are any git URL or a plain folder. Ledger, trust and secret values never leave the machine.</p></li>
+      </ul>
+      <p class="aside">Threat model and design: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/security.md">docs/security.md</a>. Report a vulnerability: <a href="https://github.com/DailenG/agent-loadout/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+    </section>
+
+    <section class="sec screens" id="screens" aria-labelledby="screens-title">
+      <header class="sec-head">
+        <p class="readout">The desktop app</p>
+        <h2 id="screens-title">Everything in view.</h2>
+        <p class="sec-lede">The app and the <code>loadout</code> command line work on the same data. Screenshots use sample data.</p>
+      </header>
+      <div class="gallery">
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/mcp.webp" type="image/webp">
+            <img src="img/screens/mcp.png" width="1088" height="680" loading="lazy" decoding="async" alt="The MCP page in light mode: servers such as GitHub, Context7, Filesystem, Sentry and Playwright, each with its transport, how many clients it is enabled for, and buttons to turn it off, edit or remove it. Sentry shows the warning A secret has no value.">
+          </picture>
+          <figcaption class="mono">MCP · one list for every client</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/apply-drawer.webp" type="image/webp">
+            <img src="img/screens/apply-drawer.png" width="1088" height="680" loading="lazy" decoding="async" alt="The Pending changes drawer in dark mode: three user files for omp, Codex and Cursor with their added and changed counts, a store change waiting to be applied with a Discard button, and two recent applies, each with Undo this apply.">
+          </picture>
+          <figcaption class="mono">Pending changes · review mode</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/history.webp" type="image/webp">
+            <img src="img/screens/history.png" width="1088" height="680" loading="lazy" decoding="async" alt="The History page in light mode: store commits such as Enable context7 for omp and Codex, Apply: 3 files written marked Applied, a commit tagged before-redesign, and Apply: 1 file written, 1 blocked marked Partly applied.">
+          </picture>
+          <figcaption class="mono">History · every change, every machine</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/projects-trust.webp" type="image/webp">
+            <img src="img/screens/projects-trust.png" width="1088" height="680" loading="lazy" decoding="async" alt="The trust review dialog for the project api-gateway: a warning that project manifests can run commands, the diff of .loadout/project.toml since it was last trusted adding an openapi server, and the buttons Cancel and Trust and apply.">
+          </picture>
+          <figcaption class="mono">Projects · review a change before trusting it</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="sec install" id="install" aria-labelledby="install-title">
+      <header class="sec-head">
+        <p class="readout">Patch in</p>
+        <h2 id="install-title">Install Loadout</h2>
+        <p class="sec-lede">Downloads come from the <a href="https://github.com/DailenG/agent-loadout/releases/latest">latest GitHub release</a><span data-release-version></span>. Each release lists the SHA-256 hash of every file in <code>SHA256SUMS</code>.</p>
+      </header>
+      <div class="console">
+        <div class="tabs" role="tablist" aria-label="Operating system" hidden>
+          <button type="button" role="tab" id="t-windows" aria-controls="p-windows" aria-selected="true">Windows</button>
+          <button type="button" role="tab" id="t-linux" aria-controls="p-linux" aria-selected="false" tabindex="-1">Linux</button>
+          <button type="button" role="tab" id="t-macos" aria-controls="p-macos" aria-selected="false" tabindex="-1">macOS and CLI</button>
+        </div>
+        <section class="panel" id="p-windows" aria-labelledby="h-windows">
+          <h3 class="panel__h" id="h-windows">Windows</h3>
+          <p>Signed per-user installer: no administrator rights, puts <code>loadout</code> on your <code>PATH</code> and updates itself. Windows 11, x64.</p>
+          <div class="dl">
+            <a class="btn btn--signal" data-asset="windows" href="https://github.com/DailenG/agent-loadout/releases/latest">Download the installer</a>
+            <span class="dl__file mono" data-asset-name="windows">Loadout_X.Y.Z_x64-setup.exe</span>
+          </div>
+          <ul class="chans" role="list">
+            <!-- channels:windows -->
+            <li class="chan" data-channel="winget" data-status="pending">
+              <div class="chan__head"><b>winget</b><span class="status status--pending">Pending</span></div>
+              <div class="term"><span class="prompt" aria-hidden="true">PS&gt;</span><code>winget install --id DailenG.AgentLoadout</code><button class="copy" type="button" data-copy="winget install --id DailenG.AgentLoadout" hidden>Copy</button></div>
+              <p class="note">The manifest is waiting to be accepted into winget-pkgs.</p>
+            </li>
+            <li class="chan" data-channel="chocolatey" data-status="pending">
+              <div class="chan__head"><b>Chocolatey</b><span class="status status--pending">Pending</span></div>
+              <div class="term"><span class="prompt" aria-hidden="true">PS&gt;</span><code>choco install agent-loadout</code><button class="copy" type="button" data-copy="choco install agent-loadout" hidden>Copy</button></div>
+              <p class="note">The package is waiting for approval on the Chocolatey Community Repository. It installs per user, like the installer.</p>
+            </li>
+            <!-- /channels -->
+          </ul>
+        </section>
+        <section class="panel" id="p-linux" aria-labelledby="h-linux">
+          <h3 class="panel__h" id="h-linux">Linux</h3>
+          <p>The AppImage runs on most distributions and updates itself. Prefer your package manager? Use the <code>.deb</code> or <code>.rpm</code>. x86_64.</p>
+          <div class="dl">
+            <a class="btn btn--signal" data-asset="appimage" href="https://github.com/DailenG/agent-loadout/releases/latest">Download the AppImage</a>
+            <a class="btn btn--line" data-asset="deb" href="https://github.com/DailenG/agent-loadout/releases/latest">.deb</a>
+            <a class="btn btn--line" data-asset="rpm" href="https://github.com/DailenG/agent-loadout/releases/latest">.rpm</a>
+          </div>
+          <div class="term"><span class="prompt" aria-hidden="true">$</span><code>chmod +x agent-loadout_*_amd64.AppImage</code><button class="copy" type="button" data-copy="chmod +x agent-loadout_*_amd64.AppImage" hidden>Copy</button></div>
+          <div class="term"><span class="prompt" aria-hidden="true">$</span><code>sudo apt install ./agent-loadout_*_amd64.deb</code><button class="copy" type="button" data-copy="sudo apt install ./agent-loadout_*_amd64.deb" hidden>Copy</button></div>
+          <div class="term"><span class="prompt" aria-hidden="true">$</span><code>sudo dnf install ./agent-loadout-*.x86_64.rpm</code><button class="copy" type="button" data-copy="sudo dnf install ./agent-loadout-*.x86_64.rpm" hidden>Copy</button></div>
+          <ul class="chans" role="list">
+            <!-- channels:linux -->
+            <li class="chan" data-channel="aur-bin" data-status="pending">
+              <div class="chan__head"><b>AUR: agent-loadout-bin</b><span class="status status--pending">Pending</span></div>
+              <div class="term"><span class="prompt" aria-hidden="true">$</span><code>yay -S agent-loadout-bin</code><button class="copy" type="button" data-copy="yay -S agent-loadout-bin" hidden>Copy</button></div>
+              <p class="note">Not published to the AUR yet. Until then, build it from the repository (below).</p>
+            </li>
+            <li class="chan" data-channel="aur" data-status="pending">
+              <div class="chan__head"><b>AUR: agent-loadout (source)</b><span class="status status--pending">Pending</span></div>
+              <div class="term"><span class="prompt" aria-hidden="true">$</span><code>yay -S agent-loadout</code><button class="copy" type="button" data-copy="yay -S agent-loadout" hidden>Copy</button></div>
+              <p class="note">Not published to the AUR yet.</p>
+            </li>
+            <!-- /channels -->
+          </ul>
+          <p class="note">Arch Linux, until the AUR packages are published: <code>git clone https://github.com/DailenG/agent-loadout</code>, then <code>makepkg -si</code> in <code>packaging/aur/agent-loadout-bin</code>.</p>
+        </section>
+        <section class="panel" id="p-macos" aria-labelledby="h-macos">
+          <h3 class="panel__h" id="h-macos">macOS and CLI</h3>
+          <p>There is no macOS app yet. The <code>loadout</code> command line builds on macOS, and on any system with stable Rust, straight from the repository:</p>
+          <div class="term"><span class="prompt" aria-hidden="true">$</span><code>cargo install --git https://github.com/DailenG/agent-loadout agent-loadout</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/DailenG/agent-loadout agent-loadout" hidden>Copy</button></div>
+          <ul class="chans" role="list">
+            <!-- channels:cli -->
+            <li class="chan" data-channel="crates" data-status="pending">
+              <div class="chan__head"><b>crates.io</b><span class="status status--pending">Pending</span></div>
+              <div class="term"><span class="prompt" aria-hidden="true">$</span><code>cargo install agent-loadout</code><button class="copy" type="button" data-copy="cargo install agent-loadout" hidden>Copy</button></div>
+              <p class="note">Not on crates.io yet; use the git install above. The crates.io crate named loadout is an unrelated project.</p>
+            </li>
+            <!-- /channels -->
+          </ul>
+          <p class="note">Check the install with <code>loadout --version</code>. Then follow <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/getting-started.md">Getting started</a>.</p>
+        </section>
+      </div>
+      <p class="aside">Per-OS details, checksums, updates and uninstalling: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#install">user guide, Install</a>.</p>
+    </section>
+
+    <section class="sec source" id="source" aria-labelledby="source-title">
+      <header class="sec-head">
+        <p class="readout">Open source</p>
+        <h2 id="source-title">Read it, run it, check it.</h2>
+        <p class="sec-lede">MIT licensed and developed in the open. Every claim on this page can be checked against the repository.</p>
+      </header>
+      <ul class="links" role="list">
+        <li><a href="https://github.com/DailenG/agent-loadout"><b>GitHub</b><span>Source, issues and pull requests</span></a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/getting-started.md"><b>Getting started</b><span>From install to your first apply and back</span></a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/concepts.md"><b>Concepts</b><span>Store, plan, ownership, secrets, trust</span></a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md"><b>User guide</b><span>Every task in the app and the CLI</span></a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/cli.md"><b>CLI reference</b><span>Every <code>loadout</code> command and option</span></a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/adapters.md"><b>Client adapters</b><span>Files, formats and checks per client</span></a></li>
+        <li><a href="https://deepwiki.com/DailenG/agent-loadout"><b>DeepWiki</b><span>Ask questions about the code</span></a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/releases"><b>Releases</b><span>Downloads, checksums and notes</span></a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="foot__brand"><img src="img/mark.svg" width="28" height="28" alt=""> <span>Loadout</span></div>
+    <nav aria-label="Footer">
+      <ul class="foot__links">
+        <li><a href="https://github.com/DailenG/agent-loadout">GitHub</a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/tree/main/docs">Documentation</a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/CHANGELOG.md">Changelog</a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/SECURITY.md">Security policy</a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/LICENSE">MIT License</a></li>
+        <li><a href="https://deepwiki.com/DailenG/agent-loadout">DeepWiki</a></li>
+      </ul>
+    </nav>
+    <p class="foot__fine mono">MIT licensed. Built and tested with omp first. Not affiliated with any AI client vendor. No cookies, no analytics.</p>
+  </footer>
+</body>
+</html>

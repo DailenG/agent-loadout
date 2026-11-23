@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loadout: pack once, equip every AI coding agent</title>
+  <meta name="description" content="Loadout keeps MCP servers, skills and secret references in one versioned, offline store and writes each AI coding client's native config. Open source, MIT.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="../shared/loadout-mark.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/big-shoulders-stencil-display-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="top">
+    <a class="brand" href="#top" aria-label="Loadout home">
+      <svg class="brand__mark" viewBox="18 18 192 192" aria-hidden="true">
+        <rect x="18" y="18" width="192" height="192" rx="50" fill="#1c1b18"/>
+        <rect x="60" y="60" width="108" height="26" rx="13" fill="#f1ece2"/>
+        <rect x="60" y="101" width="108" height="26" rx="13" fill="#f1ece2" fill-opacity=".72"/>
+        <rect x="60" y="142" width="66" height="26" rx="13" fill="#f1ece2" fill-opacity=".48"/>
+        <circle cx="153" cy="155" r="15" fill="#e2561b"/>
+      </svg>
+      <span class="brand__word">Loadout</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <ul>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#clients">Clients</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md">Docs</a></li>
+      </ul>
+    </nav>
+    <a class="btn btn--ghost btn--sm" href="https://github.com/DailenG/agent-loadout">GitHub</a>
+  </header>
+
+  <main id="main">
+    <!-- HERO: the kit, knolled -->
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero__head">
+        <p class="eyebrow"><span class="eyebrow__dot" aria-hidden="true"></span>Open source · MIT · Windows and Linux</p>
+        <h1 id="hero-title" class="stencil">Pack once.<br>Equip every agent.</h1>
+      </div>
+      <div class="hero__copy">
+        <p class="lede">Loadout keeps your MCP servers, skills and secret references in one versioned, offline store, then writes them into each AI coding client's own config files. It never touches entries it didn't create, and secret values never enter the store.</p>
+        <div class="cta">
+          <a class="btn btn--primary" href="#install">Download Loadout</a>
+          <a class="btn btn--ghost" href="https://github.com/DailenG/agent-loadout">View source</a>
+        </div>
+        <dl class="specs">
+          <div><dt>Clients</dt><dd>38 adapters</dd></div>
+          <div><dt>Store</dt><dd>Local git</dd></div>
+          <div><dt>Secrets</dt><dd>References only</dd></div>
+        </dl>
+      </div>
+
+      <figure class="kit" aria-labelledby="kit-cap">
+        <div class="kit__ruler" aria-hidden="true"></div>
+        <p class="kit__label" aria-hidden="true">KIT 01 · USER SCOPE · 0cc3f1a</p>
+        <ul class="kit__grid" role="list">
+          <li class="item item--server" style="--i:0; --r:-1.5deg">
+            <span class="item__kind">MCP · stdio</span>
+            <span class="item__name">github</span>
+            <span class="item__meta">4 clients</span>
+          </li>
+          <li class="item item--server" style="--i:1; --r:1deg">
+            <span class="item__kind">MCP · http</span>
+            <span class="item__name">context7</span>
+            <span class="item__meta">3 clients</span>
+          </li>
+          <li class="item item--skill" style="--i:2; --r:2deg">
+            <span class="item__kind">Skill</span>
+            <span class="item__name">code-review</span>
+            <span class="item__meta">5 clients</span>
+          </li>
+          <li class="item item--secret" style="--i:3; --r:-2deg">
+            <svg class="item__lock" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="4.5" y="10" width="15" height="11" rx="2" fill="currentColor"/></svg>
+            <span class="item__kind">Secret ref</span>
+            <span class="item__name">GITHUB_PAT</span>
+            <span class="item__meta">keyring · ref only</span>
+          </li>
+          <li class="item item--skill" style="--i:5; --r:-1deg">
+            <span class="item__kind">Skill</span>
+            <span class="item__name">release-notes</span>
+            <span class="item__meta">2 clients</span>
+          </li>
+          <li class="item item--secret" style="--i:6; --r:1.5deg">
+            <svg class="item__lock" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="4.5" y="10" width="15" height="11" rx="2" fill="currentColor"/></svg>
+            <span class="item__kind">Secret ref</span>
+            <span class="item__name">SENTRY_TOKEN</span>
+            <span class="item__meta">1Password · ref only</span>
+          </li>
+          <li class="item item--server" style="--i:4; --r:-.5deg">
+            <span class="item__kind">MCP · stdio</span>
+            <span class="item__name">playwright</span>
+            <span class="item__meta">2 clients</span>
+          </li>
+          <li class="item item--server" style="--i:7; --r:.75deg">
+            <span class="item__kind">MCP · sse</span>
+            <span class="item__name">linear</span>
+            <span class="item__meta">disabled</span>
+          </li>
+        </ul>
+        <figcaption id="kit-cap" class="kit__cap">
+          <span class="kit__cap-k">Writes to</span>
+          <span class="tagline">
+            <span class="tag tag--rec">omp</span>
+            <span class="tag">Claude Code</span>
+            <span class="tag">Codex</span>
+            <span class="tag">Cursor</span>
+            <span class="tag">GitHub Copilot</span>
+            <span class="tag">and more</span>
+          </span>
+        </figcaption>
+      </figure>
+    </section>
+
+    <!-- HOW IT WORKS: the packing slip -->
+    <section class="slip-wrap" id="how" aria-labelledby="how-title">
+      <div class="slip">
+        <header class="slip__head">
+          <p class="mono-k">Packing slip · No. 0001</p>
+          <h2 id="how-title" class="stencil stencil--md">How a loadout ships</h2>
+        </header>
+        <ol class="slip__list">
+          <li>
+            <span class="slip__box" aria-hidden="true"></span>
+            <div>
+              <h3>Define it once</h3>
+              <p>Add a server or skill to the store. It lives as plain TOML in a local git repository, fully offline. Secrets go in as references like <code>${secret:GITHUB_PAT}</code> that point at an environment variable, the OS keyring or 1Password.</p>
+            </div>
+            <span class="slip__qty mono-k">01</span>
+          </li>
+          <li>
+            <span class="slip__box" aria-hidden="true"></span>
+            <div>
+              <h3>Review the plan</h3>
+              <p>Loadout shows exactly which file changes for which client, entry by entry. Entries you wrote by hand are foreign: they are listed, never edited or deleted.</p>
+            </div>
+            <span class="slip__qty mono-k">02</span>
+          </li>
+          <li>
+            <span class="slip__box" aria-hidden="true"></span>
+            <div>
+              <h3>Apply, with an undo</h3>
+              <p>Edits keep your comments and key order. Every write backs up the file first and lands as one commit, so <strong>Undo this apply</strong> is always one click away.</p>
+            </div>
+            <span class="slip__qty mono-k">03</span>
+          </li>
+        </ol>
+        <p class="stamp" aria-hidden="true">Applied<br><span>3 files · 0 foreign touched</span></p>
+      </div>
+      <figure class="photo">
+        <span class="photo__tape photo__tape--l" aria-hidden="true"></span>
+        <span class="photo__tape photo__tape--r" aria-hidden="true"></span>
+        <img src="../shared/screens/M28-apply-drawer.png" width="1632" height="1020" loading="lazy" alt="Loadout's Pending changes drawer listing three client files with line counts, a store change waiting to apply, and two recent applies with Undo this apply buttons.">
+        <figcaption>Pending changes: every write, before it happens.</figcaption>
+      </figure>
+    </section>
+
+    <!-- CLIENTS: cases and tags -->
+    <section class="cases" id="clients" aria-labelledby="clients-title">
+      <header class="section-head">
+        <p class="mono-k">Manifest · 38 adapters</p>
+        <h2 id="clients-title" class="stencil stencil--md">One kit, every case</h2>
+        <p class="section-head__sub">Each client keeps its own file format. Loadout speaks JSON, JSONC, JSON5, TOML and YAML, edits in place, and writes only the entries it owns.</p>
+      </header>
+
+      <div class="tier">
+        <h3 class="tier__name"><span>Daily</span> <span class="mono-k">Tier A and B, the daily drivers</span></h3>
+        <ul class="tags" role="list">
+          <li class="ltag ltag--rec"><span class="ltag__band">Recommended</span><b>omp</b><code>~/.omp/agent/mcp.json</code></li>
+          <li class="ltag"><b>Claude Code</b><code>~/.claude.json</code></li>
+          <li class="ltag"><b>Codex</b><code>~/.codex/config.toml</code></li>
+          <li class="ltag"><b>Claude Desktop</b><code>claude_desktop_config.json</code></li>
+          <li class="ltag"><b>GitHub Copilot</b><code>~/.copilot/mcp-config.json</code></li>
+          <li class="ltag"><b>Cursor</b><code>~/.cursor/mcp.json</code></li>
+          <li class="ltag"><b>Pi</b><code>~/.pi/agent/mcp.json</code></li>
+        </ul>
+      </div>
+      <div class="tier">
+        <h3 class="tier__name"><span>Supported</span> <span class="mono-k">Tier C</span></h3>
+        <ul class="tags tags--compact" role="list">
+          <li class="ltag"><b>Gemini CLI</b></li>
+          <li class="ltag"><b>Antigravity</b></li>
+          <li class="ltag"><b>OpenCode</b></li>
+          <li class="ltag"><b>Grok Build</b></li>
+        </ul>
+      </div>
+      <div class="tier">
+        <h3 class="tier__name"><span>Best effort</span> <span class="mono-k">Tier D, user scope</span></h3>
+        <p class="tier__list">Windsurf · Devin Desktop · Cline · Roo Code · Kilo Code · Kiro · Junie · Factory Droid · Continue · Goose · Crush · Qwen Code · Augment · Hermes Agent · and more</p>
+      </div>
+    </section>
+
+    <!-- INSTALL: shipping labels -->
+    <section class="install" id="install" aria-labelledby="install-title">
+      <header class="section-head">
+        <p class="mono-k">Ship to</p>
+        <h2 id="install-title" class="stencil stencil--md">Get Loadout</h2>
+      </header>
+      <div class="labels">
+        <article class="label">
+          <p class="label__to mono-k">Ship to</p>
+          <h3>Windows 11</h3>
+          <p>Signed per-user installer. No admin rights; puts <code>loadout</code> on your PATH and updates itself.</p>
+          <a class="btn btn--primary btn--block" href="https://github.com/DailenG/agent-loadout/releases/latest">Download installer (.exe)</a>
+          <div class="cmd"><code>winget install DailenG.AgentLoadout</code><button class="copy" type="button" data-copy="winget install DailenG.AgentLoadout">Copy</button></div>
+          <p class="label__note">winget and Chocolatey: pending approval.</p>
+        </article>
+        <article class="label">
+          <p class="label__to mono-k">Ship to</p>
+          <h3>Linux</h3>
+          <p>AppImage (updates itself), <code>.deb</code> or <code>.rpm</code>. Built for Arch on Hyprland and the usual suspects.</p>
+          <a class="btn btn--primary btn--block" href="https://github.com/DailenG/agent-loadout/releases/latest">Download for Linux</a>
+          <div class="cmd"><code>yay -S agent-loadout-bin</code><button class="copy" type="button" data-copy="yay -S agent-loadout-bin">Copy</button></div>
+          <p class="label__note">AUR packages: pending publication.</p>
+        </article>
+        <article class="label label--plain">
+          <p class="label__to mono-k">Ship to</p>
+          <h3>macOS and CLI only</h3>
+          <p>No macOS app yet. The <code>loadout</code> command line builds anywhere Rust does.</p>
+          <div class="cmd"><code>cargo install agent-loadout</code><button class="copy" type="button" data-copy="cargo install agent-loadout">Copy</button></div>
+          <p class="label__note">Every release lists SHA-256 sums for each asset.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p class="stencil foot__word" aria-hidden="true">Loadout</p>
+    <ul class="foot__links">
+      <li><a href="https://github.com/DailenG/agent-loadout">GitHub</a></li>
+      <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md">User guide</a></li>
+      <li><a href="https://github.com/DailenG/agent-loadout/blob/main/docs/adapters.md">Client adapters</a></li>
+      <li><a href="https://deepwiki.com/DailenG/agent-loadout">DeepWiki</a></li>
+      <li><a href="https://github.com/DailenG/agent-loadout/releases">Releases</a></li>
+    </ul>
+    <p class="foot__fine">MIT licensed. Built and tested with omp first. Not affiliated with any AI client vendor.</p>
+  </footer>
+
+  <script src="kit.js" defer></script>
+</body>
+</html>

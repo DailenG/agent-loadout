@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>og.png source (1200 x 630)</title>
+  <!-- Source for site/img/og.png. Serve site/ locally, open this page with a
+       1200 x 630 viewport at device scale 1, and screenshot #card. -->
+  <style>
+    @font-face { font-family: "Bricolage"; src: url(../fonts/bricolage-grotesque-latin-standard-normal.woff2) format("woff2-variations"); font-weight: 200 800; font-stretch: 75% 100%; }
+    @font-face { font-family: "Martian Mono"; src: url(../fonts/martian-mono-latin-600-normal.woff2) format("woff2"); font-weight: 600; }
+    body { margin: 0; background: #120d2b; }
+    #card { position: relative; width: 1200px; height: 630px; overflow: hidden; background: #120d2b; color: #f1edff; font-family: "Bricolage", sans-serif; display: grid; grid-template-columns: 560px 1fr; gap: 36px; padding: 60px 60px 52px; box-sizing: border-box; }
+    .og-copy { display: flex; flex-direction: column; }
+    .og-brand { display: flex; align-items: center; gap: 14px; font-weight: 750; font-size: 32px; font-stretch: 85%; }
+    h1 { margin: 40px 0 0; font-size: 100px; line-height: .9; font-weight: 800; font-stretch: 75%; letter-spacing: -.02em; }
+    h1 em { font-style: normal; color: #f5a061; }
+    .og-sub { margin: 24px 0 0; font-size: 25px; line-height: 1.35; color: #b9b0de; }
+    .og-foot { margin: auto 0 0; font: 600 14px/1 "Martian Mono", monospace; letter-spacing: .12em; color: #b9b0de; display: flex; align-items: center; gap: 12px; }
+    .og-led { width: 10px; height: 10px; border-radius: 50%; background: #5fe0a5; box-shadow: 0 0 10px #5fe0a5; }
+    .og-rack { align-self: center; position: relative; height: 480px; border-radius: 22px; background: #1c1540; box-shadow: inset 0 0 0 1px #3b307a; }
+    .og-mod { position: absolute; top: 20px; bottom: 20px; width: 168px; border-radius: 14px; background: #251c52; box-shadow: inset 0 0 0 1px #3b307a; padding: 14px 0; box-sizing: border-box; }
+    .og-mod--s { left: 20px; } .og-mod--c { right: 20px; }
+    .og-mod h2 { margin: 0 16px 6px; padding-bottom: 10px; border-bottom: 1px solid #3b307a; font-size: 16px; font-weight: 750; font-stretch: 80%; letter-spacing: .04em; text-transform: uppercase; }
+    .og-row { height: 54px; display: flex; align-items: center; padding: 0 18px; font-weight: 650; font-size: 19px; border-top: 1px dashed #2f2665; }
+    .og-mod h2 + .og-row { border-top: 0; }
+    .og-mod--c .og-row { padding-left: 24px; justify-content: space-between; }
+    .og-mod--c .og-row i { width: 9px; height: 9px; border-radius: 50%; background: #5fe0a5; box-shadow: 0 0 8px #5fe0a5; }
+    svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    svg path { fill: none; stroke-width: 4; stroke-linecap: round; }
+    svg circle { fill: #120d2b; stroke-width: 3.5; }
+  </style>
+</head>
+<body>
+  <div id="card">
+    <div class="og-copy">
+      <div class="og-brand"><img src="../img/mark.svg" width="48" height="48" alt=""><span>Loadout</span></div>
+      <h1>Patch every agent from <em>one store.</em></h1>
+      <p class="og-sub">MCP servers, skills and secret references, written into each AI coding client's own config file.</p>
+      <p class="og-foot"><span class="og-led"></span>OPEN SOURCE · MIT · 38 CLIENT ADAPTERS</p>
+    </div>
+    <div class="og-rack">
+      <div class="og-mod og-mod--s">
+        <h2>Store</h2>
+        <div class="og-row">github</div>
+        <div class="og-row">context7</div>
+        <div class="og-row">playwright</div>
+        <div class="og-row">sentry</div>
+        <div class="og-row">code-review</div>
+      </div>
+      <div class="og-mod og-mod--c">
+        <h2>Clients</h2>
+        <div class="og-row">omp <i></i></div>
+        <div class="og-row">Claude Code <i></i></div>
+        <div class="og-row">Codex <i></i></div>
+        <div class="og-row">Cursor <i></i></div>
+        <div class="og-row">Copilot <i></i></div>
+        <div class="og-row">Gemini CLI <i></i></div>
+      </div>
+      <svg id="cables" aria-hidden="true"></svg>
+    </div>
+  </div>
+  <script>
+    const rack = document.querySelector(".og-rack");
+    const svg = document.getElementById("cables");
+    const box = rack.getBoundingClientRect();
+    const rows = (sel) => [...document.querySelectorAll(sel + " .og-row")].map((r) => {
+      const a = r.getBoundingClientRect();
+      return a.top + a.height / 2 - box.top;
+    });
+    const s = rows(".og-mod--s"), c = rows(".og-mod--c");
+    const x1 = 20 + 168, x2 = box.width - 20 - 168;
+    const colors = ["#f28b3c", "#9c8bff", "#5fe0a5", "#ffd8b0", "#7cc7ff"];
+    const patches = [[0, 1, 2, 3], [0, 2, 4], [0, 1], [1, 5], [0, 1, 2]];
+    let html = "";
+    patches.forEach((dsts, i) => dsts.forEach((d) => {
+      const k = (x2 - x1) * .55;
+      const p = `M${x1} ${s[i]} C${x1 + k} ${s[i]} ${x2 - k} ${c[d]} ${x2} ${c[d]}`;
+      html += `<path d="${p}" stroke="${colors[i]}" opacity=".16" stroke-width="10"/><path d="${p}" stroke="${colors[i]}"/>`;
+    }));
+    s.forEach((y, i) => { html += `<circle cx="${x1}" cy="${y}" r="9" stroke="${colors[i]}"/>`; });
+    c.forEach((y) => { html += `<circle cx="${x2}" cy="${y}" r="9" stroke="#5d548c"/>`; });
+    svg.innerHTML = html;
+  </script>
+</body>
+</html>
