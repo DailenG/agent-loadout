@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
@@ -17,7 +17,7 @@ keywords = ["mcp", "ai", "claude", "codex", "config"]
 categories = ["command-line-utilities", "development-tools", "config"]
 
 [workspace.dependencies]
-agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.2.1" }
+agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.3.0" }
 agent-loadout-testkit = { path = "crates/agent-loadout-testkit" }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
