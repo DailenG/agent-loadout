@@ -153,6 +153,15 @@ export const commands = {
 	 *  Windows the NSIS installer closes the app itself.
 	 */
 	installUpdate: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("install_update", undefined, options)),
+	scanUnmanagedSkills: (scope: SkillScope, client: string | null, options?: InvokeOptions) => typedError<UnmanagedSkills, IpcError>(__TAURI_INVOKE("scan_unmanaged_skills", { scope, client }, options)),
+	adoptSkills: (scope: SkillScope, client: string | null, choices: SkillAdoptChoice[], options?: InvokeOptions) => typedError<SkillAdoptResult, IpcError>(__TAURI_INVOKE("adopt_skills", { scope, client, choices }, options)),
+	discoverProjects: (options?: InvokeOptions) => typedError<ProjectDiscovery, IpcError>(__TAURI_INVOKE("discover_projects", undefined, options)),
+	addDiscoveredProjects: (ids: string[], options?: InvokeOptions) => typedError<DiscoveredProjectsAdded, IpcError>(__TAURI_INVOKE("add_discovered_projects", { ids }, options)),
+	scanImport: (scope: ImportScope | null, options?: InvokeOptions) => typedError<ImportScan, IpcError>(__TAURI_INVOKE("scan_import", { scope }, options)),
+	applyImport: (choices: ImportChoices, options?: InvokeOptions) => typedError<ImportApplied, IpcError>(__TAURI_INVOKE("apply_import", { choices }, options)),
+	unmanagedSummary: (scope: ImportScope | null, options?: InvokeOptions) => typedError<UnmanagedSummary, IpcError>(__TAURI_INVOKE("unmanaged_summary", { scope }, options)),
+	newUnmanaged: (options?: InvokeOptions) => typedError<UnmanagedSummary, IpcError>(__TAURI_INVOKE("new_unmanaged", undefined, options)),
+	acknowledgeUnmanaged: (ids: string[], options?: InvokeOptions) => typedError<number, IpcError>(__TAURI_INVOKE("acknowledge_unmanaged", { ids }, options)),
 };
 
 /** Events */
@@ -174,6 +183,19 @@ export const REPO = "DailenG/agent-loadout" as const;
 /* Types */
 /**  What the executor does with an entry (SPEC 8.3). */
 export type ActionKind = "none" | "create" | "update" | "remove" | "disable" | "adopt" | "adopt_overwrite" | "refresh" | "forget" | "release" | "import" | "skip";
+
+/**  A folder added to this machine's projects. */
+export type AddedDiscoveredProject = {
+	/**  The candidate id. */
+	candidate: string,
+	/**  The project id. */
+	id: string,
+	path: string,
+	/**  A private manifest was written (the folder had none). */
+	createdManifest: boolean,
+	/**  Never `trusted`: each waits for its review. */
+	trust: ProjectTrust,
+};
 
 export type AddedRemote = {
 	remote: RemoteEntry,
@@ -438,6 +460,31 @@ export type DiscardResult = {
 	commit: string | null,
 	/**  The `auto/pre-restore/<ts>` tag, from which a discard is undone. */
 	tag: string | null,
+};
+
+/**  A folder the clients know that is not a project here yet. */
+export type DiscoveredProject = {
+	/**  Names the folder in `add_discovered_projects`; stable across scans. */
+	id: string,
+	/**  The folder's own name. */
+	name: string,
+	/**  The folder under its placeholder root. */
+	path: string,
+	/**  Client ids that know the folder. */
+	clients: string[],
+	/**
+	 *  The folder's manifest, when it has one (adding binds it); `None`:
+	 *  adding writes a private one, as Init does, without trusting it.
+	 */
+	manifest: FoundManifest | null,
+	/**  Why the folder cannot be added. */
+	error: IpcError | null,
+};
+
+export type DiscoveredProjectsAdded = {
+	commit: string | null,
+	added: AddedDiscoveredProject[],
+	failed: NotAddedProject[],
 };
 
 export type EffectiveMatrix = {
@@ -914,6 +961,166 @@ export type HistoryFilter = {
  */
 export type HistoryScope = "all" | "user" | "projects";
 
+/**  What the import did: one commit, applied with it in instant mode. */
+export type ImportApplied = {
+	/**  New server ids. */
+	imported: string[],
+	/**
+	 *  New servers found only in project files: definitions, enabled
+	 *  nowhere; a project's manifest can name them (`from`).
+	 */
+	definitionOnly: string[],
+	skipped: ImportSkipped[],
+	secrets: ImportedSecret[],
+	change: ChangeResult,
+};
+
+/**  Foreign entries sharing one name. */
+export type ImportCandidate = {
+	name: string,
+	/**  The store has a server with this id already. */
+	inStore: boolean,
+	/**
+	 *  More than one definition can be imported: pick one, or import
+	 *  another as `name-<client>`.
+	 */
+	conflict: boolean,
+	variants: ImportVariant[],
+};
+
+/**
+ *  What to import. A candidate without a pick is skipped; a definition
+ *  with a literal secret and no destination for it is skipped
+ *  (`needs_secret_extraction`).
+ */
+export type ImportChoices = {
+	picks: ImportPick[],
+	secrets: ImportSecretChoice[],
+	/**  Copy the definitions without enabling them (no ownership taken). */
+	only: boolean,
+};
+
+/**  One definition to import under `id`. */
+export type ImportPick = {
+	/**  The candidate's name. */
+	name: string,
+	/**  Any source key of the definition (`ImportVariant::key`). */
+	source: string,
+	/**  The store id: the name, or `name-<client>` for a second definition. */
+	id: string,
+};
+
+export type ImportScan = {
+	candidates: ImportCandidate[],
+	warnings: IpcError[],
+};
+
+/**  Which client files a scan reads. */
+export type ImportScope = 
+/**  User files and every known project's files. */
+{ kind: "all" } | 
+/**  User files only. */
+{ kind: "user" } | 
+/**  Every known project's files. */
+{ kind: "projects" } | 
+/**  One known project's files. */
+{ kind: "project"; id: string };
+
+/**  A literal that may be a secret: it needs a destination. */
+export type ImportSecret = {
+	/**  `env.NAME`, `headers.NAME`, `args[N]` or `url`. */
+	field: string,
+	/**  The alias it gets when imported under the suggested id. */
+	suggestedAlias: string,
+	/**  Why it counts as sensitive (`sensitive_key`, `token_format`, ...). */
+	reason: string,
+};
+
+/**
+ *  The destination of one candidate's secrets: one `field`, or with
+ *  `field` `None` each one no other choice names.
+ */
+export type ImportSecretChoice = {
+	name: string,
+	field: string | null,
+	target: ImportSecretTarget,
+};
+
+/**
+ *  Where a literal secret goes (SPEC 11.7). No value: a keyring
+ *  destination takes it from the client file inside core.
+ */
+export type ImportSecretTarget = 
+/**  The OS keyring (`keyring://loadout/<alias>`). */
+{ kind: "keyring" } | 
+/**
+ *  A 1Password item (`op://vault/item/field`, or
+ *  `op://vault/item/section/field`) or Environment variable
+ *  (`op-env://<environment-id>/<NAME>`).
+ */
+{ kind: "onepassword"; reference: string } | 
+/**  An environment variable name (`env:NAME`). */
+{ kind: "env"; name: string };
+
+export type ImportSkipped = {
+	name: string,
+	error: IpcError,
+};
+
+/**  One file a foreign entry was found in. */
+export type ImportSource = {
+	/**
+	 *  Picks this source's definition (`ImportPick::source`):
+	 *  `<client>`, `<client>@<project-id>` or `<client>@<project-id>/local`.
+	 */
+	key: string,
+	/**  The finding (`acknowledge_unmanaged`). */
+	id: string,
+	client: string,
+	scope: FileScope,
+	projectId: string | null,
+	/**  For a project file: its manifests are trusted on this machine. */
+	trusted: boolean | null,
+	/**  Under its placeholder root. */
+	file: string,
+};
+
+/**  One definition of an entry, with every source that has it. */
+export type ImportVariant = {
+	/**  The `source` of an `ImportPick` for this definition. */
+	key: string,
+	/**
+	 *  The store id it gets by default: the name, or `name-<client>` for
+	 *  a second definition.
+	 */
+	suggestedId: string,
+	/**
+	 *  The server as it would be stored, `${secret:<alias>}` in place of
+	 *  each literal secret; `None` when it cannot be imported.
+	 */
+	draft: ServerDraft | null,
+	/**  Why it cannot be imported. */
+	error: IpcError | null,
+	/**
+	 *  Found in a user file Loadout writes, so importing enables it for
+	 *  those clients. Otherwise (project files only) the import is a
+	 *  definition only; offer "add to the project's manifest"
+	 *  (`save_project_server` with `from`, after a trust review for an
+	 *  untrusted project).
+	 */
+	enables: boolean,
+	secrets: ImportSecret[],
+	sources: ImportSource[],
+};
+
+/**  A secret alias the import created. */
+export type ImportedSecret = {
+	alias: string,
+	server: string,
+	field: string,
+	destination: SecretDestinationKind,
+};
+
 /**  A store server the folder inherits from the system layer. */
 export type InheritedServer = {
 	id: string,
@@ -1145,6 +1352,13 @@ export type NeededBy = {
 	clients: string[],
 };
 
+/**  A folder that could not be added. */
+export type NotAddedProject = {
+	candidate: string,
+	path: string,
+	error: IpcError,
+};
+
 /**  Planned or done create, update, remove and disable operations. */
 export type OpCounts = {
 	create: number,
@@ -1278,6 +1492,12 @@ export type ProjectChange = {
 	id: string,
 	trust: ProjectTrust,
 } & ChangeResult;
+
+export type ProjectDiscovery = {
+	candidates: DiscoveredProject[],
+	/**  Client files that could not be read (the others still were). */
+	warnings: IpcError[],
+};
 
 /**  One project of the Projects page. */
 export type ProjectRow = {
@@ -1693,6 +1913,8 @@ export type ReviewedFile = {
 	diff: string | null,
 };
 
+export type SecretDestinationKind = "keyring" | "onepassword" | "env";
+
 /**  Where a fix writes the reference. */
 export type SecretScope = 
 /**  `secrets.toml`: every machine. */
@@ -1778,6 +2000,50 @@ export type ServerRow = {
 	invalid: IpcError | null,
 };
 
+/**  What to do with the folders of one name. */
+export type SkillAdoptAction = 
+/**
+ *  Adopt the content `variant` (a hash) as the name; folders with
+ *  other content are kept.
+ */
+{ kind: "pick"; variant: string } | 
+/**
+ *  Adopt `primary` as the name and every other content as
+ *  `name-<client>`.
+ */
+{ kind: "both"; primary: string } | { kind: "skip" };
+
+export type SkillAdoptChoice = {
+	name: string,
+	action: SkillAdoptAction,
+};
+
+/**  What an adopt did: one store commit, then the folders. */
+export type SkillAdoptResult = {
+	commit: string | null,
+	/**  Store skills the action added. */
+	added: string[],
+	/**  Store skills that held the content already. */
+	reused: string[],
+	folders: SkillAdoptedFolder[],
+	problems: UnmanagedSkillProblem[],
+	links: SkillSync,
+	/**  A folder is left for the user or an entry needs a decision. */
+	needsAttention: boolean,
+};
+
+export type SkillAdoptedFolder = {
+	client: string,
+	name: string,
+	path: string,
+	/**  The store skill it went (or would go) into. */
+	skillId: string | null,
+	status: SkillFolderStatus,
+	/**  Where the folder went, under its placeholder root. */
+	trash: string | null,
+	error: IpcError | null,
+};
+
 /**  A store change and the client folders that followed. */
 export type SkillChange = {
 	commit: string | null,
@@ -1826,6 +2092,20 @@ export type SkillFileText = {
 	text: string | null,
 	bytes: number,
 };
+
+/**  What happened to one unmanaged folder. */
+export type SkillFolderStatus = 
+/**  Replaced by the managed link; the folder is in the trash. */
+"adopted" | 
+/**  Another content of its name was chosen; kept. */
+"differs" | 
+/**  Several contents and no choice; kept. */
+"conflict" | "skipped" | 
+/**
+ *  Its content is in the store, but the folder could not be replaced
+ *  (see the error); kept.
+ */
+"kept";
 
 /**  One store skill on the Skills page. */
 export type SkillInfo = {
@@ -2103,6 +2383,76 @@ export type UndoResult = {
 	tag: string,
 	commit: string | null,
 	apply: ApplyRun,
+};
+
+/**  One unmanaged entry. */
+export type UnmanagedEntry = {
+	/**  The finding (`acknowledge_unmanaged`). */
+	id: string,
+	name: string,
+	/**  Not acknowledged on this machine yet. */
+	new: boolean,
+};
+
+/**  The unmanaged entries of one client in one scope (one project). */
+export type UnmanagedGroup = {
+	client: string,
+	scope: FileScope,
+	projectId: string | null,
+	/**  Under their placeholder roots. */
+	files: string[],
+	entries: UnmanagedEntry[],
+};
+
+/**  Unmanaged folders of one name, grouped by content. */
+export type UnmanagedSkill = {
+	name: string,
+	/**
+	 *  Several contents (the store's included): pick one, or import the
+	 *  others as `name-<client>`.
+	 */
+	conflict: boolean,
+	variants: UnmanagedSkillVariant[],
+};
+
+/**  An unmanaged folder of a client skill folder. */
+export type UnmanagedSkillFolder = {
+	client: string,
+	/**  Under its placeholder root. */
+	path: string,
+};
+
+/**  An unmanaged folder that cannot be adopted. */
+export type UnmanagedSkillProblem = {
+	client: string,
+	name: string,
+	path: string,
+	error: IpcError,
+};
+
+/**  One content of an unmanaged skill name. */
+export type UnmanagedSkillVariant = {
+	/**  Names the content in `adopt_skills` choices. */
+	hash: string,
+	/**  Empty for the store's copy alone. */
+	folders: UnmanagedSkillFolder[],
+	/**  The store skill of this name holds this content. */
+	inStore: boolean,
+	description: string | null,
+	bytes: number,
+};
+
+/**  The unmanaged skill folders of a scope. */
+export type UnmanagedSkills = {
+	candidates: UnmanagedSkill[],
+	problems: UnmanagedSkillProblem[],
+};
+
+export type UnmanagedSummary = {
+	groups: UnmanagedGroup[],
+	total: number,
+	/**  Entries not acknowledged on this machine yet. */
+	new: number,
 };
 
 /**  A newer release the check found. */

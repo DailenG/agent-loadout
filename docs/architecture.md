@@ -61,10 +61,10 @@ Rules every layer follows:
 | `store/` | The git-backed store (libgit2, vendored, no network features): `bootstrap.rs` (init), `transaction.rs`, commit `trailers.rs`, `log.rs`, `diff.rs`, `tags.rs`, `restore.rs`, `revision.rs`, `merge.rs` (per-entity merge for pulls), `lock.rs`. |
 | `formats/` | Format-preserving editors: `jsonc.rs` (JSON and JSONC), `toml.rs`, `yaml.rs`, `json5.rs`, `text.rs`. Unowned bytes stay identical. |
 | `adapters/` | The adapter table (`spec.rs`), per-client mappers (`omp.rs`, `claude_code.rs`, `codex.rs`, `pi.rs`, `claude_desktop.rs`, `copilot.rs`, `cursor.rs`, `vscode_legacy.rs`, `gemini.rs`, `antigravity.rs`, `opencode.rs`, `grok.rs`, `windsurf.rs`, `devin.rs`, `ported.rs`), capabilities (`caps.rs`), detection (`detect.rs`), path templates (`location.rs`), shared mapping (`mapper.rs`). |
-| `layering/` | Project manifests (`manifest.rs`), merge rules (`merge.rs`), effective config with provenance (`effective.rs`), known projects (`projects.rs`), project servers edited from the app (`project_servers.rs`), trust by content hash (`trust.rs`), `.git/info/exclude` handling (`git.rs`). |
+| `layering/` | Project manifests (`manifest.rs`), merge rules (`merge.rs`), effective config with provenance (`effective.rs`), known projects (`projects.rs`), project servers edited from the app (`project_servers.rs`), trust by content hash (`trust.rs`), `.git/info/exclude` handling (`git.rs`), Discover projects from client files (`discover.rs`). |
 | `apply/` | Rendering desired entries (`render.rs`), planning (`plan.rs`), execution (`exec.rs`), the ownership ledger (`ledger.rs`), backups (`backup.rs`), journals (`journal.rs`), rollback (`rollback.rs`), Discard pending (`discard.rs`), import and adopt (`import.rs`), the drift resolver (`resolve.rs`). |
 | `secrets/` | Reference grammar (`grammar.rs`), catalog (`catalog.rs`), providers (`providers/`: env, keyring, 1Password), statuses (`status.rs`), delivery selection and rendering (`delivery.rs`, `render.rs`), secret classification (`classify.rs`), the leak scanner (`scanner.rs`). |
-| `skills/` | Skill store (`store.rs`), installs from git, folders and archives (`install.rs`), links, junctions and copies (`link.rs`), folder classification (`classify.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
+| `skills/` | Skill store (`store.rs`), installs from git, folders and archives (`install.rs`), links, junctions and copies (`link.rs`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
 | `remote/` | Remote config (`config.rs`), folder remotes (`folder.rs`), git remotes through the system git (`git.rs`), GitHub CLI helpers (`gh.rs`), token credentials (`credential.rs`), push and pull (`sync.rs`), sync-tool artifact filtering (`sync_artifacts.rs`), restore on a new machine (`restore.rs`), the remote manifest (`manifest.rs`), UNC paths (`unc.rs`). |
 | `migrate/` | SkillDock import (`skilldock.rs`) and the client scan (`scan.rs`). |
 | `paths.rs`, `local_settings.rs` | `LOADOUT_HOME` resolution and sync-folder detection; machine-local settings. |
@@ -116,8 +116,9 @@ command reference is [cli.md](cli.md), generated from the clap help by
 - `src/commands/*.rs` group commands by page (`servers.rs`, `apply.rs`,
   `tools.rs`, `projects.rs`, `project_servers.rs`, `effective.rs`,
   `resolve.rs`, `history.rs`, `remotes.rs`, `secrets.rs`, `skills.rs`,
-  `migrate.rs`, `updates.rs`). Each one calls core on a blocking thread
-  and returns `{ status: "ok", data } | { status: "error", error: IpcError }`.
+  `discover.rs`, `migrate.rs`, `updates.rs`). Each one calls core on a
+  blocking thread and returns
+  `{ status: "ok", data } | { status: "error", error: IpcError }`.
 - Commands take ids, not paths: folders picked in the OS dialog are kept in
   the backend and the frontend gets an opaque token, and paths shown in the
   UI use `~` and `<P>` placeholders.

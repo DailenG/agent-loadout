@@ -87,6 +87,20 @@ impl ProjectRepo {
         Ok(index.get_path(Path::new(&relative), 0).is_some())
     }
 
+    /// Whether the index holds `path` or any file below it (a folder with
+    /// tracked files).
+    pub fn tracks_any_under(&self, path: &Path) -> Result<bool, CoreError> {
+        let Some(relative) = self.relative(path) else {
+            return Ok(false);
+        };
+        let prefix = format!("{relative}/");
+        let index = self.repo.index().map_err(git_error)?;
+        Ok(index.iter().any(|entry| {
+            let tracked = String::from_utf8_lossy(&entry.path);
+            tracked == relative.as_str() || tracked.starts_with(&prefix)
+        }))
+    }
+
     /// Whether the repository's ignore rules match `path`.
     pub fn is_ignored(&self, path: &Path) -> Result<bool, CoreError> {
         let Some(relative) = self.relative(path) else {

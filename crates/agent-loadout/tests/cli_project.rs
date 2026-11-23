@@ -634,3 +634,43 @@ fn share_into_an_existing_project_toml_keeps_overrides_local() {
     assert_eq!(cli.projects()[0]["trust"], "trusted");
     assert_eq!(cli.mirror(&id, "project.toml"), Some(project_toml));
 }
+
+/// `project discover` lists folders Claude Code knows; --add binds them in
+/// one commit, untrusted.
+#[test]
+fn discover_lists_and_adds_untrusted() {
+    let cli = Cli::new();
+    let (app, _) = cli.folder("app", false);
+    let gone = cli.th.projects().join("gone");
+    let mut projects = serde_json::Map::new();
+    for root in [&app, &gone] {
+        projects.insert(root.to_string_lossy().into_owned(), serde_json::json!({}));
+    }
+    std::fs::write(
+        cli.th.home().join(".claude.json"),
+        serde_json::json!({ "projects": projects }).to_string(),
+    )
+    .unwrap();
+
+    let doc = cli.ok(&["project", "discover"]);
+    let candidates = doc["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 1, "{doc:#}");
+    assert_eq!(candidates[0]["name"], "app");
+    assert_eq!(candidates[0]["clients"], serde_json::json!(["claude-code"]));
+    assert!(candidates[0]["manifest"].is_null());
+    let id = candidates[0]["id"].as_str().unwrap().to_owned();
+
+    let doc = cli.ok(&["project", "discover", "--add", &id]);
+    assert!(doc["commit"].is_string());
+    assert_eq!(doc["added"][0]["created_manifest"], true);
+    assert!(manifest(&app, "project.local.toml").is_file());
+    let listed = cli.projects();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["trust"], "untrusted");
+    assert!(
+        cli.ok(&["project", "discover"])["candidates"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}

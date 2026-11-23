@@ -317,15 +317,20 @@ fn import_scans_and_adopts_identical_entries() {
         .collect();
     assert_eq!(names, ["docs", "chatty"]);
     assert_eq!(scan["candidates"][0]["sources"][0]["importable"], true);
+    // A literal secret needs a destination (`--extract`), named by field.
     assert_eq!(
-        scan["candidates"][1]["sources"][0]["error"]["code"],
-        "needs_secret_extraction"
+        scan["candidates"][1]["variants"][0]["secrets"][0]["field"],
+        "env.CHATTY_API_KEY"
     );
     assert!(!cli.home.exists(), "a scan creates nothing");
 
     let imported = cli.ok(&["import"]);
     assert_eq!(imported["imported"], json!(["docs"]));
     assert_eq!(imported["skipped"][0]["name"], "chatty");
+    assert_eq!(
+        imported["skipped"][0]["error"]["code"],
+        "needs_secret_extraction"
+    );
     assert_eq!(imported["apply"]["written"], 0);
     assert_eq!(std::fs::read_to_string(cli.claude()).unwrap(), text);
     assert_eq!(cli.history()[0]["summary"], "import: 1 server (docs)");

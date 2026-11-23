@@ -27,6 +27,7 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout skills import`](#loadout-skills-import)
   - [`loadout skills trash`](#loadout-skills-trash)
   - [`loadout skills vendor`](#loadout-skills-vendor)
+  - [`loadout skills adopt`](#loadout-skills-adopt)
 - [`loadout project`](#loadout-project)
   - [`loadout project init`](#loadout-project-init)
   - [`loadout project add`](#loadout-project-add)
@@ -34,6 +35,7 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout project rm`](#loadout-project-rm)
   - [`loadout project trust`](#loadout-project-trust)
   - [`loadout project share`](#loadout-project-share)
+  - [`loadout project discover`](#loadout-project-discover)
 - [`loadout history`](#loadout-history)
 - [`loadout status`](#loadout-status)
 - [`loadout diff`](#loadout-diff)
@@ -248,6 +250,7 @@ Commands:
   import   Import an unmanaged folder of a client's skill folder into the store
   trash    Move an unmanaged or mismatched entry of a client's skill folder to the trash (backups/trash), never deleting it
   vendor   Copy an agents CLI skill (~/.agents/skills) into the store
+  adopt    Adopt unmanaged folders of client skill folders (SPEC 8.6, 12.5): import them into the store, enabled where they were found, and replace each folder whose content equals the store copy with a link (the folder moves to backups/trash). Folders with the same content in several clients become one skill. Without NAME, --all, --pick or --both, lists what can be adopted
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -444,6 +447,28 @@ Options:
   -h, --help         Print help
 ```
 
+## `loadout skills adopt`
+
+```text
+Adopt unmanaged folders of client skill folders (SPEC 8.6, 12.5): import them into the store, enabled where they were found, and replace each folder whose content equals the store copy with a link (the folder moves to backups/trash). Folders with the same content in several clients become one skill. Without NAME, --all, --pick or --both, lists what can be adopted
+
+Usage: loadout skills adopt [OPTIONS] [NAMES]...
+
+Arguments:
+  [NAMES]...  Folder names to adopt (each with one content)
+
+Options:
+      --all                 Adopt every name that has one content
+      --home <PATH>         Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json                Print machine-readable JSON to stdout
+      --tool <CLIENT>       Only this client's skill folder [default: every client]
+      --project <PATH>      The skill folders of this project (trusted) instead of the user folders; adopted skills go to its manifest's [skills] enable
+      --yes                 Answer yes to confirmations (rolling back an older apply run)
+      --pick <NAME=CLIENT>  For a name with several contents: adopt the content in CLIENT's folder (or `store`, the store's copy) as NAME; folders with other content are kept (repeatable)
+      --both <NAME=CLIENT>  Adopt CLIENT's content (or `store`) as NAME and every other content as NAME-<client> (repeatable)
+  -h, --help                Print help
+```
+
 ## `loadout project`
 
 ```text
@@ -452,13 +477,14 @@ Project manifests: create, register, trust, share, list, forget
 Usage: loadout project [OPTIONS] <COMMAND>
 
 Commands:
-  init   Create a project manifest in PATH (default: the current folder); private unless --shared
-  add    Register the project whose manifests are at or above PATH; it is applied once trusted (`project trust`)
-  ls     List the projects this machine knows, with their trust state
-  rm     Forget a project on this machine and remove its owned entries
-  trust  Review the manifests at or above PATH and trust them as they are
-  share  Move private servers from `project.local.toml` into `project.toml`
-  help   Print this message or the help of the given subcommand(s)
+  init      Create a project manifest in PATH (default: the current folder); private unless --shared
+  add       Register the project whose manifests are at or above PATH; it is applied once trusted (`project trust`)
+  ls        List the projects this machine knows, with their trust state
+  rm        Forget a project on this machine and remove its owned entries
+  trust     Review the manifests at or above PATH and trust them as they are
+  share     Move private servers from `project.local.toml` into `project.toml`
+  discover  List folders the clients already know (Claude Code projects, Codex trusted projects, omp and Pi sessions) that are not projects on this machine yet; --add or --all binds them, untrusted. A folder without a manifest gets a private one
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
@@ -567,6 +593,22 @@ Options:
       --json           Print machine-readable JSON to stdout
       --yes            Answer yes to confirmations (rolling back an older apply run)
   -h, --help           Print help
+```
+
+## `loadout project discover`
+
+```text
+List folders the clients already know (Claude Code projects, Codex trusted projects, omp and Pi sessions) that are not projects on this machine yet; --add or --all binds them, untrusted. A folder without a manifest gets a private one
+
+Usage: loadout project discover [OPTIONS]
+
+Options:
+      --add <ID>     Add the candidate with this id (repeatable)
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --all          Add every candidate that can be added
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
 ```
 
 ## `loadout history`
@@ -976,13 +1018,19 @@ Arguments:
   [NAME]...  Entry names to import; all importable entries when none
 
 Options:
-      --home <PATH>      Data directory to use instead of LOADOUT_HOME or the per-OS default
-      --scan             List candidates; change nothing
-      --client <CLIENT>  Only entries of this client (repeatable)
-      --json             Print machine-readable JSON to stdout
-      --only             Copy the definitions without enabling them (no ownership taken)
-      --yes              Answer yes to confirmations (rolling back an older apply run)
-  -h, --help             Print help
+      --home <PATH>                  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --scan                         List candidates, their sources, conflicts and secrets; change nothing
+      --client <CLIENT>              Only entries of this client (repeatable)
+      --json                         Print machine-readable JSON to stdout
+      --scope <SCOPE>                Which files to read: user files (system), the files of the known projects, or both [default: all] [possible values: system, project, all]
+      --yes                          Answer yes to confirmations (rolling back an older apply run)
+      --project <ID>                 Only the files of this known project (its id)
+      --only                         Copy the definitions without enabling them (no ownership taken)
+      --pick <NAME=CLIENT>           Import NAME as CLIENT has it, under NAME (repeatable; picks one definition of an entry that differs between clients). CLIENT may be a source key from --scan (omp#work, claude-code@PROJECT-ID) for a client's other file
+      --as <NAME=CLIENT>             Import NAME as CLIENT has it, as NAME-CLIENT (repeatable; with --pick, imports both definitions). CLIENT may be a source key
+      --skip <NAME>                  Leave NAME out (repeatable)
+      --extract <NAME[:FIELD]=DEST>  Where NAME's literal secrets go: keyring, op://VAULT/ITEM/FIELD, op-env://ENV/NAME or env:VAR. NAME:FIELD (env.KEY, headers.KEY, args[N], url) sets one field (repeatable)
+  -h, --help                         Print help
 ```
 
 ## `loadout adopt`

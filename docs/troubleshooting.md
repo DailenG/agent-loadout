@@ -86,10 +86,24 @@ See [concepts: ownership](concepts.md#ownership-managed-and-foreign-entries).
 
 The entry holds a literal value (in `env`, `headers`, `args` or the URL)
 that looks like a secret, and Loadout never puts secret values in the
-store. Move the value to a secret alias first: set it up with
-`loadout secrets set ALIAS ...`, change the client entry to use an
-environment variable, or add the server to Loadout by hand with
-`${secret:ALIAS}` and adopt or remove the old entry.
+store. Tell the import where each value goes: `loadout import --scan`
+lists them by field, then for example
+
+```sh
+loadout import --extract chatty=keyring                         # the OS keyring
+loadout import --extract "chatty=op://Private/Chatty/credential" # a 1Password item
+loadout import --extract chatty:env.CHATTY_API_KEY=env:CHATTY_KEY # an environment variable
+```
+
+The store gets a `${secret:ALIAS}` reference and the client entry is
+rewritten to use it. A URL that looks like it holds a secret, with no part
+Loadout can cut out, still needs a hand edit.
+
+### `loadout import` skips an entry with `collision`
+
+The entry differs between clients (or between your user file and a
+project). Pick one definition with `--pick NAME=CLIENT`, or import both:
+`--pick docs=claude-code --as docs=omp` stores `docs` and `docs-omp`.
 
 ### The MCP and Tools pages show my user servers when I expected a project
 

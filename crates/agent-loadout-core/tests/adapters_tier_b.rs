@@ -20,7 +20,7 @@ use agent_loadout_core::adapters::mapper::{
 use agent_loadout_core::adapters::{
     ADAPTERS, AdapterSpec, McpSpec, Target, Tier, claude_code, copilot, cursor, vscode_legacy,
 };
-use agent_loadout_core::apply::import::{scan, stage_import};
+use agent_loadout_core::apply::import::{ImportRequest, scan, stage_import};
 use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::apply::{EntryState, Plan, PlanOptions, TargetPlan};
 use agent_loadout_core::formats::{Document, Format, NativeValue};
@@ -1048,8 +1048,10 @@ fn legacy_vscode_files_are_byte_identical_after_every_op() {
     let desired = DesiredState::load(&fx.store(), None).unwrap();
     let (candidates, _) = scan(&fx.ax(), &desired, &fx.ledger(), None).unwrap();
     legacy.assert_untouched("import --scan");
+    let ax = fx.ax();
     fx.edit("import", |tx| {
-        stage_import(tx, &candidates, None, false)?;
+        let request = ImportRequest::defaults(&candidates, None, false);
+        stage_import(tx, &ax, &candidates, &request)?;
         Ok(())
     });
     let desired = DesiredState::load(&fx.store(), None).unwrap();
@@ -1154,8 +1156,10 @@ fn import_reads_legacy_vscode_files() {
     );
     candidate("editor-only");
 
+    let ax = fx.ax();
     fx.edit("import", |tx| {
-        let result = stage_import(tx, &candidates, None, false)?;
+        let request = ImportRequest::defaults(&candidates, None, false);
+        let result = stage_import(tx, &ax, &candidates, &request)?;
         assert!(
             result.imported.contains(&"github".to_owned()),
             "{result:#?}"

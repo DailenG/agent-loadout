@@ -24,6 +24,7 @@ pub mod plan;
 pub mod render;
 pub mod resolve;
 pub mod rollback;
+pub mod unmanaged;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -134,10 +134,14 @@ file is **foreign**:
 - They do not appear in the store, so the MCP page and Tools > Manage do
   not list them. (This is why Manage can show "0 servers" for a client that
   has servers of its own; see the [FAQ](faq.md).)
-- To bring them under Loadout: `loadout import --scan` lists them,
-  `loadout import` copies them into the store and takes ownership,
-  `loadout import --only` copies the definitions without taking ownership,
-  and `loadout adopt CLIENT/NAME` takes over one entry.
+- To bring them under Loadout: `loadout import --scan` lists them (user
+  files and the files of every project this machine knows, identical
+  definitions collapsed, differing ones side by side), `loadout import`
+  copies them into the store and takes ownership, `loadout import --only`
+  copies the definitions without taking ownership, and
+  `loadout adopt CLIENT/NAME` takes over one entry. An entry found only in
+  a project's files becomes a store definition that is not enabled; name
+  it in the project's manifest (`from = "<id>"`) to manage it there.
 
 The ledger is machine-local and is not synced: ownership is a fact about
 the files on one machine.

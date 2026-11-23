@@ -231,9 +231,22 @@ pub fn trash(
         )
         .with_path(&path));
     }
+    let target = trash_target(sx, client, name)?;
+    confine(sx.fs, &path)?;
+    std::fs::rename(&path, &target)
+        .map_err(|err| io_error("cannot move the entry to the trash", &path, &err))?;
+    Ok(target)
+}
+
+/// A free `backups/trash/<time>-<client>-<name>` for an entry, its folder
+/// created; `already_exists` when that name is taken this second.
+pub(crate) fn trash_target(
+    sx: &SkillsEnv<'_>,
+    client: &str,
+    name: &str,
+) -> Result<PathBuf, CoreError> {
     let dir = sx.home.backups_dir().join(TRASH_DIR);
     let target = dir.join(format!("{}-{client}-{name}", timestamp(sx.env.now())));
-    confine(sx.fs, &path)?;
     confine(sx.fs, &target)?;
     if sx.fs.exists(&target) {
         return Err(
@@ -244,7 +257,5 @@ pub fn trash(
     sx.fs
         .create_dir_all(&dir)
         .map_err(|err| io_error("cannot create directory", &dir, &err))?;
-    std::fs::rename(&path, &target)
-        .map_err(|err| io_error("cannot move the entry to the trash", &path, &err))?;
     Ok(target)
 }

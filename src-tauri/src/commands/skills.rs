@@ -3,7 +3,8 @@
 //! project); client skill folders classified as managed, unmanaged or
 //! mismatch; installs from a git URL or a picked folder or archive (the
 //! path stays in the backend under a token); enable, disable, tags,
-//! updates with a per-file diff, removal; import, trash and agents CLI
+//! updates with a per-file diff, removal; import, bulk adopt (unmanaged
+//! folders into the store, replaced by links), trash and agents CLI
 //! vendoring. Every operation is the core's (`skills::*`), as
 //! `loadout skills` runs it: one store commit per change, then client
 //! folders follow at once. Commands take ids (skill, client, project),
@@ -19,6 +20,7 @@ use agent_loadout_core::model::applied::Scope as TargetScope;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
 use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
+use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, EntryClass};
 use agent_loadout_core::skills::install::{self, ChangeKind, InstallRequest, Source, UpdateStatus};
@@ -1481,4 +1483,281 @@ pub async fn run_agents_skill_cli(
     name: String,
 ) -> CmdResult<String> {
     blocking(&state, move |core| run_agents_cli(core, action, &name)).await
+}
+
+// Adopt and bulk import of unmanaged folders (SPEC 8.6, 12.5, #3).
+
+/// An unmanaged folder of a client skill folder.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSkillFolder {
+    pub client: String,
+    /// Under its placeholder root.
+    pub path: String,
+}
+
+/// One content of an unmanaged skill name.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSkillVariant {
+    /// Names the content in `adopt_skills` choices.
+    pub hash: String,
+    /// Empty for the store's copy alone.
+    pub folders: Vec<UnmanagedSkillFolder>,
+    /// The store skill of this name holds this content.
+    pub in_store: bool,
+    pub description: Option<String>,
+    pub bytes: u32,
+}
+
+/// Unmanaged folders of one name, grouped by content.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSkill {
+    pub name: String,
+    /// Several contents (the store's included): pick one, or import the
+    /// others as `name-<client>`.
+    pub conflict: bool,
+    pub variants: Vec<UnmanagedSkillVariant>,
+}
+
+/// An unmanaged folder that cannot be adopted.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSkillProblem {
+    pub client: String,
+    pub name: String,
+    pub path: String,
+    pub error: IpcError,
+}
+
+/// The unmanaged skill folders of a scope.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSkills {
+    pub candidates: Vec<UnmanagedSkill>,
+    pub problems: Vec<UnmanagedSkillProblem>,
+}
+
+/// What to do with the folders of one name.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SkillAdoptAction {
+    /// Adopt the content `variant` (a hash) as the name; folders with
+    /// other content are kept.
+    Pick {
+        variant: String,
+    },
+    /// Adopt `primary` as the name and every other content as
+    /// `name-<client>`.
+    Both {
+        primary: String,
+    },
+    Skip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
+pub struct SkillAdoptChoice {
+    pub name: String,
+    pub action: SkillAdoptAction,
+}
+
+/// What happened to one unmanaged folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillFolderStatus {
+    /// Replaced by the managed link; the folder is in the trash.
+    Adopted,
+    /// Another content of its name was chosen; kept.
+    Differs,
+    /// Several contents and no choice; kept.
+    Conflict,
+    Skipped,
+    /// Its content is in the store, but the folder could not be replaced
+    /// (see the error); kept.
+    Kept,
+}
+
+impl From<adopt::FolderStatus> for SkillFolderStatus {
+    fn from(status: adopt::FolderStatus) -> Self {
+        match status {
+            adopt::FolderStatus::Adopted => Self::Adopted,
+            adopt::FolderStatus::Differs => Self::Differs,
+            adopt::FolderStatus::Conflict => Self::Conflict,
+            adopt::FolderStatus::Skipped => Self::Skipped,
+            adopt::FolderStatus::Kept => Self::Kept,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillAdoptedFolder {
+    pub client: String,
+    pub name: String,
+    pub path: String,
+    /// The store skill it went (or would go) into.
+    pub skill_id: Option<String>,
+    pub status: SkillFolderStatus,
+    /// Where the folder went, under its placeholder root.
+    pub trash: Option<String>,
+    pub error: Option<IpcError>,
+}
+
+/// What an adopt did: one store commit, then the folders.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillAdoptResult {
+    pub commit: Option<String>,
+    /// Store skills the action added.
+    pub added: Vec<String>,
+    /// Store skills that held the content already.
+    pub reused: Vec<String>,
+    pub folders: Vec<SkillAdoptedFolder>,
+    pub problems: Vec<UnmanagedSkillProblem>,
+    pub links: SkillSync,
+    /// A folder is left for the user or an entry needs a decision.
+    pub needs_attention: bool,
+}
+
+fn problems_of(
+    env: &Env,
+    root: Option<&Path>,
+    problems: &[adopt::FolderProblem],
+) -> Vec<UnmanagedSkillProblem> {
+    problems
+        .iter()
+        .map(|problem| UnmanagedSkillProblem {
+            client: problem.client.to_owned(),
+            name: problem.name.clone(),
+            path: placeholder_path(env, &problem.path, root),
+            error: scrubbed(env, &problem.error, root),
+        })
+        .collect()
+}
+
+/// The unmanaged folders of `scope` (every client's, or `client`'s),
+/// grouped by name and content (SPEC 8.6, 12.5). Reads only.
+pub fn scan_unmanaged(
+    core: &Core,
+    scope: &SkillScope,
+    client: Option<&str>,
+) -> CmdResult<UnmanagedSkills> {
+    let (scope, root) = target_scope(core, scope)?;
+    let env = &core.env;
+    let root = root.as_deref();
+    let store = core.open_store()?;
+    let scan = adopt::scan(store.as_ref(), &sx(core), scope, root, client)
+        .map_err(|err| scrubbed(env, &err, root))?;
+    Ok(UnmanagedSkills {
+        candidates: scan
+            .candidates
+            .iter()
+            .map(|candidate| UnmanagedSkill {
+                name: candidate.name.clone(),
+                conflict: candidate.is_conflict(),
+                variants: candidate
+                    .variants
+                    .iter()
+                    .map(|variant| UnmanagedSkillVariant {
+                        hash: variant.hash.clone(),
+                        folders: variant
+                            .folders
+                            .iter()
+                            .map(|folder| UnmanagedSkillFolder {
+                                client: folder.client.to_owned(),
+                                path: placeholder_path(env, &folder.path, root),
+                            })
+                            .collect(),
+                        in_store: variant.in_store,
+                        description: variant.description.clone(),
+                        bytes: size(variant.bytes),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        problems: problems_of(env, root, &scan.problems),
+    })
+}
+
+/// Adopts unmanaged folders of `scope` as `choices` say (names without a
+/// choice are skipped): one store commit, then each folder whose content
+/// equals its store copy is replaced by the managed link and moved to
+/// `backups/trash/`.
+pub fn adopt_folders(
+    core: &Core,
+    scope: &SkillScope,
+    client: Option<&str>,
+    choices: &[SkillAdoptChoice],
+) -> CmdResult<SkillAdoptResult> {
+    let (scope, root) = target_scope(core, scope)?;
+    let env = &core.env;
+    let root = root.as_deref();
+    let choices: Vec<adopt::AdoptChoice> = choices
+        .iter()
+        .map(|choice| adopt::AdoptChoice {
+            name: choice.name.clone(),
+            action: match &choice.action {
+                SkillAdoptAction::Pick { variant } => adopt::AdoptAction::Pick {
+                    variant: variant.clone(),
+                },
+                SkillAdoptAction::Both { primary } => adopt::AdoptAction::Both {
+                    primary: primary.clone(),
+                },
+                SkillAdoptAction::Skip => adopt::AdoptAction::Skip,
+            },
+        })
+        .collect();
+    let store = core.open_store_for_change()?;
+    let report = adopt::adopt(&store, &sx(core), scope, root, client, &choices)
+        .map_err(|err| scrubbed(env, &err, root))?;
+    let path = |path: &Path| placeholder_path(env, path, root);
+    Ok(SkillAdoptResult {
+        commit: commit_text(report.commit.as_ref()),
+        added: report.added.clone(),
+        reused: report.reused.clone(),
+        folders: report
+            .folders
+            .iter()
+            .map(|folder| SkillAdoptedFolder {
+                client: folder.client.to_owned(),
+                name: folder.name.clone(),
+                path: path(&folder.path),
+                skill_id: folder.skill_id.clone(),
+                status: folder.status.into(),
+                trash: folder.trash.as_deref().map(path),
+                error: folder.error.as_ref().map(|err| scrubbed(env, err, root)),
+            })
+            .collect(),
+        problems: problems_of(env, root, &report.problems),
+        links: sync_of(env, &report.sync),
+        needs_attention: report.needs_attention(),
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn scan_unmanaged_skills(
+    state: tauri::State<'_, AppState>,
+    scope: SkillScope,
+    client: Option<String>,
+) -> CmdResult<UnmanagedSkills> {
+    blocking(&state, move |core| {
+        scan_unmanaged(core, &scope, client.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn adopt_skills(
+    state: tauri::State<'_, AppState>,
+    scope: SkillScope,
+    client: Option<String>,
+    choices: Vec<SkillAdoptChoice>,
+) -> CmdResult<SkillAdoptResult> {
+    blocking(&state, move |core| {
+        adopt_folders(core, &scope, client.as_deref(), &choices)
+    })
+    .await
 }

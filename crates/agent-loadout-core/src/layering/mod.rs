@@ -12,10 +12,12 @@
 //! - [`projects`]: init, add, remove, the trust review and trust, shared by
 //!   `loadout project` and the app.
 //! - [`project_servers`]: the app's edits of a manifest's `[servers.*]`.
+//! - [`discover`]: folders the clients know, offered as new projects.
 //!
 //! The planner ([`crate::apply::plan`]) turns known projects into project
 //! and project-local targets.
 
+pub mod discover;
 pub mod effective;
 pub mod git;
 pub mod manifest;

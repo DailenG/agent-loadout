@@ -6,7 +6,8 @@
 //! - [`providers`]: env, OS keyring and the 1Password CLI; [`status`] is
 //!   what resolving found.
 //! - [`classify`] and [`scanner`]: the SPEC 11.7 classifier and the leak
-//!   scanner every store commit passes through.
+//!   scanner every store commit passes through; [`extract`] replaces
+//!   sensitive literals by aliases on import and migration.
 //! - [`delivery`] and [`render`]: how references reach a server for one
 //!   client (SPEC 11.4: `env`, `launch`, `command`, `inline`).
 //!
@@ -20,6 +21,7 @@
 pub mod catalog;
 pub mod classify;
 pub mod delivery;
+pub mod extract;
 pub mod grammar;
 pub mod providers;
 pub mod render;

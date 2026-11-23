@@ -8,6 +8,50 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Added
+
+- `loadout import --scan` reads the files of every project this machine
+  knows too, trusted or not (read only), and shows each definition of an
+  entry with its sources; an entry that differs between clients or scopes
+  is a conflict. `--pick NAME=CLIENT` takes one definition and
+  `--as NAME=CLIENT` imports another as `NAME-CLIENT`; `--skip`, `--scope`
+  and `--project` narrow the import (#3).
+- Import extracts literal secrets instead of refusing the entry:
+  `--extract NAME[:FIELD]=keyring|op://...|op-env://...|env:VAR` stores a
+  `${secret:ALIAS}` reference and sends the value to the OS keyring (taken
+  from the client file, never shown) or maps it to 1Password or an
+  environment variable, in the same commit (SPEC 11.7, #3).
+- App backend for the import view and the unmanaged-entry notice:
+  `scan_import`, `apply_import`, `unmanaged_summary`, `new_unmanaged` and
+  `acknowledge_unmanaged`; acknowledged entries are kept per machine in
+  `state/unmanaged-seen.json` (#3, #9).
+- `loadout skills adopt` brings unmanaged skill folders into the store and
+  hands them to Loadout: identical folders in several clients become one
+  skill enabled for all of them, differing ones are a conflict
+  (`--pick NAME=CLIENT`, or `--both NAME=CLIENT` to import the others as
+  `NAME-CLIENT`), and each folder whose content equals the store copy is
+  replaced by the managed link (a junction on Windows) and moved to
+  `backups/trash/`. `--all` adopts every name with one content, `--tool`
+  one client's folder, `--project` a trusted project's folders. One commit
+  per action (SPEC 12.5, #3).
+- `loadout project discover` lists folders the clients already know
+  (Claude Code's `projects`, Codex trusted projects, omp and Pi sessions)
+  that are not projects on this machine yet; `--add ID` or `--all` adds
+  them in one commit, untrusted, writing a private manifest where a
+  folder has none (SPEC 13.3, #3).
+- App backend for skill adopt and Discover projects:
+  `scan_unmanaged_skills`, `adopt_skills`, `discover_projects` and
+  `add_discovered_projects` (#3).
+
+### Changed
+
+- An entry found only in project files imports as a store definition
+  without enablement, to be named in the project's manifest (`from`);
+  `loadout import` applies only the imported servers' files (#3).
+- The secret extraction of the SkillDock migration moved to a shared core
+  module (`secrets::extract`) that the import uses as well; the
+  migration's behavior is unchanged.
+
 ## [0.2.1] - 2026-11-23
 
 ### Changed

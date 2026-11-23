@@ -71,7 +71,7 @@ pub fn layout(fs: &dyn Fs, root: &Path) -> Option<Layout> {
 pub struct InitPlan {
     pub root: PathBuf,
     pub id: String,
-    text: String,
+    pub(crate) text: String,
 }
 
 /// What `init` created.

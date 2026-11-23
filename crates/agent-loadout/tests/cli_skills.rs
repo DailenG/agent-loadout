@@ -186,3 +186,100 @@ fn skills_add_enable_scan_disable_rm() {
     assert!(subjects.contains(&"skill: enable repo-conventions for claude-code"));
     assert!(subjects.contains(&"skill: remove repo-conventions"));
 }
+
+fn skill_folder(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let folder = dir.join(name);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: {body}\n---\n"),
+    )
+    .unwrap();
+    folder
+}
+
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
+/// `skills adopt` lists, then adopts: identical folders become one skill,
+/// a conflict needs --pick or --both, folders become links (exit 0), and
+/// a conflict left alone exits 4.
+#[test]
+fn skills_adopt_lists_then_adopts_with_choices() {
+    let cli = Cli::new();
+    let claude = cli.th.home().join(".claude").join("skills");
+    let codex = cli.th.home().join(".codex").join("skills");
+    let shared_claude = skill_folder(&claude, "shared", "Same.");
+    let shared_codex = skill_folder(&codex, "shared", "Same.");
+    let diff_claude = skill_folder(&claude, "diff", "Claude's.");
+    let diff_codex = skill_folder(&codex, "diff", "Codex's.");
+
+    let doc = cli.ok(&["skills", "adopt"]);
+    let candidates = doc["candidates"].as_array().unwrap();
+    let summary: Vec<(&str, bool, usize)> = candidates
+        .iter()
+        .map(|candidate| {
+            (
+                candidate["name"].as_str().unwrap(),
+                candidate["conflict"].as_bool().unwrap(),
+                candidate["variants"].as_array().unwrap().len(),
+            )
+        })
+        .collect();
+    assert_eq!(summary, [("diff", true, 2), ("shared", false, 1)]);
+    assert_eq!(
+        candidates[1]["variants"][0]["clients"],
+        serde_json::json!(["claude-code", "codex"])
+    );
+    assert!(!is_link(&shared_claude), "listing changes nothing");
+
+    // --all: the identical pair is adopted; the conflict stays (exit 4).
+    let (code, doc) = cli.json(&["skills", "adopt", "--all"]);
+    assert_eq!(code, 4, "{doc:#}");
+    assert_eq!(doc["added"], serde_json::json!(["shared"]));
+    let statuses: Vec<(&str, &str)> = doc["folders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|folder| {
+            (
+                folder["name"].as_str().unwrap(),
+                folder["status"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            ("diff", "conflict"),
+            ("diff", "conflict"),
+            ("shared", "adopted"),
+            ("shared", "adopted"),
+        ]
+    );
+    assert!(is_link(&shared_claude) && is_link(&shared_codex));
+    assert!(
+        doc["folders"][2]["trash"]
+            .as_str()
+            .unwrap()
+            .contains("trash")
+    );
+
+    // --both: Codex's content keeps the name, Claude Code's is diff-claude-code.
+    let doc = cli.ok(&["skills", "adopt", "--both", "diff=codex"]);
+    assert_eq!(
+        doc["added"],
+        serde_json::json!(["diff", "diff-claude-code"])
+    );
+    assert!(is_link(&diff_codex));
+    assert!(is_link(&claude.join("diff-claude-code")));
+    assert!(std::fs::symlink_metadata(&diff_claude).is_err());
+    let text = std::fs::read_to_string(diff_codex.join("SKILL.md")).unwrap();
+    assert!(text.contains("Codex's."));
+
+    // A choice naming a folder that does not exist is refused.
+    let (code, doc) = cli.json(&["skills", "adopt", "--pick", "nope=codex"]);
+    assert_ne!(code, 0, "{doc:#}");
+    assert_eq!(doc["error"]["code"], "not_found");
+}

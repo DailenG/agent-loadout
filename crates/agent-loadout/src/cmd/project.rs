@@ -1,4 +1,5 @@
-//! `loadout project init|add|ls|rm|trust|share` (SPEC 5.5, 6, 14, 17).
+//! `loadout project init|add|ls|rm|trust|share|discover` (SPEC 5.5, 6, 14,
+//! 17).
 //!
 //! The project folder is the source of truth: its manifests are read from
 //! `<P>/.loadout/`. This machine's overlay (`machines/<machine-id>.toml`
@@ -12,6 +13,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use agent_loadout_core::apply::{ProjectSelection, Touched};
+use agent_loadout_core::layering::discover;
 use agent_loadout_core::layering::manifest::manifest_dir;
 use agent_loadout_core::layering::projects::{
     self, GITIGNORE, ManifestChange, ensure_line, load_project, mirror, read_optional, save_trust,
@@ -81,6 +83,18 @@ enum ProjectCommand {
         #[arg(long = "server", value_name = "NAME")]
         servers: Vec<String>,
     },
+    /// List folders the clients already know (Claude Code projects, Codex
+    /// trusted projects, omp and Pi sessions) that are not projects on
+    /// this machine yet; --add or --all binds them, untrusted. A folder
+    /// without a manifest gets a private one.
+    Discover {
+        /// Add the candidate with this id (repeatable).
+        #[arg(long = "add", value_name = "ID")]
+        add: Vec<String>,
+        /// Add every candidate that can be added.
+        #[arg(long, conflicts_with = "add")]
+        all: bool,
+    },
 }
 
 pub fn run(ctx: &Context, args: &ProjectArgs) -> Result<u8, CoreError> {
@@ -93,6 +107,7 @@ pub fn run(ctx: &Context, args: &ProjectArgs) -> Result<u8, CoreError> {
         ProjectCommand::Rm { id } => remove(ctx, id),
         ProjectCommand::Trust { path } => trust(ctx, path),
         ProjectCommand::Share { id, servers } => share(ctx, id, servers),
+        ProjectCommand::Discover { add, all } => discover_folders(ctx, add, *all),
     }
 }
 
@@ -248,6 +263,123 @@ fn list(ctx: &Context) -> Result<(), CoreError> {
         }
     }
     Ok(())
+}
+
+fn discover_folders(ctx: &Context, add: &[String], all: bool) -> Result<u8, CoreError> {
+    let fs = ctx.fs();
+    if add.is_empty() && !all {
+        let store = ctx.open_store()?;
+        let found = discover::discover(store.as_ref(), &ctx.env, fs, &ctx.home)?;
+        warn_all(&found.warnings);
+        if ctx.json {
+            print_json(&json!({
+                "schema": JSON_SCHEMA,
+                "candidates": found.candidates.iter().map(candidate_json).collect::<Vec<_>>(),
+                "warnings": found.warnings.iter().map(error_json).collect::<Vec<_>>(),
+            }));
+            return Ok(0);
+        }
+        if found.candidates.is_empty() {
+            println!("No new project folders found.");
+            return Ok(0);
+        }
+        for candidate in &found.candidates {
+            let manifest = match (&candidate.manifest, &candidate.problem) {
+                (Some(project), _) => format!("manifest {}", project.id),
+                (None, Some(err)) => format!("invalid [{}]", err.code()),
+                (None, None) => "no manifest".to_owned(),
+            };
+            println!(
+                "{}  {}  ({}; {})",
+                candidate.id,
+                candidate.root.display(),
+                candidate.clients.join(", "),
+                manifest
+            );
+        }
+        println!(
+            "Add with `{} project discover --add <ID>` (or --all); added projects wait for \
+             `project trust`.",
+            agent_loadout_core::brand::BIN_NAME
+        );
+        return Ok(0);
+    }
+    let store = ctx.open_store_for_change()?;
+    let ids: Vec<String> = if all {
+        discover::discover(Some(&store), &ctx.env, fs, &ctx.home)?
+            .candidates
+            .into_iter()
+            .filter(|candidate| candidate.problem.is_none())
+            .map(|candidate| candidate.id)
+            .collect()
+    } else {
+        add.to_vec()
+    };
+    let done = discover::add(&store, &ctx.env, fs, &ctx.home, &ids)?;
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "commit": done.commit.as_ref().map(CommitId::to_string),
+            "added": done.added.iter().map(|added| json!({
+                "candidate": added.candidate,
+                "id": added.project_id,
+                "path": path_json(&added.root),
+                "created_manifest": added.created_manifest,
+                "trust": "untrusted",
+            })).collect::<Vec<_>>(),
+            "failed": done.failed.iter().map(|failed| json!({
+                "candidate": failed.candidate,
+                "path": path_json(&failed.root),
+                "error": error_json(&failed.error),
+            })).collect::<Vec<_>>(),
+        }));
+    } else {
+        for added in &done.added {
+            let created = if added.created_manifest {
+                " (private manifest created)"
+            } else {
+                ""
+            };
+            println!(
+                "Added project {} at {}{created}.",
+                added.project_id,
+                added.root.display()
+            );
+        }
+        for failed in &done.failed {
+            eprintln!(
+                "error[{}]: {}: {}",
+                failed.error.code(),
+                failed.root.display(),
+                failed.error.message()
+            );
+        }
+        if done.added.is_empty() && done.failed.is_empty() {
+            println!("Nothing to add.");
+        } else if !done.added.is_empty() {
+            println!(
+                "Commit {}. Review each project's manifests, then run `{} project trust <PATH>` \
+                 to apply it.",
+                short(done.commit.as_ref()),
+                agent_loadout_core::brand::BIN_NAME
+            );
+        }
+    }
+    Ok(if done.failed.is_empty() { 0 } else { 1 })
+}
+
+fn candidate_json(candidate: &discover::Discovered) -> Value {
+    json!({
+        "id": candidate.id,
+        "path": path_json(&candidate.root),
+        "name": candidate.name,
+        "clients": candidate.clients,
+        "manifest": candidate.manifest.as_ref().map(|project| json!({
+            "id": project.id,
+            "name": project.name(),
+        })),
+        "error": candidate.problem.as_ref().map(error_json),
+    })
 }
 
 /// `trusted`, `untrusted`, `changed`, `missing` (the folder is gone) or

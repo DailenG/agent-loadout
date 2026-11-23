@@ -669,17 +669,23 @@ fn import_scans_collapses_identical_entries_and_adopts_them() {
         "${env:DOCS_TOKEN}"
     );
     // Non-sensitive literals are imported as written (SPEC 11.7); a
-    // literal under a credential name needs extraction.
+    // literal under a credential name needs a destination.
     assert_eq!(def.fields.env.as_ref().unwrap()["LOG_LEVEL"], "info");
     let chatty = candidates.iter().find(|c| c.name == "chatty").unwrap();
-    assert_eq!(
-        chatty.sources[0].def.as_ref().unwrap_err().code(),
-        ErrorCode::NeedsSecretExtraction
-    );
+    let previews = import::previews(&candidates, &desired.catalog);
+    let chatty_at = candidates.iter().position(|c| c.name == "chatty").unwrap();
+    let fields: Vec<&str> = previews[chatty_at][0]
+        .extractions
+        .iter()
+        .map(|e| e.field.as_str())
+        .collect();
+    assert_eq!(fields, ["env.CHATTY_API_KEY"]);
+    assert!(chatty.identical);
 
     let committed = store
         .transaction(Operation::new("import", "import: 1 server"), |tx| {
-            let imported = import::stage_import(tx, &candidates, None, false)?;
+            let request = import::ImportRequest::defaults(&candidates, None, false);
+            let imported = import::stage_import(tx, &ax, &candidates, &request)?;
             let report = apply::apply_in(
                 tx,
                 &ax,

@@ -31,9 +31,8 @@ use crate::fs::Fs;
 use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
 use crate::model::ids::{self, IdKind};
 use crate::model::server::{Enable, Meta, Server, ToolFilter, Transport};
-use crate::secrets::classify::{
-    Reason, classify_args_import, classify_import, find_in_text, is_sensitive_argument_name,
-};
+use crate::secrets::classify::{classify_import, find_in_text};
+use crate::secrets::extract::{Aliases, Extraction, Extractor};
 
 /// SkillDock's data folder under the home folder.
 pub const DIR: &str = ".skilldock";
@@ -393,22 +392,6 @@ pub fn parse_installed(doc: &Value, tags: &mut Vec<TagEntry>) -> Vec<InstalledSk
     out
 }
 
-/// One plaintext value routed to the secret extraction wizard (SPEC
-/// 11.7). The value itself is never kept: the store gets a
-/// `${secret:<alias>}` reference in its place.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct Extraction {
-    pub server: String,
-    /// `env.NAME`, `headers.NAME`, `args[N]` (1-based) or `url`.
-    pub field: String,
-    pub alias: String,
-    /// Why it counts as sensitive ([`Reason::as_str`]).
-    pub reason: &'static str,
-    /// The default destination (`keyring://loadout/<alias>`); the wizard
-    /// also offers 1Password, an environment variable, or "not a secret".
-    pub suggested_ref: String,
-}
-
 /// A record as a store server.
 #[derive(Debug, Clone)]
 pub struct Mapped {
@@ -701,55 +684,6 @@ pub fn is_machine_path(command: &str) -> bool {
             && matches!(bytes[2], b'\\' | b'/'))
 }
 
-/// Secret aliases in use; [`Aliases::new_alias`] picks free ones.
-#[derive(Debug, Clone, Default)]
-pub struct Aliases {
-    taken: BTreeSet<String>,
-}
-
-impl Aliases {
-    pub fn new(taken: impl IntoIterator<Item = String>) -> Self {
-        Self {
-            taken: taken.into_iter().collect(),
-        }
-    }
-
-    /// `<SERVER>_<KEY>` in upper case with `_` for anything else, free of
-    /// every alias seen so far (`_2`, `_3` when taken).
-    pub fn new_alias(&mut self, server: &str, key: &str) -> String {
-        let mut base: String = format!("{server}_{key}")
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() {
-                    ch.to_ascii_uppercase()
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        while base.contains("__") {
-            base = base.replace("__", "_");
-        }
-        let mut base = base.trim_matches('_').to_owned();
-        if base.is_empty() || base.as_bytes()[0].is_ascii_digit() {
-            base.insert(0, '_');
-        }
-        base.truncate(60);
-        let mut alias = base.clone();
-        let mut n = 2;
-        while self.taken.contains(&alias) || !ids::is_valid(IdKind::SecretAlias, &alias) {
-            alias = format!("{base}_{n}");
-            n += 1;
-        }
-        self.taken.insert(alias.clone());
-        alias
-    }
-}
-
-fn reference(alias: &str) -> String {
-    format!("${{secret:{alias}}}")
-}
-
 /// Maps a record to store server `id`. Sensitive literals are replaced by
 /// `${secret:<alias>}` references and listed in [`Mapped::extractions`];
 /// the values are dropped.
@@ -777,7 +711,7 @@ pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Ma
         .and_then(|spec| spec.mcp.as_ref())
         .expect("Claude Code has MCP")
         .caps;
-    let mut extractions = Vec::new();
+    let mut extractor = Extractor::new(id, aliases);
     let mut server = Server::new(id);
     let body = &mut server.body;
     body.transport = Some(transport);
@@ -790,14 +724,14 @@ pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Ma
             .iter()
             .map(|arg| convert(caps, arg, FieldSet::ARGS))
             .collect::<Result<Vec<_>, _>>()?;
-        body.args = Some(extract_args(id, args, aliases, &mut extractions));
+        body.args = Some(extractor.args(args));
     }
     if let Some(cwd) = &raw.cwd {
         body.cwd = Some(convert(caps, cwd, FieldSet::CWD)?);
     }
     if let Some(url) = &raw.url {
         let url = convert(caps, url, FieldSet::URL)?;
-        body.url = Some(extract_url(id, url, aliases, &mut extractions)?);
+        body.url = Some(extractor.url(url)?);
     }
     for (field, source, label) in [
         (FieldSet::ENV, &raw.env, "env"),
@@ -805,35 +739,21 @@ pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Ma
     ] {
         let mut map = BTreeMap::new();
         for (name, value) in source {
-            let value = convert(caps, value, field)?;
-            let value = match classify_import(Some(name), &value) {
-                Some(reason) => {
-                    let alias = aliases.new_alias(id, name);
-                    extractions.push(extraction(id, format!("{label}.{name}"), &alias, reason));
-                    // Keep an `Authorization: Bearer` scheme around the reference.
-                    match value.split_once(' ') {
-                        Some((scheme, _))
-                            if label == "headers"
-                                && matches!(
-                                    scheme.to_ascii_lowercase().as_str(),
-                                    "bearer" | "basic" | "token"
-                                ) =>
-                        {
-                            format!("{scheme} {}", reference(&alias))
-                        }
-                        _ => reference(&alias),
-                    }
-                }
-                None => value,
-            };
-            map.insert(name.clone(), value);
+            map.insert(name.clone(), convert(caps, value, field)?);
         }
+        let map = extractor.map(label, map);
         let map = (!map.is_empty()).then_some(map);
         match label {
             "env" => body.env = map,
             _ => body.headers = map,
         }
     }
+    // The migration keeps no value: the wizard asks for each one.
+    let extractions: Vec<Extraction> = extractor
+        .finish()
+        .into_iter()
+        .map(|extracted| extracted.extraction)
+        .collect();
     let disabled: Vec<String> = record
         .tools
         .iter()
@@ -946,98 +866,6 @@ fn convert(caps: &Caps, text: &str, field: FieldSet) -> Result<String, CoreError
             "a value uses a variable form the store cannot express (`${NAME:-default}`)",
         )
     })
-}
-
-fn extraction(server: &str, field: String, alias: &str, reason: Reason) -> Extraction {
-    Extraction {
-        server: server.to_owned(),
-        field,
-        alias: alias.to_owned(),
-        reason: reason.as_str(),
-        suggested_ref: format!("keyring://{}/{alias}", crate::brand::KEYRING_SERVICE),
-    }
-}
-
-/// Arguments with each sensitive one (or the value part of `--flag=value`)
-/// replaced by a reference.
-fn extract_args(
-    id: &str,
-    mut args: Vec<String>,
-    aliases: &mut Aliases,
-    extractions: &mut Vec<Extraction>,
-) -> Vec<String> {
-    let flagged = classify_args_import(&args);
-    for (index, reason) in flagged.into_iter().enumerate() {
-        let Some(reason) = reason else {
-            continue;
-        };
-        let arg = args[index].clone();
-        let (prefix, key) = match arg.split_once('=') {
-            Some((flag, _)) if flag.starts_with('-') => {
-                (format!("{flag}="), flag.trim_start_matches('-').to_owned())
-            }
-            _ => {
-                let previous = index
-                    .checked_sub(1)
-                    .map(|i| args[i].as_str())
-                    .filter(|prev| prev.starts_with('-') && is_sensitive_argument_name(prev));
-                (
-                    String::new(),
-                    previous.map_or_else(
-                        || format!("arg{}", index + 1),
-                        |flag| flag.trim_start_matches('-').to_owned(),
-                    ),
-                )
-            }
-        };
-        let alias = aliases.new_alias(id, &key);
-        extractions.push(extraction(
-            id,
-            format!("args[{}]", index + 1),
-            &alias,
-            reason,
-        ));
-        args[index] = format!("{prefix}{}", reference(&alias));
-    }
-    args
-}
-
-/// The URL with each credential part (userinfo, token query parameter,
-/// token-shaped text) replaced by a reference.
-fn extract_url(
-    id: &str,
-    url: String,
-    aliases: &mut Aliases,
-    extractions: &mut Vec<Extraction>,
-) -> Result<String, CoreError> {
-    let Some(reason) = classify_import(None, &url) else {
-        return Ok(url);
-    };
-    let hits = find_in_text(&url);
-    if hits.is_empty() {
-        return Err(CoreError::new(
-            ErrorCode::NeedsSecretExtraction,
-            format!(
-                "the URL may hold a secret ({}); edit it by hand",
-                reason.describe()
-            ),
-        ));
-    }
-    let mut out = url.clone();
-    for (n, hit) in hits.iter().enumerate().rev() {
-        let key = if hits.len() == 1 {
-            "url".to_owned()
-        } else {
-            format!("url{}", n + 1)
-        };
-        let alias = aliases.new_alias(id, &key);
-        extractions.push(extraction(id, "url".to_owned(), &alias, hit.reason));
-        out.replace_range(hit.range.clone(), &reference(&alias));
-    }
-    // Listed in URL order.
-    let start = extractions.len() - hits.len();
-    extractions[start..].reverse();
-    Ok(out)
 }
 
 /// `settings.json` fields and how they map (SPEC 15.1): theme, agents CLI

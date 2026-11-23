@@ -9,8 +9,10 @@
 //! a [`Core`], so the same functions run against a temp home in tests.
 
 pub mod apply;
+pub mod discover;
 pub mod effective;
 pub mod history;
+pub mod import;
 pub mod migrate;
 pub mod project_servers;
 pub mod projects;
@@ -21,6 +23,10 @@ pub mod servers;
 pub mod skills;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_discover;
+#[cfg(test)]
+mod tests_import;
 #[cfg(test)]
 mod tests_migrate;
 #[cfg(test)]

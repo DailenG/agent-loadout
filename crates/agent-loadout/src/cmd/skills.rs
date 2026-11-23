@@ -1,4 +1,4 @@
-//! `loadout skills ls|add|rm|enable|disable|update|scan|import|trash|vendor`
+//! `loadout skills ls|add|rm|enable|disable|update|scan|import|adopt|trash|vendor`
 //! (SPEC 12, 14).
 //!
 //! Store changes are one commit each; links and copies in client skill
@@ -12,6 +12,7 @@ use agent_loadout_core::model::applied::Scope;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
 use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
+use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, ClientDir};
 use agent_loadout_core::skills::install::{self, InstallRequest, Source, UpdateStatus};
@@ -110,6 +111,35 @@ enum SkillsCommand {
         /// Skill id [default: from the SKILL.md name].
         #[arg(long)]
         id: Option<String>,
+    },
+    /// Adopt unmanaged folders of client skill folders (SPEC 8.6, 12.5):
+    /// import them into the store, enabled where they were found, and
+    /// replace each folder whose content equals the store copy with a
+    /// link (the folder moves to backups/trash). Folders with the same
+    /// content in several clients become one skill. Without NAME, --all,
+    /// --pick or --both, lists what can be adopted.
+    Adopt {
+        /// Folder names to adopt (each with one content).
+        names: Vec<String>,
+        /// Adopt every name that has one content.
+        #[arg(long)]
+        all: bool,
+        /// Only this client's skill folder [default: every client].
+        #[arg(long, value_name = "CLIENT")]
+        tool: Option<String>,
+        /// The skill folders of this project (trusted) instead of the user
+        /// folders; adopted skills go to its manifest's [skills] enable.
+        #[arg(long, value_name = "PATH")]
+        project: Option<PathBuf>,
+        /// For a name with several contents: adopt the content in CLIENT's
+        /// folder (or `store`, the store's copy) as NAME; folders with
+        /// other content are kept (repeatable).
+        #[arg(long, value_name = "NAME=CLIENT")]
+        pick: Vec<String>,
+        /// Adopt CLIENT's content (or `store`) as NAME and every other
+        /// content as NAME-<client> (repeatable).
+        #[arg(long, value_name = "NAME=CLIENT")]
+        both: Vec<String>,
     },
 }
 
@@ -227,6 +257,23 @@ pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
             let store = ctx.open_store_for_change()?;
             let installed = agents_cli::vendor(&store, &sx, name, &naming(ctx, id))?;
             installed_out(ctx, &installed)
+        }
+        SkillsCommand::Adopt {
+            names,
+            all,
+            tool,
+            project,
+            pick,
+            both,
+        } => {
+            let request = AdoptRequest {
+                names,
+                all: *all,
+                tool: tool.as_deref(),
+                pick,
+                both,
+            };
+            adopt_folders(ctx, &sx, project.as_deref(), &request)
         }
     }
 }
@@ -723,6 +770,258 @@ fn scan(
     }
     if dirs.iter().all(|dir| !dir.exists) {
         println!("No client skill folders found.");
+    }
+    Ok(0)
+}
+
+/// What `skills adopt` was asked.
+struct AdoptRequest<'a> {
+    names: &'a [String],
+    all: bool,
+    tool: Option<&'a str>,
+    pick: &'a [String],
+    both: &'a [String],
+}
+
+impl AdoptRequest<'_> {
+    fn lists_only(&self) -> bool {
+        self.names.is_empty() && !self.all && self.pick.is_empty() && self.both.is_empty()
+    }
+}
+
+/// The content of `name` that `which` names: `store` for the store's copy,
+/// else the content in that client's folder.
+fn variant_of(scan: &adopt::UnmanagedScan, name: &str, which: &str) -> Result<String, CoreError> {
+    let candidate = scan.candidate(name).ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::NotFound,
+            format!("there is no unmanaged skill folder {name:?}"),
+        )
+    })?;
+    candidate
+        .variants
+        .iter()
+        .find(|variant| {
+            if which == "store" {
+                variant.in_store
+            } else {
+                variant.clients().any(|client| client == which)
+            }
+        })
+        .map(|variant| variant.hash.clone())
+        .ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::InvalidValue,
+                format!("{name:?} has no content in {which:?}; see `skills adopt` for the list"),
+            )
+        })
+}
+
+fn choices(
+    scan: &adopt::UnmanagedScan,
+    request: &AdoptRequest<'_>,
+) -> Result<Vec<adopt::AdoptChoice>, CoreError> {
+    let mut out: Vec<adopt::AdoptChoice> = if request.all {
+        adopt::default_choices(scan)
+    } else {
+        Vec::new()
+    };
+    let mut set = |name: &str, action: adopt::AdoptAction| {
+        out.retain(|choice| choice.name != name);
+        out.push(adopt::AdoptChoice {
+            name: name.to_owned(),
+            action,
+        });
+    };
+    for name in request.names {
+        let candidate = scan.candidate(name).ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::NotFound,
+                format!("there is no unmanaged skill folder {name:?}"),
+            )
+        })?;
+        if candidate.is_conflict() {
+            return Err(CoreError::new(
+                ErrorCode::InvalidValue,
+                format!(
+                    "{name:?} has several contents; choose with --pick {name}=<client> or --both \
+                     {name}=<client>"
+                ),
+            ));
+        }
+        set(
+            name,
+            adopt::AdoptAction::Pick {
+                variant: candidate.variants[0].hash.clone(),
+            },
+        );
+    }
+    for (list, both) in [(request.pick, false), (request.both, true)] {
+        for spec in list {
+            let (name, which) = spec.split_once('=').ok_or_else(|| {
+                CoreError::new(
+                    ErrorCode::InvalidValue,
+                    format!("{spec:?} is not NAME=CLIENT (or NAME=store)"),
+                )
+            })?;
+            let variant = variant_of(scan, name, which)?;
+            let action = if both {
+                adopt::AdoptAction::Both { primary: variant }
+            } else {
+                adopt::AdoptAction::Pick { variant }
+            };
+            set(name, action);
+        }
+    }
+    Ok(out)
+}
+
+fn problem_json(problem: &adopt::FolderProblem) -> Value {
+    json!({
+        "client": problem.client,
+        "name": problem.name,
+        "path": path_json(&problem.path),
+        "error": error_json(&problem.error),
+    })
+}
+
+fn adopt_folders(
+    ctx: &Context,
+    sx: &skills::SkillsEnv<'_>,
+    project: Option<&Path>,
+    request: &AdoptRequest<'_>,
+) -> Result<u8, CoreError> {
+    let (scope, project) = scope_of(project)?;
+    if request.lists_only() {
+        let store = ctx.open_store()?;
+        let scan = adopt::scan(store.as_ref(), sx, scope, project.as_deref(), request.tool)?;
+        return adopt_list(ctx, &scan);
+    }
+    let store = ctx.open_store_for_change()?;
+    let scan = adopt::scan(Some(&store), sx, scope, project.as_deref(), request.tool)?;
+    let choices = choices(&scan, request)?;
+    let report = adopt::adopt(
+        &store,
+        sx,
+        scope,
+        project.as_deref(),
+        request.tool,
+        &choices,
+    )?;
+    let code = if report.needs_attention() {
+        EXIT_UNRESOLVED
+    } else {
+        0
+    };
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "commit": report.commit.as_ref().map(CommitId::as_str),
+            "added": report.added,
+            "reused": report.reused,
+            "folders": report.folders.iter().map(|folder| json!({
+                "client": folder.client,
+                "name": folder.name,
+                "path": path_json(&folder.path),
+                "skill": folder.skill_id,
+                "status": folder.status.as_str(),
+                "trash": folder.trash.as_deref().map(path_json),
+                "error": folder.error.as_ref().map(error_json),
+            })).collect::<Vec<_>>(),
+            "problems": report.problems.iter().map(problem_json).collect::<Vec<_>>(),
+            "links": report_json(&report.sync),
+        }));
+        return Ok(code);
+    }
+    if !report.added.is_empty() {
+        println!("Added to the store: {}.", report.added.join(", "));
+    }
+    if !report.reused.is_empty() {
+        println!("Already in the store: {}.", report.reused.join(", "));
+    }
+    for folder in &report.folders {
+        let detail = match (&folder.error, &folder.skill_id) {
+            (Some(err), _) => format!(" [{}] {}", err.code(), err.message()),
+            (None, Some(id)) if *id != folder.name => format!(" as {id}"),
+            _ => String::new(),
+        };
+        println!(
+            "  {:<9} {:<12} {}{detail}",
+            folder.status.as_str(),
+            folder.client,
+            folder.path.display()
+        );
+    }
+    for problem in &report.problems {
+        eprintln!(
+            "warning[{}]: {}: {}",
+            problem.error.code(),
+            problem.path.display(),
+            problem.error.message()
+        );
+    }
+    print_links(&report.sync);
+    if report.folders.is_empty() {
+        println!("Nothing to adopt.");
+    }
+    Ok(code)
+}
+
+fn adopt_list(ctx: &Context, scan: &adopt::UnmanagedScan) -> Result<u8, CoreError> {
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "scope": scope_str(scan.scope),
+            "candidates": scan.candidates.iter().map(|candidate| json!({
+                "name": candidate.name,
+                "conflict": candidate.is_conflict(),
+                "variants": candidate.variants.iter().map(|variant| json!({
+                    "hash": variant.hash,
+                    "clients": variant.clients().collect::<Vec<_>>(),
+                    "folders": variant.folders.iter().map(|folder| path_json(&folder.path)).collect::<Vec<_>>(),
+                    "in_store": variant.in_store,
+                    "description": variant.description,
+                    "bytes": variant.bytes,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "problems": scan.problems.iter().map(problem_json).collect::<Vec<_>>(),
+        }));
+        return Ok(0);
+    }
+    if scan.candidates.is_empty() {
+        println!("No unmanaged skill folders.");
+    }
+    for candidate in &scan.candidates {
+        let state = if candidate.is_conflict() {
+            "conflict"
+        } else {
+            "ready"
+        };
+        println!("{:<32} {state}", candidate.name);
+        for variant in &candidate.variants {
+            let mut owners: Vec<&str> = variant.clients().collect();
+            if variant.in_store {
+                owners.push("store");
+            }
+            println!(
+                "  {}  {}",
+                &variant.hash[..variant.hash.len().min(19)],
+                owners.join(", ")
+            );
+        }
+    }
+    for problem in &scan.problems {
+        eprintln!(
+            "warning[{}]: {}: {}",
+            problem.error.code(),
+            problem.path.display(),
+            problem.error.message()
+        );
+    }
+    if scan.candidates.iter().any(adopt::Candidate::is_conflict) {
+        println!(
+            "Choose for a conflict with --pick NAME=<client|store> or --both NAME=<client|store>."
+        );
     }
     Ok(0)
 }

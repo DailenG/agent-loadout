@@ -28,9 +28,11 @@ optional update check. Everything else works offline.
 - **Leak scanner.** Every store commit is scanned; a commit that contains
   something that looks like a secret value is refused before anything is
   written. `loadout doctor --scan-history` scans older commits too (it
-  reports, and never rewrites history). `loadout import` does not import
-  an entry that holds a literal that looks like a secret (it reports
-  `needs_secret_extraction`); the SkillDock migration asks where each
+  reports, and never rewrites history). `loadout import` replaces a
+  literal that looks like a secret with a reference and sends the value
+  to the OS keyring, or maps it to a 1Password item or an environment
+  variable, as you choose; without a choice it skips the entry
+  (`needs_secret_extraction`). The SkillDock migration asks where each
   plaintext value should go and stores only a reference.
 - **No values across IPC.** The desktop app's backend never sends a secret
   value to the frontend. Previews mask values.

@@ -119,6 +119,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::updates::set_check_for_updates,
             commands::updates::check_for_update,
             commands::updates::install_update,
+            commands::skills::scan_unmanaged_skills,
+            commands::skills::adopt_skills,
+            commands::discover::discover_projects,
+            commands::discover::add_discovered_projects,
+            commands::import::scan_import,
+            commands::import::apply_import,
+            commands::import::unmanaged_summary,
+            commands::import::new_unmanaged,
+            commands::import::acknowledge_unmanaged,
         ])
         .events(collect_events![TargetsChanged])
         .error_handling(ErrorHandlingMode::Result)

@@ -1,10 +1,16 @@
 //! Adopt and import (SPEC 8.6): native entries into the store.
 //!
-//! - [`scan`] lists foreign entries of every client's user file, grouped by
-//!   name; identical definitions collapse into one candidate.
-//! - [`stage_import`] turns candidates into store servers; the apply that
-//!   follows adopts the native entries silently when they render
-//!   identically.
+//! - [`scan_with`] lists foreign entries (no ledger record) of every
+//!   client's user files and of the project files of every project this
+//!   machine knows (trusted or not: reading changes nothing), grouped by
+//!   name. Sources with the same store definition form one variant; a
+//!   candidate with several variants is a conflict. [`scan`] reads user
+//!   files only (what `adopt --all-identical` and the migration adopt).
+//! - [`stage_import`] carries out an [`ImportRequest`]: one store server
+//!   per chosen variant (`name`, or `name-<client>` for a second variant),
+//!   with each sensitive literal extracted to the destination chosen for
+//!   it. The apply that follows adopts the native entries silently when
+//!   they render identically.
 //! - [`stage_adopt_identical`] enables existing store servers for clients
 //!   that already hold an identical entry.
 //! - [`stage_resolutions`] carries out `import` decisions of a plan ("import
@@ -12,36 +18,52 @@
 //!
 //! A read-only client (`vscode-legacy`) is a source only: what is imported
 //! from it is never enabled for it, and VS Code's `${input:...}` values are
-//! `needs_manual_secret`.
+//! `needs_manual_secret`. A variant found only in project files becomes a
+//! store definition without enablement (a project layer comes from the
+//! project's manifests, never from a store server, SPEC 6.1); the project
+//! entry stays foreign until the project's manifest names it.
 //!
 //! Secret extraction (SPEC 11.7): every literal in `env`, `headers`,
-//! `args` and the URL goes through the classifier. Sensitive literals make
-//! the entry `needs_secret_extraction` (the extraction destinations are the
-//! import wizard's), so no value that may be a secret reaches the store;
-//! non-sensitive literals (`LOG_LEVEL = "info"`) are imported as written.
+//! `args` and the URL goes through the classifier. An import replaces each
+//! sensitive literal by `${secret:<alias>}` and needs a destination for it
+//! ([`SecretChoice`]: the OS keyring, which receives the value read from the
+//! client file, a 1Password reference or an environment variable);
+//! without one the variant is skipped (`needs_secret_extraction`), so no
+//! value that may be a secret reaches the store. Non-sensitive literals
+//! (`LOG_LEVEL = "info"`) are imported as written. Other store edits of
+//! native entries ([`server_from_native`]: "import their change", pasted
+//! snippets) still refuse sensitive literals.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::adapters::caps::FieldSet;
 use crate::adapters::mapper::WriteCx;
-use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
-use crate::apply::ApplyEnv;
-use crate::apply::ledger::Ledger;
+use crate::adapters::{ADAPTERS, AdapterSpec, Target, adapter};
+use crate::apply::ledger::{Ledger, LedgerSlot, container_pointer};
 use crate::apply::plan::{Action, EntryPlan, EntryState, Plan, read_target};
 use crate::apply::render::{DesiredState, native_name, native_to_template, render};
+use crate::apply::{
+    ApplyEnv, ApplyReport, ApplyRequest, Decision, OnConflict, PlanOptions, ScopeFilter, apply_in,
+};
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, NativeValue};
-use crate::layering::projects::overlay_doc;
+use crate::layering::projects::{overlay_doc, unknown_project};
+use crate::layering::{ProjectStatus, TrustState, TrustStore, known_projects};
 use crate::model::TomlDocument;
-use crate::model::applied::Scope;
+use crate::model::applied::{ApplyTrigger, Scope};
 use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
 use crate::model::ids::{self, IdKind};
 use crate::model::server::{Enable, Meta, Server, ServerFields, ToolFilter};
-use crate::secrets::catalog::overlay_path;
+use crate::model::settings::ApplyMode;
+use crate::secrets::catalog::{Catalog, overlay_path};
 use crate::secrets::classify::{classify_args_import, classify_import};
 use crate::secrets::delivery::Sharing;
-use crate::store::{Transaction, server_path};
+use crate::secrets::extract::{
+    self, Aliases, Extracted, Extraction, ExtractionChoice, ExtractionTarget, Extractor,
+};
+use crate::secrets::grammar::SecretRef;
+use crate::store::{Machine, Store, Transaction, server_path};
 
 /// A native entry as store fields.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,8 +75,30 @@ pub struct ImportedDef {
 }
 
 /// Reads a native entry of `spec`'s client as store fields: client
-/// variable syntax becomes `${env:NAME}`, other `${` becomes `$${`.
+/// variable syntax becomes `${env:NAME}`, other `${` becomes `$${`. A
+/// literal that may be a secret is `needs_secret_extraction` (import
+/// extracts it instead, [`read_native`]).
 pub fn server_from_native(
+    spec: &AdapterSpec,
+    key: &str,
+    value: &NativeValue,
+) -> Result<ImportedDef, CoreError> {
+    let def = read_native(spec, key, value)?;
+    match sensitive_field(&def.fields) {
+        // Named by position or key, never by value: the message may reach
+        // a UI.
+        Some(what) => Err(CoreError::new(
+            ErrorCode::NeedsSecretExtraction,
+            format!("{what} may be a secret; it needs secret extraction before import"),
+        )),
+        None => Ok(def),
+    }
+}
+
+/// [`server_from_native`] with sensitive literals kept as they are, for an
+/// import that extracts them. The result may hold secret values: it stays
+/// in memory and is never formatted into a message.
+pub fn read_native(
     spec: &AdapterSpec,
     key: &str,
     value: &NativeValue,
@@ -78,7 +122,7 @@ pub fn server_from_native(
             CoreError::new(
                 ErrorCode::UnsupportedField,
                 format!(
-                    "{text:?} uses a {} variable or command form the store cannot express",
+                    "a value uses a {} variable or command form the store cannot express",
                     spec.display_name
                 ),
             )
@@ -107,22 +151,13 @@ pub fn server_from_native(
             .iter()
             .map(|arg| convert(arg, FieldSet::ARGS))
             .collect::<Result<Vec<_>, _>>()?;
-        let flagged = classify_args_import(&args);
-        // Named by position, never by value: the message may reach a UI.
-        if let Some(index) = flagged.iter().position(Option::is_some) {
-            return Err(needs_extraction(format!("argument {}", index + 1)));
-        }
         fields.args = (!args.is_empty()).then_some(args);
     }
     if let Some(cwd) = &native.cwd {
         fields.cwd = Some(convert(cwd, FieldSet::CWD)?);
     }
     if let Some(url) = &native.url {
-        let url = convert(url, FieldSet::URL)?;
-        if classify_import(None, &url).is_some() {
-            return Err(needs_extraction("the URL".to_owned()));
-        }
-        fields.url = Some(url);
+        fields.url = Some(convert(url, FieldSet::URL)?);
     }
     for (field, source, target) in [
         (FieldSet::ENV, &native.env, &mut fields.env),
@@ -130,11 +165,7 @@ pub fn server_from_native(
     ] {
         let mut map = BTreeMap::new();
         for (name, value) in source.iter().flatten() {
-            let value = convert(value, field)?;
-            if classify_import(Some(name), &value).is_some() {
-                return Err(needs_extraction(format!("the literal value of {name:?}")));
-            }
-            map.insert(name.clone(), value);
+            map.insert(name.clone(), convert(value, field)?);
         }
         *target = (!map.is_empty()).then_some(map);
     }
@@ -154,11 +185,28 @@ pub fn server_from_native(
     })
 }
 
-fn needs_extraction(what: String) -> CoreError {
-    CoreError::new(
-        ErrorCode::NeedsSecretExtraction,
-        format!("{what} may be a secret; it needs secret extraction before import"),
-    )
+/// The first field holding a literal the classifier flags, by position or
+/// key.
+fn sensitive_field(fields: &ServerFields) -> Option<String> {
+    if let Some(index) = fields
+        .args
+        .as_deref()
+        .and_then(|args| classify_args_import(args).iter().position(Option::is_some))
+    {
+        return Some(format!("argument {}", index + 1));
+    }
+    if fields
+        .url
+        .as_deref()
+        .is_some_and(|url| classify_import(None, url).is_some())
+    {
+        return Some("the URL".to_owned());
+    }
+    [&fields.env, &fields.headers]
+        .into_iter()
+        .flat_map(|map| map.iter().flatten())
+        .find(|(name, value)| classify_import(Some(name), value).is_some())
+        .map(|(name, _)| format!("the literal value of {name:?}"))
 }
 
 /// The field holding a VS Code input variable (`${input:id}`), a value the
@@ -229,15 +277,61 @@ fn to_toml(value: &NativeValue) -> Result<toml::Value, CoreError> {
     })
 }
 
+/// The known project whose files held a source.
+#[derive(Debug, Clone)]
+pub struct SourceProject {
+    /// The overlay key.
+    pub id: String,
+    pub root: PathBuf,
+    /// Its manifests are trusted on this machine as they are now. An
+    /// untrusted project is read like any other (reading changes nothing);
+    /// its manifest takes the entry only after a trust review.
+    pub trusted: bool,
+}
+
 /// Where a foreign entry was found.
 #[derive(Debug, Clone)]
 pub struct Source {
     pub client: &'static str,
+    pub scope: Scope,
+    /// The project of a project file.
+    pub project: Option<SourceProject>,
+    /// Which of the client's files in its scope, when it has several: the
+    /// profile name (omp profiles), else the file's position (`2`, `3`:
+    /// a packaged mirror, an editor variant or profile). `None` for the
+    /// first file.
+    pub slot: Option<String>,
     pub file: PathBuf,
     /// The native entry.
     pub value: NativeValue,
-    /// The entry as store fields, or why it cannot be imported.
+    /// The entry as store fields, sensitive literals included (an import
+    /// extracts them), or why it cannot be imported.
     pub def: Result<ImportedDef, CoreError>,
+}
+
+impl Source {
+    /// The source within its candidate: `<client>` for a user file,
+    /// `<client>@<project-id>` for a project file and
+    /// `<client>@<project-id>/local` for a private project file, with
+    /// `#<slot>` after the client for a client's second file in that scope
+    /// (`omp#work`, `claude-desktop#2`).
+    pub fn key(&self) -> String {
+        let client = match &self.slot {
+            Some(slot) => format!("{}#{slot}", self.client),
+            None => self.client.to_owned(),
+        };
+        match (&self.project, self.scope) {
+            (None, _) => client,
+            (Some(project), Scope::ProjectLocal) => format!("{client}@{}/local", project.id),
+            (Some(project), _) => format!("{client}@{}", project.id),
+        }
+    }
+
+    /// Importing this source enables the store server for its client: a
+    /// user file of a client Loadout writes.
+    pub fn enables(&self) -> bool {
+        self.scope == Scope::User && adapter(self.client).is_none_or(|spec| !is_read_only(spec))
+    }
 }
 
 /// Foreign entries sharing one name.
@@ -245,10 +339,165 @@ pub struct Source {
 pub struct Candidate {
     pub name: String,
     pub sources: Vec<Source>,
-    /// Every source reads as the same store definition.
+    /// The sources grouped by definition (indexes into `sources`), in
+    /// first-seen order: sources that read as the same store fields and
+    /// tool filter share a variant; one that cannot be imported is a
+    /// variant of its own.
+    pub variants: Vec<Vec<usize>>,
+    /// One variant, and it can be imported.
     pub identical: bool,
     /// The store already has a server with this id.
     pub in_store: bool,
+}
+
+impl Candidate {
+    /// The variant holding the source with key `key` ([`Source::key`]).
+    pub fn variant_of(&self, key: &str) -> Option<usize> {
+        self.variants
+            .iter()
+            .position(|v| v.iter().any(|&i| self.sources[i].key() == key))
+    }
+
+    /// The definition of variant `v`, or why it cannot be imported.
+    pub fn variant_def(&self, v: usize) -> Result<&ImportedDef, &CoreError> {
+        self.sources[self.variants[v][0]].def.as_ref()
+    }
+
+    /// The variants that can be imported.
+    pub fn importable(&self) -> Vec<usize> {
+        (0..self.variants.len())
+            .filter(|&v| self.variant_def(v).is_ok())
+            .collect()
+    }
+
+    /// Differing definitions: more than one variant can be imported.
+    pub fn conflict(&self) -> bool {
+        self.importable().len() > 1
+    }
+
+    /// Importing variant `v` enables the server for some client (it was
+    /// found in a user file); otherwise it becomes a definition only.
+    pub fn enables(&self, v: usize) -> bool {
+        self.variants[v].iter().any(|&i| self.sources[i].enables())
+    }
+
+    /// The store id each variant gets by default: the name in lower case
+    /// for the first variant that can be imported, `name-<client>` for the
+    /// others (the client of the variant's first user file, else of its
+    /// first source), numbered when two would be the same.
+    pub fn suggested_ids(&self) -> Vec<String> {
+        let base = self.name.to_ascii_lowercase();
+        let mut taken = BTreeSet::new();
+        let mut named = false;
+        let mut ids = Vec::with_capacity(self.variants.len());
+        for (v, indexes) in self.variants.iter().enumerate() {
+            let id = if !named && self.variant_def(v).is_ok() {
+                named = true;
+                base.clone()
+            } else {
+                let source = indexes
+                    .iter()
+                    .map(|&i| &self.sources[i])
+                    .find(|source| source.scope == Scope::User)
+                    .unwrap_or(&self.sources[indexes[0]]);
+                format!("{base}-{}", source.client)
+            };
+            let mut unique = id.clone();
+            let mut n = 2;
+            while !taken.insert(unique.clone()) {
+                unique = format!("{id}-{n}");
+                n += 1;
+            }
+            ids.push(unique);
+        }
+        ids
+    }
+
+    /// Importing the variant of the source with key `source`
+    /// ([`Source::key`]), else of the source found in client `source` (its
+    /// user file first), under the name, or with `rename` as
+    /// `name-<client>`.
+    pub fn choice_for(&self, source: &str, rename: bool) -> Result<VariantChoice, CoreError> {
+        let found = self
+            .sources
+            .iter()
+            .find(|candidate| candidate.key() == source)
+            .or_else(|| {
+                self.sources
+                    .iter()
+                    .filter(|candidate| candidate.client == source)
+                    .min_by_key(|candidate| candidate.scope != Scope::User)
+            })
+            .ok_or_else(|| {
+                CoreError::new(
+                    ErrorCode::NotFound,
+                    format!("{:?} was not found in {source}", self.name),
+                )
+            })?;
+        let base = self.name.to_ascii_lowercase();
+        Ok(VariantChoice {
+            name: self.name.clone(),
+            source: found.key(),
+            id: if rename {
+                format!("{base}-{}", found.client)
+            } else {
+                base
+            },
+        })
+    }
+
+    fn group(&mut self) {
+        let mut variants: Vec<Vec<usize>> = Vec::new();
+        for (index, source) in self.sources.iter().enumerate() {
+            let found = source.def.as_ref().ok().and_then(|def| {
+                variants.iter().position(|v| {
+                    matches!(&self.sources[v[0]].def,
+                        Ok(first) if first.fields == def.fields && first.tools == def.tools)
+                })
+            });
+            match found {
+                Some(v) => variants[v].push(index),
+                None => variants.push(vec![index]),
+            }
+        }
+        self.identical = variants.len() == 1 && self.sources[0].def.is_ok();
+        self.variants = variants;
+    }
+
+    fn conflict_error(&self) -> CoreError {
+        let keys: Vec<String> = self.sources.iter().map(Source::key).collect();
+        CoreError::new(
+            ErrorCode::Collision,
+            format!(
+                "{:?} differs between {}; pick one (`--pick NAME=CLIENT`) or import several \
+                 (`--as NAME=CLIENT` imports one as NAME-CLIENT)",
+                self.name,
+                keys.join(", ")
+            ),
+        )
+    }
+}
+
+/// Which files a scan reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ScanScope {
+    /// Every client's user files and every known project's files.
+    #[default]
+    All,
+    /// User files only.
+    User,
+    /// The files of every known project.
+    Projects,
+    /// The files of one known project, by id.
+    Project(String),
+}
+
+/// What a scan reads.
+#[derive(Debug, Clone, Default)]
+pub struct ScanFilter {
+    /// Only these clients (`None`: every client).
+    pub clients: Option<Vec<String>>,
+    pub scope: ScanScope,
 }
 
 /// Foreign entries of the selected clients' user files (no ledger record),
@@ -259,59 +508,157 @@ pub fn scan(
     ledger: &Ledger,
     clients: Option<&[String]>,
 ) -> Result<(Vec<Candidate>, Vec<CoreError>), CoreError> {
-    let mut candidates: Vec<Candidate> = Vec::new();
-    let mut warnings = Vec::new();
-    for spec in ADAPTERS {
-        if clients.is_some_and(|ids| !ids.iter().any(|id| id == spec.id)) {
-            continue;
+    let filter = ScanFilter {
+        clients: clients.map(<[String]>::to_vec),
+        scope: ScanScope::User,
+    };
+    scan_with(ax, desired, ledger, &filter)
+}
+
+/// Foreign entries (no ledger record) of the files `filter` selects: user
+/// files, and the project and private project files of the projects this
+/// machine knows (`desired`'s overlay), trusted or not. Grouped by name in
+/// first-seen order, user files first. Read-only. A project that is
+/// missing is left out, one that cannot be loaded is a warning; an unknown
+/// project id is `not_found`.
+pub fn scan_with(
+    ax: &ApplyEnv<'_>,
+    desired: &DesiredState,
+    ledger: &Ledger,
+    filter: &ScanFilter,
+) -> Result<(Vec<Candidate>, Vec<CoreError>), CoreError> {
+    let selected: Vec<&'static AdapterSpec> = ADAPTERS
+        .iter()
+        .copied()
+        .filter(|spec| {
+            filter
+                .clients
+                .as_ref()
+                .is_none_or(|ids| ids.iter().any(|id| id == spec.id))
+        })
+        .collect();
+    let mut scanner = Scanner {
+        ax,
+        desired,
+        ledger,
+        candidates: Vec::new(),
+        warnings: Vec::new(),
+    };
+    if matches!(filter.scope, ScanScope::All | ScanScope::User) {
+        for &spec in &selected {
+            let prefs = desired.prefs(spec.id);
+            if let Ok(targets) = spec.mcp_targets(ax.env, ax.fs, Scope::User, None, &prefs) {
+                scanner.read(spec, &targets, None)?;
+            }
         }
-        let targets =
-            match spec.mcp_targets(ax.env, ax.fs, Scope::User, None, &desired.prefs(spec.id)) {
-                Ok(targets) => targets,
-                Err(_) => continue,
+    }
+    if filter.scope != ScanScope::User {
+        let trust = TrustStore::load(ax.fs, &ax.home.state_dir()).unwrap_or_else(|err| {
+            scanner.warnings.push(err);
+            TrustStore::default()
+        });
+        let known = known_projects(ax.fs, ax.env, desired.overlay.as_ref(), &trust);
+        if let ScanScope::Project(id) = &filter.scope
+            && !known.iter().any(|project| &project.id == id)
+        {
+            return Err(unknown_project(id));
+        }
+        for project in &known {
+            if matches!(&filter.scope, ScanScope::Project(id) if *id != project.id) {
+                continue;
+            }
+            let trusted = match &project.status {
+                ProjectStatus::Missing => continue,
+                ProjectStatus::Failed(err) => {
+                    scanner.warnings.push(err.clone());
+                    continue;
+                }
+                ProjectStatus::Loaded { trust, .. } => *trust == TrustState::Trusted,
             };
-        for target in targets {
-            let Some(bytes) = read_target(ax.fs, &target.file)? else {
+            let source_project = SourceProject {
+                id: project.id.clone(),
+                root: project.root.clone(),
+                trusted,
+            };
+            for &spec in &selected {
+                let prefs = desired.prefs(spec.id);
+                for scope in [Scope::Project, Scope::ProjectLocal] {
+                    if let Ok(targets) =
+                        spec.mcp_targets(ax.env, ax.fs, scope, Some(&project.root), &prefs)
+                    {
+                        scanner.read(spec, &targets, Some(&source_project))?;
+                    }
+                }
+            }
+        }
+    }
+    let Scanner {
+        mut candidates,
+        warnings,
+        ..
+    } = scanner;
+    for candidate in &mut candidates {
+        candidate.group();
+    }
+    Ok((candidates, warnings))
+}
+
+struct Scanner<'a, 'e> {
+    ax: &'a ApplyEnv<'e>,
+    desired: &'a DesiredState,
+    ledger: &'a Ledger,
+    candidates: Vec<Candidate>,
+    warnings: Vec<CoreError>,
+}
+
+impl Scanner<'_, '_> {
+    fn read(
+        &mut self,
+        spec: &'static AdapterSpec,
+        targets: &[Target],
+        project: Option<&SourceProject>,
+    ) -> Result<(), CoreError> {
+        for (index, target) in targets.iter().enumerate() {
+            let Some(bytes) = read_target(self.ax.fs, &target.file)? else {
                 continue;
             };
             let doc = match Document::parse(&bytes, target.format) {
                 Ok(doc) => doc,
                 Err(err) => {
-                    warnings.push(err.with_path(&target.file));
+                    self.warnings.push(err.with_path(&target.file));
                     continue;
                 }
             };
             let keys = target.container_keys()?;
             let container: Vec<&str> = keys.iter().map(String::as_str).collect();
-            let pointer = crate::apply::ledger::container_pointer(&keys);
+            let pointer = container_pointer(&keys);
             let file = target.file.to_string_lossy().into_owned();
             let names = match doc.list(&container) {
                 Ok(names) => names,
                 Err(err) => {
-                    warnings.push(err.with_path(&target.file));
+                    self.warnings.push(err.with_path(&target.file));
                     continue;
                 }
             };
             for name in names {
-                let slot = crate::apply::ledger::LedgerSlot {
-                    scope: Scope::User,
-                    project_id: None,
+                let slot = LedgerSlot {
+                    scope: target.scope,
+                    project_id: project.map(|project| project.id.as_str()),
                     file: &file,
                     container: &pointer,
                 };
-                if ledger.get(&slot, &name).is_some() {
+                if self.ledger.get(&slot, &name).is_some() {
                     continue;
                 }
                 let Some(value) = doc.get(&container, &name)? else {
                     continue;
                 };
-                let def = server_from_native(spec, &name, &value);
                 if let Some(reason) = spec
                     .mcp
                     .as_ref()
                     .and_then(|mcp| mcp.mapper.skipped_by_client(&value))
                 {
-                    warnings.push(
+                    self.warnings.push(
                         CoreError::new(
                             ErrorCode::ClientSkipsEntry,
                             format!(
@@ -323,121 +670,170 @@ pub fn scan(
                         .with_path(&target.file),
                     );
                 }
+                let def = read_native(spec, &name, &value);
                 let source = Source {
                     client: spec.id,
+                    scope: target.scope,
+                    project: project.cloned(),
+                    slot: target
+                        .profile
+                        .clone()
+                        .or_else(|| (index > 0).then(|| (index + 1).to_string())),
                     file: target.file.clone(),
                     value,
                     def,
                 };
-                match candidates.iter_mut().find(|c| c.name == name) {
+                let key = source.key();
+                match self.candidates.iter_mut().find(|c| c.name == name) {
                     Some(candidate) => {
-                        if !candidate.sources.iter().any(|s| s.client == spec.id) {
+                        if !candidate.sources.iter().any(|s| s.key() == key) {
                             candidate.sources.push(source);
                         }
                     }
-                    None => candidates.push(Candidate {
-                        in_store: desired.servers.contains_key(&name.to_ascii_lowercase()),
+                    None => self.candidates.push(Candidate {
+                        in_store: self
+                            .desired
+                            .servers
+                            .contains_key(&name.to_ascii_lowercase()),
                         name,
                         sources: vec![source],
-                        identical: true,
+                        variants: Vec::new(),
+                        identical: false,
                     }),
                 }
             }
         }
+        Ok(())
     }
-    for candidate in &mut candidates {
-        let first = candidate.sources[0].def.as_ref().ok();
-        candidate.identical = candidate
-            .sources
-            .iter()
-            .all(|source| match (&source.def, first) {
-                (Ok(def), Some(first)) => def.fields == first.fields && def.tools == first.tools,
-                _ => false,
-            });
-    }
-    Ok((candidates, warnings))
 }
 
-/// Result of [`stage_import`].
-#[derive(Debug, Clone, Default)]
-pub struct ImportResult {
-    /// New server ids.
-    pub imported: Vec<String>,
-    /// Candidates left out, with the reason.
-    pub skipped: Vec<(String, CoreError)>,
+/// A scan as this machine sees the store: its known projects and its
+/// ledger ([`scan_with`]), with the desired state it was made against.
+pub struct StoreScan {
+    pub candidates: Vec<Candidate>,
+    pub warnings: Vec<CoreError>,
+    pub desired: DesiredState,
 }
 
-/// Stages one store server per candidate (all, or those in `names`).
-/// Each server is enabled for the clients it was found in, unless `only`
-/// (import the definition without taking ownership).
-pub fn stage_import(
-    tx: &mut Transaction<'_>,
-    candidates: &[Candidate],
-    names: Option<&[String]>,
-    only: bool,
-) -> Result<ImportResult, CoreError> {
-    let mut result = ImportResult::default();
-    for candidate in candidates {
-        if names.is_some_and(|names| !names.contains(&candidate.name)) {
-            continue;
-        }
-        match candidate_server(candidate, only) {
-            Ok(server) => {
-                let id = server.id.clone();
-                let relative = server_path(&id)?;
-                if tx.exists(&relative)? {
-                    result.skipped.push((
-                        candidate.name.clone(),
-                        CoreError::new(
-                            ErrorCode::AlreadyExists,
-                            format!("server {id:?} already exists"),
-                        ),
-                    ));
-                    continue;
-                }
-                tx.add_server(server)?;
-                tx.add_entity(format!("server/{id}"));
-                result.imported.push(id);
-            }
-            Err(err) => result.skipped.push((candidate.name.clone(), err)),
-        }
-    }
-    Ok(result)
+/// [`scan_with`] against `store`, or an empty desired state when there is
+/// no store yet. Read-only: creates nothing.
+pub fn scan_store(
+    store: Option<&Store<'_>>,
+    ax: &ApplyEnv<'_>,
+    filter: &ScanFilter,
+) -> Result<StoreScan, CoreError> {
+    let state = ax.home.state_dir();
+    let machine = Machine::load(ax.fs, &state)?;
+    let desired = match store {
+        Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
+        None => DesiredState::empty(),
+    };
+    let ledger = Ledger::load(ax.fs, &state)?;
+    let (candidates, warnings) = scan_with(ax, &desired, &ledger, filter)?;
+    Ok(StoreScan {
+        candidates,
+        warnings,
+        desired,
+    })
 }
 
-fn candidate_server(candidate: &Candidate, only: bool) -> Result<Server, CoreError> {
-    let id = candidate.name.to_ascii_lowercase();
-    ids::check(IdKind::Server, &id)?;
-    let mut defs = Vec::new();
-    for source in &candidate.sources {
-        defs.push((source.client, source.def.clone()?));
-    }
-    if !candidate.identical {
-        return Err(CoreError::new(
-            ErrorCode::Collision,
-            format!(
-                "{:?} differs between {}; import it from one client with --client",
-                candidate.name,
-                candidate
-                    .sources
-                    .iter()
-                    .map(|s| s.client)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        ));
-    }
-    let (first_client, first) = &defs[0];
-    let mut server = Server::new(id.clone());
-    set_fields(&mut server, &first.fields, first.tools.clone());
-    // Read-only clients (`vscode-legacy`) are sources only: the server is
-    // not enabled for them, and they get no `[client.<id>]` table.
-    let writable: Vec<&(&'static str, ImportedDef)> = defs
+/// What importing one variant under its suggested id stores.
+#[derive(Debug, Clone)]
+pub struct VariantPreview {
+    /// [`Candidate::suggested_ids`].
+    pub id: String,
+    /// The server as it would be stored (references in place of sensitive
+    /// literals), or why the variant cannot be imported.
+    pub server: Result<Server, CoreError>,
+    /// The sensitive literals that need a destination, with suggested
+    /// aliases. No value.
+    pub extractions: Vec<Extraction>,
+}
+
+/// [`VariantPreview`]s of every variant of `candidates` (same order),
+/// aliases suggested against `catalog` and each other.
+pub fn previews(candidates: &[Candidate], catalog: &Catalog) -> Vec<Vec<VariantPreview>> {
+    let mut aliases = Aliases::new(catalog.iter().map(|alias| alias.alias.clone()));
+    candidates
         .iter()
-        .filter(|(client, _)| adapter(client).is_none_or(|spec| !is_read_only(spec)))
+        .map(|candidate| {
+            candidate
+                .suggested_ids()
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(v, id)| match variant_server(candidate, v, &id, false, &mut aliases) {
+                        Ok((server, extracted)) => VariantPreview {
+                            id,
+                            server: Ok(server),
+                            extractions: extracted
+                                .into_iter()
+                                .map(|extracted| extracted.extraction)
+                                .collect(),
+                        },
+                        Err(err) => VariantPreview {
+                            id,
+                            server: Err(err),
+                            extractions: Vec::new(),
+                        },
+                    },
+                )
+                .collect()
+        })
+        .collect()
+}
+
+/// The store server variant `v` of `candidate` becomes under `id`, each
+/// sensitive literal replaced by a `${secret:<alias>}` reference (aliases
+/// from `aliases`), and the values replaced. It is enabled for the clients
+/// whose user file holds the variant, unless `only`; a variant found only
+/// in project files or read-only clients becomes a definition without
+/// enablement.
+pub fn variant_server(
+    candidate: &Candidate,
+    v: usize,
+    id: &str,
+    only: bool,
+    aliases: &mut Aliases,
+) -> Result<(Server, Vec<Extracted>), CoreError> {
+    ids::check(IdKind::Server, id)?;
+    let indexes = candidate.variants.get(v).ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::NotFound,
+            format!("{:?} has no variant {v}", candidate.name),
+        )
+    })?;
+    let sources: Vec<&Source> = indexes.iter().map(|&i| &candidate.sources[i]).collect();
+    let first = sources[0].def.as_ref().map_err(Clone::clone)?;
+    let mut fields = first.fields.clone();
+    let mut extractor = Extractor::new(id, aliases);
+    if let Some(args) = fields.args.take() {
+        fields.args = Some(extractor.args(args));
+    }
+    if let Some(url) = fields.url.take() {
+        fields.url = Some(extractor.url(url)?);
+    }
+    if let Some(env) = fields.env.take() {
+        fields.env = Some(extractor.map("env", env));
+    }
+    if let Some(headers) = fields.headers.take() {
+        fields.headers = Some(extractor.map("headers", headers));
+    }
+    let extracted = extractor.finish();
+    let mut server = Server::new(id.to_owned());
+    set_fields(&mut server, &fields, first.tools.clone());
+    // Read-only clients (`vscode-legacy`) and project files are sources
+    // only: no enablement, and no `[client.<id>]` table.
+    let enabling: Vec<&Source> = sources
+        .iter()
+        .copied()
+        .filter(|source| source.enables())
         .collect();
     let mut clients = BTreeMap::new();
-    for (client, def) in &writable {
+    for source in &enabling {
+        let Ok(def) = &source.def else {
+            continue;
+        };
         let mut table = def.passthrough.clone();
         if candidate.name != id {
             table.insert(
@@ -446,29 +842,379 @@ fn candidate_server(candidate: &Candidate, only: bool) -> Result<Server, CoreErr
             );
         }
         if !table.is_empty() {
-            clients.insert((*client).to_owned(), table);
+            clients.insert(source.client.to_owned(), table);
         }
     }
     server.body.client = (!clients.is_empty()).then_some(clients);
     server.body.meta = Some(Meta {
-        origin: Some(format!("imported:{first_client}")),
+        origin: Some(format!("imported:{}", sources[0].client)),
         ..Meta::default()
     });
-    if !only && !writable.is_empty() {
+    if !only && !enabling.is_empty() {
         server.enable = Some(Enable {
-            clients: Some(ClientSelection::List(
-                writable
-                    .iter()
-                    .map(|(client, _)| (*client).to_owned())
-                    .collect(),
-            )),
+            clients: Some(ClientSelection::List({
+                let mut ids: Vec<String> = Vec::new();
+                for source in &enabling {
+                    if !ids.iter().any(|id| id == source.client) {
+                        ids.push(source.client.to_owned());
+                    }
+                }
+                ids
+            })),
             ..Enable::default()
         });
     }
-    if let Some(err) = server.validate(Some(&id)).first_error(None) {
+    if let Some(err) = server.validate(Some(id)).first_error(None) {
         return Err(err);
     }
-    Ok(server)
+    Ok((server, extracted))
+}
+
+/// One variant to import: the candidate, any source of the variant
+/// ([`Source::key`]) and the store id it becomes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantChoice {
+    pub name: String,
+    pub source: String,
+    pub id: String,
+}
+
+/// Where a sensitive literal goes (SPEC 11.7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretDestination {
+    /// The OS keyring (`keyring://loadout/<alias>`), which receives the
+    /// value read from the client file.
+    Keyring,
+    /// A 1Password item (`op://...`) or Environment variable
+    /// (`op-env://...`), or an environment variable (`env:NAME`). Nothing
+    /// is uploaded anywhere.
+    Reference(SecretRef),
+}
+
+impl SecretDestination {
+    /// `keyring`, `op://vault/item/field` (also written `op:op://...`),
+    /// `op-env://<environment-id>/<NAME>` or `env:NAME`.
+    pub fn parse(text: &str) -> Result<Self, CoreError> {
+        let text = text.trim();
+        if text == "keyring" {
+            return Ok(Self::Keyring);
+        }
+        if let Some(name) = text.strip_prefix("env:") {
+            return extract::env_reference(name).map(Self::Reference);
+        }
+        let reference = match text.strip_prefix("op:") {
+            Some(rest) if rest.starts_with("op://") || rest.starts_with("op-env://") => rest,
+            _ => text,
+        };
+        if reference.starts_with("op://") {
+            return extract::onepassword_reference(reference).map(Self::Reference);
+        }
+        if reference.starts_with("op-env://")
+            && let reference @ SecretRef::OnePasswordEnvironment { .. } =
+                SecretRef::parse(reference)?
+        {
+            return Ok(Self::Reference(reference));
+        }
+        Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            "a destination is keyring, op://vault/item/field, op-env://<environment>/<NAME> \
+             or env:NAME",
+        ))
+    }
+
+    /// `keyring`, `onepassword` or `env`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Keyring => "keyring",
+            Self::Reference(SecretRef::Env { .. }) => "env",
+            Self::Reference(_) => "onepassword",
+        }
+    }
+}
+
+/// Where the sensitive literals of candidate `name` go: one `field`
+/// (`env.NAME`, `headers.NAME`, `args[N]`, `url`), or with `field` `None`
+/// every one no other choice names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretChoice {
+    pub name: String,
+    pub field: Option<String>,
+    pub destination: SecretDestination,
+}
+
+/// What to import (one commit).
+#[derive(Debug, Clone, Default)]
+pub struct ImportRequest {
+    pub picks: Vec<VariantChoice>,
+    pub secrets: Vec<SecretChoice>,
+    /// Copy the definitions without enabling them (no ownership taken).
+    pub only: bool,
+    /// Candidates left out before staging, with the reason; reported as
+    /// skipped.
+    pub unchosen: Vec<(String, CoreError)>,
+}
+
+impl ImportRequest {
+    /// Every candidate (or those in `names`) with one variant that can be
+    /// imported, under its name. A conflict, or a candidate that cannot be
+    /// imported, is left in [`ImportRequest::unchosen`].
+    pub fn defaults(candidates: &[Candidate], names: Option<&[String]>, only: bool) -> Self {
+        let mut request = Self {
+            only,
+            ..Self::default()
+        };
+        for candidate in candidates
+            .iter()
+            .filter(|candidate| names.is_none_or(|names| names.contains(&candidate.name)))
+        {
+            match candidate.importable().as_slice() {
+                [v] => request.picks.push(VariantChoice {
+                    name: candidate.name.clone(),
+                    source: candidate.sources[candidate.variants[*v][0]].key(),
+                    id: candidate.name.to_ascii_lowercase(),
+                }),
+                [] => {
+                    let err = candidate.sources[0]
+                        .def
+                        .as_ref()
+                        .err()
+                        .cloned()
+                        .expect("a candidate without importable variants has a failed source");
+                    request.unchosen.push((candidate.name.clone(), err));
+                }
+                _ => request
+                    .unchosen
+                    .push((candidate.name.clone(), candidate.conflict_error())),
+            }
+        }
+        request
+    }
+
+    /// Replaces what is chosen for candidate `name` by `picks` (empty:
+    /// skip it).
+    pub fn choose(&mut self, name: &str, picks: Vec<VariantChoice>) {
+        self.picks.retain(|pick| pick.name != name);
+        self.unchosen.retain(|(unchosen, _)| unchosen != name);
+        self.picks.extend(picks);
+    }
+
+    fn destination(&self, name: &str, field: &str) -> Option<&SecretDestination> {
+        let of_name = || self.secrets.iter().filter(|choice| choice.name == name);
+        of_name()
+            .find(|choice| choice.field.as_deref() == Some(field))
+            .or_else(|| of_name().find(|choice| choice.field.is_none()))
+            .map(|choice| &choice.destination)
+    }
+}
+
+/// A secret alias an import created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedAlias {
+    pub alias: String,
+    pub server: String,
+    /// `env.NAME`, `headers.NAME`, `args[N]` or `url`.
+    pub field: String,
+    /// [`SecretDestination::kind`].
+    pub destination: &'static str,
+}
+
+/// Result of [`stage_import`].
+#[derive(Debug, Clone, Default)]
+pub struct ImportResult {
+    /// New server ids.
+    pub imported: Vec<String>,
+    /// New servers found only in project files or read-only clients (not
+    /// `only`): definitions without enablement, for a project manifest to
+    /// name (`from`).
+    pub definition_only: Vec<String>,
+    /// Candidates left out, with the reason.
+    pub skipped: Vec<(String, CoreError)>,
+    pub aliases: Vec<ImportedAlias>,
+    /// New server ids enabled for some client (not `only`, not definitions
+    /// only): what [`apply_import`] plans.
+    pub enabled: Vec<String>,
+    /// `(client, native name)` of the user-file entries the new servers
+    /// take over without asking: every user file of that client holds the
+    /// imported definition ([`apply_import`]).
+    pub entries: Vec<(String, String)>,
+}
+
+/// The instant apply of an import (SPEC 8.6, 8.7): in instant mode, plans
+/// the user files of the enabled servers and takes over the entries they
+/// were imported from. An entry that renders identically is adopted
+/// without a write; one that does not (a literal secret now a reference)
+/// is overwritten with the rendered entry, unless another user file of the
+/// same client holds a different definition under that name (then it is
+/// left a collision to decide). Project files are not planned. `None` in
+/// review mode, where Pending changes shows those entries for a decision.
+pub fn apply_import(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+    result: &ImportResult,
+) -> Result<Option<ApplyReport>, CoreError> {
+    if result.enabled.is_empty() {
+        // Definitions only (`only`, project files): nothing to write.
+        return Ok(None);
+    }
+    let desired = DesiredState::load(&*tx, Some(&tx.machine().id.clone()))?;
+    if desired.apply_mode() != ApplyMode::Instant {
+        return Ok(None);
+    }
+    let request = ApplyRequest {
+        options: PlanOptions {
+            decisions: result
+                .entries
+                .iter()
+                .map(|(client, name)| Decision {
+                    client: client.clone(),
+                    name: name.clone(),
+                    resolution: OnConflict::Overwrite,
+                })
+                .collect(),
+            servers: Some(result.enabled.clone()),
+            // User files only: a project entry of the same name (a
+            // manifest's `from`) is not one the user chose to import.
+            scope: ScopeFilter::System,
+            ..PlanOptions::default()
+        },
+        trigger: ApplyTrigger::Instant,
+    };
+    apply_in(tx, ax, &request).map(Some)
+}
+
+/// Stages `request` in `tx`: one store server per pick, each sensitive
+/// literal stored as an alias at the destination chosen for it (keyring
+/// values written right before the commit). A pick that cannot be staged
+/// (gone since the scan, an id that is taken, a literal without a
+/// destination) is skipped; the rest still import.
+pub fn stage_import(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+    candidates: &[Candidate],
+    request: &ImportRequest,
+) -> Result<ImportResult, CoreError> {
+    let mut result = ImportResult {
+        skipped: request.unchosen.clone(),
+        ..ImportResult::default()
+    };
+    let machine = tx.machine().id.clone();
+    let catalog = Catalog::load(&*tx, Some(&machine))?;
+    let mut aliases = Aliases::new(catalog.iter().map(|alias| alias.alias.clone()));
+    let memory = tx.store().secret_memory().clone();
+    let mut staged: BTreeSet<String> = BTreeSet::new();
+    let mut picked: BTreeSet<(&str, usize)> = BTreeSet::new();
+    let mut choices = Vec::new();
+    for pick in &request.picks {
+        let name = pick.name.as_str();
+        let id = pick.id.as_str();
+        let staged_pick = (|| {
+            let candidate = candidates
+                .iter()
+                .find(|candidate| candidate.name == name)
+                .ok_or_else(|| {
+                    CoreError::new(
+                        ErrorCode::NotFound,
+                        format!("{name:?} is not a foreign entry any more; scan again"),
+                    )
+                })?;
+            let v = candidate.variant_of(&pick.source).ok_or_else(|| {
+                CoreError::new(
+                    ErrorCode::NotFound,
+                    format!("{name:?} has no source {:?}; scan again", pick.source),
+                )
+            })?;
+            if picked.contains(&(name, v)) {
+                return Err(CoreError::new(
+                    ErrorCode::InvalidValue,
+                    format!("this definition of {name:?} is chosen twice"),
+                ));
+            }
+            if staged.contains(id) || tx.exists(&server_path(id)?)? {
+                return Err(CoreError::new(
+                    ErrorCode::AlreadyExists,
+                    format!("server {id:?} already exists"),
+                ));
+            }
+            let mut trial = aliases.clone();
+            let (server, extracted) = variant_server(candidate, v, id, request.only, &mut trial)?;
+            let missing: Vec<&str> = extracted
+                .iter()
+                .map(|extracted| extracted.extraction.field.as_str())
+                .filter(|field| request.destination(name, field).is_none())
+                .collect();
+            if !missing.is_empty() {
+                return Err(CoreError::new(
+                    ErrorCode::NeedsSecretExtraction,
+                    format!(
+                        "{} may hold a secret; choose where each goes (the OS keyring, \
+                         1Password or an environment variable)",
+                        missing.join(", ")
+                    ),
+                ));
+            }
+            aliases = trial;
+            Ok((candidate, v, server, extracted))
+        })();
+        let (candidate, v, server, extracted) = match staged_pick {
+            Ok(staged_pick) => staged_pick,
+            Err(err) => {
+                result.skipped.push((pick.name.clone(), err));
+                continue;
+            }
+        };
+        picked.insert((name, v));
+        let enabled = server.enable.is_some();
+        tx.add_server(server)?;
+        tx.add_entity(format!("server/{id}"));
+        staged.insert(id.to_owned());
+        result.imported.push(id.to_owned());
+        if enabled {
+            result.enabled.push(id.to_owned());
+            // Take an entry over without asking only when every user file
+            // of that client holds this definition; a client whose other
+            // file (a profile, a mirror) holds another one is left to Ask.
+            for &i in &candidate.variants[v] {
+                let source = &candidate.sources[i];
+                let whole_client = candidate.sources.iter().enumerate().all(|(j, other)| {
+                    other.client != source.client
+                        || !other.enables()
+                        || candidate.variants[v].contains(&j)
+                });
+                let pair = (source.client.to_owned(), candidate.name.clone());
+                if source.enables() && whole_client && !result.entries.contains(&pair) {
+                    result.entries.push(pair);
+                }
+            }
+        } else if !request.only {
+            result.definition_only.push(id.to_owned());
+        }
+        for extracted in extracted {
+            let destination = request
+                .destination(name, &extracted.extraction.field)
+                .expect("checked above");
+            // The value stays in the client file until the apply rewrites
+            // the entry; a store file holding it is refused.
+            memory.record(extracted.value.expose());
+            let Extraction { alias, field, .. } = extracted.extraction;
+            result.aliases.push(ImportedAlias {
+                alias: alias.clone(),
+                server: id.to_owned(),
+                field,
+                destination: destination.kind(),
+            });
+            choices.push(ExtractionChoice {
+                alias,
+                target: match destination {
+                    SecretDestination::Keyring => ExtractionTarget::Keyring(extracted.value),
+                    SecretDestination::Reference(reference) => {
+                        ExtractionTarget::Reference(reference.clone())
+                    }
+                },
+            });
+        }
+    }
+    extract::stage_choices(tx, ax, &choices)?;
+    Ok(result)
 }
 
 fn is_read_only(spec: &AdapterSpec) -> bool {
@@ -499,7 +1245,9 @@ pub fn stage_adopt_identical(
     let cx = ax.render_cx(tx.store().secret_memory().clone());
     let mut adopted = Vec::new();
     for candidate in candidates {
-        for source in &candidate.sources {
+        // Enabling a store server reaches user files only; a project entry
+        // comes from the project's manifests.
+        for source in candidate.sources.iter().filter(|s| s.scope == Scope::User) {
             // A read-only client (`vscode-legacy`) is never enabled.
             let Some(spec) = adapter(source.client).filter(|spec| !is_read_only(spec)) else {
                 continue;
@@ -752,5 +1500,38 @@ fn set_passthrough(server: &mut Server, client: &str, passthrough: &toml::Table)
     }
     if clients.is_empty() {
         server.body.client = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn destinations_parse() {
+        assert_eq!(
+            SecretDestination::parse(" keyring ").unwrap(),
+            SecretDestination::Keyring
+        );
+        for text in ["op://Vault/Item/field", "op:op://Vault/Item/field"] {
+            let destination = SecretDestination::parse(text).unwrap();
+            assert_eq!(destination.kind(), "onepassword", "{text}");
+            assert!(matches!(
+                destination,
+                SecretDestination::Reference(SecretRef::OnePassword { .. })
+            ));
+        }
+        assert_eq!(
+            SecretDestination::parse("env:CHATTY_KEY").unwrap().kind(),
+            "env"
+        );
+        for bad in [
+            "op://Vault/Item",
+            "keyring://loadout/X",
+            "vault",
+            "env:not a name",
+        ] {
+            assert!(SecretDestination::parse(bad).is_err(), "{bad}");
+        }
     }
 }

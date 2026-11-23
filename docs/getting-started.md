@@ -52,6 +52,8 @@ loadout import                    # import all of them and take ownership
 loadout import github linear      # or only some, by name
 loadout import --client omp       # or only one client's
 loadout import --only             # copy definitions without taking ownership
+loadout import --pick docs=omp    # an entry that differs between clients: take omp's
+loadout import --extract chatty=keyring  # a literal secret: send it to the OS keyring
 ```
 
 Skills work the same way:

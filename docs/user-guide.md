@@ -177,8 +177,10 @@ No macOS installer is published. Install the CLI with cargo as above.
      `loadout import --scan` lists the MCP servers your clients already
      have; `loadout import` brings them into the store and takes ownership
      of them (`--only` copies the definitions without enabling them).
-     `loadout skills scan` and `loadout skills import` do the same for
-     skill folders.
+     `loadout skills adopt` lists the skill folders your clients have that
+     Loadout does not manage, and `loadout skills adopt --all` brings them
+     in (see [Skills](#skills)). `loadout project discover` lists the
+     project folders your clients already know.
 5. Add or edit servers on the **MCP** page and turn them on per client.
    Each change is applied to the client files at once (instant mode), and
    the result is shown in a notification you can undo.
@@ -436,11 +438,22 @@ SPEC section 5.5.
 |---|---|---|
 | Create a manifest | `loadout project init [PATH] [--shared] [--name NAME]` | Projects, Init manifest... |
 | Register a project someone else created | `loadout project add PATH` | Projects, Add folder |
+| Add the folders your clients already know | `loadout project discover [--add ID]... [--all]` | |
 | Review and trust | `loadout project trust PATH` | Review change & trust |
 | Move private servers into the shared manifest | `loadout project share ID [--server NAME]...` | |
 | List and forget | `loadout project ls`, `loadout project rm ID` | Remove from list |
 | See what each client loads | `loadout effective PATH` | Effective config |
 | Add, edit or remove a project server; per-client enablement | edit the manifest, then `loadout project trust PATH` | MCP page or Tools > Manage, with the project picked in the sidebar's Scope switcher |
+
+**Discover projects.** `loadout project discover` lists folders Claude
+Code (`~/.claude.json`), Codex (folders you trusted in `config.toml`), omp
+and Pi (their session history) already know, that exist and are not
+projects here yet, each with an id. `--add ID` (repeatable) or `--all` adds
+them in one commit. A folder without a manifest gets a private
+`project.local.toml`, as Init writes it. Nothing is trusted: each project
+waits for `loadout project trust` like any other. VS Code and Cursor keep
+their recent folders in a database without a documented format, so they
+are not read.
 
 **MCP page at project scope.** Pick a project in the sidebar's Scope
 switcher. The page lists the servers in that project's manifests (both
@@ -642,6 +655,22 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
   `loadout skills import CLIENT NAME` brings an unmanaged folder into the
   store; `loadout skills trash CLIENT NAME` moves one to
   `backups/trash` (never deletes it).
+- `loadout skills adopt` lists the unmanaged folders of every client,
+  grouped by name: the same content in several clients is one skill, and
+  different contents of one name are a conflict. `--all` adopts every name
+  with one content: the skill goes into the store, enabled for the clients
+  where it was found, and each folder whose content equals the store copy
+  is replaced by the managed link and moved to `backups/trash`. For a
+  conflict, `--pick NAME=CLIENT` adopts that client's content (other
+  folders are kept), and `--both NAME=CLIENT` adopts it as `NAME` and every
+  other content as `NAME-<client>`. `--tool CLIENT` limits it to one
+  client's folder, and `--project PATH` adopts a trusted project's folders
+  into its manifest. A folder is never replaced when the store copy would
+  lose something (it differs, holds a git repository, an empty folder, or
+  on Linux and macOS an executable file) or when the project's repository
+  tracks it; it is reported and left as it is. When Loadout's data folder
+  is on another drive, the original is copied into `backups/trash` and
+  checked before it is removed.
 - Skills installed by the agents CLI (`~/.agents/skills`) are listed read
   only; `loadout skills vendor NAME` copies one into the store.
 

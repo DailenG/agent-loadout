@@ -13,11 +13,14 @@
 //! after [`confine`] checks the path against the view's root, so a test
 //! with a rooted view still cannot reach outside its temp root.
 
+pub mod adopt;
 pub mod agents_cli;
 pub mod classify;
 pub mod frontmatter;
 pub mod install;
 pub mod link;
+#[cfg(test)]
+mod replace_tests;
 pub mod store;
 
 use std::borrow::Cow;

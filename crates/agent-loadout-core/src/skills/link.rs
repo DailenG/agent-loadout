@@ -17,7 +17,8 @@
 //! `skill_links` (see [`SkillLedger`]), next to the MCP entries, so the
 //! ledger stays the one record of what Loadout owns on this machine.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -294,6 +295,23 @@ impl SkillLedger {
     }
 }
 
+/// `origin` of a record for a folder the user handed over (adopt, SPEC
+/// 8.1): the entry was there before Loadout owned it.
+pub const ORIGIN_ADOPTED: &str = "adopted";
+/// `origin` of a record Loadout made; records without `origin` are these.
+pub const ORIGIN_CREATED: &str = "created";
+
+impl SkillLink {
+    /// `adopted` or `created` (SPEC 8.1). Stored in the record's extra
+    /// fields, absent for entries Loadout created.
+    pub fn origin(&self) -> &str {
+        self.extra
+            .get("origin")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(ORIGIN_CREATED)
+    }
+}
+
 /// What happened to one entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -385,7 +403,7 @@ impl SyncReport {
 
 /// One desired entry.
 #[derive(Debug, Clone)]
-struct Desired {
+pub(crate) struct Desired {
     client: &'static str,
     scope: Scope,
     project_id: Option<String>,
@@ -722,19 +740,23 @@ fn try_ensure(
                 };
                 let mut link = record(desired, None, now);
                 if let Some(owned) = owned_link {
-                    // Keep how it was made (a junction stays a junction).
+                    // Keep how it was made (a junction stays a junction)
+                    // and what else the record says (`origin`).
                     link.method = owned.method;
                     link.written_at.clone_from(&owned.written_at);
+                    link.extra.clone_from(&owned.extra);
                 }
                 ledger.upsert(link);
                 status
-            } else if owned_link.is_some() {
+            } else if let Some(owned) = owned_link {
                 // Owned and unchanged, but another target or method is
                 // desired now.
                 git_visibility(fs, desired)?;
                 remove_link(fs, &desired.path)?;
                 let hash = create(fs, desired)?;
-                ledger.upsert(record(desired, hash, now));
+                let mut link = record(desired, hash, now);
+                link.extra.clone_from(&owned.extra);
+                ledger.upsert(link);
                 LinkStatus::Updated
             } else if owned.is_some() {
                 ledger.remove(&desired.path);
@@ -761,7 +783,9 @@ fn try_ensure(
                     } else {
                         remove_copy(fs, &desired.path)?;
                         let hash = create(fs, desired)?;
-                        ledger.upsert(record(desired, hash, now));
+                        let mut copy = record(desired, hash, now);
+                        copy.extra.clone_from(&link.extra);
+                        ledger.upsert(copy);
                         LinkStatus::Updated
                     }
                 }
@@ -971,6 +995,400 @@ fn retire(sx: &SkillsEnv<'_>, ledger: &mut SkillLedger, link: &SkillLink) -> Lin
     }
 }
 
+/// An unmanaged folder to hand over to Loadout (adopt, SPEC 8.6, 12.5).
+#[derive(Debug, Clone)]
+pub(crate) struct Replacement {
+    pub client: &'static str,
+    /// The unmanaged folder.
+    pub folder: PathBuf,
+    /// Where the store skill's entry goes: the folder's own path, or
+    /// `<dir>/<id>` for a skill stored under another id (`name-<client>`).
+    pub entry: PathBuf,
+    pub skill_id: String,
+}
+
+/// The file operations a replacement makes; tests swap them to fail one.
+#[derive(Clone, Copy)]
+pub(crate) struct ReplaceOps {
+    /// Renames a folder (`std::fs::rename`).
+    pub rename: fn(&Path, &Path) -> io::Result<()>,
+    /// Copies a folder to a new path, for a trash on another drive.
+    pub copy_tree: fn(&Path, &Path) -> io::Result<()>,
+    /// Makes the managed entry ([`create`]).
+    pub create: fn(&dyn Fs, &Desired) -> Result<Option<String>, CoreError>,
+}
+
+pub(crate) const REAL_OPS: ReplaceOps = ReplaceOps {
+    rename: rename_folder,
+    copy_tree,
+    create,
+};
+
+fn rename_folder(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// Replaces each folder with the managed entry of its store skill (a link,
+/// or a copy for `copy` distribution) and moves the folder to
+/// `backups/trash/` (never deleted), when the skill is distributed there
+/// and nothing of the folder would be lost: its files equal the store
+/// copy, and it holds no `.git`, no empty folder and (on Unix) no
+/// executable file; in a project, none of its files is tracked by the
+/// project's repository. The entry is recorded with `origin = adopted`.
+/// Otherwise the folder stays as it is and its result is the reason. Runs
+/// under the store lock; call it after the commit that stored the skills.
+/// The result per item is the trash path.
+pub(crate) fn replace_folders(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    items: &[Replacement],
+) -> Result<Vec<Result<PathBuf, CoreError>>, CoreError> {
+    replace_folders_with(store, sx, items, &REAL_OPS)
+}
+
+pub(crate) fn replace_folders_with(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    items: &[Replacement],
+    ops: &ReplaceOps,
+) -> Result<Vec<Result<PathBuf, CoreError>>, CoreError> {
+    let state = sx.home.state_dir();
+    let _lock = StoreLock::acquire(sx.fs, &state, LOCK_TIMEOUT)?;
+    let mut ledger = SkillLedger::load(sx.fs, &state)?;
+    let mut ignored = SyncReport::default();
+    let (wanted, _) = desired(store, sx, &mut ignored)?;
+    let now = utc_datetime(sx.env.now()).to_string();
+    let results = items
+        .iter()
+        .map(|item| replace_one(sx, &mut ledger, &wanted, item, &now, ops))
+        .collect();
+    ledger.save(sx.fs, &state)?;
+    Ok(results)
+}
+
+/// Hands one folder over. The folder is first renamed aside in its own
+/// folder (same drive, always possible), then the entry is made, then the
+/// folder goes to the trash: renamed, or on another drive copied, checked
+/// and removed. Any failure before the trash holds the folder puts
+/// everything back: the entry made is removed, the folder renamed back,
+/// the repository's `info/exclude` restored.
+fn replace_one(
+    sx: &SkillsEnv<'_>,
+    ledger: &mut SkillLedger,
+    wanted: &[Desired],
+    item: &Replacement,
+    now: &str,
+    ops: &ReplaceOps,
+) -> Result<PathBuf, CoreError> {
+    let fs = sx.fs;
+    let kept =
+        |code: ErrorCode, why: String| Err(CoreError::new(code, why).with_path(&item.folder));
+    let Some(desired) = wanted
+        .iter()
+        .find(|desired| same_path(&desired.path, &item.entry))
+    else {
+        return kept(
+            ErrorCode::InvalidValue,
+            format!(
+                "skill {:?} is not distributed to {} here, so its folder is kept",
+                item.skill_id, item.client
+            ),
+        );
+    };
+    if entry(fs, &item.folder)? != Entry::Dir || ledger.get(&item.folder).is_some() {
+        return kept(
+            ErrorCode::EntryChanged,
+            "the folder changed since the scan; scan again".to_owned(),
+        );
+    }
+    if !same_path(&item.folder, &item.entry) && entry(fs, &item.entry)? != Entry::Missing {
+        return Err(CoreError::new(
+            ErrorCode::AlreadyExists,
+            format!(
+                "an entry named {:?} is in the way, so the folder is kept",
+                item.skill_id
+            ),
+        )
+        .with_path(&item.entry));
+    }
+    if has_nested_git(fs, &item.folder)? {
+        return kept(
+            ErrorCode::InvalidValue,
+            "the folder holds a git repository, which the store copy leaves out; it is kept"
+                .to_owned(),
+        );
+    }
+    if let Some(root) = &desired.project_root
+        && let Some(repo) = ProjectRepo::discover(root)?
+        && repo.tracks_any_under(&item.folder)?
+    {
+        return kept(
+            ErrorCode::InvalidValue,
+            "the project's repository tracks files in the folder (teammates get it from \
+             there); it is kept"
+                .to_owned(),
+        );
+    }
+    if let Some(what) = lost_in_store(fs, &item.folder, &item.folder)? {
+        return kept(
+            ErrorCode::InvalidValue,
+            format!("the store copy would lose {what}; the folder is kept"),
+        );
+    }
+    if content_hash(&read_folder(fs, &item.folder)?) != content_hash(&read_source(fs, desired)?) {
+        return kept(
+            ErrorCode::EntryChanged,
+            "the folder's content differs from the store copy; it is kept".to_owned(),
+        );
+    }
+    let name = item
+        .folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let aside = item.folder.with_file_name(format!(".{name}.loadout-adopt"));
+    confine(fs, &item.folder)?;
+    confine(fs, &aside)?;
+    if entry(fs, &aside)? != Entry::Missing {
+        return Err(CoreError::new(
+            ErrorCode::AlreadyExists,
+            "a folder left by an earlier adopt is in the way; move it away first",
+        )
+        .with_path(&aside));
+    }
+    let exclude = exclude_state(fs, desired)?;
+    (ops.rename)(&item.folder, &aside)
+        .map_err(|err| io_error("cannot move the folder aside", &item.folder, &err))?;
+    let done = (|| -> Result<(PathBuf, Option<String>), CoreError> {
+        // The exclude line before the entry: a link that cannot be hidden
+        // is never made.
+        git_visibility(fs, desired)?;
+        let hash = (ops.create)(fs, desired)?;
+        let trash = crate::skills::classify::trash_target(sx, item.client, &name)?;
+        move_to_trash(fs, ops, &aside, &trash)?;
+        Ok((trash, hash))
+    })();
+    match done {
+        Ok((trash, hash)) => {
+            let mut link = record(desired, hash, now);
+            link.extra.insert(
+                "origin".to_owned(),
+                serde_json::Value::String(ORIGIN_ADOPTED.to_owned()),
+            );
+            ledger.upsert(link);
+            Ok(trash)
+        }
+        Err(err) => Err(put_back(fs, ops, item, desired, &aside, exclude, err)),
+    }
+}
+
+/// Undoes a replacement that failed before the trash held the folder;
+/// `err` with what could not be undone added.
+fn put_back(
+    fs: &dyn Fs,
+    ops: &ReplaceOps,
+    item: &Replacement,
+    desired: &Desired,
+    aside: &Path,
+    exclude: Option<Saved>,
+    err: CoreError,
+) -> CoreError {
+    let mut notes = Vec::new();
+    // The entry path was free (or the folder itself, now aside): what is
+    // there was made by this replacement.
+    let removed = match entry(fs, &desired.path) {
+        Ok(Entry::Link(_)) => remove_link(fs, &desired.path),
+        Ok(Entry::Dir) if desired.method == LinkMethod::Copy => remove_copy(fs, &desired.path),
+        _ => Ok(()),
+    };
+    if let Err(failed) = removed {
+        notes.push(failed.message().to_owned());
+    }
+    if let Err(back) = (ops.rename)(aside, &item.folder) {
+        notes.push(format!(
+            "the folder cannot be moved back from {}: {back}",
+            aside.display()
+        ));
+    }
+    if let Some((file, bytes)) = exclude {
+        let restored = match bytes {
+            Some(bytes) => fs.write(&file, &bytes),
+            None if fs.exists(&file) => fs.remove_file(&file),
+            None => Ok(()),
+        };
+        if let Err(failed) = restored {
+            notes.push(format!("{} cannot be restored: {failed}", file.display()));
+        }
+    }
+    if notes.is_empty() {
+        return err;
+    }
+    let message = format!("{}; also, {}", err.message(), notes.join("; "));
+    CoreError::new(err.code(), message).with_path(&item.folder)
+}
+
+/// A file and its bytes before a change (`None`: it did not exist).
+type Saved = (PathBuf, Option<Vec<u8>>);
+
+/// The project repository's `info/exclude` as it is before a replacement,
+/// when the entry is in a project with a repository.
+fn exclude_state(fs: &dyn Fs, desired: &Desired) -> Result<Option<Saved>, CoreError> {
+    let Some(root) = &desired.project_root else {
+        return Ok(None);
+    };
+    let Some(repo) = ProjectRepo::discover(root)? else {
+        return Ok(None);
+    };
+    let file = repo.exclude_file();
+    let bytes = if fs.exists(&file) {
+        Some(
+            fs.read(&file)
+                .map_err(|err| io_error("cannot read file", &file, &err))?,
+        )
+    } else {
+        None
+    };
+    Ok(Some((file, bytes)))
+}
+
+/// Moves the folder set `aside` to `trash`: a rename, or across drives
+/// (`ERROR_NOT_SAME_DEVICE`, `EXDEV`) a copy that is compared with the
+/// folder before the folder is removed. A failed copy is removed and the
+/// folder stays aside (the caller puts it back).
+fn move_to_trash(
+    fs: &dyn Fs,
+    ops: &ReplaceOps,
+    aside: &Path,
+    trash: &Path,
+) -> Result<(), CoreError> {
+    confine(fs, trash)?;
+    match (ops.rename)(aside, trash) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::CrossesDevices => {
+            let copied = (ops.copy_tree)(aside, trash).and_then(|()| {
+                if tree_snapshot(aside)? == tree_snapshot(trash)? {
+                    Ok(())
+                } else {
+                    Err(io::Error::other(
+                        "the copy in the trash differs from the folder",
+                    ))
+                }
+            });
+            if let Err(err) = copied {
+                let _ = std::fs::remove_dir_all(trash);
+                return Err(io_error(
+                    "cannot copy the folder to the trash on another drive",
+                    aside,
+                    &err,
+                ));
+            }
+            // The trash holds a checked copy; a folder that cannot be
+            // removed now stays as a hidden `.<name>.loadout-adopt`.
+            let _ = std::fs::remove_dir_all(aside);
+            Ok(())
+        }
+        Err(err) => Err(io_error("cannot move the folder to the trash", aside, &err)),
+    }
+}
+
+/// Copies the folder `from` to the new path `to`: folders and files (with
+/// their permissions); a link inside is refused.
+fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::create_dir(to)?;
+    for item in std::fs::read_dir(from)? {
+        let item = item?;
+        let kind = item.file_type()?;
+        let target = to.join(item.file_name());
+        if kind.is_symlink() {
+            return Err(io::Error::other(format!(
+                "{} is a link, which is not copied across drives",
+                item.path().display()
+            )));
+        } else if kind.is_dir() {
+            copy_tree(&item.path(), &target)?;
+        } else {
+            std::fs::copy(item.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Every folder (`None`) and file (its bytes) below `dir`, by relative path.
+fn tree_snapshot(dir: &Path) -> io::Result<BTreeMap<String, Option<Vec<u8>>>> {
+    fn walk(
+        dir: &Path,
+        prefix: &str,
+        out: &mut BTreeMap<String, Option<Vec<u8>>>,
+    ) -> io::Result<()> {
+        for item in std::fs::read_dir(dir)? {
+            let item = item?;
+            let relative = format!("{prefix}/{}", item.file_name().to_string_lossy());
+            if item.file_type()?.is_dir() {
+                out.insert(relative.clone(), None);
+                walk(&item.path(), &relative, out)?;
+            } else {
+                out.insert(relative, Some(std::fs::read(item.path())?));
+            }
+        }
+        Ok(())
+    }
+    let mut out = BTreeMap::new();
+    walk(dir, "", &mut out)?;
+    Ok(out)
+}
+
+/// What the store copy of `dir` would not keep, named for the user: an
+/// empty folder (the store keeps files), or on Unix an executable file
+/// (store files have no mode). `None` when nothing.
+fn lost_in_store(fs: &dyn Fs, root: &Path, dir: &Path) -> Result<Option<String>, CoreError> {
+    let shown = |path: &Path| {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    for path in fs
+        .read_dir(dir)
+        .map_err(|err| io_error("cannot list directory", dir, &err))?
+    {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name == ".git" || name == MARKER_FILE {
+            continue;
+        }
+        match entry(fs, &path)? {
+            Entry::Dir => {
+                let empty = fs
+                    .read_dir(&path)
+                    .map_err(|err| io_error("cannot list directory", &path, &err))?
+                    .is_empty();
+                if empty {
+                    return Ok(Some(format!("the empty folder {}", shown(&path))));
+                }
+                if let Some(what) = lost_in_store(fs, root, &path)? {
+                    return Ok(Some(what));
+                }
+            }
+            Entry::File => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = std::fs::metadata(&path)
+                        .map_err(|err| io_error("cannot read file metadata", &path, &err))?
+                        .permissions()
+                        .mode();
+                    if mode & 0o111 != 0 {
+                        return Ok(Some(format!("the executable mode of {}", shown(&path))));
+                    }
+                }
+            }
+            Entry::Link(_) | Entry::Missing => {}
+        }
+    }
+    Ok(None)
+}
+
 /// Enables (or disables) skill `id` for `clients` at user scope: one
 /// commit of `skill-meta/<id>.toml`, then [`sync`]. Enabling with no
 /// clients selects `all-detected`; disabling with none turns the skill off
@@ -1105,6 +1523,64 @@ pub fn set_project_enabled(
     expected: Option<&str>,
 ) -> Result<(Option<CommitId>, SyncReport), CoreError> {
     ids::check(IdKind::Skill, id)?;
+    let project = trusted_project(store, sx, folder)?;
+    if enabled {
+        let has_content = store::get(store, id)?.is_some_and(|skill| skill.has_content);
+        if !has_content {
+            return Err(store::not_found(id));
+        }
+    }
+    // Disabling in the private file leaves a skill the shared file enables
+    // on: say so instead of reporting a change that did not happen.
+    if !enabled
+        && project.local.is_some()
+        && let Some(shared) = &project.shared
+        && manifest_enables(&shared.manifest, id)
+    {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!(
+                "skill {id:?} is enabled by the shared project.toml, which teammates use too; \
+                 remove it from [skills] enable there"
+            ),
+        )
+        .with_path(&shared.path));
+    }
+    let (text, path) = skills_file_text(&project)?;
+    let Some(edited) = edit_manifest(&text, id, enabled, &path)? else {
+        let report = sync(store, sx)?;
+        return Ok((None, report));
+    };
+    let verb = if enabled { "enable" } else { "disable" };
+    let operation = Operation::new(
+        format!("skill.project-{verb}"),
+        format!("skill: {verb} {id} in project {}", project.id),
+    )
+    .entity(format!("skill/{id}"))
+    .entity(format!("project/{}", project.id))
+    .scope(store_mod::Scope::Project(project.id.clone()));
+    let committed =
+        commit_project_edit(
+            store,
+            sx,
+            &project,
+            &edited,
+            expected,
+            operation,
+            |_| Ok(()),
+        )?;
+    let report = sync(store, sx)?;
+    Ok((committed.commit, report))
+}
+
+/// The project known on this machine at `folder`, trusted as it is now;
+/// `not_found` for an unknown or missing folder, `trust_required` when
+/// not trusted.
+pub(crate) fn trusted_project(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    folder: &Path,
+) -> Result<Project, CoreError> {
     let fs = sx.fs;
     let state = sx.home.state_dir();
     let overlay = this_overlay(store, fs, &state)?;
@@ -1122,57 +1598,53 @@ pub fn set_project_enabled(
             )
             .with_path(folder)
         })?;
-    let project = match &known.status {
+    match &known.status {
         ProjectStatus::Loaded { project, .. } => {
             if let Some(err) = known.trust_error() {
                 return Err(err);
             }
-            project.as_ref().clone()
+            Ok(project.as_ref().clone())
         }
-        ProjectStatus::Missing => {
-            return Err(
-                CoreError::new(ErrorCode::NotFound, "the project folder does not exist")
-                    .with_path(&known.root),
-            );
-        }
-        ProjectStatus::Failed(err) => return Err(err.clone()),
-    };
-    if enabled {
-        let has_content = store::get(store, id)?.is_some_and(|skill| skill.has_content);
-        if !has_content {
-            return Err(store::not_found(id));
-        }
+        ProjectStatus::Missing => Err(CoreError::new(
+            ErrorCode::NotFound,
+            "the project folder does not exist",
+        )
+        .with_path(&known.root)),
+        ProjectStatus::Failed(err) => Err(err.clone()),
     }
+}
+
+/// The text and path of the manifest `[skills]` edits go to: the private
+/// file, else the shared one.
+pub(crate) fn skills_file_text(project: &Project) -> Result<(String, PathBuf), CoreError> {
     let file = project
         .local
         .as_ref()
         .or(project.shared.as_ref())
         .expect("a loaded project has a manifest");
-    // Disabling in the private file leaves a skill the shared file enables
-    // on: say so instead of reporting a change that did not happen.
-    if !enabled
-        && project.local.is_some()
-        && let Some(shared) = &project.shared
-        && manifest_enables(&shared.manifest, id)
-    {
-        return Err(CoreError::new(
-            ErrorCode::InvalidValue,
-            format!(
-                "skill {id:?} is enabled by the shared project.toml, which teammates use too; \
-                 remove it from [skills] enable there"
-            ),
-        )
-        .with_path(&shared.path));
-    }
-    let before = file.bytes.clone();
-    let path = file.path.clone();
-    let text = String::from_utf8(before.clone()).map_err(|_| {
-        CoreError::new(ErrorCode::ParseError, "the manifest is not UTF-8").with_path(&path)
+    let text = String::from_utf8(file.bytes.clone()).map_err(|_| {
+        CoreError::new(ErrorCode::ParseError, "the manifest is not UTF-8").with_path(&file.path)
     })?;
-    let Some(edited) = edit_manifest(&text, id, enabled, &path)? else {
-        let report = sync(store, sx)?;
-        return Ok((None, report));
-    };
+    Ok((text, file.path.clone()))
+}
+
+/// Writes `edited` over the file [`skills_file_text`] names, then commits
+/// `operation`: the store mirror of the edited manifests, trusted (Loadout
+/// wrote them), plus what `stage` stages. The manifests must still be what
+/// was trusted and read (and `expected`, the hash the caller showed);
+/// other content is `trust_required`, with nothing written. When the
+/// commit fails, the file and the trust state are put back.
+pub(crate) fn commit_project_edit<T>(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    project: &Project,
+    edited: &str,
+    expected: Option<&str>,
+    operation: Operation,
+    stage: impl FnOnce(&mut crate::store::Transaction<'_>) -> Result<T, CoreError>,
+) -> Result<crate::store::Committed<T>, CoreError> {
+    let fs = sx.fs;
+    let state = sx.home.state_dir();
     // The edit is trusted below: both files must still be what was
     // trusted and read (a `git pull` in between needs a review first).
     let hash = project.hash();
@@ -1189,35 +1661,34 @@ pub fn set_project_enabled(
         )
         .with_path(crate::layering::manifest::manifest_dir(&project.root)));
     }
+    let file = project
+        .local
+        .as_ref()
+        .or(project.shared.as_ref())
+        .expect("a loaded project has a manifest");
+    let before = file.bytes.clone();
+    let path = file.path.clone();
+    let previous = TrustStore::load(fs, &state)?;
     crate::layering::projects::write_file(fs, &path, edited.as_bytes())?;
-    let verb = if enabled { "enable" } else { "disable" };
-    let operation = Operation::new(
-        format!("skill.project-{verb}"),
-        format!("skill: {verb} {id} in project {}", project.id),
-    )
-    .entity(format!("skill/{id}"))
-    .entity(format!("project/{}", project.id))
-    .scope(store_mod::Scope::Project(project.id.clone()));
-    let previous = trust.clone();
     let committed = (|| {
         let reloaded = crate::layering::projects::load_project(fs, &project.root)?;
         store.transaction(operation, |tx| {
+            let value = stage(tx)?;
             mirror(tx, &reloaded)?;
             let mut trust = TrustStore::load(fs, &state)?;
             trust.trust(&reloaded);
-            trust.save(fs, &state)
+            trust.save(fs, &state)?;
+            Ok(value)
         })
     })();
-    let committed = match committed {
-        Ok(committed) => committed,
+    match committed {
+        Ok(committed) => Ok(committed),
         Err(err) => {
             let _ = crate::layering::projects::write_file(fs, &path, &before);
             let _ = previous.save(fs, &state);
-            return Err(err);
+            Err(err)
         }
-    };
-    let report = sync(store, sx)?;
-    Ok((committed.commit, report))
+    }
 }
 
 /// Whether `[skills] enable` of `manifest` lists `id`.
@@ -1252,7 +1723,7 @@ fn manifests_hash(fs: &dyn Fs, root: &Path) -> Result<String, CoreError> {
 
 /// `[skills] enable` with `id` added or removed, comments kept; `None`
 /// when nothing changes.
-fn edit_manifest(
+pub(crate) fn edit_manifest(
     text: &str,
     id: &str,
     enabled: bool,

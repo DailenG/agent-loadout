@@ -12,13 +12,12 @@ use agent_loadout_core::apply::resolve::{filter_of, fingerprint, resolve};
 use agent_loadout_core::apply::{
     self, Action, EntryState, OnConflict, PlanOptions, placeholder_path,
 };
-use agent_loadout_core::migrate::{
-    self, ExtractionChoice, ExtractionTarget, ItemKind, ItemStatus, Offer, Report,
-};
+use agent_loadout_core::migrate::{self, ItemKind, ItemStatus, Offer, Report};
 use agent_loadout_core::model::applied::Scope as TargetScope;
-use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::secrets::SecretValue;
-use agent_loadout_core::secrets::grammar::SecretRef;
+use agent_loadout_core::secrets::extract::{
+    ExtractionChoice, ExtractionTarget, env_reference, onepassword_reference,
+};
 use agent_loadout_core::{CoreError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -257,8 +256,9 @@ fn invalid(message: &str) -> CoreError {
     CoreError::new(ErrorCode::InvalidValue, message.to_owned())
 }
 
-/// The core choice of `choice`; references are checked here (an `op://`
-/// item reference of three or four non-empty parts, a valid variable name).
+/// The core choice of `choice`; references are checked by core (an
+/// `op://` item reference of three or four non-empty parts, a valid
+/// variable name).
 fn choice_of(choice: MigrationSecretChoice) -> Result<ExtractionChoice, CoreError> {
     Ok(match choice {
         MigrationSecretChoice::Keyring { alias, value } => {
@@ -270,32 +270,14 @@ fn choice_of(choice: MigrationSecretChoice) -> Result<ExtractionChoice, CoreErro
                 target: ExtractionTarget::Keyring(SecretValue::new(&value)),
             }
         }
-        MigrationSecretChoice::Onepassword { alias, reference } => {
-            let reference = reference.trim();
-            let parts: Vec<&str> = reference
-                .strip_prefix("op://")
-                .map(|rest| rest.split('/').collect())
-                .unwrap_or_default();
-            if !(3..=4).contains(&parts.len()) || parts.iter().any(|part| part.trim().is_empty()) {
-                return Err(invalid("a 1Password reference is op://vault/item/field"));
-            }
-            let parsed = SecretRef::parse(reference)?;
-            if !matches!(parsed, SecretRef::OnePassword { .. }) {
-                return Err(invalid("a 1Password reference is op://vault/item/field"));
-            }
-            ExtractionChoice {
-                alias,
-                target: ExtractionTarget::Reference(parsed),
-            }
-        }
-        MigrationSecretChoice::Env { alias, name } => {
-            let name = name.trim();
-            ids::check(IdKind::EnvVar, name)?;
-            ExtractionChoice {
-                alias,
-                target: ExtractionTarget::Reference(SecretRef::parse(&format!("env:{name}"))?),
-            }
-        }
+        MigrationSecretChoice::Onepassword { alias, reference } => ExtractionChoice {
+            alias,
+            target: ExtractionTarget::Reference(onepassword_reference(&reference)?),
+        },
+        MigrationSecretChoice::Env { alias, name } => ExtractionChoice {
+            alias,
+            target: ExtractionTarget::Reference(env_reference(&name)?),
+        },
     })
 }
 
