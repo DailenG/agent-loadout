@@ -12,7 +12,6 @@ import {
   type DataHomeSource,
   type ErrorCode,
   type Platform,
-  type Scope,
 } from "@/ipc/bindings";
 
 const messages = {
@@ -49,11 +48,19 @@ const messages = {
   "app.error.unknown": "An unknown error occurred",
   "scope.label": "Scope",
   "scope.switcher.aria": "Configuration scope",
+  /* M26 scope switcher (SPEC 13.1) */
+  "scope.user": "User",
+  "scope.userOption": "User (all your projects)",
+  "scope.addFolder": "Add folder...",
+  "scope.noProjects": "No projects yet. Add a folder to configure it on its own.",
+  "scope.projectTooltip": "{path} ({trust})",
+  "scope.collapsed": "Scope: {name}",
+  /* end M26 */
   "page.empty.title": "Nothing here yet",
   "page.empty.skills": "Managed skills will be listed here.",
   "page.empty.mcp": "MCP servers and their per-client status will be listed here.",
   "page.empty.projects": "Folders you add as projects will be listed here.",
-  "page.empty.tools": "Detected AI coding clients will be listed here.",
+  "page.empty.tools": "AI coding clients will be listed here, omp first.",
   "page.empty.install": "Install sources for skills and MCP servers will appear here.",
   "page.empty.history": "Store commits, applies, and rollbacks will be listed here.",
   "page.empty.plugins": "Plugins are not available in this version.",
@@ -120,7 +127,8 @@ const messages = {
   "skills.loading": "Loading skills...",
   "skills.sizeWarning": "Store skills take more than 500 MB together.",
   "skills.empty.noneTitle": "No skills installed yet",
-  "skills.empty.noneDescription": "Install skills from Git or a local folder, or import the ones your tools already have.",
+  "skills.empty.noneDescription":
+    "Using omp? Skills you install here are linked into omp's skills folder, and into any other tool you enable. Install from Git or a local folder, or import the ones your tools already have.",
   "skills.empty.git": "Install from Git",
   "skills.empty.local": "Install from a Folder",
   "skills.empty.noMatchTitle": "No matching skills",
@@ -456,7 +464,8 @@ const messages = {
   "mcp.card.bulkToggle.partial": "{enabled}/{total} enabled. Click to enable all",
   "mcp.card.noClients": "No detected client can run this server.",
   "mcp.empty.title": "No MCP servers yet",
-  "mcp.empty.description": "Add a server by hand, or paste a config snippet from any client, then manage it here.",
+  "mcp.empty.description":
+    "Add a server by hand, or paste a config snippet from any client (omp, Claude Code, Codex and more), then manage it here.",
   "mcp.empty.add": "Add server",
   "mcp.empty.paste": "Paste config",
   "mcp.empty.noMatchTitle": "No matching MCP",
@@ -1158,6 +1167,13 @@ const messages = {
   "settings.secrets.map.mappedNone": "No alias was mapped.",
   "settings.secrets.map.kept": "Kept {aliases}: they already point elsewhere.",
   "settings.secrets.map.replaced": "Replaced Environment {id}.",
+  /* M27 omp recommended (#2): add "recommended.*" and M27 "tools.*" keys below this line. */
+  "recommended.badge": "Recommended",
+  "recommended.tooltip": `Recommended: ${PRODUCT_NAME} is built and tested with omp first.`,
+  "tools.get": "Get {name}",
+  "tools.getAria": "Get {name} (opens its homepage)",
+  "tools.error.openHomepage": "The homepage could not be opened.",
+  "tools.getHint": "{name} isn't installed on this machine yet.",
 } as const;
 
 export type MessageKey = keyof typeof messages;
@@ -1255,16 +1271,6 @@ const errorMessages: Record<ErrorCode, string> = {
 export function errorMessage(code: ErrorCode): string {
   return errorMessages[code];
 }
-
-/** Scope names in the closed switcher. */
-export const scopeLabels: Record<Scope["kind"], string> = {
-  system: "System",
-};
-
-/** Scope names in the open switcher (SPEC 13.1). */
-export const scopeOptionLabels: Record<Scope["kind"], string> = {
-  system: "System (user-wide)",
-};
 
 export const platformLabels: Record<Platform, string> = {
   windows: "Windows",

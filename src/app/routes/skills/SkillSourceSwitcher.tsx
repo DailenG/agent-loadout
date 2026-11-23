@@ -1,9 +1,12 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
 // Ported from DailenG/skilldock@181b52b src/features/skills/components/SkillSourceSwitcher.tsx:
 // the tabs row (managed library first, then the first tools, then "More" with a menu). Sources
-// here are the store, each client's skill folder in the page's scope, and the agents CLI.
+// here are the store, each client's skill folder in the page's scope, and the agents CLI. The
+// recommended client comes first and every tab shows its tool's name (#2).
 
 import { useEffect, useRef, useState } from "react";
+import { orderByRecommended } from "@/app/clients";
+import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { t } from "@/i18n/en";
 import { ManagedLibraryIcon } from "./icons";
@@ -39,9 +42,10 @@ type SkillSourceSwitcherProps = {
   onChange: (id: string) => void;
 };
 
-export function SkillSourceSwitcher({ active, storeCount, tools, onChange }: SkillSourceSwitcherProps) {
+export function SkillSourceSwitcher({ active, storeCount, tools: incoming, onChange }: SkillSourceSwitcherProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const tools = orderByRecommended(incoming, (tool) => tool.id);
   const activeTool = tools.find((tool) => tool.id === active);
   let visible = tools.slice(0, MAX_VISIBLE_TOOL_SOURCES);
   if (activeTool && !visible.includes(activeTool)) {
@@ -87,11 +91,11 @@ export function SkillSourceSwitcher({ active, storeCount, tools, onChange }: Ski
         role={isMenuItem ? "menuitem" : "tab"}
         aria-selected={isMenuItem ? undefined : selected}
         aria-label={`${tool.name} ${tool.count}`}
-        title={tool.name}
         onClick={() => choose(tool.id)}
       >
         <SourceLogo tab={tool} />
-        {isMenuItem ? <span>{tool.name}</span> : null}
+        <span className="skills-source-tab__name">{tool.name}</span>
+        <RecommendedBadge clientId={tool.id} className="recommended-badge--compact" />
         <span className="skills-source-tab__count">{tool.count}</span>
       </button>
     );

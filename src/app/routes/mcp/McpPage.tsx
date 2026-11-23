@@ -14,7 +14,7 @@ import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { ScopeSelect, USER_SCOPE } from "@/app/components/ScopeSelect";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
-import { errorMessage, scopeLabels, t } from "@/i18n/en";
+import { errorMessage, t } from "@/i18n/en";
 import type { ClientInfo, ServerRow, TransportKind } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 import {
@@ -448,7 +448,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
                               </span>
                             </>
                           )}
-                          <span className="status-badge tone-neutral mcp-layer-chip">{scopeLabels.system}</span>
+                          <span className="status-badge tone-neutral mcp-layer-chip">{t("scope.user")}</span>
                         </div>
                         <div className="mcp-server-card__subtitle">{subtitle}</div>
                         {row.problems.map((problem, index) => (
@@ -519,7 +519,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
                       </div>
                       <div>
                         <dt>{t("mcp.card.scope")}</dt>
-                        <dd className="detail-grid__single-line">{scopeLabels.system}</dd>
+                        <dd className="detail-grid__single-line">{t("scope.user")}</dd>
                       </div>
                     </dl>
                   </section>

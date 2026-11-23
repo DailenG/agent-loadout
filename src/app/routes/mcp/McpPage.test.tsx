@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { errorMessage } from "@/i18n/en";
+import { errorMessage, t } from "@/i18n/en";
 import type { ServerList, ServerRow } from "@/ipc/bindings";
 import { MOCK_APPLY_RUN, MOCK_CLIENTS, ok } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
@@ -69,7 +69,7 @@ describe("McpPage", () => {
     expect(within(issues).getByText(errorMessage("missing_secret"))).toBeInTheDocument();
     expect(within(issues).getByText("1 enabled")).toBeInTheDocument();
     expect(within(issues).getByText("STDIO")).toBeInTheDocument();
-    expect(within(issues).getByText("System")).toBeInTheDocument();
+    expect(within(issues).getByText(t("scope.user"))).toBeInTheDocument();
 
     const broken = screen.getByRole("article", { name: "broken" });
     expect(within(broken).getByText(errorMessage("parse_error"))).toBeInTheDocument();

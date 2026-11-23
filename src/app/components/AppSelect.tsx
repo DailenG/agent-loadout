@@ -16,6 +16,12 @@ export type AppSelectOption<T extends string> = {
   value: T;
   label: string;
   disabled?: boolean;
+  /** Shown before the label; mark it `aria-hidden` when it's decorative. */
+  icon?: ReactNode;
+  /** Hover text of the option (`data-tooltip`). */
+  tooltip?: string;
+  /** Makes the option an action: choosing it runs this instead of `onChange`. */
+  onSelect?: () => void;
 };
 
 type AppSelectProps<T extends string> = {
@@ -133,6 +139,11 @@ export function AppSelect<T extends string>(props: AppSelectProps<T>) {
     if (!option || option.disabled) {
       return;
     }
+    if (option.onSelect) {
+      closeMenu(true);
+      option.onSelect();
+      return;
+    }
     onChange(option.value);
     closeMenu(true);
   }
@@ -248,22 +259,30 @@ export function AppSelect<T extends string>(props: AppSelectProps<T>) {
           style={menuStyle}
         >
           {options.map((option, index) => {
-            const isSelected = option.value === value;
+            const isSelected = !option.onSelect && option.value === value;
             const isActive = index === activeIndex;
             return (
               <button
                 key={option.value}
                 id={`${listboxId}-option-${index}`}
-                className={`app-select__option${isSelected ? " is-selected" : ""}${isActive ? " is-active" : ""}`}
+                className={`app-select__option${option.onSelect ? " app-select__option--action" : ""}${isSelected ? " is-selected" : ""}${isActive ? " is-active" : ""}`}
                 type="button"
                 role="option"
                 aria-selected={isSelected}
                 disabled={option.disabled}
+                data-tooltip={option.tooltip}
                 onPointerEnter={() => setActiveIndex(index)}
                 onClick={() => selectOption(index)}
               >
                 <span className="app-select__check" aria-hidden="true">{isSelected ? "✓" : ""}</span>
-                <span>{option.label}</span>
+                {option.icon ? (
+                  <span className="app-select__label">
+                    <span className="app-select__icon">{option.icon}</span>
+                    <span>{option.label}</span>
+                  </span>
+                ) : (
+                  <span>{option.label}</span>
+                )}
               </button>
             );
           })}

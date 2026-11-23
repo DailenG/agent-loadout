@@ -554,6 +554,35 @@ fn open_folder_follows_the_listed_profile() {
     assert_eq!(tools::folder_of(&fx.core, "omp").unwrap(), profile);
 }
 
+/// The Tools page links omp's homepage; `open_tool_homepage` opens only
+/// table URLs, so an unknown id or a URL passed as an id is refused.
+#[test]
+fn tool_homepages_come_from_the_fixed_table() {
+    let fx = Fx::new();
+    let tools = tools::list(&fx.core).unwrap();
+    let omp = tools.iter().find(|tool| tool.id == "omp").unwrap();
+    assert_eq!(
+        omp.homepage.as_deref(),
+        Some("https://github.com/can1357/oh-my-pi")
+    );
+    assert!(
+        tools
+            .iter()
+            .filter(|tool| tool.id != "omp")
+            .all(|tool| tool.homepage.is_none())
+    );
+    assert_eq!(
+        tools::homepage_of("omp").unwrap(),
+        "https://github.com/can1357/oh-my-pi"
+    );
+    for refused in ["nope", "claude-code", "https://example.com", ""] {
+        assert_eq!(
+            tools::homepage_of(refused).unwrap_err().code(),
+            agent_loadout_core::ErrorCode::UnknownClient
+        );
+    }
+}
+
 /// The pills, the Preview tab and a pill toggle use the core's rule: a
 /// client forced on in `clients.toml` counts although it is not detected,
 /// and a client whose transports do not fit never counts.

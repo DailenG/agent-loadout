@@ -9,7 +9,6 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	/**  Version and platform. Brand strings are constants in the bindings. */
 	appInfo: (options?: InvokeOptions) => __TAURI_INVOKE<AppInfo>("app_info", undefined, options),
-	listScopes: (options?: InvokeOptions) => __TAURI_INVOKE<Scope[]>("list_scopes", undefined, options),
 	/**  The resolved `LOADOUT_HOME` (SPEC 4.5). Reads nothing inside it. */
 	dataHome: (options?: InvokeOptions) => typedError<DataHome, IpcError>(__TAURI_INVOKE("data_home", undefined, options)),
 	listServers: (options?: InvokeOptions) => typedError<ServerList, IpcError>(__TAURI_INVOKE("list_servers", undefined, options)),
@@ -34,6 +33,11 @@ export const commands = {
 	listTools: (options?: InvokeOptions) => typedError<ToolInfo[], IpcError>(__TAURI_INVOKE("list_tools", undefined, options)),
 	/**  Opens the folder of `client`'s user MCP file. */
 	revealToolFolder: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_tool_folder", { client }, options)),
+	/**
+	 *  Opens `client`'s homepage in the browser. The URL comes from a fixed
+	 *  table, never from the caller.
+	 */
+	openToolHomepage: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("open_tool_homepage", { client }, options)),
 	listProjects: (options?: InvokeOptions) => typedError<ProjectRow[], IpcError>(__TAURI_INVOKE("list_projects", undefined, options)),
 	/**
 	 *  Opens the OS folder picker; `None` when the user cancels. The folder is
@@ -1686,14 +1690,6 @@ export type ReviewedFile = {
 	diff: string | null,
 };
 
-/**
- *  A configuration scope the sidebar switcher offers (SPEC 13.1). Projects
- *  join in M16.
- */
-export type Scope = 
-/**  User-wide configuration of every client. */
-{ kind: "system" };
-
 /**  Where a fix writes the reference. */
 export type SecretScope = 
 /**  `secrets.toml`: every machine. */
@@ -2046,6 +2042,11 @@ export type ToolInfo = {
 	/**  The client reads its file only at launch. */
 	restartRequired: boolean,
 	warnings: IpcError[],
+	/**
+	 *  Where to get the client, from [`HOMEPAGES`]; opened by
+	 *  `open_tool_homepage` with the client id.
+	 */
+	homepage: string | null,
 };
 
 /**  One client's skill folder in the page's scope. */

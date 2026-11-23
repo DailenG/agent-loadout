@@ -50,6 +50,17 @@ describe("visiblePills", () => {
     const row = makeRow({ pills: [pill("cursor", "pending", true)] });
     expect(visiblePills(row, MOCK_CLIENTS).map((entry) => entry.client.id)).toEqual(["cursor"]);
   });
+
+  it("puts the recommended client first and keeps the others in client order", () => {
+    const clients = [...MOCK_CLIENTS, { id: "omp", name: "omp", detected: true, supported: true }];
+    const row = makeRow({ pills: [...makeRow().pills, pill("omp", "disabled", false)] });
+    expect(visiblePills(row, clients).map((entry) => entry.client.id)).toEqual([
+      "omp",
+      "claude-code",
+      "codex",
+      "claude-desktop",
+    ]);
+  });
 });
 
 describe("ClientPill", () => {

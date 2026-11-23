@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { orderByRecommended } from "@/app/clients";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { errorMessage, t } from "@/i18n/en";
 import type { SkillClient, SkillInfo, SkillProject, SkillUpdateCheck } from "@/ipc/bindings";
@@ -64,11 +65,14 @@ export function SkillCard(props: SkillCardProps) {
   const tagActionRef = useRef<HTMLButtonElement | null>(null);
   const tagEditorRef = useRef<HTMLDivElement | null>(null);
 
-  const enabledClients = project
-    ? skill.projectEnabled
-      ? clients.filter((client) => project.clients.includes(client.id))
-      : []
-    : clients.filter((client) => skill.clients.includes(client.id));
+  const enabledClients = orderByRecommended(
+    project
+      ? skill.projectEnabled
+        ? clients.filter((client) => project.clients.includes(client.id))
+        : []
+      : clients.filter((client) => skill.clients.includes(client.id)),
+    (client) => client.id,
+  );
   const detected = clients.filter((client) => client.detected);
   const allEnabled = project
     ? skill.projectEnabled

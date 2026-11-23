@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { App, createQueryClient, type FeatureFlags } from "@/app/App";
 import { THEME_STORAGE_KEY } from "@/app/components/theme";
-import { errorMessage, scopeLabels, scopeOptionLabels, t } from "@/i18n/en";
-import { APP_ID, PRODUCT_NAME, type Platform } from "@/ipc/bindings";
+import { errorMessage, t } from "@/i18n/en";
+import { APP_ID, PRODUCT_NAME, type Platform, type ProjectRow } from "@/ipc/bindings";
 import { tauriTransport } from "@/ipc/transport";
 import {
   createMockTransport,
@@ -14,6 +14,27 @@ import {
   ok,
   type MockTransportOptions,
 } from "@/test/mockTransport";
+
+// Paths arrive under their placeholder roots, as the backend sends them.
+const TRUSTED_PROJECT: ProjectRow = {
+  id: "app-a1b2",
+  name: "app",
+  path: "~/code/app",
+  layout: "shared",
+  trust: "trusted",
+  error: null,
+  servers: 1,
+  clients: 2,
+  pending: 0,
+};
+
+const UNTRUSTED_PROJECT: ProjectRow = {
+  ...TRUSTED_PROJECT,
+  id: "lab-c3d4",
+  name: "home-lab",
+  path: "%EXTERNAL%/home-lab",
+  trust: "untrusted",
+};
 
 function renderApp(options: MockTransportOptions = {}, features?: FeatureFlags) {
   const transport = createMockTransport(options);
@@ -43,7 +64,7 @@ function header() {
 }
 
 describe("App shell", () => {
-  it("shows the brand, the System scope and the v1 nav items in order", async () => {
+  it("shows the brand, the User scope and the v1 nav items in order", async () => {
     const { transport } = renderApp();
 
     expect(screen.getByText(PRODUCT_NAME, { selector: ".brand-title" })).toBeInTheDocument();
@@ -61,9 +82,8 @@ describe("App shell", () => {
     expect(within(header()).getByText(t("app.nav.skills.description"))).toBeInTheDocument();
 
     const scope = screen.getByRole("combobox", { name: t("scope.switcher.aria") });
-    await waitFor(() => expect(scope).toBeEnabled());
-    expect(scope).toHaveTextContent(scopeLabels.system);
-    expect(transport.calls).toContain("listScopes");
+    expect(scope).toHaveTextContent(t("scope.user"));
+    await waitFor(() => expect(transport.calls).toContain("listProjects"));
   });
 
   it("hides Plugins and Publish unless their feature flags are on", () => {
@@ -83,16 +103,90 @@ describe("App shell", () => {
     ]);
   });
 
-  it("offers only the System scope", async () => {
+  it("offers User, a hint and Add folder when no project is known", async () => {
     const { user } = renderApp();
     const scope = screen.getByRole("combobox", { name: t("scope.switcher.aria") });
-    await waitFor(() => expect(scope).toBeEnabled());
 
     await user.click(scope);
-    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    const listbox = screen.getByRole("listbox");
+    await waitFor(() => expect(within(listbox).getByText(t("scope.noProjects"))).toBeInTheDocument());
+    const options = within(listbox).getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
-      `✓${scopeOptionLabels.system}`,
+      `✓${t("scope.userOption")}`,
+      t("scope.noProjects"),
+      t("scope.addFolder"),
     ]);
+    expect(options[1]).toBeDisabled();
+  });
+
+  it("lists every project with its trust and path, then Add folder, and switches to one", async () => {
+    const { user } = renderApp({ projects: [TRUSTED_PROJECT, UNTRUSTED_PROJECT] });
+    const scope = screen.getByRole("combobox", { name: t("scope.switcher.aria") });
+
+    await user.click(scope);
+    const listbox = screen.getByRole("listbox");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(4));
+    const options = within(listbox).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      `✓${t("scope.userOption")}`,
+      "app",
+      "home-lab",
+      t("scope.addFolder"),
+    ]);
+    expect(within(options[1]).getByRole("img", { name: t("projects.trust.trusted") })).toBeInTheDocument();
+    expect(within(options[2]).getByRole("img", { name: t("projects.trust.untrusted") })).toBeInTheDocument();
+    expect(options[2]).toHaveAttribute(
+      "data-tooltip",
+      t("scope.projectTooltip", { path: "%EXTERNAL%/home-lab", trust: t("projects.trust.untrusted") }),
+    );
+
+    // An untrusted project can be selected.
+    await user.click(options[2]);
+    expect(scope).toHaveTextContent("home-lab");
+    await user.click(scope);
+    expect(within(screen.getByRole("listbox")).getByRole("option", { selected: true })).toHaveTextContent(
+      "home-lab",
+    );
+  });
+
+  it("shows the current scope in the collapsed sidebar's tooltip", async () => {
+    const { user } = renderApp({ projects: [TRUSTED_PROJECT] });
+    await user.click(screen.getByRole("button", { name: t("app.sidebar.collapse") }));
+    const userLabel = t("scope.collapsed", { name: t("scope.userOption") });
+    expect(screen.getByRole("button", { name: userLabel })).toHaveAttribute("data-tooltip", userLabel);
+
+    // The icon reopens the sidebar, where the switcher is.
+    await user.click(screen.getByRole("button", { name: userLabel }));
+    await user.click(screen.getByRole("combobox", { name: t("scope.switcher.aria") }));
+    await user.click(await screen.findByRole("option", { name: /app$/ }));
+    await user.click(screen.getByRole("button", { name: t("app.sidebar.collapse") }));
+    const projectLabel = t("scope.collapsed", { name: "app" });
+    expect(screen.getByRole("button", { name: projectLabel })).toHaveAttribute("data-tooltip", projectLabel);
+  });
+
+  it("Add folder in the sidebar runs the folder flow and selects the new project", async () => {
+    let known: ProjectRow[] = [];
+    const fresh: ProjectRow = { ...TRUSTED_PROJECT, id: "fresh-e5f6", name: "fresh", path: "~/code/fresh" };
+    const { user, transport } = renderApp({
+      commands: {
+        listProjects: async () => ok(known),
+        pickProjectFolder: async () =>
+          ok({ token: "folder-1", path: "~/code/fresh", name: "fresh", manifest: null }),
+        initProject: async () => {
+          known = [fresh];
+          return ok({ id: fresh.id, trust: "trusted", commit: null, apply: null });
+        },
+      },
+    });
+    const scope = screen.getByRole("combobox", { name: t("scope.switcher.aria") });
+
+    await user.click(scope);
+    await user.click(within(screen.getByRole("listbox")).getByRole("option", { name: t("scope.addFolder") }));
+    const dialog = await screen.findByRole("dialog", { name: t("projects.folder.titleAdd") });
+    await user.click(within(dialog).getByRole("button", { name: t("projects.folder.create") }));
+
+    await waitFor(() => expect(scope).toHaveTextContent("fresh"));
+    expect(transport.calls).toContain("initProject");
   });
 
   it("switches pages and shows each page's empty state", async () => {

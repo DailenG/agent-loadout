@@ -6,7 +6,9 @@
 // setting of the skill (SPEC 12.2). ProjectSkillPanel is new (SPEC 12.3).
 
 import { useEffect, useState } from "react";
+import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { t } from "@/i18n/en";
 import type { SkillClient, SkillInfo, SkillMethod, SkillProject } from "@/ipc/bindings";
@@ -119,7 +121,7 @@ export function ToolSyncPanel({ skill, clients, isBulkUpdatingExternally = false
         </div>
       </div>
       <div className="tool-pill-grid">
-        {clients.map((client) => {
+        {orderByRecommended(clients, (client) => client.id).map((client) => {
           const on = enabled.includes(client.id);
           const tooltip = on
             ? t("skill.tools.tooltip.enabled")
@@ -139,6 +141,7 @@ export function ToolSyncPanel({ skill, clients, isBulkUpdatingExternally = false
             >
               <PillLogo client={client} />
               <span className="tool-pill__name">{client.name}</span>
+              <RecommendedBadge clientId={client.id} className="recommended-badge--compact" />
               <span className="sr-only">{on ? t("skill.tools.toggle.on") : t("skill.tools.toggle.off")}</span>
             </button>
           );
@@ -158,7 +161,8 @@ type ProjectSkillPanelProps = {
 export function ProjectSkillPanel({ skill, project, clients }: ProjectSkillPanelProps) {
   const actions = useSkillActions();
   const [busy, setBusy] = useState(false);
-  const names = project.clients.map((id) => clients.find((client) => client.id === id)?.name ?? id);
+  const projectClients = orderByRecommended(project.clients, (id) => id);
+  const names = projectClients.map((id) => clients.find((client) => client.id === id)?.name ?? id);
   const locked = skill.projectEnabled && skill.projectShared;
 
   async function toggle() {
@@ -194,7 +198,7 @@ export function ProjectSkillPanel({ skill, project, clients }: ProjectSkillPanel
       </p>
       {locked ? <p className="skill-project-panel__note" role="note">{t("skill.project.shared")}</p> : null}
       <div className="tool-pill-grid">
-        {project.clients.map((id) => {
+        {projectClients.map((id) => {
           const client = clients.find((entry) => entry.id === id) ?? { id, name: id, detected: false };
           return (
             <span key={id} className={`tool-pill${skill.projectEnabled ? " is-enabled" : ""}`} aria-hidden="true">

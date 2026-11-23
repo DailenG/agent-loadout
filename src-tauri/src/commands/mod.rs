@@ -270,21 +270,6 @@ pub fn app_info() -> AppInfo {
     }
 }
 
-/// A configuration scope the sidebar switcher offers (SPEC 13.1). Projects
-/// join in M16.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Scope {
-    /// User-wide configuration of every client.
-    System,
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn list_scopes() -> Vec<Scope> {
-    vec![Scope::System]
-}
-
 /// Where the data directory setting came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]

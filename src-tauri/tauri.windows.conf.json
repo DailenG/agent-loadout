@@ -21,7 +21,9 @@
       "nsis": {
         "installMode": "currentUser",
         "template": "windows/installer.nsi",
-        "installerHooks": "windows/hooks.nsh"
+        "installerHooks": "windows/hooks.nsh",
+        "sidebarImage": "windows/sidebar.bmp",
+        "headerImage": "windows/header.bmp"
       }
     }
   }

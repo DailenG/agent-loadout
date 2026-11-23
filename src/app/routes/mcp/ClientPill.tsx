@@ -5,6 +5,7 @@
 
 import { useCallback, useState } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
+import { orderByRecommended } from "@/app/clients";
 import { useNotifications } from "@/app/components/notifications";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -30,8 +31,9 @@ const STATE_KEYS = {
 export type VisiblePill = { pill: ClientPillData; client: ClientInfo };
 
 /**
- * The pills a row shows, in client order: clients that are detected, or
- * selected, or have something other than "disabled" to say.
+ * The pills a row shows, in client order with the recommended client first:
+ * clients that are detected, or selected, or have something other than
+ * "disabled" to say.
  */
 export function visiblePills(row: ServerRow, clients: readonly ClientInfo[]): VisiblePill[] {
   return pillsToShow(row.pills, clients);
@@ -40,10 +42,11 @@ export function visiblePills(row: ServerRow, clients: readonly ClientInfo[]): Vi
 /** [`visiblePills`] for any row's pills. */
 export function pillsToShow(pills: readonly ClientPillData[], clients: readonly ClientInfo[]): VisiblePill[] {
   const byId = new Map(clients.map((client) => [client.id, client]));
-  return pills.flatMap((pill) => {
+  const shown = pills.flatMap((pill) => {
     const client = byId.get(pill.client) ?? { id: pill.client, name: pill.client, detected: false, supported: false };
     return client.detected || pill.selected || pill.state !== "disabled" ? [{ pill, client }] : [];
   });
+  return orderByRecommended(shown, (entry) => entry.client.id);
 }
 
 /** The clients a row is enabled for, as an explicit list. */

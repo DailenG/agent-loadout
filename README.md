@@ -1,10 +1,12 @@
 # Loadout
 
 Loadout (`agent-loadout`) manages MCP servers, skills and secret references for
-AI coding clients (Claude Code, Codex, omp, Pi, Claude Desktop, VS Code with
-GitHub Copilot, Cursor and more) from one versioned, offline store. It writes
-each client's native config files, never touches entries it did not create,
-and keeps secret values out of the store.
+AI coding clients (omp, the recommended one, plus Claude Code, Codex, Pi,
+Claude Desktop, VS Code with GitHub Copilot, Cursor and more) from one
+versioned, offline store. It writes each client's native config files, never
+touches entries it did not create, and keeps secret values out of the store.
+Loadout is built and tested with [omp](https://github.com/can1357/oh-my-pi)
+first, so the app lists it first and marks it "Recommended".
 
 Status: early development. The design is in [SPEC.md](SPEC.md); milestones M0
 (workspace bootstrap), M1 (store schemas and validation), M2 (git-backed

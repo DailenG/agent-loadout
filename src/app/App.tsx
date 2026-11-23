@@ -22,7 +22,6 @@ import {
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
 import { useDriftTriggers } from "@/app/apply/driftTriggers";
 import { PendingChangesPill } from "@/app/apply/PendingChangesPill";
-import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { AppTooltip } from "@/app/components/AppTooltip";
 import { EmptyPage } from "@/app/components/EmptyPage";
 import { HeaderToolbarProvider } from "@/app/components/HeaderSlots";
@@ -40,16 +39,10 @@ import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRem
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
 import { UpdatesSection, useStartupUpdateCheck } from "@/app/routes/settings/updates/UpdatesSection";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
-import {
-  dataHomeSourceLabels,
-  errorMessage,
-  platformLabels,
-  scopeLabels,
-  scopeOptionLabels,
-  t,
-  type MessageKey,
-} from "@/i18n/en";
-import { APP_ID, PRODUCT_NAME, REPO, type Scope } from "@/ipc/bindings";
+import { ActiveScopeProvider } from "@/app/scope/ActiveScope";
+import { ScopeSwitcher } from "@/app/scope/ScopeSwitcher";
+import { dataHomeSourceLabels, errorMessage, platformLabels, t, type MessageKey } from "@/i18n/en";
+import { APP_ID, PRODUCT_NAME, REPO } from "@/ipc/bindings";
 import {
   IpcFailure,
   TransportContext,
@@ -158,7 +151,6 @@ const routes: RouteDefinition[] = [
 /** Query keys of the commands the shell reads. */
 export const queryKeys = {
   appInfo: ["app_info"],
-  scopes: ["list_scopes"],
   dataHome: ["data_home"],
 } as const;
 
@@ -180,11 +172,6 @@ function useAppInfo() {
     queryFn: () => commands.appInfo(),
     staleTime: Infinity,
   });
-}
-
-function useScopes() {
-  const { commands } = useTransport();
-  return useQuery({ queryKey: queryKeys.scopes, queryFn: () => commands.listScopes() });
 }
 
 function useDataHome() {
@@ -593,32 +580,6 @@ function WindowsWindowControls() {
   );
 }
 
-function ScopeSwitcher() {
-  const scopes = useScopes();
-  const [activeScope, setActiveScope] = useState<Scope["kind"]>("system");
-  const options: AppSelectOption<Scope["kind"]>[] = (scopes.data ?? []).map((scope) => ({
-    value: scope.kind,
-    label: scopeOptionLabels[scope.kind],
-  }));
-
-  return (
-    <div className="scope-switcher">
-      <span className="scope-switcher__label" aria-hidden="true">
-        {t("scope.label")}
-      </span>
-      <AppSelect
-        className="scope-switcher__select"
-        value={activeScope}
-        options={options}
-        onChange={setActiveScope}
-        ariaLabel={t("scope.switcher.aria")}
-        selectedLabel={scopeLabels[activeScope]}
-        disabled={options.length === 0}
-      />
-    </div>
-  );
-}
-
 function SettingsPage(props: {
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
@@ -843,7 +804,7 @@ function AppContent(props: { features: FeatureFlags }) {
             />
           ) : null}
         </div>
-        <ScopeSwitcher />
+        <ScopeSwitcher onExpandSidebar={() => setIsSidebarCollapsed(false)} />
         <div className="sidebar-divider" aria-hidden="true" />
         <nav aria-label={t("app.nav.primary")} className="nav-list">
           {visibleRoutes.map((route) => {
@@ -929,7 +890,9 @@ export function App({ transport, queryClient, features = DEFAULT_FEATURES }: App
     <TransportContext.Provider value={transport}>
       <QueryClientProvider client={client}>
         <NotificationProvider>
-          <AppContent features={features} />
+          <ActiveScopeProvider>
+            <AppContent features={features} />
+          </ActiveScopeProvider>
           <AppTooltip />
         </NotificationProvider>
       </QueryClientProvider>

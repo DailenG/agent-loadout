@@ -1,8 +1,9 @@
 //! Tools page commands (SPEC 13.7): every client with an MCP config, its
 //! detection, user and project files, and a capability summary; opening a
-//! client's folder takes a client id, never a path from the frontend
-//! (SPEC 17).
+//! client's folder or homepage takes a client id, never a path or URL from
+//! the frontend (SPEC 17).
 
+use std::ffi::OsStr;
 use std::path::Path;
 
 use agent_loadout_core::adapters::detect::detect;
@@ -77,6 +78,32 @@ pub struct ToolInfo {
     /// The client reads its file only at launch.
     pub restart_required: bool,
     pub warnings: Vec<IpcError>,
+    /// Where to get the client, from [`HOMEPAGES`]; opened by
+    /// `open_tool_homepage` with the client id.
+    pub homepage: Option<String>,
+}
+
+/// Client homepages the app links to ("Get omp" on the Tools page). A fixed
+/// table: `open_tool_homepage` opens only these URLs.
+const HOMEPAGES: &[(&str, &str)] = &[("omp", "https://github.com/can1357/oh-my-pi")];
+
+/// The homepage of `client`, if the table has one.
+fn homepage(client: &str) -> Option<&'static str> {
+    HOMEPAGES
+        .iter()
+        .find(|(id, _)| *id == client)
+        .map(|(_, url)| *url)
+}
+
+/// The URL `open_tool_homepage` opens for `client`; an error for a client
+/// without one, so no other URL can be opened.
+pub fn homepage_of(client: &str) -> Result<&'static str, CoreError> {
+    homepage(client).ok_or_else(|| {
+        CoreError::new(
+            ErrorCode::UnknownClient,
+            format!("no homepage for client {client:?}"),
+        )
+    })
 }
 
 fn project_file(location: &Location, core: &Core) -> Option<String> {
@@ -132,6 +159,7 @@ fn tool(core: &Core, spec: &AdapterSpec, desired: Option<&DesiredState>) -> Opti
         env_refs: mcp.caps.env_ref.is_some(),
         restart_required: mcp.caps.restart_required,
         warnings,
+        homepage: homepage(spec.id).map(str::to_owned),
     })
 }
 
@@ -190,6 +218,11 @@ pub fn folder_of(core: &Core, client: &str) -> Result<std::path::PathBuf, CoreEr
 }
 
 pub(super) fn open_folder(folder: &Path) -> Result<(), CoreError> {
+    os_open(folder.as_os_str()).map_err(|err| err.with_path(folder))
+}
+
+/// Hands `target` (a folder or a URL) to the OS opener.
+fn os_open(target: &OsStr) -> Result<(), CoreError> {
     let program = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -198,7 +231,7 @@ pub(super) fn open_folder(folder: &Path) -> Result<(), CoreError> {
         "xdg-open"
     };
     std::process::Command::new(program)
-        .arg(folder)
+        .arg(target)
         .spawn()
         .map(drop)
         .map_err(|err| {
@@ -206,7 +239,6 @@ pub(super) fn open_folder(folder: &Path) -> Result<(), CoreError> {
                 ErrorCode::ToolNotFound,
                 format!("cannot start {program}: {err}"),
             )
-            .with_path(folder)
         })
 }
 
@@ -226,6 +258,21 @@ pub async fn reveal_tool_folder(
     blocking(&state, move |core| {
         let folder = folder_of(core, &client)?;
         open_folder(&folder).map_err(IpcError::from)
+    })
+    .await
+}
+
+/// Opens `client`'s homepage in the browser. The URL comes from a fixed
+/// table, never from the caller.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_tool_homepage(
+    state: tauri::State<'_, AppState>,
+    client: String,
+) -> CmdResult<()> {
+    blocking(&state, move |_core| {
+        let url = homepage_of(&client)?;
+        os_open(OsStr::new(url)).map_err(IpcError::from)
     })
     .await
 }

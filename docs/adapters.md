@@ -6,6 +6,11 @@ it writes, what it can express, and how far each one has been checked
 against the real client. The design is in [SPEC.md](../SPEC.md) section 7;
 the user guide is [user-guide.md](user-guide.md).
 
+omp (oh-my-pi) is the recommended client: Loadout is built and tested with
+omp first, and the app lists it first and marks it "Recommended" wherever it
+shows clients. That order is presentation only. The generated table below
+keeps the adapter table's order, which detection, scans and apply follow.
+
 ## Supported clients
 
 The table below is generated from the adapter table in

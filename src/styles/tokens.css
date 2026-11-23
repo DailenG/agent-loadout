@@ -1582,13 +1582,23 @@ code {
 
 .page-header__row {
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
 }
 
+/* C4 (M28): the header toolbar host is one flex row. Its items share one
+   gap and one center line with the page title; see the M28 block for the
+   control height token. The min-height keeps the title on the same line on
+   pages without a toolbar (Settings, About). */
 .page-header__row > .mcp-header-toolbar-slot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--header-toolbar-gap);
   min-width: 0;
+  min-height: var(--header-control-height);
   flex: 1 1 auto;
 }
 
@@ -1899,8 +1909,8 @@ code {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 33px;
-  min-height: 33px;
+  height: var(--header-control-height);
+  min-height: var(--header-control-height);
   padding: 0 10px;
   border-radius: 9px;
   font-size: 0.78rem;
@@ -1927,12 +1937,16 @@ code {
 
 .skills-toolbar-button--refresh:active:not(:disabled),
 .skills-toolbar-button--update-all:active:not(:disabled),
-.skills-toolbar-button--refresh.is-loading,
-.skills-toolbar-button--update-all.is-loading,
-.tools-refresh-button:active:not(:disabled),
-.tools-refresh-button.is-loading {
+.tools-refresh-button:active:not(:disabled) {
   box-shadow: 0 4px 10px rgba(47, 120, 255, 0.12);
   transform: translateY(1px);
+}
+
+/* A loading button stays on the toolbar's center line (#1). */
+.skills-toolbar-button--refresh.is-loading,
+.skills-toolbar-button--update-all.is-loading,
+.tools-refresh-button.is-loading {
+  box-shadow: 0 4px 10px rgba(47, 120, 255, 0.12);
 }
 
 .skills-toolbar-button--refresh {
@@ -1965,8 +1979,8 @@ code {
 }
 
 .ghost-button.tools-refresh-button {
-  height: 33px;
-  min-height: 33px;
+  height: var(--header-control-height);
+  min-height: var(--header-control-height);
   padding: 0 10px;
   border-radius: 9px;
   transition:
@@ -1981,7 +1995,7 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 33px;
+  height: var(--header-control-height);
   padding: 2px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1993,8 +2007,8 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 27px;
-  height: 27px;
+  width: calc(var(--header-control-height) - 6px);
+  height: calc(var(--header-control-height) - 6px);
   padding: 0;
   border: 0;
   border-radius: 7px;
@@ -2159,8 +2173,8 @@ code {
   flex: 0 1 230px;
   display: flex;
   align-items: center;
-  height: 33px;
-  min-height: 33px;
+  height: var(--header-control-height);
+  min-height: var(--header-control-height);
   min-width: 180px;
   gap: 8px;
   border: 1px solid var(--line);
@@ -3876,14 +3890,14 @@ code {
 }
 
 .secondary-button--compact.skills-toolbar-button {
-  min-height: 33px;
+  min-height: var(--header-control-height);
   padding: 0 10px;
   border-radius: 9px;
   font-weight: 500;
 }
 
 .batch-mode-button {
-  width: 33px;
+  width: var(--header-control-height);
   padding: 0;
 }
 
@@ -5495,9 +5509,11 @@ code {
   background: var(--surface);
 }
 
+/* The card title sits above its description with a small gap (#5 note). */
 .market-panel .panel-header {
-  display: flex;
-  align-items: center;
+  display: grid;
+  gap: 4px;
+  align-content: center;
   min-height: 36px;
   flex-shrink: 0;
 }
@@ -18584,3 +18600,230 @@ button.settings-form-item:disabled {
 .apply-discard__confirm {
   margin: 4px 0 8px;
 }
+
+/* M27 omp recommended (#2): the Recommended badge, named source tabs, the Tools "Get" action. */
+.recommended-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.recommended-badge--compact {
+  min-height: 16px;
+  padding: 1px 5px;
+  font-size: 0.62rem;
+}
+
+.skills-source-tab__name {
+  white-space: nowrap;
+}
+
+.skills-source-menu-item {
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+}
+
+.mcp-form-app__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card__header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-card__get-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* M26 sidebar scope switcher: projects, trust icons, Add folder (SPEC 13.1). */
+.app-select__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-select__label > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-select__icon {
+  display: inline-grid;
+  flex: 0 0 16px;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.app-select__icon svg,
+.scope-trust svg {
+  width: 16px;
+  height: 16px;
+}
+
+.scope-trust {
+  display: inline-grid;
+  place-items: center;
+}
+
+.scope-trust--trusted {
+  color: var(--success);
+}
+
+.scope-trust--review {
+  color: var(--warning);
+}
+
+.scope-trust--broken {
+  color: var(--danger);
+}
+
+.scope-switcher__popover .app-select__option--action {
+  margin-top: 3px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  color: var(--accent);
+}
+
+.scope-switcher__popover .app-select__option--action .app-select__icon {
+  color: inherit;
+}
+
+.scope-switcher__popover .app-select__option:disabled:not(.app-select__option--action) {
+  cursor: default;
+  opacity: 1;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: normal;
+}
+
+.scope-switcher-collapsed {
+  display: none;
+  padding: 0 0 12px;
+}
+
+.app-shell.is-sidebar-collapsed .scope-switcher-collapsed {
+  display: block;
+}
+/* end M26 */
+
+/* M28 header toolbar (#1, contract C4): one control height, one gap, one
+   center line for every page header action. */
+:root {
+  --header-control-height: 34px;
+  --header-toolbar-gap: 8px;
+  --header-pill-height: 28px;
+}
+
+/* When a long toolbar wraps (small windows), the title and the pending pill
+   stay level with its first row (the row aligns to flex-start). */
+.page-header__row > h1 {
+  display: flex;
+  align-items: center;
+  min-height: var(--header-control-height);
+}
+
+.page-header__row > .apply-pending-pill {
+  flex: 0 0 auto;
+  height: var(--header-pill-height);
+  min-height: var(--header-pill-height);
+  margin-top: calc((var(--header-control-height) - var(--header-pill-height)) / 2);
+}
+
+/* Pages that wrap their actions in a toolbar section or tab row keep the
+   host's row rules, so nested and direct actions line up the same way. */
+.mcp-header-toolbar-slot > :is(.skills-header-bar__tools, .page-tabs-row) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--header-toolbar-gap);
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.mcp-header-toolbar-slot
+  :is(
+    .secondary-button--compact,
+    .skills-toolbar-button,
+    .tools-refresh-button,
+    .search-field--header,
+    .skills-view-toggle,
+    .app-select__trigger
+  ) {
+  height: var(--header-control-height);
+  min-height: var(--header-control-height);
+  box-sizing: border-box;
+  margin: 0;
+}
+
+/* Plain compact buttons match the toolbar buttons (Refresh, Install). */
+.mcp-header-toolbar-slot .secondary-button--compact:not(.batch-mode-button) {
+  flex: 0 0 auto;
+  gap: 5px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mcp-header-toolbar-slot .app-select__trigger {
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 0.78rem;
+}
+
+/* Install's Skill/MCP switch becomes a segmented control of the same height,
+   like the Skills view toggle. */
+.mcp-header-toolbar-slot .install-category-row.page-tabs.filter-tabs {
+  --page-tab-item-radius: 7px;
+  --page-tab-shell-padding: 2px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 2px;
+  height: var(--header-control-height);
+  box-sizing: border-box;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.mcp-header-toolbar-slot .install-category-tab {
+  gap: 6px;
+  height: calc(var(--header-control-height) - 6px);
+  min-height: 0;
+  padding: 0 12px;
+  font-size: 0.78rem;
+}
+
+/* The sidebar's edge toggle sits at the start of the main panel, level with
+   the page title; the panel's padding keeps the title clear of it. */
+.app-shell.is-macos-window .main-panel,
+.app-shell.is-windows-window .main-panel {
+  padding-left: calc(var(--sidebar-handle-width) + 16px);
+}
+/* end M28 */

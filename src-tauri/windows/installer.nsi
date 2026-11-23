@@ -77,6 +77,11 @@ ${StrLoc}
 !define UNINSTALLERSIGNCOMMAND "{{uninstaller_sign_cmd}}"
 !define ESTIMATEDSIZE "{{estimated_size}}"
 !define STARTMENUFOLDER "{{start_menu_folder}}"
+; Loadout wording (#1, M28): the finish page offers a desktop shortcut right
+; after the progress log reported the Start menu one, so both name the
+; shortcut they mean. English only, like the hooks' messages.
+!define LOADOUT_DESKTOP_SHORTCUT_TEXT "Also add a desktop shortcut"
+!define LOADOUT_STARTMENU_SHORTCUT_DONE "Start menu shortcut created"
 
 Var PassiveMode
 Var UpdateMode
@@ -441,7 +446,7 @@ Var AppStartMenuFolder
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 ; Use show readme button in the finish page as a button create a desktop shortcut
 !define MUI_FINISHPAGE_SHOWREADME
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "${LOADOUT_DESKTOP_SHORTCUT_TEXT}"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
 ; Show run app after installation.
 !define MUI_FINISHPAGE_RUN
@@ -996,14 +1001,22 @@ Function CreateOrUpdateStartMenuShortcut
     ${EndIf}
   ${EndIf}
 
+  ; NSIS logs a bare "Create shortcut: <path>" here, which reads as if the
+  ; desktop shortcut offered on the finish page already exists; log which
+  ; shortcut this is instead.
   !if "${STARTMENUFOLDER}" != ""
     CreateDirectory "$SMPROGRAMS\$AppStartMenuFolder"
-    CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"
+    StrCpy $R1 "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"
   !else
-    CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    StrCpy $R1 "$SMPROGRAMS\${PRODUCTNAME}.lnk"
   !endif
+  SetDetailsPrint none
+  CreateShortcut "$R1" "$INSTDIR\${MAINBINARYNAME}.exe"
+  SetDetailsPrint lastused
+  !insertmacro SetLnkAppUserModelId "$R1"
+  ${If} ${FileExists} "$R1"
+    DetailPrint "${LOADOUT_STARTMENU_SHORTCUT_DONE}"
+  ${EndIf}
 FunctionEnd
 
 Function CreateOrUpdateDesktopShortcut

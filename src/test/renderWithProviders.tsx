@@ -1,6 +1,6 @@
 // Renders a page or component with the app's providers over a mock
-// transport: query client, notifications, tooltips and a header toolbar
-// host (pages portal their toolbar into it).
+// transport: query client, notifications, tooltips, the active scope and a
+// header toolbar host (pages portal their toolbar into it).
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
@@ -10,8 +10,14 @@ import { createQueryClient } from "@/app/App";
 import { AppTooltip } from "@/app/components/AppTooltip";
 import { HeaderToolbarProvider } from "@/app/components/HeaderSlots";
 import { NotificationProvider } from "@/app/components/notifications";
+import { ActiveScopeProvider, type ActiveScope } from "@/app/scope/ActiveScope";
 import { TransportContext } from "@/ipc/transport";
 import { createMockTransport, type MockTransportOptions } from "@/test/mockTransport";
+
+export type RenderOptions = MockTransportOptions & {
+  /** The active scope the shell starts with (default User). */
+  scope?: ActiveScope;
+};
 
 function ToolbarHost({ children }: { children: ReactElement }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -23,15 +29,18 @@ function ToolbarHost({ children }: { children: ReactElement }) {
   );
 }
 
-export function renderWithProviders(ui: ReactElement, options: MockTransportOptions = {}) {
-  const transport = createMockTransport(options);
+export function renderWithProviders(ui: ReactElement, options: RenderOptions = {}) {
+  const { scope, ...transportOptions } = options;
+  const transport = createMockTransport(transportOptions);
   const queryClient = createQueryClient();
   const user = userEvent.setup();
   const view = render(
     <TransportContext.Provider value={transport}>
       <QueryClientProvider client={queryClient}>
         <NotificationProvider>
-          <ToolbarHost>{ui}</ToolbarHost>
+          <ActiveScopeProvider initial={scope}>
+            <ToolbarHost>{ui}</ToolbarHost>
+          </ActiveScopeProvider>
           <AppTooltip />
         </NotificationProvider>
       </QueryClientProvider>

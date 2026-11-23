@@ -13,7 +13,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
+import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import {
@@ -723,7 +725,7 @@ export function ClientGrid({ clients, choice, onChange }: ClientGridProps) {
         <span>{t("mcp.dialog.allDetected")}</span>
       </label>
       <div className="mcp-form-apps">
-        {clients.map((client) => {
+        {orderByRecommended(clients, (client) => client.id).map((client) => {
           const checked = allDetected ? client.detected && client.supported : chosen.includes(client.id);
           const disabled = allDetected || !client.supported || (!client.detected && !checked);
           const label = !client.supported
@@ -741,7 +743,8 @@ export function ClientGrid({ clients, choice, onChange }: ClientGridProps) {
                 onChange={(event) => setClient(client.id, event.target.checked)}
               />
               <ToolLogo clientId={client.id} name={client.name} />
-              <span>{label}</span>
+              <span className="mcp-form-app__name">{label}</span>
+              <RecommendedBadge clientId={client.id} />
             </label>
           );
         })}
@@ -899,7 +902,7 @@ function PreviewPanel({ clients, draft }: { clients: readonly ClientInfo[]; draf
   }
   return (
     <div className="mcp-preview-list">
-      {preview.data.map((entry) => {
+      {orderByRecommended(preview.data, (entry) => entry.client).map((entry) => {
         const name = clientName(clients, entry.client);
         return (
           <section key={entry.client} className={`mcp-preview${entry.problem ? " is-blocked" : ""}`} aria-label={name}>

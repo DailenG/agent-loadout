@@ -19,7 +19,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::app_info,
-            commands::list_scopes,
             commands::data_home,
             commands::servers::list_servers,
             commands::servers::get_server,
@@ -40,6 +39,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::apply::discard_pending,
             commands::tools::list_tools,
             commands::tools::reveal_tool_folder,
+            commands::tools::open_tool_homepage,
             commands::projects::list_projects,
             commands::projects::pick_project_folder,
             commands::projects::add_project,
@@ -229,6 +229,15 @@ mod tests {
             committed == generated_bindings(),
             "src/ipc/bindings.ts is stale; run `npm run bindings`"
         );
+    }
+
+    /// The sidebar lists projects through `list_projects`; the old
+    /// System-only `list_scopes` is gone (M26).
+    #[test]
+    fn bindings_have_no_list_scopes() {
+        let generated = generated_bindings();
+        assert!(!generated.contains("list_scopes"));
+        assert!(generated.contains("\"list_projects\""));
     }
 
     /// Rewrites `src/ipc/bindings.ts` (`npm run bindings` runs this ignored

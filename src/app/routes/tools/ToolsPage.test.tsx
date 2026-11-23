@@ -25,6 +25,7 @@ const CURSOR: ToolInfo = {
   envRefs: false,
   restartRequired: true,
   warnings: [],
+  homepage: null,
 };
 
 const CLAUDE: ToolInfo = {
@@ -40,6 +41,7 @@ const CLAUDE: ToolInfo = {
   envRefs: true,
   restartRequired: false,
   warnings: [],
+  homepage: null,
 };
 
 const LEGACY: ToolInfo = {
@@ -51,6 +53,15 @@ const LEGACY: ToolInfo = {
   supported: false,
   readOnly: true,
   userFiles: [],
+};
+
+const OMP: ToolInfo = {
+  ...CURSOR,
+  id: "omp",
+  name: "omp",
+  tier: "a",
+  userFiles: [{ path: "~/.omp/agent/mcp.json", exists: false }],
+  homepage: "https://github.com/can1357/oh-my-pi",
 };
 
 function pills(selected: string[]): ServerRow["pills"] {
@@ -168,6 +179,41 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(transport.calls.filter((call) => call === "listTools")).toHaveLength(2),
     );
+  });
+
+  it("keeps detected tools first, puts omp before other undetected tools, and badges it", async () => {
+    renderPage({ listTools: async () => ok([CURSOR, CLAUDE, LEGACY, OMP]) });
+    const cards = await screen.findAllByRole("article");
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+      "Claude Code",
+      "omp",
+      "Cursor",
+      "Claude Desktop",
+    ]);
+    expect(within(cards[1]).getByText(t("recommended.badge"))).toHaveAttribute(
+      "data-tooltip",
+      t("recommended.tooltip"),
+    );
+    expect(within(cards[0]).queryByText(t("recommended.badge"))).not.toBeInTheDocument();
+  });
+
+  it("puts a detected omp first and offers no Get action for it", async () => {
+    renderPage({ listTools: async () => ok([CURSOR, CLAUDE, { ...OMP, detected: true }]) });
+    const cards = await screen.findAllByRole("article");
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["omp", "Claude Code", "Cursor"]);
+    expect(
+      within(cards[0]).queryByRole("button", { name: t("tools.getAria", { name: "omp" }) }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers Get omp for an undetected omp and opens its homepage by id", async () => {
+    const openToolHomepage = vi.fn(async () => ok(null));
+    const { user } = renderPage({ listTools: async () => ok([CLAUDE, CURSOR, OMP]), openToolHomepage });
+    const omp = within((await screen.findAllByRole("article"))[1]);
+    await user.click(omp.getByRole("button", { name: t("tools.getAria", { name: "omp" }) }));
+    await waitFor(() => expect(openToolHomepage).toHaveBeenCalledWith("omp"));
+    // Only omp has a homepage: Cursor gets no Get action.
+    expect(screen.queryByRole("button", { name: t("tools.getAria", { name: "Cursor" }) })).not.toBeInTheDocument();
   });
 
   it("toggles a server for the managed client with an explicit choice", async () => {

@@ -1,10 +1,16 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
+import { useActiveScope } from "@/app/scope/ActiveScope";
 import { t } from "@/i18n/en";
 import type { PickedFolder, ProjectRow, TrustReview } from "@/ipc/bindings";
 import { MOCK_CHANGE, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
+
+function ScopeProbe() {
+  const { scope } = useActiveScope();
+  return <output data-testid="scope">{scope.kind === "user" ? "user" : scope.id}</output>;
+}
 
 // Paths arrive under their placeholder roots, as the backend sends them.
 const TRUSTED: ProjectRow = {
@@ -210,5 +216,33 @@ describe("ProjectsPage", () => {
     await user.click(await screen.findByRole("button", { name: t("projects.action.addFolder") }));
     await waitFor(() => expect(transport.calls).toContain("pickProjectFolder"));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers Add folder in the empty state and makes the new project the active scope", async () => {
+    let rows: ProjectRow[] = [];
+    const { user } = renderWithProviders(
+      <>
+        <ScopeProbe />
+        <ProjectsPage />
+      </>,
+      {
+        commands: {
+          listProjects: async () => ok(rows),
+          pickProjectFolder: async () => ok(BOUND_FOLDER),
+          addProject: async () => {
+            rows = [CHANGED];
+            return ok({ id: CHANGED.id, trust: "changed", commit: MOCK_CHANGE.commit, apply: null });
+          },
+          reviewProject: async () => ok(REVIEW),
+        },
+      },
+    );
+    const empty = (await screen.findByText(t("page.empty.projects"))).closest(".empty-state") as HTMLElement;
+    await user.click(within(empty).getByRole("button", { name: t("projects.action.addFolder") }));
+    const dialog = await screen.findByRole("dialog", { name: t("projects.folder.titleAdd") });
+    await user.click(within(dialog).getByRole("button", { name: t("projects.folder.add") }));
+
+    await waitFor(() => expect(screen.getByTestId("scope")).toHaveTextContent(CHANGED.id));
+    await screen.findByRole("dialog", { name: t("projects.review.title", { name: "home-lab" }) });
   });
 });

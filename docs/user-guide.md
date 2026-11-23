@@ -1,8 +1,13 @@
 # Loadout user guide
 
 Loadout keeps one store of MCP servers, skills and secret references and
-writes them into the config files of your AI coding clients (Claude Code,
-Codex, oh-my-pi, Pi, Claude Desktop, GitHub Copilot, Cursor and 31 more).
+writes them into the config files of your AI coding clients (oh-my-pi, the
+recommended client, plus Claude Code, Codex, Pi, Claude Desktop, GitHub
+Copilot, Cursor and 31 more). Loadout is built and tested with
+[omp](https://github.com/can1357/oh-my-pi) first, so the app lists it first
+and marks it "Recommended"; the Tools page offers "Get omp" when it isn't
+installed. The recommendation is presentation only: Loadout never enables
+anything in omp, or any other client, on its own.
 Every change is a commit in a local git repository, so you can see what
 changed, undo an apply, and restore any earlier version. Secret values
 never enter the store: servers refer to secrets by alias, and the alias

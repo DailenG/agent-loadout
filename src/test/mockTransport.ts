@@ -12,9 +12,9 @@ import type {
   DataHome,
   IpcError,
   PendingPlan,
+  ProjectRow,
   ProviderEntry,
   RemotesOverview,
-  Scope,
   ServerList,
   SkillChange,
   SkillClient,
@@ -26,7 +26,8 @@ import type { CommandResult, Commands, Transport } from "@/ipc/transport";
 
 export type MockTransportOptions = {
   appInfo?: AppInfo;
-  scopes?: Scope[];
+  /** What `listProjects` answers (default none). */
+  projects?: ProjectRow[];
   dataHome?: CommandResult<DataHome>;
   isMaximized?: boolean;
   /** Replaces the default answer of these commands. */
@@ -103,6 +104,7 @@ export const MOCK_TOOLS: ToolInfo[] = [
     envRefs: true,
     restartRequired: false,
     warnings: [],
+    homepage: null,
   },
 ];
 
@@ -189,7 +191,6 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
 
   const defaults: Commands = {
     appInfo: async () => options.appInfo ?? MOCK_APP_INFO,
-    listScopes: async () => options.scopes ?? [{ kind: "system" }],
     dataHome: async () => options.dataHome ?? ok(MOCK_DATA_HOME),
     listServers: async () => ok(MOCK_SERVER_LIST),
     getServer: async (id) => mockIpcError({ code: "not_found", message: `server ${id} does not exist` }),
@@ -212,7 +213,8 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
       ok({ discarded: entities ?? [], commit: MOCK_CHANGE.commit, tag: "auto/pre-restore/mock" }),
     listTools: async () => ok(MOCK_TOOLS),
     revealToolFolder: async () => ok(null),
-    listProjects: async () => ok([]),
+    openToolHomepage: async () => ok(null),
+    listProjects: async () => ok(options.projects ?? []),
     pickProjectFolder: async () => ok(null),
     addProject: async () => ok({ id: "mock-a1b2", trust: "untrusted", commit: MOCK_CHANGE.commit, apply: null }),
     initProject: async () => ok({ id: "mock-a1b2", trust: "trusted", ...MOCK_CHANGE }),

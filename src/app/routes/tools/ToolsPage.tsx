@@ -1,12 +1,15 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
 // Grid layout, card markup and icons ported from DailenG/skilldock@181b52b src/app/routes/tools.tsx;
-// the refresh button from src/app/App.tsx. Data and capability summary are new (SPEC 13.7).
+// the refresh button from src/app/App.tsx. Data and capability summary are new (SPEC 13.7), as
+// are the Recommended badge and the "Get" action for an undetected recommended client (#2).
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
+import { recommendedFirst } from "@/app/clients";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
+import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { ToolManageDialog } from "@/app/routes/tools/ToolManageDialog";
 import { errorMessage, t } from "@/i18n/en";
@@ -76,9 +79,10 @@ type ToolCardProps = {
   openDisabled: boolean;
   onOpenFolder: () => void;
   onManage: () => void;
+  onGet: () => void;
 };
 
-function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage }: ToolCardProps) {
+function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
   const yesNo = (value: boolean) => (value ? t("tools.capability.yes") : t("tools.capability.no"));
 
   return (
@@ -88,6 +92,7 @@ function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage }: Too
           <div className="tool-card__title-row">
             <ToolLogo clientId={tool.id} name={tool.name} />
             <strong>{tool.name}</strong>
+            <RecommendedBadge clientId={tool.id} />
             <div className="tool-card__status-badges">
               <span className="status-badge tone-neutral">
                 {t("tools.tier", { tier: tool.tier.toUpperCase() })}
@@ -105,15 +110,30 @@ function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage }: Too
               ) : null}
             </div>
           </div>
+          {tool.homepage && !tool.detected ? (
+            <p className="tool-card__get-hint">{t("tools.getHint", { name: tool.name })}</p>
+          ) : null}
         </div>
-        <button
-          className="primary-button primary-button--compact tool-card__manage-button"
-          type="button"
-          onClick={onManage}
-          aria-label={t("tools.manageAria", { name: tool.name })}
-        >
-          {t("tools.manage")}
-        </button>
+        <div className="tool-card__header-actions">
+          {tool.homepage && !tool.detected ? (
+            <button
+              className="secondary-button secondary-button--compact tool-card__get-button"
+              type="button"
+              onClick={onGet}
+              aria-label={t("tools.getAria", { name: tool.name })}
+            >
+              {t("tools.get", { name: tool.name })}
+            </button>
+          ) : null}
+          <button
+            className="primary-button primary-button--compact tool-card__manage-button"
+            type="button"
+            onClick={onManage}
+            aria-label={t("tools.manageAria", { name: tool.name })}
+          >
+            {t("tools.manage")}
+          </button>
+        </div>
       </div>
       <div className="tool-card__simple-copy">
         <div className="tool-card__path-row tools-path-row">
@@ -192,11 +212,14 @@ export function ToolsPage() {
     queryKey: storeQueryKeys.tools,
     queryFn: async () => unwrap(await commands.listTools()),
   });
-  // Detected first, then table order (Array.prototype.sort is stable).
-  const sortedTools = useMemo(
-    () => [...(tools.data ?? [])].sort((left, right) => Number(right.detected) - Number(left.detected)),
-    [tools.data],
-  );
+  // Detected first, then the recommended client, then table order
+  // (Array.prototype.sort is stable).
+  const sortedTools = useMemo(() => {
+    const byRecommended = recommendedFirst<ToolInfo>((tool) => tool.id);
+    return [...(tools.data ?? [])].sort(
+      (left, right) => Number(right.detected) - Number(left.detected) || byRecommended(left, right),
+    );
+  }, [tools.data]);
   const [managingToolId, setManagingToolId] = useState("");
   const [openingToolId, setOpeningToolId] = useState("");
   const managingTool = sortedTools.find((tool) => tool.id === managingToolId) ?? null;
@@ -215,6 +238,17 @@ export function ToolsPage() {
       });
     } finally {
       setOpeningToolId("");
+    }
+  }
+
+  async function handleGet(toolId: string) {
+    try {
+      unwrap(await commands.openToolHomepage(toolId));
+    } catch (error) {
+      notify({
+        tone: "error",
+        message: error instanceof IpcFailure ? errorMessage(error.code) : t("tools.error.openHomepage"),
+      });
     }
   }
 
@@ -261,6 +295,7 @@ export function ToolsPage() {
               openDisabled={Boolean(openingToolId)}
               onOpenFolder={() => void handleOpenFolder(tool.id)}
               onManage={() => setManagingToolId(tool.id)}
+              onGet={() => void handleGet(tool.id)}
             />
           ))}
         </div>

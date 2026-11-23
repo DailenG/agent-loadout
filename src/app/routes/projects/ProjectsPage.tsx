@@ -3,18 +3,18 @@
 // backend), the trust review, Apply, Remove from list, and the effective
 // config matrix of a project.
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
+import { useChangeNotice } from "@/app/apply/changeNotice";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
+import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
 import { EffectiveMatrixView } from "@/app/routes/projects/EffectiveMatrix";
-import { FolderDialog } from "@/app/routes/projects/FolderDialog";
-import { TrustReviewDialog } from "@/app/routes/projects/TrustReviewDialog";
 import { LAYOUT_KEYS, TRUST_KEYS, failureText } from "@/app/routes/projects/labels";
+import { useActiveScope, useProjectList } from "@/app/scope/ActiveScope";
 import { errorMessage, t } from "@/i18n/en";
-import type { PickedFolder, ProjectRow, ProjectTrust } from "@/ipc/bindings";
+import type { ProjectRow, ProjectTrust } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
 
 const TRUST_TONES: Record<ProjectTrust, string> = {
@@ -101,27 +101,12 @@ export function ProjectsPage() {
   const { commands } = useTransport();
   const { notify } = useNotifications();
   const reportChange = useChangeNotice();
-  const projects = useQuery({
-    queryKey: storeQueryKeys.projects,
-    queryFn: async () => unwrap(await commands.listProjects()),
-  });
-  const [picked, setPicked] = useState<{ folder: PickedFolder; intent: "add" | "init" } | null>(null);
-  const [reviewing, setReviewing] = useState<string | null>(null);
+  const projects = useProjectList();
+  const { setScope } = useActiveScope();
+  // A new project becomes the active scope, as from the sidebar.
+  const flow = useAddFolderFlow({ onAdded: (change) => setScope({ kind: "project", id: change.id }) });
   const [matrixOf, setMatrixOf] = useState<string | null>(null);
   const [removing, setRemoving] = useState<ProjectRow | null>(null);
-
-  const pick = useMutation({
-    mutationFn: async (intent: "add" | "init") => ({
-      folder: unwrap(await commands.pickProjectFolder()),
-      intent,
-    }),
-    onSuccess: ({ folder, intent }) => {
-      if (folder) {
-        setPicked({ folder, intent });
-      }
-    },
-    onError: (error) => notify({ tone: "error", message: failureText(error) }),
-  });
 
   const apply = useMutation({
     mutationFn: async (project: ProjectRow) => ({
@@ -168,16 +153,16 @@ export function ProjectsPage() {
         <button
           className="secondary-button secondary-button--compact"
           type="button"
-          disabled={pick.isPending}
-          onClick={() => pick.mutate("add")}
+          disabled={flow.picking}
+          onClick={() => flow.start("add")}
         >
           {t("projects.action.addFolder")}
         </button>
         <button
           className="secondary-button secondary-button--compact"
           type="button"
-          disabled={pick.isPending}
-          onClick={() => pick.mutate("init")}
+          disabled={flow.picking}
+          onClick={() => flow.start("init")}
         >
           {t("projects.action.initManifest")}
         </button>
@@ -197,6 +182,14 @@ export function ProjectsPage() {
           <div className="panel-card empty-state page-empty-state">
             <h3>{t("page.empty.title")}</h3>
             <p>{t("page.empty.projects")}</p>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={flow.picking}
+              onClick={() => flow.start("add")}
+            >
+              {t("projects.action.addFolder")}
+            </button>
           </div>
         ) : null}
         <div className="project-list">
@@ -209,35 +202,12 @@ export function ProjectsPage() {
               onEffective={() => setMatrixOf(project.id)}
               onApply={() => apply.mutate(project)}
               onRemove={() => setRemoving(project)}
-              onReview={() => setReviewing(project.id)}
+              onReview={() => flow.review(project.id)}
             />
           ))}
         </div>
       </section>
-      {picked ? (
-        <FolderDialog
-          folder={picked.folder}
-          intent={picked.intent}
-          onClose={() => setPicked(null)}
-          onDone={(change, review) => {
-            setPicked(null);
-            void projects.refetch();
-            if (review) {
-              setReviewing(change.id);
-            }
-          }}
-        />
-      ) : null}
-      {reviewing ? (
-        <TrustReviewDialog
-          projectId={reviewing}
-          onClose={() => setReviewing(null)}
-          onTrusted={() => {
-            setReviewing(null);
-            void projects.refetch();
-          }}
-        />
-      ) : null}
+      {flow.dialogs}
       {removing ? (
         <div className="dialog-backdrop" role="presentation" onClick={() => setRemoving(null)}>
           <div

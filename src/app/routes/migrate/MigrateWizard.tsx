@@ -10,6 +10,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useInvalidateStore } from "@/app/apply/changeNotice";
+import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { useNotifications } from "@/app/components/notifications";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -240,9 +241,12 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
     }
   }
 
-  const wrapperOffers = (applied?.report ?? report)?.items
-    .flatMap((item) => item.offers)
-    .filter((offer): offer is Extract<MigrationOffer, { kind: "replace_wrapper" }> => offer.kind === "replace_wrapper") ?? [];
+  const wrapperOffers = orderByRecommended(
+    (applied?.report ?? report)?.items
+      .flatMap((item) => item.offers)
+      .filter((offer): offer is Extract<MigrationOffer, { kind: "replace_wrapper" }> => offer.kind === "replace_wrapper") ?? [],
+    (offer) => offer.client,
+  );
 
   let body: JSX.Element;
   let actions: JSX.Element;
