@@ -11,7 +11,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use agent_loadout_core::apply::ProjectSelection;
+use agent_loadout_core::apply::{ProjectSelection, Touched};
 use agent_loadout_core::layering::manifest::manifest_dir;
 use agent_loadout_core::layering::projects::{
     self, GITIGNORE, ManifestChange, ensure_line, load_project, mirror, read_optional, save_trust,
@@ -397,8 +397,9 @@ fn share(ctx: &Context, id: &str, servers: &[String]) -> Result<u8, CoreError> {
             }
         }
         let summary = format!("project: share {} in {id}", moved.names.join(", "));
+        let touched = Some(Touched::Project(root.clone()));
         let done =
-            projects::commit_project(&store, &ax, "project.share", summary, id, true, |tx| {
+            projects::commit_project(&store, &ax, "project.share", summary, id, touched, |tx| {
                 mirror(tx, &project)?;
                 save_trust(&ax, &project)
             })?;

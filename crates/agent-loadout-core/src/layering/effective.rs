@@ -21,7 +21,8 @@
 //! [`Caps::precedence`]: crate::adapters::caps::Caps::precedence
 //! [`Caps::compat_reads`]: crate::adapters::caps::Caps::compat_reads
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -31,8 +32,9 @@ use serde::{Serialize, Serializer};
 use crate::adapters::caps::{CompatSource, Outrank, ProjectDisable, ProjectSemantics, Source};
 use crate::adapters::detect::replacing_extension;
 use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
+use crate::apply::cache::CachedPlan;
 use crate::apply::exec::PlanInputs;
-use crate::apply::ledger::{EntryKind, container_pointer};
+use crate::apply::ledger::{EntryKind, LedgerEntry, container_pointer};
 use crate::apply::plan::{
     self, Action, EntryPlan, EntryState, Plan, PlanOptions, ProjectSelection, ScopeFilter,
     TargetPlan, client_enable_required, list_members, read_target, unset_not_expressible,
@@ -189,54 +191,120 @@ pub fn effective(
     folder: &Path,
     clients: Option<&[String]>,
 ) -> Result<EffectiveView, CoreError> {
+    let specs = selected(ax, clients)?;
+    let inputs = PlanInputs::load(store, ax)?;
+    view_of(ax, &inputs, specs, folder, None)
+}
+
+/// [`effective`] from a plan of every scope and project made already (the
+/// app's cached plan, [`crate::apply::cache`]), so the view plans nothing.
+pub fn effective_planned(
+    ax: &ApplyEnv<'_>,
+    cached: &CachedPlan,
+    folder: &Path,
+    clients: Option<&[String]>,
+) -> Result<EffectiveView, CoreError> {
+    let specs = selected(ax, clients)?;
+    view_of(ax, &cached.inputs, specs, folder, Some(&cached.plan))
+}
+
+/// The clients of a view: `clients`, or every client with MCP support on
+/// this OS that Loadout writes.
+fn selected(
+    ax: &ApplyEnv<'_>,
+    clients: Option<&[String]>,
+) -> Result<Vec<&'static AdapterSpec>, CoreError> {
     let os = ax.env.os();
-    let specs: Vec<&'static AdapterSpec> = match clients {
-        Some(ids) => ids
-            .iter()
-            .map(|id| writable(id, ax.env))
-            .collect::<Result<_, _>>()?,
-        None => ADAPTERS
+    match clients {
+        Some(ids) => ids.iter().map(|id| writable(id, ax.env)).collect(),
+        None => Ok(ADAPTERS
             .iter()
             .copied()
             .filter(|spec| on_os(spec, os) && !read_only(spec))
-            .collect(),
-    };
-    let inputs = PlanInputs::load(store, ax)?;
+            .collect()),
+    }
+}
+
+/// The view of `folder` for `specs` from `inputs`: from `full`, a plan of
+/// every scope and project, when given; else from one planner run for the
+/// user files and the folder's project.
+fn view_of(
+    ax: &ApplyEnv<'_>,
+    inputs: &PlanInputs,
+    specs: Vec<&'static AdapterSpec>,
+    folder: &Path,
+    full: Option<&Plan>,
+) -> Result<EffectiveView, CoreError> {
     let cx = ax.render_cx(inputs.memory.clone());
     let mut warnings = Vec::new();
     // The project, at the path this machine knows it by when it does (the
-    // overlay's spelling), so that planned files compare equal.
-    let mut known = false;
+    // overlay's spelling), so that planned files compare equal; and the
+    // ids this machine knows at that folder.
+    let mut known: Vec<&str> = Vec::new();
     let project = match discover(ax.env, ax.fs, folder) {
         Some(found) => {
-            let root = inputs
+            let projects = inputs
                 .desired
                 .overlay
                 .as_ref()
-                .and_then(|overlay| overlay.projects.as_ref())
-                .and_then(|projects| {
-                    projects
-                        .values()
-                        .map(|project| PathBuf::from(&project.path))
-                        .find(|path| same_path(path, &found))
-                });
-            known = root.is_some();
+                .and_then(|overlay| overlay.projects.as_ref());
+            let root = projects.and_then(|projects| {
+                projects
+                    .values()
+                    .map(|project| PathBuf::from(&project.path))
+                    .find(|path| same_path(path, &found))
+            });
+            if let (Some(root), Some(projects)) = (&root, projects) {
+                known = projects
+                    .iter()
+                    .filter(|(_, project)| same_path(Path::new(&project.path), root))
+                    .map(|(id, _)| id.as_str())
+                    .collect();
+            }
             Project::load(ax.fs, root.as_deref().unwrap_or(&found))?
         }
         None => None,
     };
 
-    let system = PlanOptions {
+    let mut selections = vec![PlanOptions {
         scope: ScopeFilter::System,
         ..PlanOptions::default()
+    }];
+    if let Some(project) = project.as_ref().filter(|_| !known.is_empty()) {
+        selections.push(PlanOptions {
+            scope: ScopeFilter::Project,
+            projects: ProjectSelection::Only(project.root.clone()),
+            ..PlanOptions::default()
+        });
+    }
+    let plans = match full {
+        Some(_) => Vec::new(),
+        None => plan::plan_each(
+            &cx,
+            &inputs.desired,
+            &inputs.ledger,
+            &inputs.key,
+            &selections,
+        )?,
     };
-    let mut plans = vec![plan::plan(
-        &cx,
-        &inputs.desired,
-        &inputs.ledger,
-        &inputs.key,
-        &system,
-    )?];
+    let planned: Vec<&TargetPlan> = match full {
+        // What the two plans hold, in the same order (user files first):
+        // the user targets, and those of the folder's project, which a plan
+        // of the folder selects by the ids known there.
+        Some(full) => full
+            .targets
+            .iter()
+            .filter(|target| {
+                target.scope == Scope::User
+                    || (selections.len() > 1
+                        && target
+                            .project_id
+                            .as_deref()
+                            .is_some_and(|id| known.contains(&id)))
+            })
+            .collect(),
+        None => plans.iter().flat_map(|plan| &plan.targets).collect(),
+    };
     let mut entries = Vec::new();
     let mut trust = None;
     if let Some(project) = &project {
@@ -247,20 +315,6 @@ pub fn effective(
             TrustStore::default()
         });
         trust = trust_required(project, &project.root, store.state(project));
-        if known {
-            let options = PlanOptions {
-                scope: ScopeFilter::Project,
-                projects: ProjectSelection::Only(project.root.clone()),
-                ..PlanOptions::default()
-            };
-            plans.push(plan::plan(
-                &cx,
-                &inputs.desired,
-                &inputs.ledger,
-                &inputs.key,
-                &options,
-            )?);
-        }
         entries = project_entries(
             project,
             &inputs.desired.servers,
@@ -271,12 +325,14 @@ pub fn effective(
 
     let mut view = View {
         cx: &cx,
-        inputs: &inputs,
+        inputs,
         root: project.as_ref().map(|project| project.root.as_path()),
-        plans: &plans,
+        planned,
+        owners: Owners::of(&inputs.ledger.entries),
         entries: &entries,
         trust,
         docs: BTreeMap::new(),
+        displayed: RefCell::new(HashMap::new()),
         detected: Detected::default(),
         readers: None,
         warnings,
@@ -367,17 +423,41 @@ struct ClientCx {
 /// A client id and the files and containers (pointers) it reads.
 type Readers = Vec<(&'static str, Vec<(PathBuf, String)>)>;
 
+/// The first ledger entry of each file, container and key, whatever its
+/// slot: one pass over the ledger instead of one per candidate (#14).
+struct Owners<'a>(HashMap<(&'a str, &'a str, &'a str), &'a LedgerEntry>);
+
+impl<'a> Owners<'a> {
+    /// Server entries (not list members) of `entries`.
+    fn of(entries: &'a [LedgerEntry]) -> Self {
+        let mut map = HashMap::new();
+        for row in entries.iter().filter(|row| row.kind == EntryKind::McpEntry) {
+            map.entry((row.file.as_str(), row.container.as_str(), row.key.as_str()))
+                .or_insert(row);
+        }
+        Self(map)
+    }
+
+    fn get(&self, file: &str, container: &str, key: &str) -> Option<&'a LedgerEntry> {
+        self.0.get(&(file, container, key)).copied()
+    }
+}
+
 struct View<'a> {
     cx: &'a RenderCx<'a>,
     inputs: &'a PlanInputs,
     root: Option<&'a Path>,
-    plans: &'a [Plan],
+    /// The planned targets of the user files and the folder's project.
+    planned: Vec<&'a TargetPlan>,
+    owners: Owners<'a>,
     entries: &'a [ProjectEntry],
     /// `trust_required` when the folder's project is not trusted as it is.
     trust: Option<CoreError>,
     /// Parsed files; `None` for a file that does not exist or does not
     /// parse.
     docs: BTreeMap<PathBuf, Option<Document>>,
+    /// [`View::display`] of each file shown so far.
+    displayed: RefCell<HashMap<PathBuf, String>>,
     detected: Detected,
     /// The files and containers each client reads (also visible to).
     readers: Option<Readers>,
@@ -683,29 +763,24 @@ impl<'a> View<'a> {
     /// entries the plan creates there or cannot write.
     fn candidates(&mut self, source: &SourceFile, rows: &mut BTreeMap<String, Vec<Candidate>>) {
         let present = self.entries_in(source);
-        let ledger = &self.inputs.ledger;
         let file = source.file.to_string_lossy();
         let targets = self.targets(&source.file, &source.pointer, EntryKind::McpEntry);
-        let planned_entry = |name: &str| -> Option<(&TargetPlan, &EntryPlan)> {
-            targets.iter().find_map(|target| {
-                target
-                    .entries
-                    .iter()
-                    .find(|entry| entry.name == name)
-                    .map(|entry| (*target, entry))
-            })
-        };
+        // The first planned entry of each name, by target, then entry.
+        let mut planned_entries: HashMap<&str, (&TargetPlan, &EntryPlan)> = HashMap::new();
+        for target in &targets {
+            for entry in &target.entries {
+                planned_entries
+                    .entry(entry.name.as_str())
+                    .or_insert((*target, entry));
+            }
+        }
+        let planned_entry = |name: &str| planned_entries.get(name).copied();
         let display = self.display(&source.file);
         for (name, value) in &present {
             let planned = planned_entry(name);
             // Any slot: a file the client reads may be owned through another
             // client's scope (a compatibility source).
-            let owned = ledger.entries.iter().find(|row| {
-                row.kind == EntryKind::McpEntry
-                    && row.file == file
-                    && row.container == source.pointer
-                    && row.key == *name
-            });
+            let owned = self.owners.get(&file, &source.pointer, name);
             // Loadout's entry: owned, or desired here and equal to what is
             // there (adopted on apply).
             let ours: Option<(Scope, String)> = match (owned, planned) {
@@ -830,9 +905,9 @@ impl<'a> View<'a> {
 
     /// The planned targets of `file` and `pointer` of `kind`.
     fn targets(&self, file: &Path, pointer: &str, kind: EntryKind) -> Vec<&'a TargetPlan> {
-        self.plans
+        self.planned
             .iter()
-            .flat_map(|plan| &plan.targets)
+            .copied()
             .filter(|target| {
                 target.file == file && target.pointer == pointer && target.kind == kind
             })
@@ -1015,7 +1090,11 @@ impl<'a> View<'a> {
 
     /// `file` with a placeholder root (`~`, `<P>`, `%APPDATA%`).
     fn display(&self, file: &Path) -> String {
-        placeholder_path(self.cx.env, file, self.root)
+        self.displayed
+            .borrow_mut()
+            .entry(file.to_path_buf())
+            .or_insert_with(|| placeholder_path(self.cx.env, file, self.root))
+            .clone()
     }
 }
 

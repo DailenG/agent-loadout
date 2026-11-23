@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use agent_loadout_core::apply::Touched;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::model::server::{Enable, Meta, Server, Transport};
@@ -258,7 +259,7 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
     let ax = ctx.apply_env();
     let committed = store.transaction(operation, |tx| {
         tx.add_server(server)?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::Servers(vec![id.clone()]))
     })?;
     let report = committed.value;
     let commit = committed.commit.as_ref().map(|commit| commit.to_string());
@@ -343,7 +344,7 @@ fn remove(ctx: &Context, ids: &[String]) -> Result<u8, CoreError> {
     let ax = ctx.apply_env();
     let committed = store.transaction(operation, |tx| {
         unique.iter().try_for_each(|id| tx.remove_server(id))?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::Servers(unique.clone()))
     })?;
     let report = committed.value;
     if ctx.json {

@@ -31,6 +31,7 @@
 //! read back as written is refused (`invalid_value`).
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use saphyr_parser::{Event, Parser, ScalarStyle};
 
@@ -40,12 +41,20 @@ use crate::error::{CoreError, ErrorCode};
 #[derive(Debug, Clone)]
 pub(super) struct YamlBody {
     text: String,
+    /// The tree of the text `list` and `get` read last, with that text, so
+    /// reading every entry of a file builds the tree once (#14). Shared by
+    /// clones; used only while the text is still the same.
+    read: Arc<Mutex<Option<ReadTree>>>,
 }
+
+/// A text and its tree.
+type ReadTree = (String, Arc<Tree>);
 
 impl YamlBody {
     pub(super) fn parse(text: String) -> Result<Self, CoreError> {
-        build(&text)?;
-        Ok(Self { text })
+        let tree = build(&text)?;
+        let read = Arc::new(Mutex::new(Some((text.clone(), Arc::new(tree)))));
+        Ok(Self { text, read })
     }
 
     pub(super) fn text(&self) -> String {
@@ -56,8 +65,21 @@ impl YamlBody {
         build(&self.text)
     }
 
+    /// The tree of the current text, for reading.
+    fn read_tree(&self) -> Result<Arc<Tree>, CoreError> {
+        let mut read = self.read.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((text, tree)) = read.as_ref()
+            && *text == self.text
+        {
+            return Ok(tree.clone());
+        }
+        let tree = Arc::new(self.tree()?);
+        *read = Some((self.text.clone(), tree.clone()));
+        Ok(tree)
+    }
+
     pub(super) fn list(&self, container: &[&str]) -> Result<Vec<String>, CoreError> {
-        let tree = self.tree()?;
+        let tree = self.read_tree()?;
         let path = PathSpec::of(container);
         let Some(node) = found_node(&tree, &path)? else {
             return Ok(Vec::new());
@@ -76,7 +98,7 @@ impl YamlBody {
         container: &[&str],
         key: &str,
     ) -> Result<Option<NativeValue>, CoreError> {
-        let tree = self.tree()?;
+        let tree = self.read_tree()?;
         let path = PathSpec::of(container);
         let Some(node) = found_node(&tree, &path)? else {
             return Ok(None);
@@ -868,6 +890,7 @@ enum Kind {
     Map(Vec<(Node, Node)>),
 }
 
+#[derive(Debug)]
 struct Tree {
     /// The first document's root.
     root: Option<Node>,

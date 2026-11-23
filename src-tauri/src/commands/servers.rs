@@ -12,7 +12,7 @@ use agent_loadout_core::adapters::{ADAPTERS, AdapterSpec, adapter};
 use agent_loadout_core::apply::import::server_from_native;
 use agent_loadout_core::apply::render::{DesiredState, Detected, RenderCx, native_name, render};
 use agent_loadout_core::apply::{
-    self, EntryState, Plan, PlanOptions, ScopeFilter, TargetPlan, instant_apply,
+    EntryState, Plan, ScopeFilter, TargetPlan, Touched, instant_apply,
 };
 use agent_loadout_core::formats::{Document, Format};
 use agent_loadout_core::model::TomlDocument;
@@ -309,14 +309,6 @@ pub fn client_infos(core: &Core) -> Vec<ClientInfo> {
         .collect()
 }
 
-fn system_plan(core: &Core, store: Option<&Store<'_>>) -> Result<Plan, CoreError> {
-    let options = PlanOptions {
-        scope: ScopeFilter::System,
-        ..PlanOptions::default()
-    };
-    apply::preview(store, &core.apply_env(), &options)
-}
-
 /// What rendering reads: the desired state of the store's working tree (or
 /// none) and the store's secret memory.
 pub(super) fn render_inputs(
@@ -464,20 +456,22 @@ fn row(plan: &Plan, clients: &[ClientInfo], selected: &[String], server: &Server
 pub fn list(core: &Core) -> CmdResult<ServerList> {
     let clients = client_infos(core);
     let store = core.open_store()?;
-    let plan = system_plan(core, store.as_ref())?;
+    // The pills come from the shared plan (#15): its user files.
+    let cached = core.plan()?;
+    let plan = cached.plan.scope_part(ScopeFilter::System);
     let entries = match &store {
         Some(store) => store.servers()?,
         None => Vec::new(),
     };
-    let (desired, memory) = render_inputs(core, store.as_ref())?;
+    let desired = cached.desired();
     let ax = core.apply_env();
-    let cx = ax.render_cx(memory);
+    let cx = ax.render_cx(cached.memory());
     let mut detected = Detected::default();
     let servers = entries
         .iter()
         .map(|entry| match &entry.document {
             Ok(doc) => {
-                let selected = detected.system_clients(&cx, &desired, doc.value());
+                let selected = detected.system_clients(&cx, desired, doc.value());
                 row(&plan, &clients, &selected, doc.value())
             }
             Err(err) => ServerRow {
@@ -696,7 +690,7 @@ fn change_server(
     let operation = Operation::new(op, summary).entity(format!("server/{id}"));
     let committed = store.transaction(operation, |tx| {
         edit(tx)?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::Servers(vec![id.to_owned()]))
     })?;
     Ok(ChangeResult::new(
         &core.env,
@@ -815,7 +809,7 @@ pub fn remove(core: &Core, ids_to_remove: &[String]) -> CmdResult<ChangeResult> 
     let ax = core.apply_env();
     let committed = store.transaction(operation, |tx| {
         unique.iter().try_for_each(|id| tx.remove_server(id))?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::Servers(unique.clone()))
     })?;
     Ok(ChangeResult::new(
         &core.env,

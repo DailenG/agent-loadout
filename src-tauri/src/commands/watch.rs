@@ -288,6 +288,8 @@ impl Worker {
                 Err(RecvTimeoutError::Timeout) => {
                     self.rescan();
                     if hit == Hit::Target {
+                        // The views refetch on the event: plan again.
+                        self.core.plan_cache.invalidate();
                         on_change();
                     }
                     burst = None;

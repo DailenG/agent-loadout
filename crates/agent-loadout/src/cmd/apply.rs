@@ -81,6 +81,7 @@ pub fn run(ctx: &Context, args: &ApplyArgs) -> Result<u8, CoreError> {
         scope: args.scope.into(),
         projects: selection(ctx, args.path.as_deref())?,
         targets: None,
+        servers: None,
     };
     if args.dry_run {
         let store = ctx.open_store()?;

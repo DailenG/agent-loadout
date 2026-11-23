@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::apply::{ApplyEnv, ApplyReport, instant_apply};
+use crate::apply::{ApplyEnv, ApplyReport, Touched, instant_apply};
 use crate::env::Env;
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
@@ -176,11 +176,20 @@ pub fn init(
         }
         let project = load_project(fs, &root)?;
         let summary = format!("project: init {id}");
-        commit_project(store, ax, "project.init", summary, &id, true, |tx| {
-            set_known(tx, fs, &project.id, &root)?;
-            mirror(tx, &project)?;
-            save_trust(ax, &project)
-        })
+        let touched = Touched::Project(root.clone());
+        commit_project(
+            store,
+            ax,
+            "project.init",
+            summary,
+            &id,
+            Some(touched),
+            |tx| {
+                set_known(tx, fs, &project.id, &root)?;
+                mirror(tx, &project)?;
+                save_trust(ax, &project)
+            },
+        )
     })();
     let (report, commit) = match staged {
         Ok(done) => done,
@@ -213,7 +222,7 @@ pub fn add(
 ) -> Result<Option<CommitId>, CoreError> {
     let id = project.id.clone();
     let summary = format!("project: add {id}");
-    let (_, commit) = commit_project(store, ax, "project.add", summary, &id, false, |tx| {
+    let (_, commit) = commit_project(store, ax, "project.add", summary, &id, None, |tx| {
         set_known(tx, ax.fs, &id, &project.root)
     })?;
     Ok(commit)
@@ -234,26 +243,30 @@ pub fn remove(store: &Store<'_>, ax: &ApplyEnv<'_>, id: &str) -> Result<Removed,
     ids::check(IdKind::Project, id)?;
     let summary = format!("project: remove {id}");
     let mut root = None;
-    let (report, commit) = commit_project(store, ax, "project.remove", summary, id, true, |tx| {
-        let mut doc = overlay_doc(tx)?;
-        let projects = &mut doc.value_mut().projects;
-        let known = projects.as_mut().and_then(|map| map.remove(id));
-        let Some(known) = known else {
-            return Err(unknown_project(id));
-        };
-        if projects.as_ref().is_some_and(BTreeMap::is_empty) {
-            *projects = None;
-        }
-        root = Some(PathBuf::from(known.path));
-        let relative = overlay_path(&tx.machine().id)?;
-        tx.write(&relative, doc.to_text()?)?;
-        let state = ax.home.state_dir();
-        let mut trust = TrustStore::load(ax.fs, &state)?;
-        if trust.forget(id) {
-            trust.save(ax.fs, &state)?;
-        }
-        Ok(())
-    })?;
+    // The project is no longer known: cleaning up its files is a plan of
+    // every project (owned entries of unknown projects).
+    let touched = Some(Touched::All);
+    let (report, commit) =
+        commit_project(store, ax, "project.remove", summary, id, touched, |tx| {
+            let mut doc = overlay_doc(tx)?;
+            let projects = &mut doc.value_mut().projects;
+            let known = projects.as_mut().and_then(|map| map.remove(id));
+            let Some(known) = known else {
+                return Err(unknown_project(id));
+            };
+            if projects.as_ref().is_some_and(BTreeMap::is_empty) {
+                *projects = None;
+            }
+            root = Some(PathBuf::from(known.path));
+            let relative = overlay_path(&tx.machine().id)?;
+            tx.write(&relative, doc.to_text()?)?;
+            let state = ax.home.state_dir();
+            let mut trust = TrustStore::load(ax.fs, &state)?;
+            if trust.forget(id) {
+                trust.save(ax.fs, &state)?;
+            }
+            Ok(())
+        })?;
     Ok(Removed {
         root,
         report,
@@ -367,25 +380,26 @@ pub fn trust(
     }
     let id = project.id.clone();
     let summary = format!("project: trust {id}");
-    commit_project(store, ax, "project.trust", summary, &id, true, |tx| {
+    let touched = Some(Touched::Project(project.root.clone()));
+    commit_project(store, ax, "project.trust", summary, &id, touched, |tx| {
         set_known(tx, ax.fs, &id, &project.root)?;
         mirror(tx, project)?;
         save_trust(ax, project)
     })
 }
 
-/// Stages one project commit; with `apply`, the instant apply runs in it.
-/// `state/trust.json` reflects committed operations only: when the
-/// transaction fails (staging, validation, the leak scanner), the trust
-/// file as it was before is written back (a failure to do so is added to
-/// the error's message).
+/// Stages one project commit; with `apply`, the instant apply of what it
+/// touched runs in it. `state/trust.json` reflects committed operations
+/// only: when the transaction fails (staging, validation, the leak
+/// scanner), the trust file as it was before is written back (a failure to
+/// do so is added to the error's message).
 pub fn commit_project(
     store: &Store<'_>,
     ax: &ApplyEnv<'_>,
     op: &str,
     summary: String,
     id: &str,
-    apply: bool,
+    apply: Option<Touched>,
     stage: impl FnOnce(&mut Transaction<'_>) -> Result<(), CoreError>,
 ) -> Result<(Option<ApplyReport>, Option<CommitId>), CoreError> {
     let operation = Operation::new(op, summary)
@@ -395,10 +409,9 @@ pub fn commit_project(
     let previous = TrustStore::load(ax.fs, &state).ok();
     let committed = store.transaction(operation, |tx| {
         stage(tx)?;
-        if apply {
-            instant_apply(tx, ax)
-        } else {
-            Ok(None)
+        match &apply {
+            Some(touched) => instant_apply(tx, ax, touched),
+            None => Ok(None),
         }
     });
     match committed {

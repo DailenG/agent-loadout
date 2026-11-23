@@ -6,7 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use agent_loadout_core::layering::{Layer, effective};
+use agent_loadout_core::layering::Layer;
+use agent_loadout_core::layering::effective::effective_planned;
 use serde::Serialize;
 use specta::Type;
 
@@ -106,7 +107,10 @@ pub fn matrix(core: &Core, id: &str) -> CmdResult<EffectiveMatrix> {
     let store = core.open_store()?;
     let (root, name) = validate_known_root(core, store.as_ref(), id)?;
     let env = &core.env;
-    let view = effective(store.as_ref(), &core.apply_env(), &root, None)
+    let cached = core
+        .plan()
+        .map_err(|err| scrubbed(env, &err, Some(&root)))?;
+    let view = effective_planned(&core.apply_env(), &cached, &root, None)
         .map_err(|err| scrubbed(env, &err, Some(&root)))?;
     let mut rows: BTreeMap<String, Vec<MatrixCell>> = BTreeMap::new();
     for (client, entries) in &view.clients {

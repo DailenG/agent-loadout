@@ -18,6 +18,7 @@
 //! provider is not usable here ([`check_available`]).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::adapters::caps::{Caps, CommandRef, EnvRefSyntax, FieldSet};
@@ -316,6 +317,9 @@ pub struct DeliveryEnv {
     launcher: Option<PathBuf>,
     keyring: Arc<dyn KeyringBackend>,
     op: OnceLock<OpCli>,
+    /// Times the keyring was handed out: a read of secret state that no
+    /// file shows (the plan cache, [`crate::apply::cache`]).
+    keyring_uses: AtomicU64,
 }
 
 impl DeliveryEnv {
@@ -327,6 +331,7 @@ impl DeliveryEnv {
             launcher,
             keyring,
             op: OnceLock::new(),
+            keyring_uses: AtomicU64::new(0),
         }
     }
 
@@ -340,8 +345,18 @@ impl DeliveryEnv {
         self.launcher.as_deref()
     }
 
+    /// The keyring. Every secret value read while rendering (a keyring
+    /// entry, a 1Password item, the service account token) goes through
+    /// it, and each call counts in [`DeliveryEnv::provider_reads`].
     pub fn keyring(&self) -> &dyn KeyringBackend {
+        self.keyring_uses.fetch_add(1, Ordering::Relaxed);
         self.keyring.as_ref()
+    }
+
+    /// How often the keyring was handed out so far, by any caller: a plan
+    /// that saw this change may depend on secret values.
+    pub fn provider_reads(&self) -> u64 {
+        self.keyring_uses.load(Ordering::Relaxed)
     }
 
     /// The 1Password CLI of this machine (`op --version` runs once).

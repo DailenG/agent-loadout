@@ -8,6 +8,28 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Changed
+
+- Planning is much faster on machines with many servers and client files:
+  each client file is parsed once per plan instead of once per entry, files
+  shared by several targets (`~/.claude.json`) are read once, ledger lookups
+  are indexed, and `loadout effective` plans in one run (#14).
+- The app plans once per change: the drawer, the MCP pills, the Projects
+  page and the effective matrix share one cached plan, served again until a
+  file it read changes (#15).
+- A store change applies only what it touched: a server change plans the
+  files that hold or own that server's entries, and `project trust`,
+  `init`, project server edits and `project share` plan that project only.
+  A project still waiting for trust elsewhere no longer slows the change or
+  turns its exit code into 7 (#15).
+
+### Fixed
+
+- Dialogs and the Pending changes drawer manage keyboard focus: opening one
+  moves focus inside, Tab and Shift+Tab stay inside, the page behind is
+  inert, Escape closes only the top dialog, and focus returns to the button
+  that opened it (#11).
+
 ## [0.2.0] - 2026-11-23
 
 ### Added

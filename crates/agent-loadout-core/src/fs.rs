@@ -63,6 +63,12 @@ pub trait Fs: Send + Sync {
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         Ok(path.to_path_buf())
     }
+
+    /// Notes that what the caller works out depends on the content of
+    /// `path`, which it reads some other way (git2 reading a repository's
+    /// index). Nothing here; a recording view takes note (the plan cache,
+    /// [`crate::apply::cache`]).
+    fn note_dependency(&self, _path: &Path) {}
 }
 
 /// The real file system, unconfined.

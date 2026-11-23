@@ -3,6 +3,7 @@
 //! written. It is the only definition of ownership, machine-local and never
 //! versioned.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
 
@@ -208,6 +209,90 @@ impl Ledger {
         let before = self.entries.len();
         self.entries.retain(|entry| !entry.is(slot, key));
         self.entries.len() != before
+    }
+
+    /// The entries of `slot`, from one pass over the ledger: what
+    /// [`Ledger::in_container`] and [`Ledger::get`] give for that slot,
+    /// without a pass per lookup (#14).
+    pub fn slot_entries(&self, slot: &LedgerSlot<'_>) -> SlotEntries<'_> {
+        let entries: Vec<&LedgerEntry> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.slot() == *slot)
+            .collect();
+        let mut by_key = HashMap::with_capacity(entries.len());
+        for entry in &entries {
+            by_key.entry(entry.key.as_str()).or_insert(*entry);
+        }
+        SlotEntries { entries, by_key }
+    }
+
+    /// Applies `changes` to the entries of `slot` in one pass over the
+    /// ledger: what [`Ledger::upsert`] (`Some`) and [`Ledger::remove`]
+    /// (`None`) do called one after the other, with the same result. Returns
+    /// whether anything changed.
+    pub fn update_slot(
+        &mut self,
+        slot: &LedgerSlot<'_>,
+        changes: Vec<(String, Option<LedgerEntry>)>,
+    ) -> bool {
+        // Where the slot's entries of each key are, first one first.
+        let mut at: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, entry) in self.entries.iter().enumerate() {
+            if entry.slot() == *slot {
+                at.entry(entry.key.clone()).or_default().push(index);
+            }
+        }
+        let mut dropped: HashSet<usize> = HashSet::new();
+        let mut changed = false;
+        for (key, change) in changes {
+            match change {
+                Some(entry) => {
+                    debug_assert!(entry.slot() == *slot && entry.key == key);
+                    match at.get(&key).and_then(|indices| indices.first()) {
+                        Some(&index) => self.entries[index] = entry,
+                        None => {
+                            at.insert(key, vec![self.entries.len()]);
+                            self.entries.push(entry);
+                        }
+                    }
+                    changed = true;
+                }
+                None => {
+                    if let Some(indices) = at.remove(&key) {
+                        changed = true;
+                        dropped.extend(indices);
+                    }
+                }
+            }
+        }
+        if !dropped.is_empty() {
+            let mut index = 0;
+            self.entries.retain(|_| {
+                index += 1;
+                !dropped.contains(&(index - 1))
+            });
+        }
+        changed
+    }
+}
+
+/// [`Ledger::slot_entries`].
+#[derive(Debug)]
+pub struct SlotEntries<'a> {
+    entries: Vec<&'a LedgerEntry>,
+    by_key: HashMap<&'a str, &'a LedgerEntry>,
+}
+
+impl<'a> SlotEntries<'a> {
+    /// [`Ledger::get`] for the slot.
+    pub fn get(&self, key: &str) -> Option<&'a LedgerEntry> {
+        self.by_key.get(key).copied()
+    }
+
+    /// [`Ledger::in_container`] for the slot, in ledger order.
+    pub fn iter(&self) -> impl Iterator<Item = &'a LedgerEntry> + '_ {
+        self.entries.iter().copied()
     }
 }
 

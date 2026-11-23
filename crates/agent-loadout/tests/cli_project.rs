@@ -416,14 +416,16 @@ fn trust_exits_on_its_own_project_not_on_another_untrusted_one() {
         roots.push(root);
     }
 
-    // The instant apply after the trust still reports the other project as
-    // blocked, but that is not this command's failure (#10).
+    // The instant apply after the trust covers this project only (#15): the
+    // other one, still untrusted, is neither planned nor reported (#10).
     let trusted = cli.ok(&["project", "trust", roots[0].to_str().unwrap()]);
     let targets = &trusted["apply"]["targets"];
     assert!(
-        project_targets(targets, "second-cd34")
-            .iter()
-            .any(|target| target["error"]["code"] == "trust_required"),
+        project_targets(targets, "second-cd34").is_empty(),
+        "{trusted:#}"
+    );
+    assert!(
+        !project_targets(targets, "first-ab12").is_empty(),
         "{trusted:#}"
     );
     let docs: Value = serde_json::from_str(&read(&roots[0].join(".mcp.json"))).unwrap();

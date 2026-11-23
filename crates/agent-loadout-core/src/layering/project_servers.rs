@@ -20,7 +20,7 @@ use std::path::Path;
 
 use crate::apply::exec::swap_file;
 use crate::apply::plan::read_target;
-use crate::apply::{ApplyEnv, ApplyReport};
+use crate::apply::{ApplyEnv, ApplyReport, Touched};
 use crate::error::{CoreError, ErrorCode};
 use crate::layering::manifest::manifest_dir;
 use crate::layering::projects::{
@@ -262,7 +262,7 @@ pub fn edit_server(
             &format!("project.server.{verb}"),
             summary,
             &project.id,
-            true,
+            Some(Touched::Project(root.to_path_buf())),
             |tx| {
                 mirror(tx, &edited)?;
                 save_trust(ax, &edited)

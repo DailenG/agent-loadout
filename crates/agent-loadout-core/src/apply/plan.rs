@@ -2,7 +2,8 @@
 //! per-file operations, the resulting text and a state per entry out.
 //! Planning reads files and never writes anything.
 
-use std::collections::BTreeMap;
+use std::cell::OnceCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use similar::TextDiff;
@@ -23,7 +24,7 @@ use crate::apply::render::{
 };
 use crate::env::{Env, Os};
 use crate::error::{CoreError, ErrorCode};
-use crate::formats::{Document, NativeValue};
+use crate::formats::{Document, Format, NativeValue};
 use crate::layering::manifest::normalize_path_text;
 use crate::layering::{
     self, EntryBody, EntryLayer, KnownProject, Project, ProjectEntry, ProjectRepo, ProjectStatus,
@@ -266,6 +267,11 @@ pub struct PlanOptions {
     /// Only these target files (within the other filters); all when
     /// `None`.
     pub targets: Option<Vec<TargetFilter>>,
+    /// Only the targets these store servers touch (within the other
+    /// filters): those that hold or own entries of them, and those of
+    /// project entries that start from them (`from`); all when `None`. The
+    /// instant apply of a server change plans these (#15).
+    pub servers: Option<Vec<String>>,
 }
 
 impl PlanOptions {
@@ -286,6 +292,48 @@ impl PlanOptions {
         self.targets
             .as_ref()
             .is_none_or(|targets| targets.iter().any(|filter| filter.matches(target)))
+    }
+
+    /// [`PlanOptions::servers`] for `input`, whose entries `ledger` may own.
+    /// `derived` names the project entries (project id, entry name) that
+    /// start from one of the servers: what they own is selected too, even
+    /// where they are no longer desired (a transport the client cannot run).
+    fn selects_servers(
+        &self,
+        input: &TargetInput,
+        ledger: &Ledger,
+        derived: &[(String, String)],
+    ) -> bool {
+        let Some(ids) = &self.servers else {
+            return true;
+        };
+        let named = |id: &str| ids.iter().any(|named| named == id);
+        if input.desired.iter().any(|entry| named(&entry.server_id))
+            || input.members.iter().any(|member| named(&member.server_id))
+            || input.sources.iter().any(|from| named(from))
+        {
+            return true;
+        }
+        let Ok(keys) = input.container_keys() else {
+            // Planned as blocked; nothing a server change could alter.
+            return false;
+        };
+        let file = input.target.file.to_string_lossy();
+        let pointer = container_pointer(&keys);
+        let slot = LedgerSlot {
+            scope: input.target.scope,
+            project_id: input.project_id.as_deref(),
+            file: &file,
+            container: &pointer,
+        };
+        ledger.slot_entries(&slot).iter().any(|row| {
+            row.server_id.as_deref().is_some_and(|id| {
+                named(id)
+                    || derived.iter().any(|(project, name)| {
+                        row.project_id.as_deref() == Some(project.as_str()) && name == id
+                    })
+            })
+        })
     }
 
     /// Whether user files are planned.
@@ -382,6 +430,9 @@ pub(crate) struct TargetInput {
     /// it is written (a private entry in an untracked project file, SPEC
     /// 6.5).
     pub(crate) exclude: bool,
+    /// The store servers the target's project entries start from (`from`),
+    /// for [`PlanOptions::servers`].
+    pub(crate) sources: Vec<String>,
 }
 
 /// A string a list target should hold (a server name in Claude Code's
@@ -407,6 +458,7 @@ impl TargetInput {
             keys: None,
             blocked: None,
             exclude: false,
+            sources: Vec::new(),
         }
     }
 
@@ -638,6 +690,11 @@ pub struct Plan {
     /// Problems outside any target: clients that cannot be written here,
     /// server files that do not load.
     pub warnings: Vec<CoreError>,
+    /// The first `base` warnings are the system layer's (rendering, server
+    /// files), the next `user` ones the user files'; the project planner's
+    /// follow. See [`Plan::scope_part`].
+    base: usize,
+    user: usize,
 }
 
 impl Plan {
@@ -657,6 +714,42 @@ impl Plan {
     pub fn has_work(&self) -> bool {
         self.targets.iter().any(TargetPlan::has_work)
     }
+
+    /// Of a plan of every scope and project ([`PlanOptions::default`]),
+    /// the plan of `scope` alone: the same targets, in the same order, and
+    /// the same warnings as planning with `scope` gives (#15: the app plans
+    /// once and shows the parts).
+    pub fn scope_part(&self, scope: ScopeFilter) -> Plan {
+        let (base, user) = (self.base, self.base + self.user);
+        let warnings: Vec<CoreError> = match scope {
+            ScopeFilter::All => self.warnings.clone(),
+            ScopeFilter::System => self.warnings[..user].to_vec(),
+            ScopeFilter::Project => self.warnings[..base]
+                .iter()
+                .chain(&self.warnings[user..])
+                .cloned()
+                .collect(),
+        };
+        Plan {
+            targets: self
+                .targets
+                .iter()
+                .filter(|target| match scope {
+                    ScopeFilter::All => true,
+                    ScopeFilter::System => target.scope == Scope::User,
+                    ScopeFilter::Project => target.scope != Scope::User,
+                })
+                .cloned()
+                .collect(),
+            base: self.base,
+            user: if scope == ScopeFilter::Project {
+                0
+            } else {
+                self.user
+            },
+            warnings,
+        }
+    }
 }
 
 /// Plans the selected scopes: the user files of every selected client that
@@ -669,10 +762,78 @@ pub fn plan(
     key: &LedgerKey,
     options: &PlanOptions,
 ) -> Result<Plan, CoreError> {
+    let mut plans = plan_each(cx, desired, ledger, key, std::slice::from_ref(options))?;
+    Ok(plans.pop().expect("one plan per selection"))
+}
+
+/// [`plan`] for each of `selections`, in one run: the system layer is
+/// rendered once, and each file read and parsed once for all of them.
+pub(crate) fn plan_each(
+    cx: &RenderCx<'_>,
+    desired: &DesiredState,
+    ledger: &Ledger,
+    key: &LedgerKey,
+    selections: &[PlanOptions],
+) -> Result<Vec<Plan>, CoreError> {
     let rendering = system_entries(cx, desired);
+    let mut files = Files::default();
+    selections
+        .iter()
+        .map(|options| plan_one(cx, desired, &rendering, ledger, key, options, &mut files))
+        .collect()
+}
+
+/// Target files read and parsed during one planner run. Each file is read
+/// and parsed once, however many targets it holds (`~/.claude.json`: the
+/// user container, one per project and the `disabledMcpServers` lists);
+/// every target plans against its own copy.
+#[derive(Default)]
+struct Files {
+    bytes: HashMap<PathBuf, Option<Vec<u8>>>,
+    docs: HashMap<(PathBuf, Format), Result<Document, CoreError>>,
+}
+
+impl Files {
+    /// The bytes of `target`'s file, and its document when it exists.
+    #[allow(clippy::type_complexity)]
+    fn of(
+        &mut self,
+        fs: &dyn crate::fs::Fs,
+        target: &Target,
+    ) -> Result<(Option<Vec<u8>>, Option<Result<Document, CoreError>>), CoreError> {
+        let file = &target.file;
+        let bytes = match self.bytes.get(file) {
+            Some(bytes) => bytes.clone(),
+            None => {
+                let bytes = read_target(fs, file)?;
+                self.bytes.insert(file.clone(), bytes.clone());
+                bytes
+            }
+        };
+        let parsed = bytes.as_ref().map(|bytes| {
+            self.docs
+                .entry((file.clone(), target.format))
+                .or_insert_with(|| Document::parse(bytes, target.format))
+                .clone()
+        });
+        Ok((bytes, parsed))
+    }
+}
+
+fn plan_one(
+    cx: &RenderCx<'_>,
+    desired: &DesiredState,
+    rendering: &Rendering,
+    ledger: &Ledger,
+    key: &LedgerKey,
+    options: &PlanOptions,
+    files: &mut Files,
+) -> Result<Plan, CoreError> {
     let mut plan = Plan {
         targets: Vec::new(),
         warnings: rendering.warnings.clone(),
+        base: 0,
+        user: 0,
     };
     for (id, err) in &desired.invalid {
         plan.warnings.push(CoreError::new(
@@ -680,38 +841,46 @@ pub fn plan(
             format!("server {id:?} is not applied, and entries it owns are left alone: {err}"),
         ));
     }
+    plan.base = plan.warnings.len();
     let mut inputs: Vec<TargetInput> = Vec::new();
     if options.plans_user() {
         user_inputs(
             cx,
             desired,
-            &rendering,
+            rendering,
             ledger,
             options,
             &mut plan,
             &mut inputs,
         );
     }
+    plan.user = plan.warnings.len() - plan.base;
+    let mut derived = Vec::new();
     if options.scope.project() {
         let mut planner = ProjectPlanner {
             cx,
             desired,
-            rendering: &rendering,
+            rendering,
             ledger,
             options,
             detected: Detected::default(),
             warnings: Vec::new(),
             inputs: Vec::new(),
+            derived: Vec::new(),
         };
         planner.plan_projects();
         plan.warnings.append(&mut planner.warnings);
         inputs.append(&mut planner.inputs);
+        derived = planner.derived;
     }
-    inputs.retain(|input| options.selects_target(&input.target));
+    inputs.retain(|input| {
+        options.selects_target(&input.target) && options.selects_servers(input, ledger, &derived)
+    });
     for input in inputs {
-        let bytes = read_target(cx.fs, &input.target.file)?;
-        plan.targets
-            .push(plan_target(cx, input, bytes, ledger, key, options));
+        let (bytes, parsed) = files.of(cx.fs, &input.target)?;
+        plan.targets.push(plan_target_in(
+            cx, input, bytes, parsed, ledger, key, options,
+        ));
     }
     Ok(plan)
 }
@@ -791,6 +960,9 @@ struct ProjectPlanner<'a, 'c> {
     detected: Detected,
     warnings: Vec<CoreError>,
     inputs: Vec<TargetInput>,
+    /// Project entries (project id, name) that start from one of
+    /// [`PlanOptions::servers`].
+    derived: Vec<(String, String)>,
 }
 
 /// One project being planned.
@@ -893,6 +1065,19 @@ impl ProjectPlanner<'_, '_> {
         let mut warned: Vec<String> = Vec::new();
         let mut held = Vec::new();
         for entry in &entries {
+            let from_selected = [Some(entry), entry.shared.as_deref()]
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.from.as_deref())
+                .any(|from| {
+                    self.options
+                        .servers
+                        .as_ref()
+                        .is_some_and(|ids| ids.iter().any(|id| id == from))
+                });
+            if from_selected {
+                self.derived.push((pcx.id.to_owned(), entry.name.clone()));
+            }
             if matches!(entry.body, EntryBody::Server(Err(_))) {
                 held.push(entry.name.clone());
             }
@@ -1029,8 +1214,11 @@ impl ProjectPlanner<'_, '_> {
 
     /// SPEC 6.5 for a private entry in `target`, a project file: blocked
     /// with `private_in_tracked_file` when the project's repository tracks
-    /// the file; otherwise whether to hide it through `info/exclude`.
+    /// the file; otherwise whether to hide it through `info/exclude`. git2
+    /// reads the repository directly, so the files that decide it are
+    /// noted on `fs` ([`crate::fs::Fs::note_dependency`]).
     fn private_file(
+        fs: &dyn crate::fs::Fs,
         pcx: &ProjectCx<'_>,
         spec: &AdapterSpec,
         target: &Target,
@@ -1038,9 +1226,13 @@ impl ProjectPlanner<'_, '_> {
         if target.scope != Scope::Project {
             return Ok(false);
         }
+        fs.note_dependency(&pcx.root.join(".git"));
         let Some(repo) = ProjectRepo::discover(pcx.root)? else {
             return Ok(false);
         };
+        for file in repo.state_files(&target.file) {
+            fs.note_dependency(&file);
+        }
         if repo.is_tracked(&target.file)? {
             let file = repo
                 .relative(&target.file)
@@ -1094,10 +1286,12 @@ impl ProjectPlanner<'_, '_> {
         let ready = match (&pcx.blocked, server) {
             (Some(err), _) | (None, Err(err)) => Err(err.clone()),
             (None, Ok(server)) => match entry.layer {
-                EntryLayer::Local => Self::private_file(pcx, spec, &target).map(|hide| {
-                    exclude = hide;
-                    server
-                }),
+                EntryLayer::Local => {
+                    Self::private_file(self.cx.fs, pcx, spec, &target).map(|hide| {
+                        exclude = hide;
+                        server
+                    })
+                }
                 EntryLayer::Shared => Ok(server),
             },
         };
@@ -1128,6 +1322,7 @@ impl ProjectPlanner<'_, '_> {
         let input = self.input_for(target, spec.id, native_disable, EntryKind::McpEntry);
         input.exclude |= exclude;
         input.desired.push(want);
+        input.sources.extend(entry.from.clone());
     }
 
     /// SPEC 6.3: hides system server `entry.name` from `spec` in this
@@ -1178,7 +1373,7 @@ impl ProjectPlanner<'_, '_> {
                 // (Gemini `mcp.excluded`, SPEC 6.5).
                 let mut exclude = false;
                 if pcx.blocked.is_none() && matches!(entry.layer, EntryLayer::Local) {
-                    match Self::private_file(pcx, spec, &target) {
+                    match Self::private_file(self.cx.fs, pcx, spec, &target) {
                         Ok(hide) => exclude = hide,
                         Err(err) => {
                             self.warnings.push(err);
@@ -1211,9 +1406,8 @@ impl ProjectPlanner<'_, '_> {
                 };
                 let ready = match (&pcx.blocked, entry.layer) {
                     (Some(err), _) => Err(err.clone()),
-                    (None, EntryLayer::Local) => {
-                        Self::private_file(pcx, spec, &target).map(|hide| exclude = hide)
-                    }
+                    (None, EntryLayer::Local) => Self::private_file(self.cx.fs, pcx, spec, &target)
+                        .map(|hide| exclude = hide),
                     (None, EntryLayer::Shared) => Ok(()),
                 };
                 want.server = ready.and_then(|()| match (&system.server, partial) {
@@ -1513,6 +1707,20 @@ pub(crate) fn plan_target(
     key: &LedgerKey,
     options: &PlanOptions,
 ) -> TargetPlan {
+    plan_target_in(cx, input, bytes, None, ledger, key, options)
+}
+
+/// [`plan_target`], with `bytes` already parsed as the target's format
+/// when `parsed` is given.
+fn plan_target_in(
+    cx: &RenderCx<'_>,
+    input: TargetInput,
+    bytes: Option<Vec<u8>>,
+    parsed: Option<Result<Document, CoreError>>,
+    ledger: &Ledger,
+    key: &LedgerKey,
+    options: &PlanOptions,
+) -> TargetPlan {
     let target = &input.target;
     let mut plan = TargetPlan {
         clients: input.clients.clone(),
@@ -1545,9 +1753,10 @@ pub(crate) fn plan_target(
     if let Some(err) = &input.blocked {
         return blocked_target(plan, err.clone());
     }
-    let parsed = match &bytes {
-        Some(bytes) => Document::parse(bytes, target.format),
-        None => Ok(target.new_document()),
+    let parsed = match (&bytes, parsed) {
+        (Some(_), Some(parsed)) => parsed,
+        (Some(bytes), None) => Document::parse(bytes, target.format),
+        (None, _) => Ok(target.new_document()),
     };
     let mut doc = match parsed {
         Ok(doc) => doc,
@@ -1574,25 +1783,29 @@ pub(crate) fn plan_target(
     };
 
     // Names in file order, then new desired names, then ledger-only names.
+    let owned_here = ledger.slot_entries(&slot);
+    let observed_set: HashSet<&str> = observed_names.iter().map(String::as_str).collect();
     let mut names: Vec<String> = observed_names.clone();
+    let mut listed: HashSet<String> = observed_names.iter().cloned().collect();
     for entry in &input.desired {
-        if !names.contains(&entry.name) {
+        if listed.insert(entry.name.clone()) {
             names.push(entry.name.clone());
         }
     }
-    for entry in ledger.in_container(slot) {
-        if entry.kind == EntryKind::McpEntry && !names.contains(&entry.key) {
+    for entry in owned_here.iter() {
+        if entry.kind == EntryKind::McpEntry && listed.insert(entry.key.clone()) {
             names.push(entry.key.clone());
         }
     }
     let foreign_names: Vec<String> = observed_names
         .iter()
-        .filter(|name| ledger.get(&slot, name).is_none())
+        .filter(|name| owned_here.get(name).is_none())
         .cloned()
         .collect();
+    let readers = OnceCell::new();
 
     for name in names {
-        let observed = if observed_names.contains(&name) {
+        let observed = if observed_set.contains(name.as_str()) {
             match doc.get(&container, &name) {
                 Ok(value) => value,
                 Err(err) => {
@@ -1603,8 +1816,8 @@ pub(crate) fn plan_target(
         } else {
             None
         };
-        let owned = ledger
-            .get(&slot, &name)
+        let owned = owned_here
+            .get(&name)
             .filter(|entry| entry.kind == EntryKind::McpEntry);
         let wanted: Vec<&DesiredEntry> = input
             .desired
@@ -1621,6 +1834,7 @@ pub(crate) fn plan_target(
             owned,
             key,
             options,
+            &readers,
         );
         if let Some(entry) = entry {
             let was_inline = owned.and_then(|l| l.delivery.as_deref()) == Some("inline");
@@ -1657,28 +1871,39 @@ pub(crate) fn plan_target(
     plan
 }
 
+/// The clients that read a user file, with their timeout fields.
+type TimeoutReaders = Vec<(&'static str, &'static [TimeoutField])>;
+
 /// `timeout_unit_conflict` when `native` sets a timeout key that the
 /// clients reading `target`'s user file take in different units: with
 /// `PI_CODING_AGENT_DIR` set, omp and Pi read one `mcp.json`, omp's
-/// `timeout` in milliseconds and Pi's in seconds (gate V2 OMP-10).
-fn timeout_unit_conflict(env: &Env, target: &Target, native: &NativeValue) -> Option<CoreError> {
+/// `timeout` in milliseconds and Pi's in seconds (gate V2 OMP-10). The
+/// readers of the file are worked out once per target (`readers`).
+fn timeout_unit_conflict(
+    env: &Env,
+    target: &Target,
+    native: &NativeValue,
+    readers: &OnceCell<TimeoutReaders>,
+) -> Option<CoreError> {
     let entry = native.as_object()?;
     if target.scope != Scope::User {
         return None;
     }
-    let readers: Vec<(&'static str, &'static [TimeoutField])> = ADAPTERS
-        .iter()
-        .filter_map(|spec| {
-            let mcp = spec.mcp.as_ref()?;
-            let reads = mcp.oses.contains(&env.os())
-                && mcp
-                    .user
-                    .iter()
-                    .filter_map(|location| location.resolve(env, None))
-                    .any(|file| layering::same_path(&file, &target.file));
-            reads.then_some((spec.id, mcp.caps.timeouts))
-        })
-        .collect();
+    let readers = readers.get_or_init(|| {
+        ADAPTERS
+            .iter()
+            .filter_map(|spec| {
+                let mcp = spec.mcp.as_ref()?;
+                let reads = mcp.oses.contains(&env.os())
+                    && mcp
+                        .user
+                        .iter()
+                        .filter_map(|location| location.resolve(env, None))
+                        .any(|file| layering::same_path(&file, &target.file));
+                reads.then_some((spec.id, mcp.caps.timeouts))
+            })
+            .collect()
+    });
     let mut keys = readers
         .iter()
         .flat_map(|(_, timeouts)| timeouts.iter())
@@ -1727,6 +1952,7 @@ fn plan_entry(
     owned: Option<&LedgerEntry>,
     key: &LedgerKey,
     options: &PlanOptions,
+    readers: &OnceCell<TimeoutReaders>,
 ) -> Option<EntryPlan> {
     let os = cx.env.os();
     let mut entry = EntryPlan {
@@ -1779,7 +2005,7 @@ fn plan_entry(
         }
         if let Some(problem) = natives
             .iter()
-            .find_map(|(_, native)| timeout_unit_conflict(cx.env, &input.target, native))
+            .find_map(|(_, native)| timeout_unit_conflict(cx.env, &input.target, native, readers))
         {
             entry.state = EntryState::Blocked;
             entry.problem = Some(problem);
@@ -2012,21 +2238,22 @@ fn plan_list(
         file: &file,
         container: &pointer,
     };
+    let owned_here = ledger.slot_entries(&slot);
     let mut names: Vec<String> = Vec::new();
     for member in &plan.input.members {
         if !names.contains(&member.name) {
             names.push(member.name.clone());
         }
     }
-    for row in ledger.in_container(slot) {
+    for row in owned_here.iter() {
         if row.kind == EntryKind::ListMember && !names.contains(&row.key) {
             names.push(row.key.clone());
         }
     }
     for name in names {
         let want = plan.input.members.iter().find(|member| member.name == name);
-        let owned = ledger
-            .get(&slot, &name)
+        let owned = owned_here
+            .get(&name)
             .filter(|row| row.kind == EntryKind::ListMember);
         let client = match (want, owned) {
             (Some(member), _) => Some(member.client),

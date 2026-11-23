@@ -73,6 +73,7 @@ impl Fx {
             fs: Box::new(fs),
             home,
             delivery,
+            plan_cache: agent_loadout_core::apply::cache::PlanCache::new(),
         };
         Self { th, core, keyring }
     }
@@ -1032,11 +1033,13 @@ fn trust_status_ignores_another_untrusted_project() {
     let review = projects::review(&fx.core, "app-a1b2").unwrap();
     let trusted = projects::trust(&fx.core, "app-a1b2", &review.hash).unwrap();
     let run = trusted.change.apply.expect("instant mode applies");
+    // The apply covers the trusted project only (#15): the other one, still
+    // untrusted, is not in its result.
     assert!(
-        run.files.iter().any(|file| file
+        run.files.iter().all(|file| file
             .error
             .as_ref()
-            .is_some_and(|error| error.code == agent_loadout_core::ErrorCode::TrustRequired)),
+            .is_none_or(|error| error.code != agent_loadout_core::ErrorCode::TrustRequired)),
         "{run:?}"
     );
     assert_eq!(run.status, ApplyStatusKind::Done);

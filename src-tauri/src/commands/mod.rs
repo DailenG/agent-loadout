@@ -42,6 +42,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agent_loadout_core::adapters::detect::NoRegistry;
+use agent_loadout_core::apply::cache::{CachedPlan, PlanCache};
 use agent_loadout_core::apply::{
     ApplyEnv, ApplyReport, ApplyStatus, EntryPlan, EntryState, TargetResult, placeholder_path,
 };
@@ -66,6 +67,8 @@ pub struct Core {
     pub fs: Box<dyn Fs>,
     pub home: LoadoutHome,
     pub delivery: DeliveryEnv,
+    /// The pending plan the views share (#15): planned once per change.
+    pub plan_cache: PlanCache,
 }
 
 impl Core {
@@ -81,6 +84,7 @@ impl Core {
             fs: Box::new(RealFs),
             home,
             delivery,
+            plan_cache: PlanCache::new(),
         })
     }
 
@@ -103,6 +107,15 @@ impl Core {
     /// The store, created on first use (the first change).
     pub fn open_store_for_change(&self) -> Result<Store<'_>, CoreError> {
         Store::open_or_init(&self.env, self.fs.as_ref(), &self.home, &client_name())
+    }
+
+    /// The plan of every scope and project of this machine, from the plan
+    /// cache: planned again only when something it was planned from
+    /// changed (the views' refetches on focus and drift cost a check).
+    pub fn plan(&self) -> Result<Arc<CachedPlan>, CoreError> {
+        self.plan_cache.plan(&self.apply_env(), &|fs| {
+            Store::open(&self.env, fs, &self.home, &client_name())
+        })
     }
 
     pub fn os(&self) -> Os {

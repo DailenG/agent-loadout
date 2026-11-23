@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{IsTerminal, Read};
 use std::sync::Arc;
 
+use agent_loadout_core::apply::Touched;
 use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::brand;
 use agent_loadout_core::model::ids::{self, IdKind};
@@ -417,7 +418,7 @@ fn set(ctx: &Context, args: &SetArgs) -> Result<u8, CoreError> {
         };
         tx.add_entity(entity);
         catalog::stage_set(tx, alias, &update, scope)?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::All)
     })?;
     let report = committed.value;
     if ctx.json {
@@ -641,7 +642,7 @@ fn map_op_env(ctx: &Context, args: &MapOpEnvArgs) -> Result<u8, CoreError> {
             };
             catalog::stage_set(tx, alias, &update, SetScope::Store)?;
         }
-        Ok((previous, instant_apply(tx, &ax)?))
+        Ok((previous, instant_apply(tx, &ax, &Touched::All)?))
     })?;
     let (previous, report) = committed.value;
     let aliases: Vec<&str> = mapped.iter().map(|(alias, _)| alias.as_str()).collect();
@@ -703,7 +704,7 @@ fn op_account(ctx: &Context, account: Option<&str>, clear: bool) -> Result<u8, C
     let committed = store.transaction(Operation::new("secrets.op-account", summary), |tx| {
         tx.add_entity("secrets".to_owned());
         let previous = catalog::stage_op_account(tx, account)?;
-        Ok((previous, instant_apply(tx, &ax)?))
+        Ok((previous, instant_apply(tx, &ax, &Touched::All)?))
     })?;
     let (previous, report) = committed.value;
     if ctx.json {

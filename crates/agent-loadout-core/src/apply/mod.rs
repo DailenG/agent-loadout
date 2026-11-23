@@ -14,6 +14,7 @@
 //! the planner turns them into project and project-local targets.
 
 pub mod backup;
+pub mod cache;
 pub mod discard;
 pub mod exec;
 pub mod import;
@@ -38,7 +39,8 @@ use crate::secrets::delivery::DeliveryEnv;
 use crate::secrets::scanner::SecretMemory;
 
 pub use exec::{
-    ApplyReport, ApplyRequest, ApplyStatus, TargetResult, apply_in, instant_apply, preview, run,
+    ApplyReport, ApplyRequest, ApplyStatus, TargetResult, Touched, apply_in, instant_apply,
+    preview, run,
 };
 pub use plan::{
     Action, Decision, EntryPlan, EntryState, OnConflict, Plan, PlanOptions, ProjectSelection,

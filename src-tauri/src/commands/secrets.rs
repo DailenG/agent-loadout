@@ -13,8 +13,8 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use agent_loadout_core::apply::instant_apply;
 use agent_loadout_core::apply::render::DesiredState;
+use agent_loadout_core::apply::{Touched, instant_apply};
 use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::secrets::catalog::{
@@ -380,7 +380,7 @@ fn commit_alias(
         };
         tx.add_entity(entity);
         catalog::stage_set(tx, alias, update, scope)?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::All)
     })?;
     Ok(ChangeResult::new(
         &core.env,
@@ -597,7 +597,7 @@ pub fn map_environment(
             };
             catalog::stage_set(tx, alias, &update, SetScope::Store)?;
         }
-        Ok((previous, instant_apply(tx, &ax)?))
+        Ok((previous, instant_apply(tx, &ax, &Touched::All)?))
     })?;
     let (previous, report) = committed.value;
     Ok(MapResult {
@@ -629,7 +629,7 @@ pub fn op_account(core: &Core, account: Option<&str>) -> CmdResult<ChangeResult>
     let committed = store.transaction(Operation::new("secrets.op-account", summary), |tx| {
         tx.add_entity("secrets".to_owned());
         catalog::stage_op_account(tx, account)?;
-        instant_apply(tx, &ax)
+        instant_apply(tx, &ax, &Touched::All)
     })?;
     Ok(ChangeResult::new(
         &core.env,

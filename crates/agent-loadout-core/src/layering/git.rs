@@ -103,6 +103,25 @@ impl ProjectRepo {
         self.commondir.join("info").join("exclude")
     }
 
+    /// The files whose content [`ProjectRepo::is_tracked`] and
+    /// [`ProjectRepo::is_ignored`] of `path` depend on: the index,
+    /// `info/exclude` and the `.gitignore` of each folder from the work
+    /// tree root down to `path`'s (git's global excludes file aside).
+    pub fn state_files(&self, path: &Path) -> Vec<PathBuf> {
+        let gitdir = spelled_like(self.repo.path(), &self.workdir);
+        let mut files = vec![gitdir.join("index"), self.exclude_file()];
+        let mut dir = self.workdir.clone();
+        files.push(dir.join(".gitignore"));
+        if let Some(relative) = self.relative(path) {
+            let parts: Vec<&str> = relative.split('/').collect();
+            for part in &parts[..parts.len().saturating_sub(1)] {
+                dir.push(part);
+                files.push(dir.join(".gitignore"));
+            }
+        }
+        files
+    }
+
     /// Hides `path` from git by appending `/<relative path>` to
     /// `info/exclude` (creating it). Does nothing when the path is outside
     /// the work tree, already ignored or already listed. Returns whether

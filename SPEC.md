@@ -682,6 +682,8 @@ plan(selection):                          # selection = scopes x clients x folde
 
 `loadout diff` and the GUI "Pending changes" drawer render the plan as unified diffs of each file (before/after text), with secret values masked in inline mode.
 
+One planner run reads and parses each file once, however many targets it holds (`~/.claude.json`: the user container, one per project, the `disabledMcpServers` lists); every target plans against its own copy of that document and the original bytes, so diffs and results are as when each target read the file itself. The format editors keep the values a document holds between reads (rebuilt after an edit), so reading every entry of a file costs one parse (M30, #14).
+
 ### 8.4 Execution
 
 Per target file, in order, holding the global lock:
@@ -690,7 +692,7 @@ Per target file, in order, holding the global lock:
 2. Copy the original bytes to `backups/files/<ts>-<apply-id>/<encoded-path>` (user-only ACL on Windows, mode 0600 on Unix).
 3. Apply edits through the format editor. Re-parse the result and re-read our entries through the mapper; they MUST equal desired, and every non-owned entry MUST be byte-identical to before. Otherwise abort this file (`self_check_failed`).
 4. Atomic write: temp file in the same dir (`.<name>.loadout-<rand>.tmp`), write, `fsync`, copy permissions, compare-and-swap check (re-hash target), then `rename` (Unix) or `ReplaceFileW` (Windows, keeps ACLs and attributes), then `fsync` the directory (Unix). Locked by another process on Windows: retry with backoff for 2 s, then `file_locked`.
-5. Update the ledger (atomic write) immediately after each file.
+5. Update the ledger (atomic write) after each file that was written. Changes to ownership alone (adopt, refresh, forget, release) are written with the next save, at the latest after the last file, and before the run stops on an error (a journal write that fails), so nothing written is left unowned. When a save fails, the files whose ownership it carried are reported `failed`; what was written stays written.
 6. Append the result to `state/journal/<apply-id>.json`. On next start, an unfinished journal is reported with per-file outcomes; no automatic replay.
 
 Invariants (each has a test):
@@ -703,6 +705,10 @@ Invariants (each has a test):
 ### 8.5 Drift detection triggers
 
 GUI: file watcher on every target file, manifest and skill target dir; window focus; manual Refresh. CLI: `loadout status`. Drift is never auto-reverted.
+
+The app keeps the last full plan (every scope and project) and serves the drawer, the MCP pills, the Projects page and the effective matrix from it (M30, #15). While a plan is computed, every file read and folder probe it makes is noted with what it saw (existence, content hash, listing), including the project repository files git2 reads for SPEC 6.5. The plan is served again only when each noted read gives the same answer, so a store commit, a trust change, a client rewriting its file or an apply from the CLI makes the next request plan again, also for a request that waited on a plan started before the commit; the watcher's event drops it too. A plan that read secret values (keyring entries, inline values) is shared only with the requests that waited for it. Requests that arrive while a plan is computed wait for it. Known limits: git's global excludes file (`core.excludesFile`) and a repository created in a parent folder of a project are not noted, so until another change, a watcher event or a restart, the plan keeps the private-file decision (SPEC 6.5) it made before.
+
+An instant apply (8.7) plans and writes only the targets the change touched: for a store server, the targets that hold or own its entries and those of project entries that start from it (`from`); for `project trust`, `init`, a project server edit or `project share`, that project's targets. Other store changes (client preferences, settings, secrets, `project remove`) apply every target. The result, exit code and notice cover those targets only, so a project still waiting for trust elsewhere no longer turns a server change into exit 7.
 
 ### 8.6 Adopt and import
 

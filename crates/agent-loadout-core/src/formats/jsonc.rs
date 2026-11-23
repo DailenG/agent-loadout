@@ -1,7 +1,15 @@
 //! JSON and JSONC editing through `jsonc-parser`'s CST.
 //!
-//! The body is kept as text and parsed again for each step of an operation
-//! (the CST is `Rc`-based, so it cannot live in a `Send` document). An
+//! The body is kept as text. The CST is `Rc`-based, so it cannot live in a
+//! `Send` document; what can is a tree of the values the text holds
+//! ([`Node`]), built from the parse that checks the text and again after
+//! each change, on the next read. Reads (`list`, `get`) go through it, so
+//! reading every entry of a file costs one parse, however many entries it
+//! holds (#14). Clones share it until one of them changes its text.
+//!
+//! An edit parses the text once and works on that CST; a step that follows
+//! a change parses the new text again, so every step sees the CST a parse
+//! of the current text gives, as when each step parsed on its own. An
 //! operation that changes nothing never re-serializes, so its output is the
 //! input, and a failed operation restores the text it started from.
 //!
@@ -10,6 +18,8 @@
 //! would also break the object over several lines, so members are added and
 //! values replaced there by splicing one-line text that copies the object's
 //! own `:` and `,` spacing.
+
+use std::sync::{Arc, OnceLock};
 
 use jsonc_parser::cst::{
     CstContainerNode, CstInputValue, CstLeafNode, CstNode, CstObject, CstObjectProp, CstRootNode,
@@ -27,6 +37,63 @@ pub(super) struct JsonBody {
     /// the root object this document created is empty again, the text goes
     /// back to it.
     blank: Option<String>,
+    /// The value `text` holds (`None` for no value), built on the first
+    /// read after a change ([`JsonBody::set_text`] replaces it).
+    values: Arc<OnceLock<Result<Option<Node>, CoreError>>>,
+}
+
+/// A value of the text as reads see it. An object keeps every member whose
+/// name decodes, in file order and with duplicates, as the CST lists them;
+/// a lookup takes the first one, as `CstObject::get` does.
+#[derive(Debug, Clone)]
+enum Node {
+    Object(Vec<(String, Node)>),
+    Value(NativeValue),
+}
+
+impl Node {
+    fn of(node: &CstNode) -> Self {
+        match node {
+            CstNode::Container(CstContainerNode::Object(object)) => Node::Object(
+                object
+                    .properties()
+                    .iter()
+                    .filter_map(|prop| {
+                        let name = prop.decoded_name()?;
+                        let value = prop
+                            .value()
+                            .map_or(Node::Value(NativeValue::Null), |node| Node::of(&node));
+                        Some((name, value))
+                    })
+                    .collect(),
+            ),
+            other => Node::Value(to_native(other)),
+        }
+    }
+
+    /// [`to_native`] of the CST node this was built from.
+    fn to_native(&self) -> NativeValue {
+        match self {
+            Node::Object(members) => {
+                let mut map = NativeMap::new();
+                for (name, value) in members {
+                    if !map.contains_key(name) {
+                        map.insert(name.clone(), value.to_native());
+                    }
+                }
+                NativeValue::Object(map)
+            }
+            Node::Value(value) => value.clone(),
+        }
+    }
+
+    /// The value of the first member named `key`.
+    fn member<'n>(members: &'n [(String, Node)], key: &str) -> Option<&'n Self> {
+        members
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value)
+    }
 }
 
 impl JsonBody {
@@ -38,16 +105,25 @@ impl JsonBody {
                 .map_err(|err| parse_error(strict, &err))?;
         }
         let root = parse(&text, strict)?;
-        let blank = root.value().is_none().then(|| text.clone());
+        let value = root.value();
+        let blank = value.is_none().then(|| text.clone());
+        let values = Arc::new(OnceLock::from(Ok(value.as_ref().map(Node::of))));
         Ok(Self {
             text,
             strict,
             blank,
+            values,
         })
     }
 
     pub(super) fn text(&self) -> String {
         self.text.clone()
+    }
+
+    /// Sets the text; the values are built again on the next read.
+    fn set_text(&mut self, text: String) {
+        self.text = text;
+        self.values = Arc::default();
     }
 
     fn format(&self) -> Format {
@@ -64,16 +140,46 @@ impl JsonBody {
         parse(&self.text, self.strict)
     }
 
+    /// The value the current text holds.
+    fn values(&self) -> Result<Option<&Node>, CoreError> {
+        self.values
+            .get_or_init(|| Ok(self.root()?.value().as_ref().map(Node::of)))
+            .as_ref()
+            .map(Option::as_ref)
+            .map_err(Clone::clone)
+    }
+
+    /// The members of the object at `path` ([`JsonBody::object_at`] over
+    /// the values).
+    fn members_at(&self, path: &[&str]) -> Result<Option<&[(String, Node)]>, CoreError> {
+        let Some(value) = self.values()? else {
+            return Ok(None);
+        };
+        let Node::Object(root) = value else {
+            return Err(unexpected_shape(self.format(), &[], "an object"));
+        };
+        let mut members: &[(String, Node)] = root;
+        for (depth, key) in path.iter().enumerate() {
+            let Some(value) = Node::member(members, key) else {
+                return Ok(None);
+            };
+            let Node::Object(inner) = value else {
+                return Err(unexpected_shape(
+                    self.format(),
+                    &path[..=depth],
+                    "an object",
+                ));
+            };
+            members = inner;
+        }
+        Ok(Some(members))
+    }
+
     pub(super) fn list(&self, container: &[&str]) -> Result<Vec<String>, CoreError> {
-        let root = self.root()?;
-        let Some(object) = self.object_at(&root, container)? else {
+        let Some(members) = self.members_at(container)? else {
             return Ok(Vec::new());
         };
-        Ok(object
-            .properties()
-            .iter()
-            .filter_map(|prop| prop.decoded_name())
-            .collect())
+        Ok(members.iter().map(|(name, _)| name.clone()).collect())
     }
 
     pub(super) fn get(
@@ -81,14 +187,10 @@ impl JsonBody {
         container: &[&str],
         key: &str,
     ) -> Result<Option<NativeValue>, CoreError> {
-        let root = self.root()?;
-        let Some(object) = self.object_at(&root, container)? else {
+        let Some(members) = self.members_at(container)? else {
             return Ok(None);
         };
-        Ok(object.get(key).map(|prop| {
-            prop.value()
-                .map_or(NativeValue::Null, |node| to_native(&node))
-        }))
+        Ok(Node::member(members, key).map(Node::to_native))
     }
 
     pub(super) fn upsert(
@@ -99,15 +201,21 @@ impl JsonBody {
         created: &mut Vec<Vec<String>>,
     ) -> Result<bool, CoreError> {
         check_finite(value)?;
-        let current = self.get(container, key)?;
+        let root = self.root()?;
+        let current = self.object_at(&root, container)?.and_then(|object| {
+            object.get(key).map(|prop| {
+                prop.value()
+                    .map_or(NativeValue::Null, |node| to_native(&node))
+            })
+        });
         if current.as_ref() == Some(value) {
             return Ok(false);
         }
         self.atomic(|body| {
-            body.ensure_object(container, created)?;
+            let root = body.ensure_object(root, container, created)?;
             match current {
-                Some(_) => body.merge(container, key, value),
-                None => body.append(container, key, value),
+                Some(_) => body.merge(root, container, key, value).map(drop),
+                None => body.append(root, container, key, value),
             }
         })?;
         Ok(true)
@@ -122,7 +230,7 @@ impl JsonBody {
             return Ok(false);
         };
         remove_member(prop.into());
-        self.text = root.to_string();
+        self.set_text(root.to_string());
         Ok(true)
     }
 
@@ -145,8 +253,8 @@ impl JsonBody {
             }
             let array = NativeValue::Array(vec![NativeValue::from(member)]);
             self.atomic(|body| {
-                body.ensure_object(parent, created)?;
-                body.append(parent, name, &array)
+                let root = body.ensure_object(root, parent, created)?;
+                body.append(root, parent, name, &array)
             })?;
             created.push(owned(list));
             return Ok(true);
@@ -170,7 +278,7 @@ impl JsonBody {
                 remove_member(node);
             }
         }
-        self.text = root.to_string();
+        self.set_text(root.to_string());
         Ok(true)
     }
 
@@ -184,7 +292,7 @@ impl JsonBody {
                 .is_some_and(|object| object.properties().is_empty());
             return Ok(match (&self.blank, empty) {
                 (Some(blank), true) => {
-                    self.text = blank.clone();
+                    self.set_text(blank.clone());
                     true
                 }
                 _ => false,
@@ -205,7 +313,7 @@ impl JsonBody {
         };
         if empty {
             remove_member(prop.into());
-            self.text = root.to_string();
+            self.set_text(root.to_string());
         }
         Ok(empty)
     }
@@ -215,52 +323,63 @@ impl JsonBody {
         &mut self,
         steps: impl FnOnce(&mut Self) -> Result<(), CoreError>,
     ) -> Result<(), CoreError> {
-        let saved = self.text.clone();
+        let saved = (self.text.clone(), self.values.clone());
         let result = steps(self);
         if result.is_err() {
-            self.text = saved;
+            (self.text, self.values) = saved;
         }
         result
     }
 
     /// Creates the root object and the objects on `path` that are missing.
+    /// `root` is the CST of the current text; returns the CST of the text
+    /// after (parsed again when something was created).
     fn ensure_object(
         &mut self,
+        mut root: CstRootNode,
         path: &[&str],
         created: &mut Vec<Vec<String>>,
-    ) -> Result<(), CoreError> {
-        let root = self.root()?;
+    ) -> Result<CstRootNode, CoreError> {
         if root.value().is_none() {
             root.object_value_or_set();
-            self.text = root.to_string();
+            self.set_text(root.to_string());
             created.push(Vec::new());
+            root = self.root()?;
         }
         for depth in 0..path.len() {
-            let root = self.root()?;
             if self.object_at(&root, &path[..=depth])?.is_none() {
                 self.append(
+                    root,
                     &path[..depth],
                     path[depth],
                     &NativeValue::Object(NativeMap::new()),
                 )?;
                 created.push(owned(&path[..=depth]));
+                root = self.root()?;
             }
         }
-        Ok(())
+        Ok(root)
     }
 
     /// Makes `key` in the object at `parent` equal to `new`, keeping the text
-    /// of every member whose value already is.
-    fn merge(&mut self, parent: &[&str], key: &str, new: &NativeValue) -> Result<(), CoreError> {
-        let root = self.root()?;
+    /// of every member whose value already is. `root` is the CST of the
+    /// current text. Returns whether the text changed.
+    fn merge(
+        &mut self,
+        root: CstRootNode,
+        parent: &[&str],
+        key: &str,
+        new: &NativeValue,
+    ) -> Result<bool, CoreError> {
         let prop = self.prop_at(&root, parent, key)?;
         let old = prop.value();
         if old.as_ref().map(to_native).as_ref() == Some(new) {
-            return Ok(());
+            return Ok(false);
         }
         let (Some(object), NativeValue::Object(map)) = (old.and_then(|node| node.as_object()), new)
         else {
-            return self.replace(parent, key, new);
+            self.replace(root, parent, key, new)?;
+            return Ok(true);
         };
         let stale: Vec<CstObjectProp> = object
             .properties()
@@ -270,37 +389,48 @@ impl JsonBody {
                     .is_some_and(|name| !map.contains_key(&name))
             })
             .collect();
+        let mut root = root;
         if !stale.is_empty() {
             for prop in stale {
                 remove_member(prop.into());
             }
-            self.text = root.to_string();
+            self.set_text(root.to_string());
+            root = self.root()?;
         }
         let mut path = parent.to_vec();
         path.push(key);
         for (member, value) in map.iter() {
-            let root = self.root()?;
             let exists = self
                 .object_at(&root, &path)?
                 .is_some_and(|object| object.get(member).is_some());
-            if exists {
-                self.merge(&path, member, value)?;
+            let changed = if exists {
+                self.merge(root.clone(), &path, member, value)?
             } else {
-                self.append(&path, member, value)?;
+                self.append(root.clone(), &path, member, value)?;
+                true
+            };
+            if changed {
+                root = self.root()?;
             }
         }
-        Ok(())
+        Ok(true)
     }
 
-    /// Appends `key: value` to the object at `path`.
-    fn append(&mut self, path: &[&str], key: &str, value: &NativeValue) -> Result<(), CoreError> {
-        let root = self.root()?;
+    /// Appends `key: value` to the object at `path`; `root` is the CST of
+    /// the current text.
+    fn append(
+        &mut self,
+        root: CstRootNode,
+        path: &[&str],
+        key: &str,
+        value: &NativeValue,
+    ) -> Result<(), CoreError> {
         let object = self
             .object_at(&root, path)?
             .expect("the caller checked the object exists");
         if !one_line(&root, &object) {
             object.append(key, to_input(value));
-            self.text = root.to_string();
+            self.set_text(root.to_string());
             return Ok(());
         }
         let spacing = Spacing::of(&root, &object);
@@ -320,18 +450,19 @@ impl JsonBody {
         };
         let mut text = root.to_string();
         text.insert_str(at, &insert);
-        self.text = text;
+        self.set_text(text);
         Ok(())
     }
 
-    /// Replaces the value of `key` in the object at `parent`.
+    /// Replaces the value of `key` in the object at `parent`; `root` is the
+    /// CST of the current text.
     fn replace(
         &mut self,
+        root: CstRootNode,
         parent: &[&str],
         key: &str,
         value: &NativeValue,
     ) -> Result<(), CoreError> {
-        let root = self.root()?;
         let object = self
             .object_at(&root, parent)?
             .expect("the caller checked the object exists");
@@ -344,11 +475,11 @@ impl JsonBody {
                 let end = start + old.to_string().len();
                 let mut text = root.to_string();
                 text.replace_range(start..end, &Spacing::of(&root, &object).render(value));
-                self.text = text;
+                self.set_text(text);
             }
             _ => {
                 prop.set_value(to_input(value));
-                self.text = root.to_string();
+                self.set_text(root.to_string());
             }
         }
         Ok(())

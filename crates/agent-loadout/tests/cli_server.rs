@@ -130,8 +130,9 @@ fn server_add_ls_show_rm_and_history() {
         "--client",
         "future-client",
     ]);
-    // The instant apply covers every server, and github is still blocked.
-    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    // The instant apply covers the server added (#15): github, blocked by
+    // its missing secret, is not this change's failure.
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("warning[unknown_client]"));
 
     let output = cli.run(&["server", "add", "github", "--json", "--", "npx"]);

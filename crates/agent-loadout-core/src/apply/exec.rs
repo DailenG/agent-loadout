@@ -11,6 +11,7 @@
 //! that transaction's single commit. [`run`] wraps it in its own
 //! transaction, which commits only when a file was written.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,7 +21,8 @@ use crate::apply::backup;
 use crate::apply::journal::{FileRecord, Journal, RecordedError};
 use crate::apply::ledger::{EntryKind, Ledger, LedgerEntry, LedgerKey, LedgerSlot, Origin};
 use crate::apply::plan::{
-    self, Action, EntryPlan, EntryState, OpCounts, Plan, PlanOptions, TargetPlan, read_target,
+    self, Action, EntryPlan, EntryState, OpCounts, Plan, PlanOptions, ProjectSelection,
+    ScopeFilter, TargetPlan, read_target,
 };
 use crate::apply::render::{DesiredState, RenderCx};
 use crate::apply::{ApplyEnv, import, placeholder_path, temp_path};
@@ -159,22 +161,59 @@ pub enum ApplyStatus {
     TrustRequired,
 }
 
+/// What a store change touched. Its instant apply plans and writes only
+/// those targets (#15), so an unrelated project waiting for trust, or a
+/// drifted file elsewhere, neither slows the change nor shows in its
+/// result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Touched {
+    /// Anything (client preferences, settings, secrets): every target.
+    All,
+    /// These store servers (added, edited, enabled for other clients,
+    /// removed): the targets [`PlanOptions::servers`] selects.
+    Servers(Vec<String>),
+    /// The known project at this folder (trusted, initialized): its
+    /// targets only.
+    Project(PathBuf),
+}
+
+impl Touched {
+    /// The plan that covers what was touched.
+    pub fn options(&self) -> PlanOptions {
+        match self {
+            Touched::All => PlanOptions::default(),
+            Touched::Servers(ids) => PlanOptions {
+                servers: Some(ids.clone()),
+                ..PlanOptions::default()
+            },
+            Touched::Project(root) => PlanOptions {
+                scope: ScopeFilter::Project,
+                projects: ProjectSelection::Only(root.clone()),
+                ..PlanOptions::default()
+            },
+        }
+    }
+}
+
 /// In instant mode (`apply_mode`, the default), applies a staged store edit
 /// inside its transaction, so the edit and its apply are one commit
-/// (SPEC 8.7). `None` in review mode.
+/// (SPEC 8.7): the targets the edit `touched`. `None` in review mode. The
+/// desired state is loaded once, for the mode and the plan.
 pub fn instant_apply(
     tx: &mut Transaction<'_>,
     ax: &ApplyEnv<'_>,
+    touched: &Touched,
 ) -> Result<Option<ApplyReport>, CoreError> {
     let machine = tx.machine().id.clone();
-    if DesiredState::load(tx, Some(&machine))?.apply_mode() != ApplyMode::Instant {
+    let desired = DesiredState::load(tx, Some(&machine))?;
+    if desired.apply_mode() != ApplyMode::Instant {
         return Ok(None);
     }
     let request = ApplyRequest {
-        options: PlanOptions::default(),
+        options: touched.options(),
         trigger: ApplyTrigger::Instant,
     };
-    apply_in(tx, ax, &request).map(Some)
+    apply_with(tx, ax, &request, Some(desired)).map(Some)
 }
 
 /// Plans against the store's working tree (or an empty desired state when
@@ -255,6 +294,16 @@ pub fn apply_in(
     ax: &ApplyEnv<'_>,
     request: &ApplyRequest,
 ) -> Result<ApplyReport, CoreError> {
+    apply_with(tx, ax, request, None)
+}
+
+/// [`apply_in`] with the transaction's desired state loaded already.
+fn apply_with(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
+    request: &ApplyRequest,
+    desired: Option<DesiredState>,
+) -> Result<ApplyReport, CoreError> {
     tx.check()?;
     let state_dir = ax.home.state_dir();
     let machine = tx.machine().clone();
@@ -262,7 +311,10 @@ pub fn apply_in(
     let mut ledger = Ledger::load(ax.fs, &state_dir)?;
     let key = LedgerKey::load_or_create(ax.fs, &state_dir)?;
 
-    let mut desired = DesiredState::load(tx, Some(&machine.id))?;
+    let mut desired = match desired {
+        Some(desired) => desired,
+        None => DesiredState::load(tx, Some(&machine.id))?,
+    };
     let mut plan = plan::plan(&cx, &desired, &ledger, &key, &request.options)?;
     let mut imported = Vec::new();
     if plan
@@ -323,11 +375,43 @@ pub fn apply_in(
         written_at: utc_datetime(now).to_string(),
         store_commit: base.short().to_owned(),
     };
-    let mut targets = Vec::with_capacity(plan.targets.len());
+    let mut targets: Vec<TargetResult> = Vec::with_capacity(plan.targets.len());
+    // SPEC 8.4 step 5: the ownership of a written file is saved right after
+    // it; ledger-only changes (adopt, refresh, forget, release) go with the
+    // next save. `unsaved` are the targets whose changes are not saved yet.
+    let mut unsaved: Vec<usize> = Vec::new();
     for target in plan.targets {
-        let result = executor.execute(target, &mut ledger);
-        journal.record(ax.fs, &state_dir, file_record(&result))?;
+        let (mut result, changed) = executor.execute(target, &mut ledger);
+        let index = targets.len();
+        if changed {
+            unsaved.push(index);
+        }
+        if changed && result.written {
+            if let Err(err) = ledger.save(ax.fs, &state_dir) {
+                for earlier in unsaved.drain(..).filter(|earlier| *earlier != index) {
+                    ownership_lost(&mut targets[earlier], &err);
+                    journal.files[earlier] = file_record(&targets[earlier]);
+                }
+                ownership_lost(&mut result, &err);
+            }
+            unsaved.clear();
+        }
+        if let Err(err) = journal.record(ax.fs, &state_dir, file_record(&result)) {
+            // What was done stays owned, whatever stops the run.
+            if !unsaved.is_empty() {
+                let _ = ledger.save(ax.fs, &state_dir);
+            }
+            return Err(err);
+        }
         targets.push(result);
+    }
+    if !unsaved.is_empty()
+        && let Err(err) = ledger.save(ax.fs, &state_dir)
+    {
+        for index in unsaved {
+            ownership_lost(&mut targets[index], &err);
+            journal.files[index] = file_record(&targets[index]);
+        }
     }
     let outcome = run_outcome(&targets);
     let writes = targets.iter().filter(|target| target.written).count();
@@ -449,45 +533,48 @@ struct Executor<'a> {
 }
 
 impl Executor<'_> {
-    fn execute(&mut self, plan: TargetPlan, ledger: &mut Ledger) -> TargetResult {
+    /// Executes one target; also returns whether its ownership changed in
+    /// `ledger`.
+    fn execute(&mut self, plan: TargetPlan, ledger: &mut Ledger) -> (TargetResult, bool) {
         let mut plan = plan;
         let mut replans = 0;
         loop {
             let current = match read_target(self.ax.fs, &plan.file) {
                 Ok(bytes) => bytes,
-                Err(err) => return failed(plan, err),
+                Err(err) => return (failed(plan, err), false),
             };
             if current != plan.before {
                 replans += 1;
                 if replans > MAX_REPLANS {
                     let err = changed_during_apply(&plan.file);
-                    return failed(plan, err);
+                    return (failed(plan, err), false);
                 }
                 plan = self.replan(plan, current, ledger);
                 continue;
             }
             if let Some(problem) = plan.problem.clone() {
-                return finished(plan, ApplyOutcome::Blocked, Some(problem), false, None);
+                return (
+                    finished(plan, ApplyOutcome::Blocked, Some(problem), false, None),
+                    false,
+                );
             }
             if let Err(err) = self.exclude(&plan) {
-                return failed(plan, err);
+                return (failed(plan, err), false);
             }
             let Some(after) = plan.after.clone() else {
                 // Ledger-only work (adopt, refresh, forget, release).
-                if let Err(err) = self.update_ledger(&plan, ledger) {
-                    return failed(plan, err);
-                }
+                let changed = self.update_ledger(&plan, ledger);
                 let outcome = entry_outcome(&plan, false);
-                return finished(plan, outcome, None, false, None);
+                return (finished(plan, outcome, None, false, None), changed);
             };
             if let Err(err) = self_check(&plan, &after) {
-                return failed(plan, err);
+                return (failed(plan, err), false);
             }
             let backup = match &current {
                 Some(bytes) => {
                     match backup::save(self.ax.fs, self.ax.home, &self.run_dir, &plan.file, bytes) {
                         Ok(path) => Some(path),
-                        Err(err) => return failed(plan, err),
+                        Err(err) => return (failed(plan, err), false),
                     }
                 }
                 None => None,
@@ -500,27 +587,20 @@ impl Executor<'_> {
                     replans += 1;
                     if replans > MAX_REPLANS {
                         let err = changed_during_apply(&plan.file);
-                        return failed(plan, err);
+                        return (failed(plan, err), false);
                     }
                     let now = match read_target(self.ax.fs, &plan.file) {
                         Ok(bytes) => bytes,
-                        Err(err) => return failed(plan, err),
+                        Err(err) => return (failed(plan, err), false),
                     };
                     plan = self.replan(plan, now, ledger);
                     continue;
                 }
-                Err(err) => return failed(plan, err),
+                Err(err) => return (failed(plan, err), false),
             }
-            if let Err(err) = self.update_ledger(&plan, ledger) {
-                let restart = restart_required(&plan.clients, &plan.file);
-                let mut result = failed(plan, err);
-                result.written = true;
-                result.backup = backup;
-                result.warnings.extend(restart);
-                return result;
-            }
+            let changed = self.update_ledger(&plan, ledger);
             let outcome = entry_outcome(&plan, true);
-            return finished(plan, outcome, None, true, backup);
+            return (finished(plan, outcome, None, true, backup), changed);
         }
     }
 
@@ -615,8 +695,9 @@ pub(crate) fn swap_file(
 }
 
 impl Executor<'_> {
-    /// Records every entry's new ownership state and saves the ledger.
-    fn update_ledger(&self, plan: &TargetPlan, ledger: &mut Ledger) -> Result<(), CoreError> {
+    /// Records every entry's new ownership state in `ledger` (saved once
+    /// after the run, see [`apply_in`]). Returns whether it changed.
+    fn update_ledger(&self, plan: &TargetPlan, ledger: &mut Ledger) -> bool {
         let file = plan.file.to_string_lossy().into_owned();
         let slot = LedgerSlot {
             scope: plan.scope,
@@ -624,19 +705,26 @@ impl Executor<'_> {
             file: &file,
             container: &plan.pointer,
         };
-        let mut changed = false;
+        let known = ledger.slot_entries(&slot);
+        // What this batch did to a key so far, for a later entry of the
+        // same key (duplicate keys in a file): its origin, `None` once
+        // removed.
+        let mut done: HashMap<String, Option<Option<Origin>>> = HashMap::new();
+        let mut changes: Vec<(String, Option<LedgerEntry>)> = Vec::new();
         for entry in &plan.entries {
             let origin = match entry.action {
                 Action::Create => Some(Origin::Created),
                 Action::Adopt | Action::AdoptOverwrite => Some(Origin::Adopted),
                 Action::Update | Action::Disable | Action::Refresh => Some(
-                    ledger
-                        .get(&slot, &entry.name)
-                        .and_then(|known| known.origin)
-                        .unwrap_or(Origin::Created),
+                    match done.get(&entry.name) {
+                        Some(origin) => origin.flatten(),
+                        None => known.get(&entry.name).and_then(|known| known.origin),
+                    }
+                    .unwrap_or(Origin::Created),
                 ),
                 Action::Remove | Action::Forget | Action::Release => {
-                    changed |= ledger.remove(&slot, &entry.name);
+                    done.insert(entry.name.clone(), None);
+                    changes.push((entry.name.clone(), None));
                     None
                 }
                 Action::None | Action::Import | Action::Skip => None,
@@ -655,7 +743,7 @@ impl Executor<'_> {
                 // A list member is its own value.
                 EntryKind::ListMember => None,
             };
-            ledger.upsert(LedgerEntry {
+            let row = LedgerEntry {
                 kind: plan.kind,
                 client: client.to_owned(),
                 scope: plan.scope,
@@ -670,13 +758,12 @@ impl Executor<'_> {
                 store_commit: Some(self.store_commit.clone()),
                 delivery: entry.delivery.map(str::to_owned),
                 extra: serde_json::Map::new(),
-            });
-            changed = true;
+            };
+            done.insert(entry.name.clone(), Some(Some(origin)));
+            changes.push((entry.name.clone(), Some(row)));
         }
-        if changed {
-            ledger.save(self.ax.fs, &self.ax.home.state_dir())?;
-        }
-        Ok(())
+        drop(known);
+        ledger.update_slot(&slot, changes)
     }
 }
 
@@ -765,6 +852,14 @@ fn restart_required(clients: &[&'static str], file: &Path) -> Vec<CoreError> {
             .with_path(file)
         })
         .collect()
+}
+
+/// A target whose new ownership could not be saved: it fails, and what was
+/// written stays written (with its backup and restart notes).
+fn ownership_lost(target: &mut TargetResult, err: &CoreError) {
+    target.outcome = ApplyOutcome::Failed;
+    target.error = Some(err.clone());
+    target.counts = OpCounts::default();
 }
 
 fn failed(plan: TargetPlan, err: CoreError) -> TargetResult {

@@ -6,7 +6,6 @@
 use std::ops::Range;
 
 use agent_loadout_core::apply::discard::{self, PendingKind};
-use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::apply::rollback::{self, ApplySelector};
 use agent_loadout_core::apply::{
     self, Action, ApplyRequest, EntryState, PlanOptions, ScopeFilter, TargetFilter, TargetPlan,
@@ -399,16 +398,9 @@ fn planned_file(env: &Env, target: &TargetPlan) -> PlannedFile {
 
 /// The drawer: every file the next apply would touch, with masked diffs.
 pub fn pending(core: &Core) -> CmdResult<PendingPlan> {
-    let store = core.open_store()?;
-    let ax = core.apply_env();
-    let plan = apply::preview(store.as_ref(), &ax, &PlanOptions::default())?;
-    let apply_mode = match &store {
-        Some(store) => {
-            let machine = Machine::load(core.fs.as_ref(), &core.home.state_dir())?;
-            DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?.apply_mode()
-        }
-        None => ApplyMode::Instant,
-    };
+    let cached = core.plan()?;
+    let plan = &cached.plan;
+    let apply_mode = cached.desired().apply_mode();
     let pending = plan
         .targets
         .iter()
@@ -449,7 +441,8 @@ pub fn run(core: &Core, files: Option<Vec<FileRef>>) -> CmdResult<ChangeResult> 
     let targets = match files {
         None => None,
         Some(files) => {
-            let plan = apply::preview(Some(&store), &ax, &PlanOptions::default())?;
+            let cached = core.plan()?;
+            let plan = &cached.plan;
             let targets: Vec<TargetFilter> = plan
                 .targets
                 .iter()

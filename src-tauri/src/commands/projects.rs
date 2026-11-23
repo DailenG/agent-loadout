@@ -247,11 +247,9 @@ pub fn list(core: &Core) -> CmdResult<Vec<ProjectRow>> {
     if known.is_empty() {
         return Ok(Vec::new());
     }
-    let options = PlanOptions {
-        scope: ScopeFilter::Project,
-        ..PlanOptions::default()
-    };
-    let plan = apply::preview(store.as_ref(), &core.apply_env(), &options)?;
+    // From the shared plan (#15): its project targets.
+    let cached = core.plan()?;
+    let plan = cached.plan.scope_part(ScopeFilter::Project);
     let mut pending: BTreeMap<&str, usize> = BTreeMap::new();
     let mut clients: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for target in &plan.targets {

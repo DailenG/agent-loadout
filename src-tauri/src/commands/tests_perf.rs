@@ -9,7 +9,16 @@
 //! cargo test --release --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture tests_perf
 //! ```
 //!
-//! `PERF_OUT` names a folder for `backend.json`.
+//! [`perf_planner`] is the quick variant for the planner work (#14, #15):
+//! the same 200 servers and 21 client files, 5 projects, no skills and no
+//! edit history, built in seconds:
+//!
+//! ```text
+//! cargo test --release --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture perf_planner
+//! ```
+//!
+//! `PERF_OUT` names a folder for `backend.json` (`planner.json` for the
+//! quick variant).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -455,6 +464,190 @@ fn perf_baseline_commands() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             Path::new(&dir).join("backend.json"),
+            serde_json::to_string_pretty(&json).unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+/// Projects of [`perf_planner`]; every fifth stays untrusted.
+const PLANNER_PROJECTS: usize = 5;
+
+fn print_table(out: &[Timing]) {
+    eprintln!(
+        "\n| Command | runs | min ms | median ms | max ms | JSON bytes |\n|---|---|---|---|---|---|"
+    );
+    for t in out {
+        eprintln!(
+            "| {} | {} | {} | {} | {} | {} |",
+            t.name,
+            t.runs,
+            ms(t.min),
+            ms(t.median),
+            ms(t.max),
+            t.bytes
+        );
+    }
+}
+
+/// The quick planner benchmark (#14, #15): 200 servers, 21 client files
+/// with 25 foreign entries each and 5 projects (4 trusted), set up in
+/// review mode so the setup itself runs few plans, then timed in instant
+/// mode as the app runs by default.
+#[test]
+#[ignore = "planner benchmark; run on demand (docs/perf)"]
+fn perf_planner() {
+    let fx = Fx::new();
+    let core = &fx.core;
+    drop(fx.store());
+    let mut setup = Vec::new();
+
+    let started = Instant::now();
+    let detected = client_files(core);
+    let mut files: Vec<(String, String)> = (0..SERVERS)
+        .map(|i| {
+            (
+                format!("servers/server-{i:03}.toml"),
+                server_toml(i, &detected, "initial"),
+            )
+        })
+        .collect();
+    files.push((
+        "settings.toml".to_owned(),
+        "schema = 1\napply_mode = \"review\"\n".to_owned(),
+    ));
+    stage(core, &files);
+    record(
+        &mut setup,
+        "client files + 200 servers (review mode)",
+        started,
+    );
+
+    let started = Instant::now();
+    let first = apply::pending(core).unwrap();
+    record(&mut setup, "first pending plan", started);
+    eprintln!(
+        "first plan: {} files, {} pending, {} writes",
+        first.files.len(),
+        first.pending,
+        first.writes
+    );
+
+    let started = Instant::now();
+    apply::run(core, None).unwrap();
+    record(&mut setup, "first apply (all client files)", started);
+
+    let started = Instant::now();
+    let mut project_ids = Vec::new();
+    for i in 0..PLANNER_PROJECTS {
+        let root = fx.th.projects().join(format!("project-{i}"));
+        std::fs::create_dir_all(root.join(".loadout")).unwrap();
+        std::fs::write(root.join(".loadout/project.toml"), project_manifest(i)).unwrap();
+        let added = projects::add(core, &root).unwrap();
+        if i % 5 != 4 {
+            let hash = projects::review(core, &added.id).unwrap().hash;
+            projects::trust(core, &added.id, &hash).unwrap();
+        }
+        project_ids.push(added.id);
+    }
+    apply::run(core, None).unwrap();
+    record(&mut setup, "add 5 projects (4 trusted) + apply", started);
+
+    stage(
+        core,
+        &[(
+            "settings.toml".to_owned(),
+            "schema = 1\napply_mode = \"instant\"\n".to_owned(),
+        )],
+    );
+
+    let project = project_ids[0].clone();
+    let mut out = Vec::new();
+    time(&mut out, "pending_plan", || apply::pending(core).unwrap());
+    time(&mut out, "list_servers", || servers::list(core).unwrap());
+    time(&mut out, "list_projects", || projects::list(core).unwrap());
+    time(&mut out, "effective_matrix", || {
+        effective::matrix(core, &project).unwrap()
+    });
+    time(&mut out, "status (core preview, all scopes)", || {
+        let store = core.open_store().unwrap();
+        let plan = agent_loadout_core::apply::preview(
+            store.as_ref(),
+            &core.apply_env(),
+            &agent_loadout_core::apply::PlanOptions::default(),
+        )
+        .unwrap();
+        plan.targets.len()
+    });
+    time(
+        &mut out,
+        "focus on MCP (pending_plan + list_servers + list_projects)",
+        || {
+            (
+                apply::pending(core).unwrap(),
+                servers::list(core).unwrap(),
+                projects::list(core).unwrap(),
+            )
+        },
+    );
+    let mut toggle = 0usize;
+    time(
+        &mut out,
+        "set_server_clients (one pill, instant apply)",
+        || {
+            toggle += 1;
+            let clients: Vec<String> = detected
+                .iter()
+                .filter(|client| toggle.is_multiple_of(2) || **client != detected[0])
+                .map(|c| (*c).to_owned())
+                .collect();
+            servers::set_clients_for(
+                core,
+                "server-010",
+                &servers::ClientChoice {
+                    all_detected: false,
+                    clients,
+                },
+            )
+            .unwrap()
+        },
+    );
+    time(&mut out, "pending_plan after a pill toggle", || {
+        apply::pending(core).unwrap()
+    });
+    let trusted = project_ids[1].clone();
+    time(&mut out, "project trust (instant apply)", || {
+        let hash = projects::review(core, &trusted).unwrap().hash;
+        projects::trust(core, &trusted, &hash).unwrap()
+    });
+
+    eprintln!(
+        "\nstore: {SERVERS} servers, {PLANNER_PROJECTS} projects, {} commits, {} clients with files",
+        fx.commits(),
+        detected.len()
+    );
+    eprintln!("\n| Setup step | ms |\n|---|---|");
+    for (name, d) in &setup {
+        eprintln!("| {name} | {} |", ms(*d));
+    }
+    print_table(&out);
+    if let Some(dir) = std::env::var_os("PERF_OUT") {
+        let json: Vec<_> = out
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "runs": t.runs,
+                    "minMs": ms(t.min),
+                    "medianMs": ms(t.median),
+                    "maxMs": ms(t.max),
+                    "bytes": t.bytes,
+                })
+            })
+            .collect();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            Path::new(&dir).join("planner.json"),
             serde_json::to_string_pretty(&json).unwrap(),
         )
         .unwrap();
