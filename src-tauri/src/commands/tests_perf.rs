@@ -240,7 +240,11 @@ fn perf_baseline_commands() {
 
     let started = Instant::now();
     let first = apply::pending(core).unwrap();
-    record(&mut setup, "first pending plan (200 servers x clients)", started);
+    record(
+        &mut setup,
+        "first pending plan (200 servers x clients)",
+        started,
+    );
     eprintln!(
         "first plan: {} files, {} pending, {} writes",
         first.files.len(),

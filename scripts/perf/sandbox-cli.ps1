@@ -25,9 +25,9 @@ New-Item -ItemType Directory -Force -Path $Root | Out-Null
 Copy-Item -LiteralPath $Source -Destination $Cli
 $env:LOADOUT_HOME = $LoadoutHome
 
-function Invoke-Loadout([string[]]$CliArgs) {
+function Invoke-Loadout([string[]]$CliArgs, [int[]]$Ok = @(0)) {
     $out = & $Cli @CliArgs 2>&1
-    if ($LASTEXITCODE -ne 0) { throw ('loadout {0} failed ({1}): {2}' -f ($CliArgs -join ' '), $LASTEXITCODE, ($out | Out-String)) }
+    if ($Ok -notcontains $LASTEXITCODE) { throw ('loadout {0} failed ({1}): {2}' -f ($CliArgs -join ' '), $LASTEXITCODE, ($out | Out-String)) }
 }
 
 function Write-Text([string]$Path, [string]$Text) {
@@ -92,9 +92,11 @@ Measure-Step '20 projects (add + trust)' {
         for ($n = 0; $n -lt 5; $n++) { $text += "`n[servers.local-$n]`ntransport = `"stdio`"`ncommand = `"project-mcp-$n`"`n" }
         Write-Text (Join-Path $dir '.loadout\project.toml') $text
         Invoke-Loadout @('project', 'add', $dir)
-        if (($i % 5) -ne 4) { Invoke-Loadout @('--yes', 'project', 'trust', $dir) }
+        # Every fifth project stays untrusted on purpose, so the apply that
+        # `project trust` runs ends partial (exit 7) once one exists.
+        if (($i % 5) -ne 4) { Invoke-Loadout @('--yes', 'project', 'trust', $dir) @(0, 7) }
     }
-    Invoke-Loadout @('apply')
+    Invoke-Loadout @('apply') @(0, 7)
 }
 
 function Measure-Cli([string]$Label, [string[]]$CliArgs, [string]$Cwd = $Root) {
