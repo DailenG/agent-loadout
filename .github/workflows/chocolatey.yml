@@ -101,7 +101,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "choco pack failed ($LASTEXITCODE)" }
           $nupkg = Join-Path $out "agent-loadout.$env:VERSION.nupkg"
           choco push $nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "choco push failed ($LASTEXITCODE)" }
+          if ($LASTEXITCODE -ne 0) {
+            # The community repository refuses (403) any new version while the
+            # package has a version in moderation and none approved yet. That
+            # is a wait, not a failure: commit the files, and a later run
+            # pushes this version once the first one is approved.
+            $feed = "https://community.chocolatey.org/api/v2/FindPackagesById()?id='agent-loadout'"
+            $approved = ([xml](Invoke-WebRequest -Uri $feed -UseBasicParsing).Content).feed.entry
+            if (-not $approved) {
+              "::warning::agent-loadout has no approved version yet and one is in moderation; $env:VERSION will be pushed by a later run after approval."
+              exit 0
+            }
+            throw "choco push failed ($LASTEXITCODE)"
+          }
 
   commit:
     needs: update
