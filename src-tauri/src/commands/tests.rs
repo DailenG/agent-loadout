@@ -779,7 +779,7 @@ fn drawer_diffs_mask_secrets_of_other_entries() {
 // M16: Projects page, effective matrix, drift resolver.
 
 impl Fx {
-    fn summaries(&self) -> Vec<String> {
+    pub(super) fn summaries(&self) -> Vec<String> {
         match self.core.open_store().unwrap() {
             Some(store) => store
                 .log(&LogFilter::default())
@@ -791,7 +791,7 @@ impl Fx {
         }
     }
 
-    fn store_file(&self, relative: &str) -> String {
+    pub(super) fn store_file(&self, relative: &str) -> String {
         use agent_loadout_core::store::StoreRead;
         self.core
             .open_store()
@@ -804,7 +804,7 @@ impl Fx {
 
     /// What crosses IPC must never name the temp root (it stands in for
     /// the user's profile path).
-    fn assert_no_root(&self, json: &str) {
+    pub(super) fn assert_no_root(&self, json: &str) {
         let root = self.th.root().to_string_lossy().into_owned();
         for form in [
             root.clone(),

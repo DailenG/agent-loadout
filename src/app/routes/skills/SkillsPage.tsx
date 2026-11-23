@@ -8,7 +8,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { storeQueryKeys, useInvalidateStore } from "@/app/apply/changeNotice";
-import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { ScopeSelect, USER_SCOPE } from "@/app/components/ScopeSelect";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
@@ -28,7 +28,6 @@ import { useRenameConfirm } from "./useRenameConfirm";
 export type SkillViewMode = "list" | "grid" | "grouped";
 
 const GRID_COLUMNS = 3;
-const USER_SCOPE = "user";
 
 const VIEW_MODES: { mode: SkillViewMode; label: "skills.view.list" | "skills.view.grid" | "skills.view.grouped"; icon: () => JSX.Element }[] = [
   { mode: "list", label: "skills.view.list", icon: ListIcon },
@@ -78,10 +77,6 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   const [isChecking, setIsChecking] = useState(false);
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
 
-  const projects = useQuery({
-    queryKey: storeQueryKeys.projects,
-    queryFn: async () => unwrap(await commands.listProjects()),
-  });
   const list = useQuery({
     queryKey: [...storeQueryKeys.skills, scope],
     queryFn: async () => unwrap(await commands.listSkills(scope)),
@@ -124,12 +119,6 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   const activeSource = source === STORE_SOURCE || activeDir || (source === AGENTS_SOURCE && data?.agentsCli)
     ? source
     : STORE_SOURCE;
-
-  const scopeOptions: AppSelectOption<string>[] = [
-    { value: USER_SCOPE, label: t("skills.scope.user") },
-    ...(projects.data ?? []).map((row) => ({ value: row.id, label: t("skills.scope.project", { name: row.name }) })),
-  ];
-  const scopeLabel = scopeOptions.find((option) => option.value === scopeKey)?.label ?? t("skills.scope.user");
 
   async function handleCheckUpdates() {
     setIsChecking(true);
@@ -220,12 +209,11 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <AppSelect
-        className="skills-scope-select"
+      <ScopeSelect
         value={scopeKey}
-        options={scopeOptions}
         ariaLabel={t("skills.scope.aria")}
-        selectedLabel={scopeLabel}
+        userLabel={t("skills.scope.user")}
+        projectLabel={(name) => t("skills.scope.project", { name })}
         onChange={(value) => {
           setScopeKey(value);
           setExpandedId("");

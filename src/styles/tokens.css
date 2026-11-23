@@ -18564,3 +18564,23 @@ button.settings-form-item:disabled {
   color: var(--danger, #d14343);
   font-size: 0.78rem;
 }
+
+/* M24 MCP project scope and Discard pending (SPEC 13.2, 13.4). */
+.mcp-project-trust {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-project-inherited {
+  margin-top: 16px;
+}
+
+.mcp-project-inherited .apply-run {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.apply-discard__confirm {
+  margin: 4px 0 8px;
+}

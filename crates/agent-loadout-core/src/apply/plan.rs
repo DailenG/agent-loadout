@@ -19,7 +19,7 @@ use crate::apply::ledger::{
 };
 use crate::apply::render::{
     DesiredEntry, DesiredState, Detected, RenderCx, RenderTarget, Rendering, native_name,
-    render_for, server_transport, system_entries, writable,
+    render_for, system_entries, writable,
 };
 use crate::env::{Env, Os};
 use crate::error::{CoreError, ErrorCode};
@@ -920,20 +920,10 @@ impl ProjectPlanner<'_, '_> {
         warned: &mut Vec<String>,
     ) {
         let clients = match &entry.body {
-            EntryBody::Server(Ok(server)) => {
-                let transport = server_transport(server, self.cx.env);
-                self.detected
-                    .select(self.cx, self.desired, &entry.clients, transport)
-            }
             EntryBody::Server(Err(_)) => self.error_clients(pcx, entry),
-            EntryBody::Suppression => {
-                let transport = self
-                    .desired
-                    .servers
-                    .get(&entry.name)
-                    .and_then(|server| server_transport(server, self.cx.env));
+            EntryBody::Server(Ok(_)) | EntryBody::Suppression => {
                 self.detected
-                    .select(self.cx, self.desired, &entry.clients, transport)
+                    .project_selection(self.cx, self.desired, entry)
             }
         };
         for client in clients {

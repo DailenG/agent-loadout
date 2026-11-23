@@ -14,6 +14,7 @@
 //! the planner turns them into project and project-local targets.
 
 pub mod backup;
+pub mod discard;
 pub mod exec;
 pub mod import;
 pub mod journal;

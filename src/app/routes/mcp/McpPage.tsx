@@ -1,7 +1,7 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
 // Toolbar, server card markup, monogram, detail container, two-click delete and empty state
 // ported from DailenG/skilldock@181b52b src/app/routes/mcp.tsx; the data layer is new
-// (typed commands over TanStack Query, SPEC 13.2).
+// (typed commands over TanStack Query, SPEC 13.2), and so is the project scope (M24).
 
 import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
@@ -12,6 +12,7 @@ import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
+import { ScopeSelect, USER_SCOPE } from "@/app/components/ScopeSelect";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { errorMessage, scopeLabels, t } from "@/i18n/en";
 import type { ClientInfo, ServerRow, TransportKind } from "@/ipc/bindings";
@@ -24,7 +25,9 @@ import {
   visiblePills,
   type VisiblePill,
 } from "./ClientPill";
-import { AddIcon, DeleteIcon, EditIcon, PasteIcon, PowerToggleIcon } from "./icons";
+import { AddIcon, DeleteIcon, EditIcon, McpServerMonogram, PasteIcon, PowerToggleIcon } from "./icons";
+import { ProjectServersView, useProjectServers } from "./ProjectServers";
+import type { ProjectDialogState } from "./ProjectServerDialog";
 import { ServerEditDialog, type EditTab } from "./ServerEditDialog";
 
 export type McpPageProps = {
@@ -50,26 +53,6 @@ function serverName(row: ServerRow): string {
 
 function failureText(error: unknown): string {
   return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
-}
-
-function monogram(value: string): string {
-  const first = Array.from(value.trim()).find((character) => /[\p{L}\p{N}]/u.test(character));
-  return (first ?? "?").toLocaleUpperCase();
-}
-
-function McpServerMonogram({ row, active }: { row: ServerRow; active: boolean }) {
-  return (
-    <div className="link-badge link-badge--mcp-monogram" aria-hidden="true">
-      <span className="link-badge__type-mark link-badge__type-mark--mcp">
-        <svg viewBox="0 0 12 12" fill="none">
-          <path d="M4.2 4.2 2.8 5.6a2 2 0 0 0 2.8 2.8L7 7" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
-          <path d="M7.8 7.8 9.2 6.4a2 2 0 0 0-2.8-2.8L5 5" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
-        </svg>
-      </span>
-      <span className="link-badge__label">{monogram(serverName(row))}</span>
-      <span className={`link-badge__status-dot ${active ? "is-active" : "is-inactive"}`} />
-    </div>
-  );
 }
 
 type DetailContainerProps = {
@@ -117,7 +100,7 @@ function McpServerDetailContainer({ children, isGridLayout, row, active, onClose
       >
         <header className="skill-card-detail-modal__header">
           <div className="skill-card-detail-modal__identity">
-            <McpServerMonogram row={row} active={active} />
+            <McpServerMonogram name={serverName(row)} active={active} />
             <div className="skill-card-detail-modal__copy">
               <div className="skill-card-detail-modal__title">
                 <h3>{name}</h3>
@@ -151,7 +134,10 @@ function McpServerDetailContainer({ children, isGridLayout, row, active, onClose
   );
 }
 
-/** The MCP page (SPEC 13.2): one card per store server with its client pills. */
+/**
+ * The MCP page (SPEC 13.2): one card per store server with its client pills, or at project
+ * scope the servers of that project's manifests.
+ */
 export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
   const { commands } = useTransport();
   const changeNotice = useChangeNotice();
@@ -168,6 +154,11 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
   const [deletingId, setDeletingId] = useState("");
   const [bulkId, setBulkId] = useState("");
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [scopeKey, setScopeKey] = useState(USER_SCOPE);
+  const inProject = scopeKey !== USER_SCOPE;
+  const [projectDialog, setProjectDialog] = useState<ProjectDialogState | null>(null);
+  const projectServers = useProjectServers(scopeKey, inProject);
+  const [projectBusy, setProjectBusy] = useState(false);
   const deleteActionRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -254,22 +245,43 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <ListGridViewToggle value={viewMode} onChange={setViewMode} />
+      <ScopeSelect
+        value={scopeKey}
+        ariaLabel={t("mcp.scope.aria")}
+        userLabel={t("mcp.scope.user")}
+        projectLabel={(name) => t("mcp.scope.project", { name })}
+        onChange={(value) => {
+          setScopeKey(value);
+          setExpandedId("");
+          setDialog(null);
+          setProjectDialog(null);
+        }}
+      />
+      {inProject ? null : <ListGridViewToggle value={viewMode} onChange={setViewMode} />}
       <RefreshButton label={t("mcp.toolbar.refresh")} />
+      {inProject ? null : (
+        <button
+          className="secondary-button secondary-button--compact skills-toolbar-button"
+          type="button"
+          onClick={() => setDialog({ mode: "create", focusPaste: true })}
+        >
+          <span aria-hidden="true" className="skills-toolbar-button__icon">
+            <PasteIcon />
+          </span>
+          <span>{t("mcp.toolbar.paste")}</span>
+        </button>
+      )}
       <button
         className="secondary-button secondary-button--compact skills-toolbar-button"
         type="button"
-        onClick={() => setDialog({ mode: "create", focusPaste: true })}
-      >
-        <span aria-hidden="true" className="skills-toolbar-button__icon">
-          <PasteIcon />
-        </span>
-        <span>{t("mcp.toolbar.paste")}</span>
-      </button>
-      <button
-        className="secondary-button secondary-button--compact skills-toolbar-button"
-        type="button"
-        onClick={() => setDialog({ mode: "create", focusPaste: false })}
+        onClick={() =>
+          inProject ? setProjectDialog({ mode: "create" }) : setDialog({ mode: "create", focusPaste: false })}
+        // An untrusted or changed project is read only until it is trusted;
+        // a running edit or refetch may make the shown hash stale.
+        disabled={
+          inProject
+          && (projectServers.data?.project.trust !== "trusted" || projectServers.isFetching || projectBusy)
+        }
       >
         <span aria-hidden="true" className="skills-toolbar-button__icon">
           <AddIcon />
@@ -279,6 +291,22 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
       <ToolbarGoInstallButton onClick={onOpenInstall} />
     </section>
   );
+
+  if (inProject) {
+    return (
+      <div className="mcp-route">
+        <HeaderToolbar>{toolbar}</HeaderToolbar>
+        <ProjectServersView
+          projectId={scopeKey}
+          query={query}
+          onOpenPending={onOpenPending}
+          dialog={projectDialog}
+          onDialog={setProjectDialog}
+          onBusy={setProjectBusy}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mcp-route">
@@ -396,7 +424,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
                 >
                   <div className="mcp-server-card__main">
                     <div className="mcp-server-card__identity">
-                      <McpServerMonogram row={row} active={enabledPills.length > 0} />
+                      <McpServerMonogram name={name} active={enabledPills.length > 0} />
                       <div className="mcp-server-card__title-stack">
                         <div className="mcp-server-card__title-row">
                           <strong>{name}</strong>

@@ -1112,7 +1112,7 @@ Edit dialog: tabs **Form | TOML | Preview**.
 - Preview: per-client rendered native entry (masked), including blocked reasons.
 - Paste-anything: pasting a client JSON/TOML snippet (any client's shape) auto-detects and converts.
 
-Project scope: the list shows the **effective** servers for the folder; actions write to the project or project-local manifest (a "Write to: Project (shared) / Local (private)" selector in the dialog).
+Project scope: the list shows the **effective** servers for the folder: the entries of its manifests (both files merged, with their layer and kind: project-only, override of a store server, suppression) and, apart, the store servers it inherits (each with Override here and Hide here); actions write to the project or project-local manifest (a "Write to: Project (shared) / Local (private)" selector in the dialog). Every edit writes the manifest, then mirrors, trusts and applies that content in one commit (Loadout trusts what it writes itself, as `project share` does). An edit starts only from trusted content with the content hash the page showed; an untrusted or changed project is read only until it is reviewed and trusted.
 
 ### 13.3 Projects page (new)
 
@@ -1146,6 +1146,7 @@ Clicking a cell shows the provenance chain (winner file, shadowed entries, reade
 ### 13.4 Apply drawer and drift resolver (new)
 
 - Drawer lists files grouped by scope with op counts; each expands to a unified diff (masked). Buttons: Apply all, Apply selected, Discard pending (review mode).
+- Discard pending throws away store edits this machine has not applied: the server files (`servers/<id>.toml`) and `clients.toml` that differ from this machine's last apply commit (the newest commit with its `Loadout-Apply` trailer, else the initial commit; the base "Undo this apply" uses, 8.7) are restored to it, all of them or one entity, after a confirmation. It is a store restore of those entities (9.5: `auto/pre-restore/<ts>` tag, one commit `discard: ...`, op `store.discard`) that is not applied, so no client file changes. Settings, the secret catalog, skills, project mirrors and machine overlays are never discarded (not apply edits, synced at once, or owned by the project folder).
 - Resolver for `drifted` / `conflict` / `collision` / `missing`: three columns (last written, current file, desired) with the actions of the entry's state (8.2): Overwrite, Import theirs into store, Release ownership, Skip; Re-create, Respect deletion for `missing`. Release ownership is recorded in this machine's overlay (`[enable.released]`, server id to clients), never in the synced server file; naming the client again (a pill toggle) manages the entry here again. The resolver shows a fingerprint (keyed hash of the state, the file entry and the desired entry); a resolution is refused with `entry_changed` when the entry no longer has it.
 
 ### 13.5 History page (new, modeled on SkillDock's backup history dialog)

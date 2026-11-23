@@ -12,6 +12,8 @@ import { useTransport } from "@/ipc/transport";
 export const driftQueryKeys = [
   storeQueryKeys.pendingPlan,
   storeQueryKeys.servers,
+  storeQueryKeys.projectServers,
+  storeQueryKeys.storeChanges,
   storeQueryKeys.projects,
   storeQueryKeys.effective,
   storeQueryKeys.tools,

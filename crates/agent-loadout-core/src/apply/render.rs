@@ -22,6 +22,7 @@ use crate::env::Env;
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{NativeMap, NativeValue};
 use crate::fs::Fs;
+use crate::layering::{EntryBody, ProjectEntry};
 use crate::model::TomlDocument;
 use crate::model::clients::{
     ClientPrefs, ClientPrefsFile, ClientSelection, NATIVE_NAME_KEY, known_client,
@@ -340,6 +341,43 @@ impl Detected {
         let transport = server_transport(server, cx.env);
         let mut clients = self.select(cx, desired, selection, transport);
         clients.retain(|client| !desired.excluded(client) && !desired.released(&server.id, client));
+        clients
+    }
+
+    /// The clients project `entry` names on this machine, before machine
+    /// exclusions: its selection (the entry's `clients`, else the project's
+    /// defaults) resolved by [`Detected::select`] for the transport of its
+    /// definition, or for a suppression the transport of the store server
+    /// it hides. An entry whose definition does not resolve fits no
+    /// transport, so `all-detected` names no client for it.
+    pub fn project_selection(
+        &mut self,
+        cx: &RenderCx<'_>,
+        desired: &DesiredState,
+        entry: &ProjectEntry,
+    ) -> Vec<String> {
+        let transport = match &entry.body {
+            EntryBody::Server(Ok(server)) => server_transport(server, cx.env),
+            EntryBody::Server(Err(_)) => None,
+            EntryBody::Suppression => desired
+                .servers
+                .get(&entry.name)
+                .and_then(|server| server_transport(server, cx.env)),
+        };
+        self.select(cx, desired, &entry.clients, transport)
+    }
+
+    /// The clients project `entry` is written for on this machine, as the
+    /// planner picks them: [`Detected::project_selection`] minus machine
+    /// exclusions and `clients.toml` opt-outs.
+    pub fn project_clients(
+        &mut self,
+        cx: &RenderCx<'_>,
+        desired: &DesiredState,
+        entry: &ProjectEntry,
+    ) -> Vec<String> {
+        let mut clients = self.project_selection(cx, desired, entry);
+        clients.retain(|client| !desired.excluded(client));
         clients
     }
 

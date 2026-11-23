@@ -34,8 +34,13 @@ export type VisiblePill = { pill: ClientPillData; client: ClientInfo };
  * selected, or have something other than "disabled" to say.
  */
 export function visiblePills(row: ServerRow, clients: readonly ClientInfo[]): VisiblePill[] {
+  return pillsToShow(row.pills, clients);
+}
+
+/** [`visiblePills`] for any row's pills. */
+export function pillsToShow(pills: readonly ClientPillData[], clients: readonly ClientInfo[]): VisiblePill[] {
   const byId = new Map(clients.map((client) => [client.id, client]));
-  return row.pills.flatMap((pill) => {
+  return pills.flatMap((pill) => {
     const client = byId.get(pill.client) ?? { id: pill.client, name: pill.client, detected: false, supported: false };
     return client.detected || pill.selected || pill.state !== "disabled" ? [{ pill, client }] : [];
   });
@@ -108,19 +113,15 @@ function pillTooltip({ pill, client }: VisiblePill): string {
   }
 }
 
-type ClientPillProps = {
-  row: ServerRow;
+type PillButtonProps = {
   entry: VisiblePill;
-  /** Opens Pending changes, where drift is resolved. */
-  onOpenPending: () => void;
-  /** A bulk change of this row is running. */
-  busy?: boolean;
+  /** A change of this pill or its row is running. */
+  busy: boolean;
+  onClick: () => void;
 };
 
-/** One client of a server row (SPEC 13.2). */
-export function ClientPill({ row, entry, onOpenPending, busy = false }: ClientPillProps) {
-  const setServerClients = useSetServerClients();
-  const [isUpdating, setIsUpdating] = useState(false);
+/** A client pill's markup and states (SPEC 13.2), for any scope. */
+export function PillButton({ entry, busy, onClick }: PillButtonProps) {
   const { pill, client } = entry;
   const state = pill.state;
   const stateLabel = t(STATE_KEYS[state]);
@@ -128,29 +129,12 @@ export function ClientPill({ row, entry, onOpenPending, busy = false }: ClientPi
   const notSupported = state === "not_supported";
   const showsState = state !== "enabled" && state !== "disabled";
 
-  async function handleClick() {
-    if (state === "drift") {
-      onOpenPending();
-      return;
-    }
-    setIsUpdating(true);
-    try {
-      await setServerClients(
-        row.id,
-        toggledChoice(row, client.id, !pill.selected),
-        t("mcp.toggled", { name: row.displayName ?? row.id, client: client.name }),
-      );
-    } finally {
-      setIsUpdating(false);
-    }
-  }
-
   const button = (
     <button
       className={`tool-pill mcp-pill is-${state.replace("_", "-")}${state === "enabled" ? " is-enabled" : ""}`}
       type="button"
-      onClick={() => void handleClick()}
-      disabled={notSupported || isUpdating || busy}
+      onClick={onClick}
+      disabled={notSupported || busy}
       aria-pressed={notSupported || state === "drift" ? undefined : pill.selected}
       aria-label={t("mcp.pill.aria", { client: client.name, state: stateLabel })}
       data-state={state}
@@ -170,4 +154,39 @@ export function ClientPill({ row, entry, onOpenPending, busy = false }: ClientPi
       {button}
     </span>
   ) : button;
+}
+
+type ClientPillProps = {
+  row: ServerRow;
+  entry: VisiblePill;
+  /** Opens Pending changes, where drift is resolved. */
+  onOpenPending: () => void;
+  /** A bulk change of this row is running. */
+  busy?: boolean;
+};
+
+/** One client of a store server row (SPEC 13.2). */
+export function ClientPill({ row, entry, onOpenPending, busy = false }: ClientPillProps) {
+  const setServerClients = useSetServerClients();
+  const [isUpdating, setIsUpdating] = useState(false);
+  const { pill, client } = entry;
+
+  async function handleClick() {
+    if (pill.state === "drift") {
+      onOpenPending();
+      return;
+    }
+    setIsUpdating(true);
+    try {
+      await setServerClients(
+        row.id,
+        toggledChoice(row, client.id, !pill.selected),
+        t("mcp.toggled", { name: row.displayName ?? row.id, client: client.name }),
+      );
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  return <PillButton entry={entry} busy={isUpdating || busy} onClick={() => void handleClick()} />;
 }

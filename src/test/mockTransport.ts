@@ -207,6 +207,9 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     listAppliedRuns: async () => ok([]),
     undoApply: async (applyId) =>
       ok({ applyId, restored: [], tag: "auto/pre-rollback/mock", commit: null, apply: MOCK_APPLY_RUN }),
+    pendingStoreChanges: async () => ok([]),
+    discardPending: async (entities) =>
+      ok({ discarded: entities ?? [], commit: MOCK_CHANGE.commit, tag: "auto/pre-restore/mock" }),
     listTools: async () => ok(MOCK_TOOLS),
     revealToolFolder: async () => ok(null),
     listProjects: async () => ok([]),
@@ -218,6 +221,11 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     removeProject: async () => ok(MOCK_CHANGE),
     applyProjectFiles: async () => ok(MOCK_CHANGE),
     revealProjectFolder: async () => ok(null),
+    listProjectServers: async (id) => mockIpcError({ code: "not_found", message: `project ${id} is not mocked` }),
+    getProjectServer: async (_id, name) => mockIpcError({ code: "not_found", message: `server ${name} is not mocked` }),
+    saveProjectServer: async () => ok(MOCK_CHANGE),
+    removeProjectServer: async () => ok(MOCK_CHANGE),
+    setProjectServerClients: async () => ok(MOCK_CHANGE),
     effectiveMatrix: async (id) => mockIpcError({ code: "not_found", message: `project ${id} is not mocked` }),
     resolverDetail: async () => mockIpcError({ code: "not_found", message: "entry not mocked" }),
     resolveEntry: async () => ok(MOCK_CHANGE),

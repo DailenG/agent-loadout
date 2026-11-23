@@ -11,6 +11,7 @@
 //! - [`effective`]: what a client loads in a folder, and from where (6.4).
 //! - [`projects`]: init, add, remove, the trust review and trust, shared by
 //!   `loadout project` and the app.
+//! - [`project_servers`]: the app's edits of a manifest's `[servers.*]`.
 //!
 //! The planner ([`crate::apply::plan`]) turns known projects into project
 //! and project-local targets.
@@ -19,6 +20,7 @@ pub mod effective;
 pub mod git;
 pub mod manifest;
 pub mod merge;
+pub mod project_servers;
 pub mod projects;
 pub mod trust;
 

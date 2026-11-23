@@ -211,7 +211,7 @@ pub fn rollback(
 }
 
 /// The root commit reached by first parents from `from`.
-fn initial_commit(store: &Store<'_>, from: &CommitId) -> Result<CommitId, CoreError> {
+pub(crate) fn initial_commit(store: &Store<'_>, from: &CommitId) -> Result<CommitId, CoreError> {
     let mut current = from.clone();
     while let Some(parent) = store.first_parent(&current)? {
         current = parent;

@@ -1,11 +1,12 @@
 // Pending changes drawer (SPEC 13.4): the pending apply plan grouped by
 // scope, each file expandable to its masked unified diff, Apply all / Apply
-// selected, the drift resolver for entries that need a decision, and the
-// recent apply runs with "Undo this apply".
+// selected, Discard pending (review mode: store edits not applied yet, all
+// or one, back to the last applied state), the drift resolver for entries
+// that need a decision, and the recent apply runs with "Undo this apply".
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
-import { storeQueryKeys, useChangeNotice, useUndoApply } from "@/app/apply/changeNotice";
+import { storeQueryKeys, useChangeNotice, useInvalidateStore, useUndoApply } from "@/app/apply/changeNotice";
 import { STATE_KEYS, diffLineClass } from "@/app/apply/labels";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { useNotifications } from "@/app/components/notifications";
@@ -17,6 +18,8 @@ import type {
   EntryStateKind,
   FileRef,
   FileScope,
+  PendingChangeKind,
+  PendingStoreChange,
   PlannedFile,
 } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
@@ -274,10 +277,62 @@ function RecentApplies() {
   );
 }
 
+/** `server/<id>` as "Server <id>", `clients` as "Client preferences". */
+function entityLabel(entity: string): string {
+  if (entity === "clients") {
+    return t("apply.discard.entity.clients");
+  }
+  return t("apply.discard.entity.server", { id: entity.replace(/^server\//, "") });
+}
+
+const PENDING_KIND_KEYS = {
+  added: "apply.discard.kind.added",
+  changed: "apply.discard.kind.changed",
+  removed: "apply.discard.kind.removed",
+} as const satisfies Record<PendingChangeKind, MessageKey>;
+
+type PendingStoreChangesProps = {
+  changes: PendingStoreChange[];
+  busy: boolean;
+  onDiscard: (entity: string) => void;
+};
+
+/** Store edits not applied yet, each with Discard (SPEC 13.4, review mode). */
+function PendingStoreChanges({ changes, busy, onDiscard }: PendingStoreChangesProps) {
+  return (
+    <section className="apply-drawer__section" aria-labelledby="apply-discard-title">
+      <h4 id="apply-discard-title" className="apply-drawer__section-title">
+        {t("apply.discard.title")}
+      </h4>
+      <p className="apply-drawer__note">{t("apply.discard.description")}</p>
+      <ul className="apply-runs">
+        {changes.map((change) => (
+          <li key={change.entity} className="apply-run">
+            <div className="apply-run__copy">
+              <span className="apply-run__summary">{entityLabel(change.entity)}</span>
+              <span className="apply-run__time">{t(PENDING_KIND_KEYS[change.kind])}</span>
+            </div>
+            <button
+              className="secondary-button secondary-button--compact"
+              type="button"
+              disabled={busy}
+              aria-label={t("apply.discard.oneAria", { entity: entityLabel(change.entity) })}
+              onClick={() => onDiscard(change.entity)}
+            >
+              {t("apply.discard.one")}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function DrawerBody({ onClose }: { onClose: () => void }) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
   const reportChange = useChangeNotice();
+  const invalidateStore = useInvalidateStore();
   const clientName = useClientNames();
   const titleId = useId();
   const plan = useQuery({
@@ -295,6 +350,36 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
     },
     onError: (error) => notify({ tone: "error", message: failureText(error) }),
   });
+  const isReview = plan.data?.applyMode === "review";
+  const storeChangesQuery = useQuery({
+    queryKey: storeQueryKeys.storeChanges,
+    queryFn: async () => unwrap(await commands.pendingStoreChanges()),
+    enabled: isReview,
+  });
+  const storeChanges = isReview ? storeChangesQuery.data ?? [] : [];
+  // Discard pending: `entities` null stands for every change listed.
+  const [confirmingDiscard, setConfirmingDiscard] = useState<{ entities: string[] | null } | null>(null);
+  const [discarding, setDiscarding] = useState(false);
+
+  async function handleDiscard(entities: string[]) {
+    setDiscarding(true);
+    try {
+      const result = unwrap(await commands.discardPending(entities));
+      const [only] = result.discarded;
+      notify({
+        tone: "success",
+        message: result.discarded.length === 1 && only
+          ? t("apply.discard.doneOne", { entity: entityLabel(only) })
+          : t("apply.discard.done", { count: result.discarded.length }),
+      });
+      setConfirmingDiscard(null);
+    } catch (error) {
+      notify({ tone: "error", message: failureText(error) });
+    } finally {
+      setDiscarding(false);
+      await invalidateStore();
+    }
+  }
 
   const files = plan.data?.files ?? [];
   const groups = SCOPE_ORDER.map((scope) => ({
@@ -408,10 +493,50 @@ function DrawerBody({ onClose }: { onClose: () => void }) {
               {errorMessage(warning.code)}
             </p>
           ))}
+          {storeChanges.length > 0 ? (
+            <PendingStoreChanges
+              changes={storeChanges}
+              busy={discarding}
+              onDiscard={(entity) => setConfirmingDiscard({ entities: [entity] })}
+            />
+          ) : null}
+          {confirmingDiscard ? (
+            <div className="apply-run__confirm apply-discard__confirm" role="alert">
+              <span>
+                {confirmingDiscard.entities
+                  ? t("apply.discard.confirmOne", { entity: entityLabel(confirmingDiscard.entities[0] ?? "") })
+                  : t("apply.discard.confirmAll", { count: storeChanges.length })}
+              </span>
+              <button
+                className="secondary-button secondary-button--compact semantic-action semantic-action--disable"
+                type="button"
+                disabled={discarding}
+                // "All" is the changes shown: one that arrived since is not thrown away.
+                onClick={() =>
+                  void handleDiscard(confirmingDiscard.entities ?? storeChanges.map((change) => change.entity))}
+              >
+                {t("apply.discard.confirmAction")}
+              </button>
+              <button className="ghost-button" type="button" onClick={() => setConfirmingDiscard(null)}>
+                {t("apply.cancel")}
+              </button>
+            </div>
+          ) : null}
           <RecentApplies />
         </div>
 
         <div className="apply-drawer__actions">
+          {isReview ? (
+            <button
+              className="secondary-button secondary-button--compact semantic-action semantic-action--disable"
+              type="button"
+              aria-label={t("apply.discard.allAria")}
+              disabled={discarding || storeChanges.length === 0}
+              onClick={() => setConfirmingDiscard({ entities: null })}
+            >
+              {t("apply.discard.all")}
+            </button>
+          ) : null}
           <button
             className="secondary-button secondary-button--compact"
             type="button"

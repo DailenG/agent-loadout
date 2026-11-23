@@ -13,6 +13,10 @@ import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 export const storeQueryKeys = {
   servers: ["list_servers"],
   pendingPlan: ["pending_plan"],
+  /** Prefix of `["list_project_servers", id]`. */
+  projectServers: ["list_project_servers"],
+  /** Store edits Discard pending can throw away. */
+  storeChanges: ["pending_store_changes"],
   appliedRuns: ["list_applied_runs"],
   tools: ["list_tools"],
   projects: ["list_projects"],

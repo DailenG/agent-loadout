@@ -1,9 +1,11 @@
 //! Apply drawer commands (SPEC 13.4) and "Undo this apply" (SPEC 8.7):
 //! the pending plan with masked diffs, `loadout apply` (every file or only
-//! the selected ones) and `loadout rollback`.
+//! the selected ones), `loadout rollback`, and Discard pending (store
+//! edits not applied yet, restored to the last applied state).
 
 use std::ops::Range;
 
+use agent_loadout_core::apply::discard::{self, PendingKind};
 use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::apply::rollback::{self, ApplySelector};
 use agent_loadout_core::apply::{
@@ -14,6 +16,7 @@ use agent_loadout_core::model::applied::ApplyTrigger;
 use agent_loadout_core::model::settings::ApplyMode;
 use agent_loadout_core::secrets::classify::{classify_import, find_in_text, is_sensitive_key};
 use agent_loadout_core::store::Machine;
+use agent_loadout_core::store::diff::trailer_entities;
 use agent_loadout_core::{CoreError, Env, ErrorCode};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -527,6 +530,91 @@ pub fn undo(core: &Core, apply_id: &str, confirmed: bool) -> CmdResult<UndoResul
     })
 }
 
+/// How a store entity differs from what this machine last applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingChangeKind {
+    Added,
+    Changed,
+    Removed,
+}
+
+impl From<PendingKind> for PendingChangeKind {
+    fn from(kind: PendingKind) -> Self {
+        match kind {
+            PendingKind::Added => Self::Added,
+            PendingKind::Changed => Self::Changed,
+            PendingKind::Removed => Self::Removed,
+        }
+    }
+}
+
+/// A store edit waiting for an apply that Discard pending can throw away
+/// (`server/<id>` or `clients`).
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingStoreChange {
+    pub entity: String,
+    pub kind: PendingChangeKind,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscardResult {
+    /// The entities restored to the last applied state.
+    pub discarded: Vec<String>,
+    pub commit: Option<String>,
+    /// The `auto/pre-restore/<ts>` tag, from which a discard is undone.
+    pub tag: Option<String>,
+}
+
+/// The drawer's discardable store edits since this machine's last apply.
+pub fn store_changes(core: &Core) -> CmdResult<Vec<PendingStoreChange>> {
+    let Some(store) = core.open_store()? else {
+        return Ok(Vec::new());
+    };
+    let pending = discard::pending(&store, &core.apply_env())?;
+    Ok(pending
+        .map(|pending| pending.changes)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|change| PendingStoreChange {
+            entity: change.entity,
+            kind: change.kind.into(),
+        })
+        .collect())
+}
+
+/// Discard pending: restores `entities` (all pending ones when `None`) to
+/// the last applied state in one commit, without applying, so no client
+/// file is touched.
+pub fn discard(core: &Core, entities: Option<&[String]>) -> CmdResult<DiscardResult> {
+    let Some(store) = core.open_store()? else {
+        return Ok(DiscardResult {
+            discarded: Vec::new(),
+            commit: None,
+            tag: None,
+        });
+    };
+    let ax = core.apply_env();
+    let report = match discard::pending(&store, &ax)? {
+        Some(pending) => discard::discard(&store, &ax, &pending, entities)?,
+        None => None,
+    };
+    Ok(match report {
+        Some(report) => DiscardResult {
+            discarded: trailer_entities(&report.plan.files),
+            commit: report.commit.as_ref().map(ToString::to_string),
+            tag: report.tag,
+        },
+        None => DiscardResult {
+            discarded: Vec::new(),
+            commit: None,
+            tag: None,
+        },
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn pending_plan(state: tauri::State<'_, AppState>) -> CmdResult<PendingPlan> {
@@ -556,4 +644,21 @@ pub async fn undo_apply(
     confirmed: bool,
 ) -> CmdResult<UndoResult> {
     blocking(&state, move |core| undo(core, &apply_id, confirmed)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn pending_store_changes(
+    state: tauri::State<'_, AppState>,
+) -> CmdResult<Vec<PendingStoreChange>> {
+    blocking(&state, store_changes).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn discard_pending(
+    state: tauri::State<'_, AppState>,
+    entities: Option<Vec<String>>,
+) -> CmdResult<DiscardResult> {
+    blocking(&state, move |core| discard(core, entities.as_deref())).await
 }

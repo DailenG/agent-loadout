@@ -41,10 +41,13 @@ into the store in one commit, with a report of every item; the migration
 wizard page follows),
 M21 (Tier C adapters: Gemini CLI, Antigravity, OpenCode, Grok Build),
 M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
-editors, and the ported user-scope clients) and M23 (packaging: the NSIS
+editors, and the ported user-scope clients), M23 (packaging: the NSIS
 installer with `loadout` on the user PATH, AppImage/deb/rpm, AUR PKGBUILDs,
 winget manifests, the release workflow with Azure Trusted Signing, and the
-optional updater) are in place. Gates V1 (Tier A)
+optional updater) and M24 (desktop MCP page at project scope: a project's
+manifest servers with per-client pills, add/edit/remove in `project.toml`
+or `project.local.toml`, read only until trusted; Discard pending in the
+pending-changes drawer) are in place. Gates V1 (Tier A)
 and V2 (Tier B),
 the real-client checks, are partly run; see
 [docs/verify/README.md](docs/verify/README.md).
@@ -60,6 +63,8 @@ Downloads are on the [latest release](https://github.com/DailenG/agent-loadout/r
 - **Windows:** `Loadout_<version>_x64-setup.exe` (per-user, signed; puts
   `loadout` on your PATH and updates itself). winget
   (`winget install DailenG.AgentLoadout`) once the package is accepted.
+  Chocolatey (`choco install agent-loadout`, per-user like the installer)
+  once the package is approved.
 - **Linux:** the AppImage (updates itself), or the `.deb` / `.rpm`.
 - **Arch Linux:** the AUR packages `agent-loadout` (source) and
   `agent-loadout-bin` are not published yet; until then build them from this

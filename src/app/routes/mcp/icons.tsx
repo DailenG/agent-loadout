@@ -1,6 +1,27 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
-// Icons ported from DailenG/skilldock@181b52b src/app/routes/mcp.tsx and
+// Icons and the server monogram ported from DailenG/skilldock@181b52b src/app/routes/mcp.tsx and
 // src/features/skills/components/PowerToggleIcon.tsx; PasteIcon is new.
+
+function monogram(value: string): string {
+  const first = Array.from(value.trim()).find((character) => /[\p{L}\p{N}]/u.test(character));
+  return (first ?? "?").toLocaleUpperCase();
+}
+
+/** A server's first letter with the MCP mark and an active dot. */
+export function McpServerMonogram({ name, active }: { name: string; active: boolean }) {
+  return (
+    <div className="link-badge link-badge--mcp-monogram" aria-hidden="true">
+      <span className="link-badge__type-mark link-badge__type-mark--mcp">
+        <svg viewBox="0 0 12 12" fill="none">
+          <path d="M4.2 4.2 2.8 5.6a2 2 0 0 0 2.8 2.8L7 7" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+          <path d="M7.8 7.8 9.2 6.4a2 2 0 0 0-2.8-2.8L5 5" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+        </svg>
+      </span>
+      <span className="link-badge__label">{monogram(name)}</span>
+      <span className={`link-badge__status-dot ${active ? "is-active" : "is-inactive"}`} />
+    </div>
+  );
+}
 
 export function RefreshIcon({ isSpinning = false }: { isSpinning?: boolean }) {
   return (

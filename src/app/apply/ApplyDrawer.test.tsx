@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
 import { t } from "@/i18n/en";
-import type { AppliedRun, PendingPlan, PlannedFile } from "@/ipc/bindings";
+import type { AppliedRun, PendingPlan, PendingStoreChange, PlannedFile } from "@/ipc/bindings";
 import {
   MOCK_APPLY_RUN,
   MOCK_CHANGE,
@@ -254,5 +254,86 @@ describe("ApplyDrawer", () => {
     await waitFor(() =>
       expect(screen.queryByText(t("apply.undo.confirmMessage"))).not.toBeInTheDocument(),
     );
+  });
+
+  describe("Discard pending (review mode)", () => {
+    const STORE_CHANGES: PendingStoreChange[] = [
+      { entity: "server/github", kind: "changed" },
+      { entity: "server/docs", kind: "added" },
+      { entity: "clients", kind: "changed" },
+    ];
+
+    function renderReview(commands: MockTransportOptions["commands"] = {}) {
+      return renderDrawer({
+        commands: {
+          pendingPlan: async () => ok({ ...PLAN, applyMode: "review" }),
+          pendingStoreChanges: async () => ok(STORE_CHANGES),
+          ...commands,
+        },
+      });
+    }
+
+    it("is not offered in instant mode", async () => {
+      const { transport } = renderDrawer();
+      await screen.findByRole("region", { name: t("apply.scope.user") });
+      expect(screen.queryByRole("button", { name: t("apply.discard.allAria") })).not.toBeInTheDocument();
+      expect(screen.queryByText(t("apply.discard.title"))).not.toBeInTheDocument();
+      expect(transport.calls).not.toContain("pendingStoreChanges");
+    });
+
+    it("lists the store changes and discards one after confirming", async () => {
+      const discardPending = vi.fn(async (entities: string[] | null) =>
+        ok({ discarded: entities ?? [], commit: MOCK_CHANGE.commit, tag: "auto/pre-restore/mock" }),
+      );
+      const { user } = renderReview({ discardPending });
+      const section = await screen.findByRole("region", { name: t("apply.discard.title") });
+      expect(within(section).getByText(t("apply.discard.entity.server", { id: "github" }))).toBeInTheDocument();
+      expect(within(section).getByText(t("apply.discard.entity.clients"))).toBeInTheDocument();
+      expect(within(section).getByText(t("apply.discard.kind.added"))).toBeInTheDocument();
+
+      const entity = t("apply.discard.entity.server", { id: "docs" });
+      await user.click(within(section).getByRole("button", { name: t("apply.discard.oneAria", { entity }) }));
+      // Nothing is discarded before the confirmation.
+      const message = await screen.findByText(t("apply.discard.confirmOne", { entity }));
+      const confirm = message.closest("[role='alert']") as HTMLElement;
+      expect(discardPending).not.toHaveBeenCalled();
+
+      await user.click(within(confirm).getByRole("button", { name: t("apply.discard.confirmAction") }));
+      await waitFor(() => expect(discardPending).toHaveBeenCalledWith(["server/docs"]));
+      expect(await screen.findByText(t("apply.discard.doneOne", { entity }))).toBeInTheDocument();
+      expect(screen.queryByText(t("apply.discard.confirmOne", { entity }))).not.toBeInTheDocument();
+    });
+
+    it("discards exactly the listed changes after confirming, and cancel keeps it", async () => {
+      const discardPending = vi.fn(async (entities: string[] | null) =>
+        ok({ discarded: entities ?? [...STORE_CHANGES.map((change) => change.entity), "server/late"], commit: null, tag: null }),
+      );
+      const { user } = renderReview({ discardPending });
+      const discardAll = await screen.findByRole("button", { name: t("apply.discard.allAria") });
+      await waitFor(() => expect(discardAll).toBeEnabled());
+
+      await user.click(discardAll);
+      expect(await screen.findByText(t("apply.discard.confirmAll", { count: 3 }))).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: t("apply.cancel") }));
+      expect(screen.queryByText(t("apply.discard.confirmAll", { count: 3 }))).not.toBeInTheDocument();
+      expect(discardPending).not.toHaveBeenCalled();
+
+      await user.click(discardAll);
+      await user.click(await screen.findByRole("button", { name: t("apply.discard.confirmAction") }));
+      // The listed entities, never null: a change that arrived after the list
+      // was shown (here `server/late`) is not discarded unseen.
+      await waitFor(() =>
+        expect(discardPending).toHaveBeenCalledWith(["server/github", "server/docs", "clients"]),
+      );
+      expect(discardPending.mock.calls.flat(2)).not.toContain("server/late");
+      expect(await screen.findByText(t("apply.discard.done", { count: 3 }))).toBeInTheDocument();
+    });
+
+    it("disables Discard pending when no store edit waits", async () => {
+      renderReview({ pendingStoreChanges: async () => ok([]) });
+      const discardAll = await screen.findByRole("button", { name: t("apply.discard.allAria") });
+      expect(discardAll).toBeDisabled();
+      expect(screen.queryByText(t("apply.discard.title"))).not.toBeInTheDocument();
+    });
   });
 });

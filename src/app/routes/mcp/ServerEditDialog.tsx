@@ -18,6 +18,7 @@ import { ToolLogo } from "@/app/components/ToolLogo";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import {
   BIN_NAME,
+  type ClientChoice,
   type ClientInfo,
   type ConvertedServer,
   type DeliveryKind,
@@ -89,12 +90,14 @@ function emptyDraft(): ServerDraft {
   };
 }
 
-function optional(value: string | null): string | null {
+/** A trimmed text field, or null when blank. */
+export function optional(value: string | null): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed ? trimmed : null;
 }
 
-function keepRows(rows: KeyValue[]): KeyValue[] {
+/** Key/value rows as saved: keys trimmed, blank rows dropped. */
+export function keepRows(rows: KeyValue[]): KeyValue[] {
   return rows
     .map((row) => ({ key: row.key.trim(), value: row.value }))
     .filter((row) => row.key || row.value);
@@ -445,7 +448,7 @@ function ServerForm({ clients, draft, mode, focusPaste, onChange }: ServerFormPr
         aliases={aliases.data ?? []}
         onChange={(rows) => set(stdio ? "env" : "headers", rows)}
       />
-      <ClientGrid clients={clients} draft={draft} onChange={(choice) => set("clients", choice)} />
+      <ClientGrid clients={clients} choice={draft.clients} onChange={(choice) => set("clients", choice)} />
       <div className="mcp-form-field">
         <span>{t("mcp.dialog.delivery")}</span>
         <AppSelect
@@ -471,7 +474,7 @@ function ServerForm({ clients, draft, mode, focusPaste, onChange }: ServerFormPr
   );
 }
 
-type ChipInputProps = {
+export type ChipInputProps = {
   label: string;
   placeholder: string;
   values: string[];
@@ -479,7 +482,7 @@ type ChipInputProps = {
 };
 
 /** Values as removable chips; Enter adds the typed value. */
-function ChipInput({ label, placeholder, values, onChange }: ChipInputProps) {
+export function ChipInput({ label, placeholder, values, onChange }: ChipInputProps) {
   const [text, setText] = useState("");
 
   function commit() {
@@ -530,7 +533,7 @@ function ChipInput({ label, placeholder, values, onChange }: ChipInputProps) {
   );
 }
 
-type KeyValueEditorProps = {
+export type KeyValueEditorProps = {
   kind: "env" | "headers";
   rows: KeyValue[];
   aliases: string[];
@@ -538,7 +541,7 @@ type KeyValueEditorProps = {
 };
 
 /** Environment variables or headers; values are literals or references. */
-function KeyValueEditor({ kind, rows, aliases, onChange }: KeyValueEditorProps) {
+export function KeyValueEditor({ kind, rows, aliases, onChange }: KeyValueEditorProps) {
   const label = kind === "env" ? t("mcp.dialog.env") : t("mcp.dialog.headers");
 
   function update(index: number, row: KeyValue) {
@@ -686,14 +689,15 @@ function KeyValueRow({ index, row, aliases, onChange, onRemove }: KeyValueRowPro
   );
 }
 
-type ClientGridProps = {
+export type ClientGridProps = {
   clients: readonly ClientInfo[];
-  draft: ServerDraft;
-  onChange: (choice: ServerDraft["clients"]) => void;
+  choice: ClientChoice;
+  onChange: (choice: ClientChoice) => void;
 };
 
-function ClientGrid({ clients, draft, onChange }: ClientGridProps) {
-  const { allDetected, clients: chosen } = draft.clients;
+/** The client checkbox grid with "All detected clients". */
+export function ClientGrid({ clients, choice, onChange }: ClientGridProps) {
+  const { allDetected, clients: chosen } = choice;
 
   function setAllDetected(checked: boolean) {
     onChange(

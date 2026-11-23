@@ -11,7 +11,9 @@ use agent_loadout_core::adapters::mapper::WriteCx;
 use agent_loadout_core::adapters::{ADAPTERS, AdapterSpec, adapter};
 use agent_loadout_core::apply::import::server_from_native;
 use agent_loadout_core::apply::render::{DesiredState, Detected, RenderCx, native_name, render};
-use agent_loadout_core::apply::{self, EntryState, Plan, PlanOptions, ScopeFilter, instant_apply};
+use agent_loadout_core::apply::{
+    self, EntryState, Plan, PlanOptions, ScopeFilter, TargetPlan, instant_apply,
+};
 use agent_loadout_core::formats::{Document, Format};
 use agent_loadout_core::model::TomlDocument;
 use agent_loadout_core::model::applied::Scope as TargetScope;
@@ -317,7 +319,7 @@ fn system_plan(core: &Core, store: Option<&Store<'_>>) -> Result<Plan, CoreError
 
 /// What rendering reads: the desired state of the store's working tree (or
 /// none) and the store's secret memory.
-fn render_inputs(
+pub(super) fn render_inputs(
     core: &Core,
     store: Option<&Store<'_>>,
 ) -> Result<(DesiredState, Arc<SecretMemory>), CoreError> {
@@ -349,27 +351,40 @@ fn pill_state(state: EntryState) -> Option<PillState> {
 /// `selected`: the clients the core writes the server for here
 /// ([`Detected::system_clients`]).
 fn pill(plan: &Plan, server: &str, selected: &[String], client: &ClientInfo) -> ClientPill {
+    let unsupported = IpcError {
+        code: ErrorCode::NotSupportedOnOs,
+        message: format!("{} has no MCP config on this OS", client.name),
+    };
+    let targets = plan
+        .targets
+        .iter()
+        .filter(|target| target.scope == TargetScope::User);
+    pill_in(targets, server, selected, client, unsupported)
+}
+
+/// The pill of `server` for `client` from the entries of `targets`: the
+/// most pressing entry state, else pending when selected and disabled
+/// otherwise. A client that is not `supported` gets `unsupported`.
+pub(super) fn pill_in<'a>(
+    targets: impl Iterator<Item = &'a TargetPlan>,
+    server: &str,
+    selected: &[String],
+    client: &ClientInfo,
+    unsupported: IpcError,
+) -> ClientPill {
     let selected = selected.contains(&client.id);
     if !client.supported {
         return ClientPill {
             client: client.id.clone(),
             selected,
             state: PillState::NotSupported,
-            reason: Some(IpcError {
-                code: ErrorCode::NotSupportedOnOs,
-                message: format!("{} has no MCP config on this OS", client.name),
-            }),
+            reason: Some(unsupported),
         };
     }
     let mut worst: Option<(PillState, Option<IpcError>)> = None;
-    let entries = plan
-        .targets
-        .iter()
-        .filter(|target| target.scope == TargetScope::User)
-        .flat_map(|target| &target.entries)
-        .filter(|entry| {
-            entry.server_id.as_deref() == Some(server) && entry.client == Some(client.id.as_str())
-        });
+    let entries = targets.flat_map(|target| &target.entries).filter(|entry| {
+        entry.server_id.as_deref() == Some(server) && entry.client == Some(client.id.as_str())
+    });
     for entry in entries {
         let Some(state) = pill_state(entry.state) else {
             continue;
@@ -391,7 +406,7 @@ fn pill(plan: &Plan, server: &str, selected: &[String], client: &ClientInfo) -> 
     }
 }
 
-fn launch_text(fields: &Server) -> String {
+pub(super) fn launch_text(fields: &Server) -> String {
     let body = &fields.body;
     match (&body.url, &body.command) {
         (Some(url), _) => url.clone(),
@@ -487,7 +502,7 @@ pub fn list(core: &Core) -> CmdResult<ServerList> {
     })
 }
 
-fn non_empty(text: &Option<String>) -> Option<String> {
+pub(super) fn non_empty(text: &Option<String>) -> Option<String> {
     text.as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
@@ -503,7 +518,10 @@ fn non_empty_list(items: &[String]) -> Option<Vec<String>> {
     (!items.is_empty()).then_some(items)
 }
 
-fn pairs(rows: &[KeyValue], what: &str) -> Result<Option<BTreeMap<String, String>>, CoreError> {
+pub(super) fn pairs(
+    rows: &[KeyValue],
+    what: &str,
+) -> Result<Option<BTreeMap<String, String>>, CoreError> {
     let mut map = BTreeMap::new();
     for KeyValue { key, value } in rows {
         let key = key.trim();
@@ -521,7 +539,7 @@ fn pairs(rows: &[KeyValue], what: &str) -> Result<Option<BTreeMap<String, String
     Ok((!map.is_empty()).then_some(map))
 }
 
-fn to_pairs(map: &Option<BTreeMap<String, String>>) -> Vec<KeyValue> {
+pub(super) fn to_pairs(map: &Option<BTreeMap<String, String>>) -> Vec<KeyValue> {
     map.iter()
         .flatten()
         .map(|(key, value)| KeyValue {

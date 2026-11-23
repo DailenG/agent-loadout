@@ -29,6 +29,8 @@ export const commands = {
 	runApply: (files: FileRef[] | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("run_apply", { files }, options)),
 	listAppliedRuns: (options?: InvokeOptions) => typedError<AppliedRun[], IpcError>(__TAURI_INVOKE("list_applied_runs", undefined, options)),
 	undoApply: (applyId: string, confirmed: boolean, options?: InvokeOptions) => typedError<UndoResult, IpcError>(__TAURI_INVOKE("undo_apply", { applyId, confirmed }, options)),
+	pendingStoreChanges: (options?: InvokeOptions) => typedError<PendingStoreChange[], IpcError>(__TAURI_INVOKE("pending_store_changes", undefined, options)),
+	discardPending: (entities: string[] | null, options?: InvokeOptions) => typedError<DiscardResult, IpcError>(__TAURI_INVOKE("discard_pending", { entities }, options)),
 	listTools: (options?: InvokeOptions) => typedError<ToolInfo[], IpcError>(__TAURI_INVOKE("list_tools", undefined, options)),
 	/**  Opens the folder of `client`'s user MCP file. */
 	revealToolFolder: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_tool_folder", { client }, options)),
@@ -50,6 +52,11 @@ export const commands = {
 	 *  from this machine's overlay, never from the frontend.
 	 */
 	revealProjectFolder: (id: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_project_folder", { id }, options)),
+	listProjectServers: (projectId: string, options?: InvokeOptions) => typedError<ProjectServerList, IpcError>(__TAURI_INVOKE("list_project_servers", { projectId }, options)),
+	getProjectServer: (projectId: string, name: string, layer: ManifestLayerKind, options?: InvokeOptions) => typedError<ProjectServerDraft, IpcError>(__TAURI_INVOKE("get_project_server", { projectId, name, layer }, options)),
+	saveProjectServer: (projectId: string, hash: string, draft: ProjectServerDraft, create: boolean, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("save_project_server", { projectId, hash, draft, create }, options)),
+	removeProjectServer: (projectId: string, hash: string, name: string, layer: ManifestLayerKind, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("remove_project_server", { projectId, hash, name, layer }, options)),
+	setProjectServerClients: (projectId: string, hash: string, name: string, layer: ManifestLayerKind, clients: ClientChoice | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_project_server_clients", { projectId, hash, name, layer, clients }, options)),
 	effectiveMatrix: (projectId: string, options?: InvokeOptions) => typedError<EffectiveMatrix, IpcError>(__TAURI_INVOKE("effective_matrix", { projectId }, options)),
 	resolverDetail: (entry: EntryRef, options?: InvokeOptions) => typedError<ResolverDetail, IpcError>(__TAURI_INVOKE("resolver_detail", { entry }, options)),
 	resolveEntry: (entry: EntryRef, action: ResolveAction, fingerprint: string, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("resolve_entry", { entry, action, fingerprint }, options)),
@@ -420,6 +427,14 @@ export type DataHomeSource =
 
 /**  How secret references reach the server (SPEC 11.4). */
 export type DeliveryKind = "auto" | "env" | "launch" | "command" | "inline";
+
+export type DiscardResult = {
+	/**  The entities restored to the last applied state. */
+	discarded: string[],
+	commit: string | null,
+	/**  The `auto/pre-restore/<ts>` tag, from which a discard is undone. */
+	tag: string | null,
+};
 
 export type EffectiveMatrix = {
 	projectId: string,
@@ -892,6 +907,14 @@ export type HistoryFilter = {
 /**  Which commits the list shows. */
 export type HistoryScope = "all" | "system" | "projects";
 
+/**  A store server the folder inherits from the system layer. */
+export type InheritedServer = {
+	id: string,
+	displayName: string | null,
+	transport: TransportKind | null,
+	launch: string,
+};
+
 /**
  *  A failed command: the stable code the frontend localizes from, plus
  *  English diagnostic detail (never shown as state).
@@ -932,6 +955,13 @@ export type LayerRef = {
 
 /**  How a manifest file compares with the content last trusted. */
 export type ManifestChangeKind = "new" | "changed" | "unchanged" | "removed";
+
+/**  One of a project's two manifest files (SPEC 5.5). */
+export type ManifestLayerKind = 
+/**  `project.toml`, committed with the project. */
+"shared" | 
+/**  `project.local.toml`, personal. */
+"local";
 
 /**  The manifest files of a project folder (SPEC 5.5). */
 export type ManifestLayout = 
@@ -1126,6 +1156,9 @@ export type OpFeatureDto = "item_read" | "environments" | "environment_listing";
 /**  Result of an apply run or of one file (SPEC 8.7). */
 export type OutcomeKind = "ok" | "partial" | "blocked" | "failed";
 
+/**  How a store entity differs from what this machine last applied. */
+export type PendingChangeKind = "added" | "changed" | "removed";
+
 export type PendingPlan = {
 	applyMode: ApplyModeKind,
 	/**  Files with work, decisions or problems. */
@@ -1138,6 +1171,15 @@ export type PendingPlan = {
 	writes: number,
 	unresolved: number,
 	warnings: IpcError[],
+};
+
+/**
+ *  A store edit waiting for an apply that Discard pending can throw away
+ *  (`server/<id>` or `clients`).
+ */
+export type PendingStoreChange = {
+	entity: string,
+	kind: PendingChangeKind,
 };
 
 /**  A folder picked in the OS dialog, as the frontend sees it. */
@@ -1245,6 +1287,117 @@ export type ProjectRow = {
 	clients: number,
 	/**  Entries waiting for an apply, a decision, or blocked. */
 	pending: number,
+};
+
+/**  The project the MCP page is scoped to. */
+export type ProjectScopeInfo = {
+	id: string,
+	name: string,
+	path: string,
+	trust: ProjectTrust,
+	/**
+	 *  Content hash of the manifests as listed; edits send it back, and
+	 *  other content is `trust_required` (SPEC 17).
+	 */
+	hash: string,
+	/**
+	 *  The files an edit can write: `shared` when `project.toml` exists,
+	 *  `local` always (created next to a shared file when needed).
+	 */
+	layers: ManifestLayerKind[],
+	/**  The merged `[defaults] clients`. */
+	defaultClients: ClientChoice,
+};
+
+/**
+ *  One manifest table as the project dialog edits it. Keys it does not
+ *  show (`unset`, `[os.*]`, `[client.*]`, `cwd`, ...) are kept on save.
+ */
+export type ProjectServerDraft = {
+	name: string,
+	layer: ManifestLayerKind,
+	kind: ProjectServerKind,
+	/**  The store server an override starts from. */
+	from: string | null,
+	/**  Required for a definition; an override may leave it to `from`. */
+	transport: TransportKind | null,
+	command: string | null,
+	args: string[],
+	url: string | null,
+	env: KeyValue[],
+	headers: KeyValue[],
+	/**  `None`: the project's defaults; an empty list: no client. */
+	clients: ClientChoice | null,
+	/**
+	 *  A `project.local.toml` table over the same name in `project.toml`:
+	 *  a partial table, empty fields keep the shared entry's values. Read
+	 *  only (ignored on save).
+	 */
+	overShared?: boolean,
+};
+
+/**  What a manifest entry does (SPEC 5.5, 6.2). */
+export type ProjectServerKind = 
+/**  A complete project-only definition. */
+"define" | 
+/**  A store server (`from`) with project fields over it. */
+"override" | 
+/**  `enabled = false` alone: the same-named store server is hidden here. */
+"suppress";
+
+export type ProjectServerList = {
+	project: ProjectScopeInfo,
+	servers: ProjectServerRow[],
+	/**  Store servers enabled system-wide that the manifests do not name. */
+	inherited: InheritedServer[],
+	/**
+	 *  Clients with an MCP config; `supported` means a project config on
+	 *  this OS.
+	 */
+	clients: ClientInfo[],
+	/**  Ids of the store's servers, the choices for `from`. */
+	storeServers: string[],
+	/**  Manifest and plan warnings. */
+	warnings: IpcError[],
+};
+
+/**  One server name of the project's manifests, both layers merged. */
+export type ProjectServerRow = {
+	name: string,
+	kind: ProjectServerKind,
+	from: string | null,
+	/**  The files that define it. */
+	layers: ManifestLayerKind[],
+	/**
+	 *  Where pill toggles and Delete write: the private file when it holds
+	 *  the entry, else the shared one.
+	 */
+	editLayer: ManifestLayerKind,
+	transport: TransportKind | null,
+	/**
+	 *  The resolved command and arguments, or URL; references shown,
+	 *  values never.
+	 */
+	launch: string,
+	/**
+	 *  The entry's client selection as the manifests write it (its
+	 *  `clients`, else the project's defaults), before this machine's
+	 *  exclusions: pill toggles start from this, never from the pills.
+	 */
+	clients: ClientChoice,
+	/**  No table of this name sets `clients`: the project's defaults apply. */
+	usesDefaults: boolean,
+	/**
+	 *  One pill per client in [`ProjectServerList::clients`] order. For a
+	 *  suppression, selected means hidden for that client.
+	 */
+	pills: ClientPill[],
+	problems: IpcError[],
+	/**
+	 *  The entry does not resolve (`unknown_template`, an incomplete
+	 *  definition).
+	 */
+	invalid: IpcError | null,
 };
 
 /**  Trust of a known project's manifests (SPEC 17). */

@@ -63,6 +63,22 @@ To check a download against `SHA256SUMS`:
 winget install --id DailenG.AgentLoadout
 ```
 
+**Chocolatey** (once the package is approved on the Chocolatey Community
+Repository):
+
+```
+choco install agent-loadout
+```
+
+The package downloads the release installer (SHA-256 checked) and runs it
+silently, so it installs for the account that runs `choco`, like the
+installer below; run it from an elevated prompt of the account that will
+use Loadout (the package refuses to install as SYSTEM). `choco upgrade
+agent-loadout` updates it. If the in-app updater updates Loadout first,
+Chocolatey keeps showing the older version until the next upgrade; to
+leave updates to Chocolatey alone, clear "Check for updates" in Settings,
+Updates.
+
 **Installer**: download and run `Loadout_X.Y.Z_x64-setup.exe`. It needs no
 administrator rights. It installs into `%LOCALAPPDATA%\Programs\Loadout`:
 
@@ -191,10 +207,12 @@ scope or one of your projects. Most pages follow it. The pages:
   skills; unmanaged ones can be imported into the store or moved to the
   trash.
 - **MCP**: your servers with their per-client state (enabled, disabled,
-  pending, drift, blocked, not supported). Toolbar: search, Refresh,
-  **Paste config** (paste a server entry from any client's JSON or TOML)
-  and **Add**. The edit dialog has Form, TOML and Preview tabs; Preview
-  shows the entry each client gets, with secrets masked.
+  pending, drift, blocked, not supported). Toolbar: search, a scope select
+  (System or one of your projects, see
+  [Projects and trust](#projects-and-trust)), Refresh, **Paste config**
+  (paste a server entry from any client's JSON or TOML) and **Add**. The
+  edit dialog has Form, TOML and Preview tabs; Preview shows the entry each
+  client gets, with secrets masked.
 - **Projects**: Add folder, Init manifest..., and per project Open,
   Effective config (which server each client loads in that folder and from
   which file), Apply, Remove from list, and Review change & trust.
@@ -213,7 +231,8 @@ scope or one of your projects. Most pages follow it. The pages:
 A **pending changes** pill appears in the header when changes wait for
 review or an apply left something blocked or undecided; it opens the
 **Pending changes** drawer with per-file diffs, Apply all, Apply selected,
-and Resolve... for entries that need a decision.
+Discard pending (review mode) and Resolve... for entries that need a
+decision.
 
 ## The command line
 
@@ -355,6 +374,15 @@ changes and apply them yourself, set `apply_mode = "review"` in
 `store/settings.toml` and run `loadout backup` to commit that edit. Changes
 then wait in Pending changes (or for `loadout apply`).
 
+**Discard pending** (review mode, in the Pending changes drawer) throws
+away store edits this machine has not applied yet: server definitions and
+client preferences (`clients.toml`) go back to the store revision of this
+machine's last apply. **Discard** does it for one item; **Discard
+pending** for all of them, after a confirmation. No client file is
+touched. It is one commit with an `auto/pre-restore/...` tag, so History
+can bring the discarded version back. Settings, secrets, skills, project
+manifests and this machine's known projects are not changed by it.
+
 ## Projects and trust
 
 A project is a folder with a manifest in `<P>/.loadout/`:
@@ -380,6 +408,23 @@ SPEC section 5.5.
 | Move private servers into the shared manifest | `loadout project share ID [--server NAME]...` | |
 | List and forget | `loadout project ls`, `loadout project rm ID` | Remove from list |
 | See what each client loads | `loadout effective PATH` | Effective config |
+| Add, edit or remove a project server; per-client enablement | edit the manifest, then `loadout project trust PATH` | MCP page, scope **Project: NAME** |
+
+**MCP page at project scope.** Pick a project in the MCP page's scope
+select. The page lists the servers in that project's manifests (both
+files merged; each card shows **Project** or **Local** for the file that
+defines it, and whether it is a project server, an override of a store
+server, or a store server hidden here) with per-client pills from the
+project's plan; clients without a project config are shown as not
+supported. Below them, **From the store (System)** lists the store servers
+the folder inherits, each with **Override here** and **Hide here**. **Add**
+and the edit dialog write one `[servers.NAME]` table; **Write to** picks
+**Project (shared, project.toml)** or **Local (private,
+project.local.toml)** (a private project has only the local file; use
+`loadout project share` to share one). Each edit is one commit: Loadout
+writes the manifest, trusts that content, and applies the project's files.
+A project that is not trusted, or whose manifest changed since it was
+trusted, is read only on this page until you choose **Review & trust**.
 
 **Trust.** Project manifests can start programs through stdio servers, so
 Loadout applies a manifest only after you trusted its exact content. A
@@ -689,8 +734,9 @@ alone.
 Then remove the program:
 
 - **Windows**: Settings, Apps, Installed apps, Loadout, Uninstall (or
-  `winget uninstall --id DailenG.AgentLoadout`). This removes the install
-  folder from your user `PATH`.
+  `winget uninstall --id DailenG.AgentLoadout`, or
+  `choco uninstall agent-loadout` if you installed it with Chocolatey). This
+  removes the install folder from your user `PATH`.
 - **Arch Linux**: `sudo pacman -R agent-loadout` (or `agent-loadout-bin`).
 - **Debian, Ubuntu, Fedora, openSUSE**: the package is named `agent-loadout`:
   `sudo apt remove agent-loadout` or `sudo dnf remove agent-loadout`.

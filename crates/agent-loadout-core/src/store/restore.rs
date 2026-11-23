@@ -215,8 +215,32 @@ pub fn restore(
     ax: &ApplyEnv<'_>,
     request: &RestoreRequest,
 ) -> Result<RestoreReport, CoreError> {
+    let summary = format!("restore: {}", request.target.short());
+    restore_as(store, ax, request, "store.restore", summary, None)
+}
+
+/// [`restore`] committed with operation `op` and `summary` (Discard
+/// pending is a restore of selected entities, `store.discard`). With
+/// `expected_head`, the store must still be at that commit when the plan is
+/// made (the caller worked out what to restore from it), else
+/// `file_changed_during_apply` before anything changes; the transaction
+/// checks the plan's HEAD again under the lock.
+pub(crate) fn restore_as(
+    store: &Store<'_>,
+    ax: &ApplyEnv<'_>,
+    request: &RestoreRequest,
+    op: &str,
+    summary: String,
+    expected_head: Option<&CommitId>,
+) -> Result<RestoreReport, CoreError> {
     let machine = Machine::load_or_create(ax.env, ax.fs, &ax.home.state_dir())?;
     let plan = prepare(store, &machine.id, request)?;
+    if expected_head.is_some_and(|head| *head != plan.head) {
+        return Err(CoreError::new(
+            ErrorCode::FileChangedDuringApply,
+            "the store changed since the pending changes were read; review them again",
+        ));
+    }
     if plan.needs_confirmation() && !request.confirmed {
         let files: Vec<String> = plan
             .manifests
@@ -242,8 +266,7 @@ pub fn restore(
             apply: None,
         });
     }
-    let operation_summary = format!("restore: {}", request.target.short());
-    let mut operation = Operation::new("store.restore", operation_summary);
+    let mut operation = Operation::new(op, summary);
     for entity in trailer_entities(&plan.files) {
         operation = operation.entity(entity);
     }
