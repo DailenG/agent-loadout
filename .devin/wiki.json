@@ -1,0 +1,125 @@
+{
+  "repo_notes": [
+    {
+      "content": "Loadout (crate and package name agent-loadout, CLI binary `loadout`, desktop binary `agent-loadout-app`) keeps one versioned, offline store of MCP servers, skills and secret references and writes them into the native config files of 38 AI coding clients (omp is the recommended client; also Claude Code, Codex, Pi, Claude Desktop, VS Code with GitHub Copilot, Cursor, Gemini CLI and more). The store is a local git repository; every change is one commit. It is a Rust workspace (crates/agent-loadout-core, crates/agent-loadout, crates/agent-loadout-testkit), a Tauri 2 desktop app in src-tauri/ (its own Cargo workspace), and a React 18 + TypeScript frontend in src/."
+    },
+    {
+      "content": "Sources of truth. SPEC.md is the design contract (sections are cited in code comments as `SPEC 8.3` and so on). docs/milestones/M*.md are completion notes written when each milestone landed: they are history, not a description of current behavior; prefer the code and SPEC.md. Where SPEC.md and the code disagree, the code is current. docs/user-guide.md, docs/concepts.md, docs/cli.md and docs/architecture.md describe current behavior. Generated files, never edited by hand: src/ipc/bindings.ts (tauri-specta, `npm run bindings`), the table between `<!-- adapters:begin -->` and `<!-- adapters:end -->` in docs/adapters.md (test crates/agent-loadout-core/tests/docs_adapters.rs with LOADOUT_UPDATE_DOCS=1), docs/schema/*.json (JSON Schemas from the Rust model types via schemars), and docs/cli.md (scripts/gen-cli-docs.mjs). The *-TASK.md files at the repository root are old work briefs, not documentation."
+    },
+    {
+      "content": "Crate boundaries. crates/agent-loadout-core owns all logic: model, store, formats, adapters, layering, apply, secrets, skills, remote, migrate, paths. It never reads process-global state (std::env, home lookups, the clock): callers inject an `Env` and an `Fs` (crates/agent-loadout-core/src/env.rs, fs.rs). crates/agent-loadout (the CLI, clap, crates/agent-loadout/src/main.rs and src/cmd/) and src-tauri/src/commands/ (Tauri commands) are thin wrappers that build an Env from the process and call core. The frontend talks to the backend only through the typed `Transport` in src/ipc/transport.ts. Errors are typed `CoreError` values with stable snake_case `ErrorCode`s (crates/agent-loadout-core/src/error.rs); display strings live only in src/i18n/en.ts (English only)."
+    },
+    {
+      "content": "Security invariants. No secret value is ever stored in the store or sent across IPC: servers reference secrets as `${secret:ALIAS}`, aliases map to env:, keyring://, op:// or op-env:// references, and a leak scanner (crates/agent-loadout-core/src/secrets/scanner.rs) runs on every store commit. Foreign client entries (ones Loadout did not write) are never modified or removed unless the user adopts or imports them. Ownership is defined only by the machine-local ledger (state/ledger.json, HMAC-keyed hashes, crates/agent-loadout-core/src/apply/ledger.rs). Project manifests (<P>/.loadout/project.toml and project.local.toml) are applied only after the user trusted their exact content hash (state/trust.json, layering/trust.rs); otherwise targets plan as blocked trust_required and commands exit 7. Client files are backed up to backups/files before every write and written atomically (temp file plus rename or ReplaceFileW) with a post-write self check. One cross-process lock (state/loadout.lock) serializes mutation."
+    },
+    {
+      "content": "Test conventions. Tests are hermetic: agent_loadout_testkit::TempHome builds a temp root with home, appdata, localappdata and xdg folders and yields an Env plus a RootedFs that panics on any path outside the root. CLI tests clear the environment and pass --home. The 1Password CLI is replaced by the op-stub binary (crates/agent-loadout-testkit/src/bin, op_stub.rs), gh by gh-stub, the OS keyring by MemKeyring, and system git runs with an isolated config (git_env.rs). Client fixtures live in fixtures/. Frontend tests use Vitest with the explicit mock transport (src/test/mockTransport.ts); there is no silent fixture fallback. E2E smoke tests (tests/e2e) drive the built app with tauri-driver. No test may touch real client configs, real secrets, the real keyring or the network."
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "What Loadout is and does: the store, clients, apply, secrets by reference, projects, skills, remotes. Summarize README.md, docs/concepts.md and SPEC.md sections 1 to 3. Name the three Rust crates (crates/), the desktop app (src-tauri/) and the frontend (src/), and point readers at docs/README.md."
+    },
+    {
+      "title": "Architecture",
+      "purpose": "How the crates and processes fit together: core owns logic, the CLI and Tauri commands are thin wrappers, the injected Env and Fs, typed errors, the global lock. Sources: docs/architecture.md, SPEC.md section 4, crates/agent-loadout-core/src/lib.rs, env.rs, fs.rs, error.rs, paths.rs, brand.rs."
+    },
+    {
+      "title": "Core library module map",
+      "parent": "Architecture",
+      "purpose": "One section per module of crates/agent-loadout-core/src: model/, store/, formats/, adapters/, layering/, apply/, secrets/, skills/, remote/, migrate/, paths.rs, local_settings.rs. What each owns and its main types."
+    },
+    {
+      "title": "CLI crate",
+      "parent": "Architecture",
+      "purpose": "crates/agent-loadout: main.rs (clap tree, global --home/--json/--yes, exit codes), src/cmd/*.rs (one file per command), src/exec (the `loadout exec` launcher that never writes stdout), keyring.rs. Reference docs/cli.md and docs/user-guide.md."
+    },
+    {
+      "title": "Desktop app backend",
+      "parent": "Architecture",
+      "purpose": "src-tauri: src/main.rs (tauri-specta builder, collected commands and events), src/commands/*.rs (thin command wrappers, path validation, IpcError), commands/watch.rs (the drift file watcher and TargetsChanged event), updates.rs, tauri.conf.json (CSP, capabilities). How src/ipc/bindings.ts is generated (`npm run bindings`)."
+    },
+    {
+      "title": "Store and git history",
+      "purpose": "The versioned store: <LOADOUT_HOME>/store layout, Store::transaction, one commit per change, commit trailers, tags (including auto/ tags), history, diff, restore, the store lock. Sources: crates/agent-loadout-core/src/store/ (transaction.rs, trailers.rs, tags.rs, log.rs, diff.rs, restore.rs, lock.rs, bootstrap.rs), model/, docs/schema/, SPEC.md sections 4.5, 5 and 9."
+    },
+    {
+      "title": "Client adapters and formats",
+      "purpose": "The adapter model: AdapterSpec table, mappers, capabilities, detection, locations and placeholders, and the format-preserving editors. Sources: crates/agent-loadout-core/src/adapters/ (spec.rs, mapper.rs, caps.rs, detect.rs, location.rs, mod.rs), src/formats/ (jsonc.rs, toml.rs, yaml.rs, json5.rs, text.rs), docs/adapters.md, SPEC.md section 7."
+    },
+    {
+      "title": "Tier A clients: omp, Claude Code, Codex, Claude Desktop",
+      "parent": "Client adapters and formats",
+      "purpose": "The daily Tier A adapters and their files, shapes, native disable and secret delivery: adapters/omp.rs, claude_code.rs, codex.rs, claude_desktop.rs; the generated table in docs/adapters.md."
+    },
+    {
+      "title": "Tier B clients: Pi, GitHub Copilot, Cursor",
+      "parent": "Client adapters and formats",
+      "purpose": "adapters/pi.rs, copilot.rs, cursor.rs and vscode_legacy.rs (the legacy VS Code mcp.json, read only): Copilot and VS Code variants and profiles, Cursor project servers that need enabling in Cursor. docs/adapters.md and SPEC.md section 7.3."
+    },
+    {
+      "title": "Tier C and D clients",
+      "parent": "Client adapters and formats",
+      "purpose": "Tier C (adapters/gemini.rs, antigravity.rs, opencode.rs, grok.rs) and Tier D (windsurf.rs, devin.rs, and the user-scope clients ported from SkillDock in ported.rs). Read-only and best-effort rules, YAML and JSON5 editors. docs/adapters.md, SPEC.md sections 7.5 and 20.2."
+    },
+    {
+      "title": "Apply engine",
+      "purpose": "Planning, drift, ownership and execution: entry states, the planning table, instant versus review mode, apply commits, rollback, discard pending, import and adopt, the resolver. Sources: crates/agent-loadout-core/src/apply/ (plan.rs, render.rs, exec.rs, ledger.rs, journal.rs, backup.rs, rollback.rs, discard.rs, import.rs, resolve.rs), SPEC.md section 8."
+    },
+    {
+      "title": "Ownership ledger, backups and rollback",
+      "parent": "Apply engine",
+      "purpose": "state/ledger.json and the HMAC key, origin created versus adopted, foreign entries, backups/files and restore --files, journals for crash reporting, atomic writes and the self check, `loadout rollback`. apply/ledger.rs, backup.rs, journal.rs, exec.rs, rollback.rs; SPEC.md sections 8.1, 8.4, 8.7 and 9.5."
+    },
+    {
+      "title": "Secrets",
+      "purpose": "Secret references and resolution: the ${secret:ALIAS} grammar, store/secrets.toml catalog, machine overrides, providers (env, OS keyring, 1Password op and op-env), statuses, delivery modes (env, launch via `loadout exec`, command, inline), extraction on import, the leak scanner. Sources: crates/agent-loadout-core/src/secrets/ (grammar.rs, catalog.rs, providers/, status.rs, delivery.rs, render.rs, classify.rs, scanner.rs), crates/agent-loadout/src/exec, SPEC.md section 11."
+    },
+    {
+      "title": "Projects, trust and effective config",
+      "purpose": "Project manifests (project.toml shared, project.local.toml private), layering and merge rules, overrides and hiding user servers, effective config with provenance, project trust by content hash, project servers edited from the GUI. Sources: crates/agent-loadout-core/src/layering/ (manifest.rs, merge.rs, effective.rs, projects.rs, project_servers.rs, trust.rs, git.rs), SPEC.md sections 5.5, 6 and 17."
+    },
+    {
+      "title": "Skills",
+      "purpose": "Skill store (store/skills, store/skill-meta), installs from git, folders and .zip/.skill archives, frontmatter, links (Windows junctions, symlinks, copies), project links hidden via .git/info/exclude, scanning client skill folders, the agents CLI folder. Sources: crates/agent-loadout-core/src/skills/ (store.rs, install.rs, link.rs, classify.rs, frontmatter.rs, agents_cli.rs), SPEC.md section 12."
+    },
+    {
+      "title": "Remotes and sync",
+      "purpose": "Optional backup and sync remotes: folder remotes (repo-per-machine, mirror, archive), git remotes through the system git with system, gh or token auth, the git-credential helper, push, pull with per-entity merge and conflicts, restore --from on a new machine. Sources: crates/agent-loadout-core/src/remote/ (config.rs, folder.rs, git.rs, gh.rs, credential.rs, sync.rs, sync_artifacts.rs, restore.rs, manifest.rs, unc.rs), store/merge.rs, SPEC.md section 9.6 to 9.9."
+    },
+    {
+      "title": "Migration from SkillDock",
+      "purpose": "`loadout migrate skilldock` and the GUI wizard: read-only import of ~/.skilldock servers, skills, tags, settings and backup repository in one commit, plaintext secret choices. Sources: crates/agent-loadout-core/src/migrate/ (skilldock.rs, scan.rs, mod.rs), src/app/routes/migrate/, SPEC.md section 15."
+    },
+    {
+      "title": "Desktop app",
+      "purpose": "The React frontend: shell and routes (src/app/App.tsx), typed IPC (src/ipc/transport.ts, bindings.ts), TanStack Query keys (storeQueryKeys in src/app/apply/changeNotice.ts), drift triggers (src/app/apply/driftTriggers.ts), the active scope (src/app/scope/ActiveScope.tsx, ScopeSwitcher.tsx), the English catalog (src/i18n/en.ts), SPEC.md section 13."
+    },
+    {
+      "title": "Desktop pages",
+      "parent": "Desktop app",
+      "purpose": "Each page and what it does: src/app/routes/skills, mcp (including project scope ProjectServers.tsx), projects (effective matrix, trust review), tools (ToolManageDialog), install, history, settings (versioning, secrets, updates), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
+    },
+    {
+      "title": "Command line interface",
+      "purpose": "Using `loadout`: command groups, global options, exit codes (0 to 7, exec 77 and 78), JSON output, commands that commit and apply at once. Sources: docs/cli.md (generated), docs/user-guide.md, crates/agent-loadout/src/main.rs and src/cmd/, SPEC.md section 14."
+    },
+    {
+      "title": "Packaging and release",
+      "purpose": "How releases are built and shipped: tags v*.*.*, .github/workflows/release.yml (version check, Windows NSIS installer signed with Azure Trusted Signing via scripts/sign-windows.ps1, AppImage/deb/rpm, draft release with SHA256SUMS, latest.json updater feed), the optional Tauri updater, packaging/winget (render.ps1), packaging/aur (PKGBUILDs, validate.sh, verify-release.sh), packaging/chocolatey and .github/workflows/chocolatey.yml, scripts/stage-cli.mjs, src-tauri/windows hooks. SPEC.md section 16."
+    },
+    {
+      "title": "Testing strategy",
+      "purpose": "Hermetic tests and what each layer covers: crates/agent-loadout-testkit (TempHome, RootedFs, op-stub, gh-stub, MemKeyring, git_env), fixtures/, golden and property tests in crates/*/tests, src-tauri/src/commands/tests*.rs, Vitest with src/test/mockTransport.ts, tests/e2e with tauri-driver, scripts/verify-clients.md and docs/verify for real-client gates, .github/workflows/ci.yml. SPEC.md section 19."
+    },
+    {
+      "title": "Security model",
+      "purpose": "Threat model and invariants: no secret values in the store, logs or IPC; leak scanner; foreign entries untouched; ledger ownership; project trust; atomic writes and backups; backups never pushed; Tauri CSP and path validation; skill archive limits. Sources: docs/security.md, SECURITY.md, SPEC.md sections 11 and 17."
+    },
+    {
+      "title": "Contributing",
+      "purpose": "Developer setup per OS, the gates (root and src-tauri cargo fmt, clippy, test; npm test; tsc; npm run bindings), regenerating generated files, commit style, how releases are cut. Sources: CONTRIBUTING.md, .github/workflows/ci.yml, package.json, rust-toolchain.toml, deny.toml."
+    }
+  ]
+}

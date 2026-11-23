@@ -32,6 +32,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: docs/cli.md matches the CLI help
+        if: runner.os == 'Linux'
+        run: node scripts/gen-cli-docs.mjs --check
 
   # SPEC 16.2: the Arch container runs the workspace tests, the frontend
   # tests and the AUR packages' `makepkg --nobuild` validation.

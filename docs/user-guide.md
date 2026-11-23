@@ -14,9 +14,13 @@ never enter the store: servers refer to secrets by alias, and the alias
 points at an environment variable, the OS keyring or 1Password.
 
 Loadout has a desktop app and a command-line tool, `loadout`. Both work on
-the same data and can be used side by side. The full design is in
-[SPEC.md](../SPEC.md); the per-client details are in
-[adapters.md](adapters.md).
+the same data and can be used side by side. New to Loadout? Start with
+[getting-started.md](getting-started.md); the ideas this guide relies on
+(store, scopes, ownership, drift, trust) are explained in
+[concepts.md](concepts.md). Every command and option is in the
+[CLI reference](cli.md), the per-client details are in
+[adapters.md](adapters.md), and the full design is in
+[SPEC.md](../SPEC.md).
 
 Contents:
 
@@ -40,8 +44,8 @@ Contents:
 
 Releases are published on GitHub at
 <https://github.com/DailenG/agent-loadout/releases>, tagged `vX.Y.Z` (the
-first release is `v0.1.0`). Each release has these assets (`X.Y.Z` is the
-version):
+first published release is `v0.1.2`). Each release has these assets
+(`X.Y.Z` is the version):
 
 | Asset | What it is |
 |---|---|
@@ -124,30 +128,30 @@ name of an unrelated tool's packages). They install the desktop app as
 from it; for the CLI on `PATH`, use a package or `cargo install`.
 
 The desktop app needs WebKitGTK 4.1. If the window opens blank, see
-[Blank window on Linux](#blank-window-on-linux). To store secrets in the OS
+[Blank window on Linux](troubleshooting.md#blank-window-on-linux). To store secrets in the OS
 keyring, you need a Secret Service provider (see
-[Secrets on Linux](#secrets-on-linux)).
+[Secrets on Linux](troubleshooting.md#secrets-on-linux)).
 
 ### Command line only (any OS)
 
 ```
-cargo install agent-loadout
+cargo install --git https://github.com/DailenG/agent-loadout agent-loadout
 ```
 
-This installs `loadout` from crates.io; it needs a current stable Rust
-toolchain. There is no desktop app this way, and no in-app updater: rerun
-the command to update.
+This builds and installs `loadout` from the repository; it needs a current
+stable Rust toolchain. Once the crate is published on crates.io,
+`cargo install agent-loadout` will do the same. There is no desktop app
+this way, and no in-app updater: rerun the command to update.
 
 ### macOS
 
-No macOS installer is published. The CLI installs with
-`cargo install agent-loadout`.
+No macOS installer is published. Install the CLI with cargo as above.
 
 ## First run
 
 1. Start the app ("Loadout" in the Start menu, or `agent-loadout-app` on
-   Linux), or run any `loadout` command. The data directory and an empty
-   store are created on first use.
+   Linux), or run `loadout` commands. The data directory and an empty
+   store are created the first time something is saved.
 2. The app offers **Add a backup remote**. A remote is optional: it backs
    the store up to a git host or a folder (a USB drive, a network share, a
    synced folder). Choose "Not now" to stay local; you can add one later
@@ -261,7 +265,8 @@ loadout [--home <PATH>] [--json] [--yes] <COMMAND>
 - `--json`: machine-readable JSON on stdout.
 - `--yes`: answer yes to confirmations.
 
-`loadout --help` and `loadout <command> --help` describe every option.
+`loadout --help` and `loadout <command> --help` describe every option; the
+[CLI reference](cli.md) has all of them on one page.
 Commands:
 
 | Command | What it does |
@@ -530,7 +535,7 @@ writes to stdout (that is the MCP channel), reports errors on stderr with
 the prefix `loadout-exec:`, and does not read the store. In user and
 private files Loadout writes the absolute path of the `loadout` binary, so
 another program named `loadout` on `PATH` cannot take its place (see
-[Another program named loadout](#another-program-named-loadout)).
+[Another program named loadout](troubleshooting.md#another-program-named-loadout)).
 
 **1Password.** Install the 1Password CLI (`winget install
 AgileBits.1Password.CLI` on Windows, `yay -S 1password-cli` on Arch,
@@ -676,68 +681,11 @@ inside a sync folder (`sync_root_detected`), and with `--paths` prints the
 resolved folders; `--scan-history` scans every store commit for secrets
 (it reports, and never rewrites history).
 
-### Blank window on Linux
-
-On some GPU and driver combinations, WebKitGTK shows an empty window. Start
-the app with the DMA-BUF renderer turned off:
-
-```
-WEBKIT_DISABLE_DMABUF_RENDERER=1 agent-loadout-app
-```
-
-For the AppImage: `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./agent-loadout_X.Y.Z_amd64.AppImage`.
-To make it permanent for the menu entry, copy the desktop file to
-`~/.local/share/applications/` and change its `Exec=` line to
-`Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 agent-loadout-app`. Loadout does
-not apply this setting by itself yet.
-
-### Secrets on Linux
-
-The OS keyring on Linux is the Secret Service, provided by gnome-keyring,
-KWallet or KeePassXC (with its Secret Service integration turned on).
-Without one, keyring aliases report `provider_unavailable`. When the
-keyring collection is locked and no unlock prompt can appear (SSH, WSL, a
-service), Loadout reports `locked` instead of waiting; unlock the keyring
-in your desktop session and try again. Loadout never asks for an unlock
-itself.
-
-### Another program named loadout
-
-Another tool also ships a binary named `loadout` (an AI-agent launcher
-CLI, published on winget as `TheCodeSaiyan.Loadout` and as `.deb` and
-`.rpm` packages). If both are installed, the one that comes first on
-`PATH` wins when you type `loadout`.
-
-- The launch entries Loadout writes into user-scope and private files use
-  the absolute path of its own `loadout`, so clients start the right
-  program. Shared project files (committed for a team) use the bare name
-  `loadout` to stay portable, so on such a machine they can start the
-  wrong one.
-- Check which one you get: `where.exe loadout` (Windows) or
-  `which -a loadout` (Linux); `loadout --version` from this project prints
-  `loadout X.Y.Z` and `loadout --help` starts with "Manage MCP servers,
-  skills and secret references for AI coding clients".
-- Fix it by putting Loadout's install folder first on `PATH`, or by
-  uninstalling the other tool. `loadout doctor` does not check for this yet.
-
-### Other common issues
-
-- **A server did not appear in Claude Desktop**: fully quit Claude Desktop
-  (also from the system tray or menu bar) and start it again; it loads
-  servers only at launch.
-- **Cursor lists a project server as disabled**: turn it on once in Cursor,
-  Customize > MCPs.
-- **A slow server never starts in omp**: omp's `timeout` (milliseconds)
-  also limits startup; raise or remove it.
-- **`multiple accounts found` from 1Password**: set the account with
-  `loadout secrets op-account ACCOUNT`.
-- **Exit code 6**: another Loadout process holds the store lock; wait for
-  it or close the other instance.
-- **Exit code 7**: a project manifest is new or changed; review it with
-  `loadout project trust PATH`.
-- **Drift after editing a client file by hand**: `loadout status` shows the
-  entry as changed outside; resolve it in Pending changes or with
-  `loadout apply --on-conflict overwrite|import|skip`.
+Known problems and their fixes (installer and PATH issues, a blank window
+on Linux, another program named `loadout`, servers that do not show up,
+read-only projects, 1Password prompts, the Linux keyring) are in
+[troubleshooting.md](troubleshooting.md); short answers are in the
+[FAQ](faq.md).
 
 ## Uninstall
 
