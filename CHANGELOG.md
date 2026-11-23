@@ -8,6 +8,8 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-23
+
 ### Changed
 
 - Planning is much faster on machines with many servers and client files:
@@ -29,6 +31,11 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
   moves focus inside, Tab and Shift+Tab stay inside, the page behind is
   inert, Escape closes only the top dialog, and focus returns to the button
   that opened it (#11).
+
+### Security
+
+- `cookie` 0.18.3 in the desktop app's dependency tree (RUSTSEC-2026-0594;
+  Loadout never forks or uses private cookies, so it was not affected).
 
 ## [0.2.0] - 2026-11-23
 
@@ -116,7 +123,8 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/DailenG/agent-loadout/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/DailenG/agent-loadout/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DailenG/agent-loadout/releases/tag/v0.1.2
