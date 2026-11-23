@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in Loadout does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not paste real secrets or real client
+        configuration: redact them or use throwaway values. Security problems
+        go through private reporting instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Loadout version
+      description: Output of `loadout --version`, or the About page in the app.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options:
+        - Windows installer (.exe)
+        - winget
+        - Chocolatey
+        - AppImage
+        - .deb or .rpm
+        - AUR or makepkg
+        - cargo install
+        - Built from source
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happens
+      options:
+        - Desktop app
+        - loadout CLI
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: clients
+    attributes:
+      label: Clients involved
+      description: Which AI clients (omp, Claude Code, Codex, Cursor and so on), if any.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. loadout server add ...
+        2. loadout apply
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Error text, `--json` output or log lines (redacted). Pasted as code.
+      render: text

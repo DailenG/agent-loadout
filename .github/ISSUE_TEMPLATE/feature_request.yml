@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a new capability, client or improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would like Loadout to do. Commands, screens or config shapes help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you use now, or other tools that do this well.
+  - type: input
+    id: clients
+    attributes:
+      label: Clients involved
+      description: For a new or changed client adapter, the client's name and its config file location.

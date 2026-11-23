@@ -32,7 +32,7 @@
     "targets": "all",
     "license": "MIT",
     "publisher": "DailenG",
-    "homepage": "https://github.com/DailenG/agent-loadout",
+    "homepage": "https://daileng.github.io/agent-loadout/",
     "category": "DeveloperTool",
     "shortDescription": "Manage MCP servers, skills and secret references for AI coding clients",
     "longDescription": "Loadout manages MCP servers, skills and secret references for AI coding clients from one versioned, offline store. It writes each client's native config files, never touches entries it did not create, and keeps secret values out of the store.",

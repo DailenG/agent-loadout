@@ -6,6 +6,7 @@ edition = "2024"
 rust-version = "1.100"
 license = "MIT"
 repository = "https://github.com/DailenG/agent-loadout"
+homepage = "https://daileng.github.io/agent-loadout/"
 publish = false
 
 # A workspace of its own (SPEC 4.1 layout, M14 note): Tauri, WebView2 and

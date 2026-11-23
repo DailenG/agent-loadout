@@ -51,7 +51,7 @@ jobs:
     steps:
       # The package files live on the default branch, and that is where the
       # update is committed.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           persist-credentials: false
@@ -122,7 +122,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
 

@@ -4,6 +4,8 @@
   "description": "Loadout desktop app frontend (never published to npm)",
   "license": "MIT",
   "repository": "https://github.com/DailenG/agent-loadout",
+  "homepage": "https://daileng.github.io/agent-loadout/",
+  "bugs": "https://github.com/DailenG/agent-loadout/issues",
   "private": true,
   "type": "module",
   "scripts": {

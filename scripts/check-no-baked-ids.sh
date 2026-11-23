@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 # Assembled from fragments so this script does not match itself.
 regex="Ov2""3li|Iv1""\\.|wang""huan9"
 # Design documents that name them on purpose, to explain what this project avoids.
-allowed=("SPEC.md" "LANDSCAPE.md")
+allowed=("SPEC.md" "docs/internal/LANDSCAPE.md")
 
 found=0
 while IFS= read -r -d '' file; do

@@ -7,7 +7,7 @@ only; there are no backports.
 
 | Version | Supported |
 |---|---|
-| Latest release (currently 0.1.x) | Yes |
+| Latest release (currently 0.2.x) | Yes |
 | Older releases | No; update to the latest release |
 | `main` branch | Fixes land here first |
 

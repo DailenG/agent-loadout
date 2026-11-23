@@ -6,7 +6,7 @@ use std::process::Command;
 
 /// Design documents that name SkillDock's baked-in id and dead upstream on
 /// purpose, to explain what this project avoids.
-const ALLOWED_FILES: [&str; 2] = ["SPEC.md", "LANDSCAPE.md"];
+const ALLOWED_FILES: [&str; 2] = ["SPEC.md", "docs/internal/LANDSCAPE.md"];
 
 #[test]
 fn repository_has_no_baked_ids() {

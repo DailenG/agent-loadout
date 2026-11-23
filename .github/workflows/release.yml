@@ -49,7 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tag matches the crate and package versions
         id: check
         shell: bash
@@ -80,10 +80,10 @@ jobs:
       SIGNING: ${{ vars.LOADOUT_SIGN_ACCOUNT != '' && vars.LOADOUT_SIGN_ENDPOINT != '' && vars.LOADOUT_SIGN_PROFILE != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
       UPDATER: ${{ vars.LOADOUT_UPDATER_PUBKEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain from rust-toolchain.toml
         run: rustup toolchain install
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -108,7 +108,7 @@ jobs:
 
       - name: Code-signing kit
         if: env.SIGNING == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: DailenG/code-signing-kit
           ssh-key: ${{ secrets.CODE_SIGNING_KIT_SSH_KEY }}
@@ -185,7 +185,7 @@ jobs:
           if [ "$UPDATER" = true ]; then
             cp src-tauri/target/release/bundle/nsis/Loadout_${VERSION}_x64-setup.exe.sig out/
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
           path: out/
@@ -199,14 +199,14 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       UPDATER: ${{ vars.LOADOUT_UPDATER_PUBKEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: WebKitGTK and other Tauri build libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Toolchain from rust-toolchain.toml
         run: rustup toolchain install
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -273,7 +273,7 @@ jobs:
           if [ "$UPDATER" = true ]; then
             cp "$bundle/appimage/agent-loadout_${VERSION}_amd64.AppImage.sig" out/
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux
           path: out/
@@ -289,8 +289,8 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
       - name: Gather assets
@@ -340,8 +340,17 @@ jobs:
         run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
 
       # A draft: the maintainer reviews and publishes it. latest.json is
-      # served from releases/latest only once the release is published.
+      # served from releases/latest only once the release is published. The
+      # notes are this version's CHANGELOG.md section, followed by the
+      # generated list of pull requests and the compare link.
       - name: Draft release
         run: |
+          set -euo pipefail
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { f = 1; next } f && /^## / { exit } f' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::warning::CHANGELOG.md has no section for $VERSION; add the summary to the draft by hand"
+          fi
           gh release create "$GITHUB_REF_NAME" dist/* \
-            --draft --verify-tag --generate-notes --title "Loadout $VERSION"
+            --draft --verify-tag --generate-notes --notes-file "$RUNNER_TEMP/notes.md" \
+            --title "Loadout $VERSION"

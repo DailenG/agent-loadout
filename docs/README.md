@@ -25,6 +25,7 @@
 | [schema/](schema) | JSON Schemas for the store files (generated) |
 | [verify/](verify/README.md) | Real-client verification records |
 | [milestones/](milestones) | Milestone completion notes (historical) |
+| [internal/](internal/README.md) | Pre-build notes such as the survey of comparable tools (historical) |
 
 You can also ask questions about the code on
 [DeepWiki](https://deepwiki.com/DailenG/agent-loadout).

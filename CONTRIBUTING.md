@@ -175,7 +175,9 @@ Maintainers only.
    when the `release` environment is configured) and the Linux AppImage,
    `.deb`, `.rpm` and tarball, smoke-tests them, and creates a **draft**
    GitHub release with `SHA256SUMS`, the rendered winget manifests and,
-   when the updater key is set, `latest.json` and `.sig` files.
+   when the updater key is set, `latest.json` and `.sig` files. The draft's
+   notes are the version's CHANGELOG section followed by the generated
+   list of pull requests.
 3. Review the draft and publish it. Release tags are protected: a failed
    run means a new version, not a re-tag.
 4. After publishing:
@@ -185,10 +187,13 @@ Maintainers only.
      pushes the package and commits the updated files.
    - **winget**: submit the manifests from `winget-manifests-X.Y.Z.zip`
      (rendered by `packaging/winget/render.ps1`) to `microsoft/winget-pkgs`.
+     While an earlier version's pull request is still open, replace its
+     manifests with the new version's on the same branch (and update its
+     title) rather than opening a second pull request.
    - **AUR**: fill the real checksums (`updpkgsums`), regenerate
      `.SRCINFO`, run `packaging/aur/verify-release.sh` on Arch, commit as
      `packaging(aur): real X.Y.Z checksums`. (Publishing the packages to
-     the AUR itself has not started yet.)
+     the AUR itself waits for AUR account registration to reopen.)
 
 ## License
 

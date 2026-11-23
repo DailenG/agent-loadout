@@ -66,14 +66,15 @@ To check a download against `SHA256SUMS`:
 
 ### Windows
 
-**winget** (once the maintainer has published the manifest):
+**winget** (once the package is accepted; the first submission is waiting
+for a moderator's review in winget-pkgs):
 
 ```
 winget install --id DailenG.AgentLoadout
 ```
 
-**Chocolatey** (once the package is approved on the Chocolatey Community
-Repository):
+**Chocolatey** (once the package is approved; it is waiting for moderation
+on the Chocolatey Community Repository):
 
 ```
 choco install agent-loadout
@@ -105,14 +106,24 @@ SmartScreen may warn about them.
 
 ### Arch Linux
 
-Two AUR packages:
+Two AUR packages, not on the AUR yet (AUR account registration is closed
+for now):
 
 - `agent-loadout`: builds from source.
 - `agent-loadout-bin`: repackages the release tarball.
 
-Install either with your AUR helper, for example `yay -S agent-loadout-bin`
-or `paru -S agent-loadout`. Both install `/usr/bin/loadout` (the CLI),
-`/usr/bin/agent-loadout-app` (the desktop app) and a desktop entry.
+Until they are published, build either from this repository:
+
+```sh
+git clone https://github.com/DailenG/agent-loadout
+cd agent-loadout/packaging/aur/agent-loadout-bin   # or agent-loadout
+makepkg -si
+```
+
+Once they are on the AUR, install either with your AUR helper, for example
+`yay -S agent-loadout-bin` or `paru -S agent-loadout`. Both install
+`/usr/bin/loadout` (the CLI), `/usr/bin/agent-loadout-app` (the desktop
+app) and a desktop entry.
 
 ### Other Linux distributions
 

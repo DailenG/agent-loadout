@@ -55,7 +55,7 @@ What SkillDock gets right and this spec keeps: the GUI layout and flows, the man
 
 ### Non-goals (v1)
 
-- MCP proxies, gateways or container runtimes (ToolHive, 1MCP, Docker MCP gateway, MetaMCP), per LANDSCAPE.md.
+- MCP proxies, gateways or container runtimes (ToolHive, 1MCP, Docker MCP gateway, MetaMCP), per [LANDSCAPE.md](docs/internal/LANDSCAPE.md).
 - Rewriting servers into wrapper commands for tool filtering (SkillDock's `mcp-filter`/`mcp-remote`). Tool filtering is written only through native client fields.
 - Plugin management, marketplaces, SkillHub publishing and the Publish route: deferred post-v1 (Decision 3). The GUI keeps their nav slots hidden behind a feature flag.
 - Built-in catalogs as required dependencies. Catalog sources are optional post-v1 add-ons.
@@ -1311,7 +1311,7 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 - `THIRD_PARTY_NOTICES.md` lists every reused file with origin (`DailenG/skilldock@181b52b <path>`), license and copyright, plus full license texts. Files derived from SkillDock keep a header comment: `// Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan`.
 - Expected reuse from SkillDock: `tokens.css`, shell layout (`App.tsx` structure), `AppSelect`, `AppTooltip`, `BatchActions`, notifications, `ToolSyncPanel`, `ToolManageDialog`, `SkillDiffView`, skill list/card components, i18n catalog, tool logo set, the client path tables, the Windows junction and `ReplaceFileW` logic. Rewritten from scratch: `mcp_manager.rs`, `backup_*.rs`, `github_*.rs`, `commands.rs`, `plugin_manager.rs`.
 - CC Switch, agentsync, rulesync, MCPM, ruler (all MIT): ideas freely; any copied code gets the same header and a notice entry.
-- **gaal (AGPL-3.0): ideas only.** No code, no doc text, no test fixtures copied. Implementers of the env-reference and upsert features MUST NOT open gaal's source while implementing them; the design here is derived from LANDSCAPE.md's one-line summary.
+- **gaal (AGPL-3.0): ideas only.** No code, no doc text, no test fixtures copied. Implementers of the env-reference and upsert features MUST NOT open gaal's source while implementing them; the design here is derived from [LANDSCAPE.md](docs/internal/LANDSCAPE.md)'s one-line summary.
 - Dependency policy: `cargo-deny` in CI denies GPL/AGPL/SSPL licenses and unknown licenses; `license-checker` equivalent for npm.
 - Tool logos are third-party trademarks used nominatively to identify clients; the app icon and name are new (not SkillDock's).
 

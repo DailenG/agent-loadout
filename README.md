@@ -1,7 +1,10 @@
 # Loadout
 
 [![CI](https://github.com/DailenG/agent-loadout/actions/workflows/ci.yml/badge.svg)](https://github.com/DailenG/agent-loadout/actions/workflows/ci.yml)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DailenG/agent-loadout)
+[![Latest release](https://img.shields.io/github/v/release/DailenG/agent-loadout)](https://github.com/DailenG/agent-loadout/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1f6feb)](https://deepwiki.com/DailenG/agent-loadout)
+[![Website](https://img.shields.io/badge/website-daileng.github.io-8b5cf6)](https://daileng.github.io/agent-loadout/)
 
 Loadout (`agent-loadout`) manages MCP servers, skills and secret references
 for AI coding clients from one versioned, offline store: omp (the
@@ -39,8 +42,8 @@ Downloads are on the [latest release](https://github.com/DailenG/agent-loadout/r
   once the package is approved.
 - **Linux:** the AppImage (updates itself), or the `.deb` / `.rpm`.
 - **Arch Linux:** the AUR packages `agent-loadout` (source) and
-  `agent-loadout-bin` are not published yet; until then build them from this
-  repository:
+  `agent-loadout-bin` are not published yet (AUR account registration is
+  closed for now); until then build them from this repository:
 
   ```sh
   git clone https://github.com/DailenG/agent-loadout
@@ -102,7 +105,7 @@ Questions about the code: [Ask DeepWiki](https://deepwiki.com/DailenG/agent-load
 
 ## Status and roadmap
 
-Loadout is in early development (0.1.x). What changed in each release is in
+Loadout is in early development (0.2.x). What changed in each release is in
 the [changelog](CHANGELOG.md); how it was built is in
 [docs/history.md](docs/history.md). Planned work and known issues are
 tracked in [GitHub issues](https://github.com/DailenG/agent-loadout/issues).

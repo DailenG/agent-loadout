@@ -8,7 +8,7 @@
       "prompt": "PS>",
       "command": "winget install --id DailenG.AgentLoadout",
       "status": "pending",
-      "pending": "The manifest is waiting to be accepted into winget-pkgs.",
+      "pending": "Submitted to winget-pkgs and waiting for a moderator's review. Until then, use the installer above.",
       "url": ""
     },
     {
@@ -18,7 +18,7 @@
       "prompt": "PS>",
       "command": "choco install agent-loadout",
       "status": "pending",
-      "pending": "The package is waiting for approval on the Chocolatey Community Repository. It installs per user, like the installer.",
+      "pending": "Waiting for moderation on the Chocolatey Community Repository (a new package's first versions are reviewed by hand). It installs per user, like the installer.",
       "url": ""
     },
     {
@@ -28,7 +28,7 @@
       "prompt": "$",
       "command": "yay -S agent-loadout-bin",
       "status": "pending",
-      "pending": "Not published to the AUR yet. Until then, build it from the repository (below).",
+      "pending": "Not on the AUR yet: AUR account registration is closed for now. Until then, build it from the repository (below).",
       "url": ""
     },
     {
@@ -38,7 +38,7 @@
       "prompt": "$",
       "command": "yay -S agent-loadout",
       "status": "pending",
-      "pending": "Not published to the AUR yet.",
+      "pending": "Not on the AUR yet: AUR account registration is closed for now.",
       "url": ""
     },
     {
