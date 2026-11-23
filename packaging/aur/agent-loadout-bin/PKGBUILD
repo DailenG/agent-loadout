@@ -10,7 +10,7 @@
 
 pkgname=agent-loadout-bin
 _pkgname=agent-loadout
-pkgver=0.1.3
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Manage MCP servers, skills and secret references for AI coding clients (prebuilt)'
 arch=('x86_64')
@@ -39,7 +39,7 @@ provides=("$_pkgname" 'loadout')
 conflicts=("$_pkgname")
 options=('!strip' '!debug')
 source_x86_64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-$CARCH-linux.tar.gz")
-sha256sums_x86_64=('ea1dae055b0a29de114228720a46b886f03844ad9f97aa6a9523f894d82e8198')
+sha256sums_x86_64=('SKIP')
 
 package() {
   cd "$_pkgname-$pkgver-$CARCH-linux"

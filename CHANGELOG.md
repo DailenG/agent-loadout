@@ -6,7 +6,9 @@ All notable changes to Loadout are listed here. The format follows
 [GitHub](https://github.com/DailenG/agent-loadout/releases); work in progress
 is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
-## [Unreleased] (0.2.0)
+## [Unreleased]
+
+## [0.2.0] - 2026-11-23
 
 ### Added
 
@@ -92,6 +94,7 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/DailenG/agent-loadout/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/DailenG/agent-loadout/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DailenG/agent-loadout/releases/tag/v0.1.2
