@@ -908,8 +908,11 @@ export type HistoryFilter = {
 	limit: number | null,
 };
 
-/**  Which commits the list shows. */
-export type HistoryScope = "all" | "system" | "projects";
+/**
+ *  Which commits the list shows: all, the user scope's (SPEC 13.1), or
+ *  projects'.
+ */
+export type HistoryScope = "all" | "user" | "projects";
 
 /**  A store server the folder inherits from the system layer. */
 export type InheritedServer = {

@@ -1,8 +1,9 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ToolsPage } from "@/app/routes/tools/ToolsPage";
 import { t } from "@/i18n/en";
-import type { ServerList, ServerRow, ToolInfo } from "@/ipc/bindings";
+import type { ProjectRow, ProjectServerList, ServerList, ServerRow, ToolInfo, TrustReview } from "@/ipc/bindings";
 import {
   MOCK_CHANGE,
   MOCK_CLIENTS,
@@ -10,7 +11,8 @@ import {
   ok,
   type MockTransportOptions,
 } from "@/test/mockTransport";
-import { renderWithProviders } from "@/test/renderWithProviders";
+import { renderWithProviders, type RenderOptions } from "@/test/renderWithProviders";
+import { ScopeDriver, driveProject } from "@/test/ScopeDriver";
 
 const CURSOR: ToolInfo = {
   id: "cursor",
@@ -99,14 +101,81 @@ const SERVERS: ServerList = {
   warnings: [],
 };
 
-function renderPage(commands: MockTransportOptions["commands"] = {}) {
-  return renderWithProviders(<ToolsPage />, {
-    commands: {
-      listTools: async () => ok([CURSOR, CLAUDE, LEGACY]),
-      listServers: async () => ok(SERVERS),
-      ...commands,
+const PROJECT: ProjectRow = {
+  id: "web-7k2f",
+  name: "web",
+  path: "~/Code/web",
+  layout: "shared",
+  trust: "trusted",
+  error: null,
+  servers: 2,
+  clients: 1,
+  pending: 0,
+};
+
+const HASH = "sha256:shown";
+
+function manifestRow(name: string, clients: string[]): ProjectServerList["servers"][number] {
+  return {
+    name,
+    kind: "define",
+    from: null,
+    layers: ["shared"],
+    editLayer: "shared",
+    transport: "stdio",
+    launch: `${name}-mcp`,
+    clients: { allDetected: false, clients },
+    usesDefaults: false,
+    pills: pills(clients),
+    problems: [],
+    invalid: null,
+  };
+}
+
+const PROJECT_SERVERS: ProjectServerList = {
+  project: {
+    id: PROJECT.id,
+    name: "web",
+    path: "~/Code/web",
+    trust: "trusted",
+    hash: HASH,
+    layers: ["shared", "local"],
+    defaultClients: { allDetected: true, clients: [] },
+  },
+  servers: [
+    manifestRow("docs", ["claude-code", "codex"]),
+    { ...manifestRow("quiet", []), kind: "suppress", from: "quiet" },
+  ],
+  inherited: [{ id: "noisy", displayName: "Noisy", transport: "stdio", launch: "noisy-mcp" }],
+  clients: MOCK_CLIENTS,
+  storeServers: ["noisy", "quiet"],
+  warnings: [],
+};
+
+function renderPage(commands: MockTransportOptions["commands"] = {}, options: Omit<RenderOptions, "commands"> = {}) {
+  const onOpenMcp = vi.fn();
+  const view = renderWithProviders(
+    <>
+      <ScopeDriver projectIds={[PROJECT.id]} />
+      <ToolsPage onOpenMcp={onOpenMcp} />
+    </>,
+    {
+      ...options,
+      commands: {
+        listTools: async () => ok([CURSOR, CLAUDE, LEGACY]),
+        listServers: async () => ok(SERVERS),
+        listProjects: async () => ok([PROJECT]),
+        listProjectServers: async () => ok(PROJECT_SERVERS),
+        ...commands,
+      },
     },
-  });
+  );
+  return { onOpenMcp, ...view };
+}
+
+async function openManage(user: UserEvent, name: string) {
+  await user.click(await screen.findByRole("button", { name: t("tools.manageAria", { name }) }));
+  return screen.findByRole("dialog", { name: t("tools.dialog.title", { name }) });
 }
 
 describe("ToolsPage", () => {
@@ -244,5 +313,83 @@ describe("ToolsPage", () => {
 
     await user.click(within(dialog).getByRole("button", { name: t("tools.dialog.done") }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("follows the sidebar to a project and names that project's files", async () => {
+    const { user } = renderPage();
+    const claude = within((await screen.findAllByRole("article"))[0]);
+    expect(claude.getByText("<P>/.mcp.json")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: driveProject(PROJECT.id) }));
+    expect(await claude.findByText(t("tools.projectFilesIn", { name: "web" }))).toBeInTheDocument();
+    expect(
+      within(claude.getByRole("list", { name: t("tools.projectFilesAria", { name: "Claude Code" }) })).getByText(
+        "~/Code/web/.mcp.json",
+      ),
+    ).toBeInTheDocument();
+    // The page renders no scope select of its own.
+    expect(screen.queryByRole("combobox", { name: /scope/i })).not.toBeInTheDocument();
+  });
+
+  it("toggles the client in a project's manifest entry with the shown hash", async () => {
+    const setProjectServerClients = vi.fn(async () => ok(MOCK_CHANGE));
+    const { user, transport, onOpenMcp } = renderPage(
+      { setProjectServerClients },
+      { scope: { kind: "project", id: PROJECT.id } },
+    );
+    const dialog = await openManage(user, "Claude Code");
+    expect(await within(dialog).findByText("docs")).toBeInTheDocument();
+    expect(within(dialog).getByText(t("tools.dialog.projectNote", { name: "web" }))).toBeInTheDocument();
+    // A suppression has no per-client switch; the store list is not read.
+    expect(within(dialog).queryByText("quiet")).not.toBeInTheDocument();
+    expect(transport.calls).not.toContain("listServers");
+    expect(within(dialog).getByText(t("tools.dialog.summary", { enabled: 1, total: 1 }))).toBeInTheDocument();
+
+    const docsSwitch = within(dialog).getByRole("button", { name: t("tools.dialog.item.disable", { name: "docs" }) });
+    await waitFor(() => expect(docsSwitch).toBeEnabled());
+    await user.click(docsSwitch);
+    await waitFor(() =>
+      expect(setProjectServerClients).toHaveBeenCalledWith(PROJECT.id, HASH, "docs", "shared", {
+        allDetected: false,
+        clients: ["codex"],
+      }),
+    );
+    expect(transport.calls).not.toContain("setServerClients");
+
+    // Inherited store servers are read only here, with a way to the MCP page.
+    const inherited = within(dialog).getByRole("region", { name: t("tools.dialog.inherited.title") });
+    expect(within(inherited).queryByRole("button", { name: /Enable|Disable/ })).not.toBeInTheDocument();
+    await user.click(
+      within(inherited).getByRole("button", { name: t("tools.dialog.inherited.openAria", { name: "Noisy" }) }),
+    );
+    expect(onOpenMcp).toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Manage dialog read only for an untrusted project and offers the trust review", async () => {
+    const review: TrustReview = {
+      id: PROJECT.id,
+      name: "web",
+      path: "~/Code/web",
+      trust: "untrusted",
+      hash: "sha256:reviewed",
+      files: [],
+      warnings: [],
+    };
+    const { user, transport } = renderPage(
+      {
+        listProjectServers: async () =>
+          ok({ ...PROJECT_SERVERS, project: { ...PROJECT_SERVERS.project, trust: "untrusted" } }),
+        reviewProject: async () => ok(review),
+      },
+      { scope: { kind: "project", id: PROJECT.id } },
+    );
+    const dialog = await openManage(user, "Claude Code");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(t("mcp.project.untrusted"));
+    expect(
+      within(dialog).getByRole("button", { name: t("tools.dialog.item.disable", { name: "docs" }) }),
+    ).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: t("mcp.project.review") }));
+    expect(await screen.findByRole("button", { name: t("projects.review.trust") })).toBeInTheDocument();
+    expect(transport.calls).not.toContain("setProjectServerClients");
   });
 });

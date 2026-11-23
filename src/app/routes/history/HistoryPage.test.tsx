@@ -160,14 +160,14 @@ describe("HistoryPage", () => {
     const { user, transport } = renderPage();
     await screen.findByRole("listitem", { name: SERVER_EDIT.summary });
     await user.click(screen.getByRole("combobox", { name: t("history.toolbar.scope") }));
-    await user.click(await screen.findByRole("option", { name: t("history.scope.system") }));
+    await user.click(await screen.findByRole("option", { name: t("history.scope.user") }));
     await waitFor(() =>
-      expect(argsOf(transport, "listHistory")).toContainEqual([{ scope: "system", entity: null, limit: null }]),
+      expect(argsOf(transport, "listHistory")).toContainEqual([{ scope: "user", entity: null, limit: null }]),
     );
     await user.type(screen.getByRole("searchbox", { name: t("history.toolbar.entity") }), "server/github{Enter}");
     await waitFor(() =>
       expect(argsOf(transport, "listHistory")).toContainEqual([
-        { scope: "system", entity: "server/github", limit: null },
+        { scope: "user", entity: "server/github", limit: null },
       ]),
     );
   });

@@ -202,8 +202,12 @@ inside a synced folder is supported).
 
 ## The desktop app
 
-The sidebar has a **Scope** switcher at the top: the system (user-wide)
-scope or one of your projects. Most pages follow it. The pages:
+The sidebar has a **Scope** switcher at the top: **User** (the user scope,
+for all your projects), one entry per project with its trust state (the
+tooltip shows its folder), and **+ Add folder...**, which adds a project and
+selects it. Skills, MCP and Tools follow the scope you pick; switching
+closes any open card or dialog. The choice lasts until you quit: the app
+always starts at User. The pages:
 
 - **Skills**: installed skills in list, grid or grouped view; Check
   updates; per-skill details with **Enable in Tools** (per client), Enable
@@ -212,23 +216,30 @@ scope or one of your projects. Most pages follow it. The pages:
   skills; unmanaged ones can be imported into the store or moved to the
   trash.
 - **MCP**: your servers with their per-client state (enabled, disabled,
-  pending, drift, blocked, not supported). Toolbar: search, a scope select
-  (System or one of your projects, see
-  [Projects and trust](#projects-and-trust)), Refresh, **Paste config**
-  (paste a server entry from any client's JSON or TOML) and **Add**. The
-  edit dialog has Form, TOML and Preview tabs; Preview shows the entry each
-  client gets, with secrets masked.
+  pending, drift, blocked, not supported). At project scope it lists that
+  project's manifest servers (see [Projects and trust](#projects-and-trust)).
+  Toolbar: search, Refresh, **Paste config** (paste a server entry from any
+  client's JSON or TOML) and **Add**. The edit dialog has Form, TOML and
+  Preview tabs; Preview shows the entry each client gets, with secrets
+  masked.
 - **Projects**: Add folder, Init manifest..., and per project Open,
   Effective config (which server each client loads in that folder and from
   which file), Apply, Remove from list, and Review change & trust.
 - **Tools**: every client with its tier, whether it is installed, its user
   and project config files (with Open folder), and a capability summary.
-  **Manage** turns servers on and off for one client.
+  At project scope the project files are named under that project's
+  folder. **Manage** turns servers on and off for one client: at User in
+  the store, at project scope in that project's manifest (the store
+  servers the project inherits are listed read only, with **Open on MCP
+  page**; an untrusted or changed project is read only until **Review &
+  trust**).
 - **Install**: Skill (Git or Local folder or `.zip`/`.skill` archive) and
   MCP (Manual form or Paste config).
-- **History**: every store commit, with Show diff, Undo this apply,
-  Restore this version, Restore entity..., Tag and Download zip; a Client
-  file backups tab; and the remotes strip with sync state and conflicts.
+- **History**: every store commit, filtered by All, User or Projects
+  (History covers every scope and does not follow the switcher), with Show
+  diff, Undo this apply, Restore this version, Restore entity..., Tag and
+  Download zip; a Client file backups tab; and the remotes strip with sync
+  state and conflicts.
 - **Settings**: App Preferences (Appearance), Versioning & Backup
   (remotes), Migration, Secrets, and Updates (see [Updates](#updates)).
 - **About**: version, app identifier, repository and data directory.
@@ -398,9 +409,9 @@ A project is a folder with a manifest in `<P>/.loadout/`:
 - `project.toml`: shared, committed with the project, for everyone on the
   team.
 
-A manifest can add project-only servers, override a system server for the
-folder, or hide a system server there (`enabled = false`). Loadout writes
-the project servers into each client's project files (for example
+A manifest can add project-only servers, override a user-scope server for
+the folder, or hide a user-scope server there (`enabled = false`). Loadout
+writes the project servers into each client's project files (for example
 `<P>/.mcp.json` for Claude Code); see [adapters.md](adapters.md) for which
 clients have project and project-local files. The manifest format is in
 SPEC section 5.5.
@@ -413,15 +424,15 @@ SPEC section 5.5.
 | Move private servers into the shared manifest | `loadout project share ID [--server NAME]...` | |
 | List and forget | `loadout project ls`, `loadout project rm ID` | Remove from list |
 | See what each client loads | `loadout effective PATH` | Effective config |
-| Add, edit or remove a project server; per-client enablement | edit the manifest, then `loadout project trust PATH` | MCP page, scope **Project: NAME** |
+| Add, edit or remove a project server; per-client enablement | edit the manifest, then `loadout project trust PATH` | MCP page or Tools > Manage, with the project picked in the sidebar's Scope switcher |
 
-**MCP page at project scope.** Pick a project in the MCP page's scope
-select. The page lists the servers in that project's manifests (both
+**MCP page at project scope.** Pick a project in the sidebar's Scope
+switcher. The page lists the servers in that project's manifests (both
 files merged; each card shows **Project** or **Local** for the file that
 defines it, and whether it is a project server, an override of a store
 server, or a store server hidden here) with per-client pills from the
 project's plan; clients without a project config are shown as not
-supported. Below them, **From the store (System)** lists the store servers
+supported. Below them, **From your user scope** lists the store servers
 the folder inherits, each with **Override here** and **Hide here**. **Add**
 and the edit dialog write one `[servers.NAME]` table; **Write to** picks
 **Project (shared, project.toml)** or **Local (private,

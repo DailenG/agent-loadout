@@ -12,7 +12,7 @@ import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
-import { ScopeSelect, USER_SCOPE } from "@/app/components/ScopeSelect";
+import { useActiveScope } from "@/app/scope/ActiveScope";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { errorMessage, t } from "@/i18n/en";
 import type { ClientInfo, ServerRow, TransportKind } from "@/ipc/bindings";
@@ -154,11 +154,20 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
   const [deletingId, setDeletingId] = useState("");
   const [bulkId, setBulkId] = useState("");
   const [dialog, setDialog] = useState<DialogState | null>(null);
-  const [scopeKey, setScopeKey] = useState(USER_SCOPE);
-  const inProject = scopeKey !== USER_SCOPE;
+  // The sidebar's scope (SPEC 13.1); a switch closes the open card and any dialog.
+  const { scope } = useActiveScope();
+  const projectId = scope.kind === "project" ? scope.id : "";
+  const inProject = scope.kind === "project";
+  const [shownProjectId, setShownProjectId] = useState(projectId);
   const [projectDialog, setProjectDialog] = useState<ProjectDialogState | null>(null);
-  const projectServers = useProjectServers(scopeKey, inProject);
+  const projectServers = useProjectServers(projectId, inProject);
   const [projectBusy, setProjectBusy] = useState(false);
+  if (shownProjectId !== projectId) {
+    setShownProjectId(projectId);
+    setExpandedId("");
+    setDialog(null);
+    setProjectDialog(null);
+  }
   const deleteActionRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -245,18 +254,6 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <ScopeSelect
-        value={scopeKey}
-        ariaLabel={t("mcp.scope.aria")}
-        userLabel={t("mcp.scope.user")}
-        projectLabel={(name) => t("mcp.scope.project", { name })}
-        onChange={(value) => {
-          setScopeKey(value);
-          setExpandedId("");
-          setDialog(null);
-          setProjectDialog(null);
-        }}
-      />
       {inProject ? null : <ListGridViewToggle value={viewMode} onChange={setViewMode} />}
       <RefreshButton label={t("mcp.toolbar.refresh")} />
       {inProject ? null : (
@@ -297,7 +294,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
       <div className="mcp-route">
         <HeaderToolbar>{toolbar}</HeaderToolbar>
         <ProjectServersView
-          projectId={scopeKey}
+          projectId={projectId}
           query={query}
           onOpenPending={onOpenPending}
           dialog={projectDialog}

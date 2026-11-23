@@ -9,11 +9,21 @@ import "@/styles/tokens.css";
  * The Tauri transport, or the explicit mock under `npm run dev:mock`
  * (`vite --mode mock`). The mock is imported dynamically behind a
  * build-time mode check so production bundles never contain it.
+ * `?dataset=` picks the mock's data: `demo` (the default; realistic content
+ * for every page and dialog) or `perf` (a large dataset for performance
+ * measurements).
  */
 async function selectTransport(): Promise<Transport> {
   if (import.meta.env.MODE === "mock") {
     const { createMockTransport } = await import("@/test/mockTransport");
-    return createMockTransport({ appInfo: { version: "0.0.0-mock", platform: "windows" } });
+    const appInfo = { version: "0.0.0-mock", platform: "windows" } as const;
+    const dataset = new URLSearchParams(window.location.search).get("dataset");
+    if (dataset === "perf") {
+      const { buildPerfDataset } = await import("@/test/perfData");
+      return createMockTransport({ appInfo, ...buildPerfDataset() });
+    }
+    const { buildDemoDataset } = await import("@/test/demoData");
+    return createMockTransport({ appInfo, ...buildDemoDataset() });
   }
   return tauriTransport;
 }

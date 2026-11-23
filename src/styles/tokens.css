@@ -18416,11 +18416,6 @@ button.settings-form-item:disabled {
 }
 
 /* M19 Skills and Install (SPEC 13.7): the pieces SkillDock did not have. */
-.skills-scope-select {
-  flex: 0 0 auto;
-  width: 190px;
-}
-
 .skills-scope-note,
 .skills-source-folder,
 .skill-project-panel__note {
@@ -18726,6 +18721,31 @@ button.settings-form-item:disabled {
   display: block;
 }
 /* end M26 */
+
+/* M26b Tools Manage dialog at project scope (SPEC 13.1, 13.7). */
+.tool-manage-dialog__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tool-manage-dialog__scope-note,
+.tool-manage-dialog__trust {
+  margin: 0;
+}
+
+.tool-manage-dialog__inherited {
+  display: grid;
+  gap: 6px;
+  grid-column: 1 / -1;
+  padding-top: 6px;
+}
+
+.tool-manage-dialog__inherited .apply-drawer__note {
+  margin: 0;
+}
+/* end M26b */
 
 /* M28 header toolbar (#1, contract C4): one control height, one gap, one
    center line for every page header action. */

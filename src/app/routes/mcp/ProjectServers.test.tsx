@@ -5,6 +5,7 @@ import type { ChangeResult, ProjectRow, ProjectServerList, ProjectServerRow, Tru
 import type { CommandResult } from "@/ipc/transport";
 import { MOCK_CHANGE, MOCK_CLIENTS, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
+import { DRIVE_USER, ScopeDriver, driveProject } from "@/test/ScopeDriver";
 import { McpPage } from "./McpPage";
 
 const PROJECT: ProjectRow = {
@@ -98,15 +99,22 @@ const REVIEW: TrustReview = {
 
 async function renderProjectScope(commands: MockTransportOptions["commands"] = {}) {
   const onOpenPending = vi.fn();
-  const view = renderWithProviders(<McpPage onOpenPending={onOpenPending} onOpenInstall={() => undefined} />, {
-    commands: {
-      listProjects: async () => ok([PROJECT]),
-      listProjectServers: async () => ok(LIST),
-      ...commands,
+  const view = renderWithProviders(
+    <>
+      <ScopeDriver projectIds={[PROJECT.id]} />
+      <McpPage onOpenPending={onOpenPending} onOpenInstall={() => undefined} />
+    </>,
+    {
+      commands: {
+        listProjects: async () => ok([PROJECT]),
+        listProjectServers: async () => ok(LIST),
+        ...commands,
+      },
     },
-  });
-  await view.user.click(screen.getByRole("combobox", { name: t("mcp.scope.aria") }));
-  await view.user.click(await screen.findByRole("option", { name: t("mcp.scope.project", { name: "web" }) }));
+  );
+  // The page renders no scope select of its own: the sidebar's scope drives it.
+  expect(screen.queryByRole("combobox", { name: /scope/i })).not.toBeInTheDocument();
+  await view.user.click(screen.getByRole("button", { name: driveProject(PROJECT.id) }));
   return { onOpenPending, ...view };
 }
 
@@ -422,5 +430,18 @@ describe("McpPage at project scope", () => {
     await waitFor(() => expect(trustProject).toHaveBeenCalledWith(PROJECT.id, REVIEW.hash));
     const edits = ["saveProjectServer", "removeProjectServer", "setProjectServerClients"];
     expect(transport.calls.some((command) => edits.includes(command))).toBe(false);
+  });
+
+  it("follows the sidebar back to User and closes an open editor", async () => {
+    const { user } = await renderProjectScope();
+    await screen.findByRole("article", { name: "docs" });
+    const add = screen.getByRole("button", { name: t("mcp.toolbar.add") });
+    await waitFor(() => expect(add).toBeEnabled());
+    await user.click(add);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: DRIVE_USER }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("article", { name: "docs" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("header-toolbar")).getByRole("button", { name: t("mcp.toolbar.paste") })).toBeInTheDocument();
   });
 });

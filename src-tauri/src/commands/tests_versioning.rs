@@ -131,6 +131,33 @@ fn restore_entity_restores_only_that_entity() {
 }
 
 #[test]
+fn the_user_filter_lists_the_user_scope_commits() {
+    let fx = Fx::new();
+    servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();
+    // The GUI sends the scope as `user` (SPEC 13.1 names it User).
+    let scope: HistoryScope = serde_json::from_str("\"user\"").unwrap();
+    assert_eq!(scope, HistoryScope::User);
+    let filter = |scope| HistoryFilter {
+        scope,
+        entity: None,
+        limit: None,
+    };
+    let user = history::history(&fx.core, &filter(HistoryScope::User)).unwrap();
+    assert!(
+        user.iter()
+            .any(|entry| entry.entities.contains(&"server/fake".to_owned())),
+        "{user:?}"
+    );
+    assert!(
+        user.iter()
+            .all(|entry| entry.scope.as_deref() == Some("system")),
+        "{user:?}"
+    );
+    let projects = history::history(&fx.core, &filter(HistoryScope::Projects)).unwrap();
+    assert!(projects.is_empty(), "{projects:?}");
+}
+
+#[test]
 fn undo_this_apply_from_history_is_one_click_for_the_latest() {
     let fx = Fx::new();
     servers::save(&fx.core, &draft("fake", &["claude-code"]), true).unwrap();

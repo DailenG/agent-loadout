@@ -41,7 +41,7 @@ const TABS = [
   { id: "backups", label: "history.tabs.backups" },
 ] as const satisfies readonly { id: Tab; label: MessageKey }[];
 
-const SCOPE_OPTIONS: AppSelectOption<HistoryScope>[] = (["all", "system", "projects"] as const).map((scope) => ({
+const SCOPE_OPTIONS: AppSelectOption<HistoryScope>[] = (["all", "user", "projects"] as const).map((scope) => ({
   value: scope,
   label: t(SCOPE_KEYS[scope]),
 }));

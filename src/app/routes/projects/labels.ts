@@ -19,9 +19,9 @@ export const TRUST_KEYS = {
   invalid: "projects.trust.invalid",
 } as const satisfies Record<ProjectTrust, MessageKey>;
 
-/** The legend letters of the matrix (SPEC 13.3). */
+/** The legend letters of the matrix (SPEC 13.3); the core's `system` layer is the user scope. */
 export const LAYER_LETTERS: Record<LayerKind, string> = {
-  system: "S",
+  system: "U",
   project: "P",
   project_local: "L",
   foreign: "F",
@@ -29,7 +29,7 @@ export const LAYER_LETTERS: Record<LayerKind, string> = {
 };
 
 export const LAYER_KEYS = {
-  system: "matrix.layer.system",
+  system: "matrix.layer.user",
   project: "matrix.layer.project",
   project_local: "matrix.layer.projectLocal",
   foreign: "matrix.layer.foreign",

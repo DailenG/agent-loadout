@@ -24,6 +24,8 @@ mod tests;
 #[cfg(test)]
 mod tests_migrate;
 #[cfg(test)]
+mod tests_perf;
+#[cfg(test)]
 mod tests_project_servers;
 #[cfg(test)]
 mod tests_skills;

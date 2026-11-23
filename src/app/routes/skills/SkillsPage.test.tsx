@@ -10,6 +10,7 @@ import {
   type MockTransportOptions,
 } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
+import { ScopeDriver, driveProject } from "@/test/ScopeDriver";
 import { SkillsPage } from "./SkillsPage";
 
 function makeSkill(overrides: Partial<SkillInfo>): SkillInfo {
@@ -82,13 +83,19 @@ const CLAUDE_DIR: ToolSkillDir = {
 
 function renderPage(commands: MockTransportOptions["commands"] = {}) {
   const onOpenInstall = vi.fn();
-  const view = renderWithProviders(<SkillsPage onOpenInstall={onOpenInstall} />, {
-    commands: {
-      listSkills: async () => ok(LIST),
-      listSkillToolDirs: async () => ok([CLAUDE_DIR]),
-      ...commands,
+  const view = renderWithProviders(
+    <>
+      <ScopeDriver projectIds={[PROJECT.id]} />
+      <SkillsPage onOpenInstall={onOpenInstall} />
+    </>,
+    {
+      commands: {
+        listSkills: async () => ok(LIST),
+        listSkillToolDirs: async () => ok([CLAUDE_DIR]),
+        ...commands,
+      },
     },
-  });
+  );
   return { onOpenInstall, ...view };
 }
 
@@ -318,7 +325,7 @@ describe("SkillsPage", () => {
     expect(screen.getByRole("tab", { name: /Store/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("scopes to a project: lists project-enabled skills and turns one on with the shown hash", async () => {
+  it("follows the sidebar to a project: lists project-enabled skills and turns one on with the shown hash", async () => {
     const scopes: SkillScope[] = [];
     const { user, transport } = renderPage({
       listProjects: async () => ok([PROJECT]),
@@ -343,12 +350,16 @@ describe("SkillsPage", () => {
       },
     });
     await screen.findByRole("article", { name: "alpha" });
-    await user.click(screen.getByRole("combobox", { name: "Skills scope" }));
-    await user.click(await screen.findByRole("option", { name: /Project: web/ }));
+    // The page has no scope select of its own; a switch returns to the Store tab.
+    expect(screen.queryByRole("combobox", { name: /scope/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Claude Code/ }));
+    expect(screen.getByRole("tab", { name: /Store/ })).toHaveAttribute("aria-selected", "false");
+    await user.click(screen.getByRole("button", { name: driveProject(PROJECT.id) }));
     expect(
       await screen.findByText("Skills enabled in web. Links go to Claude Code in the project folder."),
     ).toBeInTheDocument();
     expect(scopes).toContainEqual({ kind: "project", id: PROJECT.id });
+    expect(screen.getByRole("tab", { name: /Store/ })).toHaveAttribute("aria-selected", "true");
     // Project-enabled skills come first.
     const cards = screen.getAllByRole("article");
     expect(cards[0]).toHaveAccessibleName("alpha");

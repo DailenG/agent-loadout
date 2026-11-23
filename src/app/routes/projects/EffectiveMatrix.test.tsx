@@ -81,7 +81,7 @@ describe("EffectiveMatrixView", () => {
     const compat = within(table).getByRole("button", { name: /github in Grok/ });
     expect(compat).toHaveTextContent("C⚠");
     const slack = within(table).getByRole("button", { name: /slack in Claude Code/ });
-    expect(slack).toHaveTextContent("S⊘");
+    expect(slack).toHaveTextContent("U⊘");
     // A client without an entry shows a dash.
     expect(within(table).getAllByLabelText(t("matrix.cell.none")).length).toBeGreaterThan(0);
     expect(screen.getByText(t("matrix.legend"))).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe("EffectiveMatrixView", () => {
     expect(within(detail).getAllByText("<P>/.mcp.json").length).toBeGreaterThan(0);
     expect(within(detail).getByText("store:github+project")).toBeInTheDocument();
     const shadowed = within(detail).getByRole("list", { name: t("matrix.detail.shadowed") });
-    expect(shadowed).toHaveTextContent(t("matrix.layer.system"));
+    expect(shadowed).toHaveTextContent(t("matrix.layer.user"));
     expect(shadowed).toHaveTextContent("~/.claude.json");
     expect(within(detail).getByText("VS Code (Copilot), Grok")).toBeInTheDocument();
     const snippet = within(detail).getByLabelText(t("matrix.detail.snippet"));

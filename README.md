@@ -13,7 +13,7 @@ Status: early development. The design is in [SPEC.md](SPEC.md); milestones M0
 store, `loadout server add|ls|show|rm`, `loadout history`), M3
 (format-preserving JSON, JSONC and TOML editors), M4 (client adapter
 framework with Claude Code and Claude Desktop adapters), M5 (Codex, omp
-and Pi adapters), M6 (system-scope apply engine with an ownership ledger,
+and Pi adapters), M6 (user-scope apply engine with an ownership ledger,
 `loadout status|diff|apply|rollback|import|adopt`, one store commit per apply
 run), M7 (secret references, env/keyring/1Password providers, the leak
 scanner on every store commit, `loadout secrets ls|check|providers|set|clear`),
@@ -46,10 +46,12 @@ M22 (Tier D: Windsurf, Devin Desktop, format-preserving YAML and JSON5
 editors, and the ported user-scope clients), M23 (packaging: the NSIS
 installer with `loadout` on the user PATH, AppImage/deb/rpm, AUR PKGBUILDs,
 winget manifests, the release workflow with Azure Trusted Signing, and the
-optional updater) and M24 (desktop MCP page at project scope: a project's
+optional updater), M24 (desktop MCP page at project scope: a project's
 manifest servers with per-client pills, add/edit/remove in `project.toml`
 or `project.local.toml`, read only until trusted; Discard pending in the
-pending-changes drawer) are in place. Gates V1 (Tier A)
+pending-changes drawer) and M26 (the sidebar's Scope switcher, User or one
+of your projects plus "Add folder...", drives the Skills, MCP and Tools
+pages; "User" replaces "System" everywhere) are in place. Gates V1 (Tier A)
 and V2 (Tier B),
 the real-client checks, are partly run; see
 [docs/verify/README.md](docs/verify/README.md).

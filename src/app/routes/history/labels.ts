@@ -13,7 +13,7 @@ import { IpcFailure } from "@/ipc/transport";
 
 export const SCOPE_KEYS = {
   all: "history.scope.all",
-  system: "history.scope.system",
+  user: "history.scope.user",
   projects: "history.scope.projects",
 } as const satisfies Record<HistoryScope, MessageKey>;
 

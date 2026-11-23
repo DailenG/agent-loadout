@@ -667,7 +667,7 @@ function RoutePage(props: {
     );
   }
   if (route.key === "tools") {
-    return <ToolsPage />;
+    return <ToolsPage onOpenMcp={() => props.onNavigate("mcp")} />;
   }
   if (route.key === "history") {
     return (

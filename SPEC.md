@@ -1065,10 +1065,11 @@ Same grid, tokens, sidebar widths (174 px / 86 px collapsed), header with title,
 ```
 +----------------------+-------------------------------------------------------------+
 | [icon] Loadout       |  MCP                                  [search][≡/▦][Refresh]|
-| Scope: [System    v] |  Scan, edit, and sync MCP config      [Scan Import][Add]    |
-|   System (user-wide) |  for 14 tools          (3 pending)    [Review & Apply]      |
-|   skilldock-next     +-------------------------------------------------------------+
-|   home-lab           |                                                             |
+| Scope: [User      v] |  Scan, edit, and sync MCP config      [Scan Import][Add]    |
+|   User (all your     |  for 14 tools          (3 pending)    [Review & Apply]      |
+|     projects)        +-------------------------------------------------------------+
+|   skilldock-next  ✓  |                                                             |
+|   home-lab        ⚠  |                                                             |
 |   + Add folder...    |   (page content)                                            |
 | -------------------- |                                                             |
 |  * Skills            |                                                             |
@@ -1082,6 +1083,8 @@ Same grid, tokens, sidebar widths (174 px / 86 px collapsed), header with title,
 +----------------------+-------------------------------------------------------------+
 ```
 
+The scope switcher is the one place a scope is chosen. **User** is the user scope: the store servers and skills every folder gets, written to each client's user-scope files (the core's `system` layer, 6.1). Each known project follows, with its trust state and its placeholder path in the tooltip; **+ Add folder...** runs the Projects page's add flow and selects the new project. Skills, MCP and Tools follow the active scope; none of them has a scope select of its own. Switching closes an open card, editor or Manage dialog and returns Skills to its Store tab. The scope lasts for the session (it survives page changes) and is not persisted: a restart opens User. History is cross-scope and keeps its own filter (All / User / Projects).
+
 - Plugins and Publish nav items exist behind a feature flag (hidden in v1; deferred post-v1).
 - Window chrome: Windows custom controls (`decorations: false`, as SkillDock); Linux native decorations (Hyprland tiles windows; no custom bar); macOS Overlay title bar.
 - Header shows a **pending changes** pill when `apply_mode = review` or when an instant apply left blocked/failed items; clicking opens the Apply drawer.
@@ -1092,7 +1095,7 @@ List row (SkillDock card plus layer chips and per-client states):
 
 ```
 +-----------------------------------------------------------------------------------+
-| (G)* github   [12 tools] [Enabled 5]  [System] [Project override]   ✎  🗑  ⌄      |
+| (G)* github   [12 tools] [Enabled 5]  [User] [Project override]     ✎  🗑  ⌄      |
 |     Issues, pull requests and code search                                          |
 |     ! Missing secret: GITHUB_PAT                                                   |
 +-----------------------------------------------------------------------------------+
@@ -1100,7 +1103,7 @@ List row (SkillDock card plus layer chips and per-client states):
   Basic Info:  Description | Full Command (refs shown, never values) | Origin | Scope
   Enable in Tools:   [Claude Code ✓] [Cursor ✓] [Codex ✓] [VS Code ○] [omp ⚠ drift]
                      [Pi ✓] [Claude Desktop ⛔ missing secret]   [Enable All][Disable All]
-  Layers (project scope only): System ~/.claude.json  -> shadowed by Project <P>/.mcp.json
+  Layers (project scope only): User ~/.claude.json  -> shadowed by Project <P>/.mcp.json
   Tools 10/12 enabled  [Enable All][Disable All]  [create_issue] [delete_repository ✗] ...
 ```
 
@@ -1112,7 +1115,7 @@ Edit dialog: tabs **Form | TOML | Preview**.
 - Preview: per-client rendered native entry (masked), including blocked reasons.
 - Paste-anything: pasting a client JSON/TOML snippet (any client's shape) auto-detects and converts.
 
-Project scope: the list shows the **effective** servers for the folder: the entries of its manifests (both files merged, with their layer and kind: project-only, override of a store server, suppression) and, apart, the store servers it inherits (each with Override here and Hide here); actions write to the project or project-local manifest (a "Write to: Project (shared) / Local (private)" selector in the dialog). Every edit writes the manifest, then mirrors, trusts and applies that content in one commit (Loadout trusts what it writes itself, as `project share` does). An edit starts only from trusted content with the content hash the page showed; an untrusted or changed project is read only until it is reviewed and trusted.
+Project scope (the sidebar's scope is a project, 13.1): the list shows the **effective** servers for the folder: the entries of its manifests (both files merged, with their layer and kind: project-only, override of a store server, suppression) and, apart under "From your user scope", the store servers it inherits (each with Override here and Hide here); actions write to the project or project-local manifest (a "Write to: Project (shared) / Local (private)" selector in the dialog). Every edit writes the manifest, then mirrors, trusts and applies that content in one commit (Loadout trusts what it writes itself, as `project share` does). An edit starts only from trusted content with the content hash the page showed; an untrusted or changed project is read only until it is reviewed and trusted.
 
 ### 13.3 Projects page (new)
 
@@ -1134,11 +1137,11 @@ Effective config view (per folder): matrix, rows = server names, columns = clien
 
 ```
                  Claude Code   Cursor   Codex    VS Code   omp      Grok
-github           P ✓           P ✓      P ✓      S ✓       P ✓      P ✓ (+compat dup)
+github           P ✓           P ✓      P ✓      U ✓       P ✓      P ✓ (+compat dup)
 postgres         P ✓           P ✓      P ✓      -         -        -
-slack            S ⊘ suppressed S ⚠ cannot suppress  S ⊘   S ✓      S ⚠
+slack            U ⊘ suppressed U ⚠ cannot suppress  U ⊘   U ✓      U ⚠
 context7 (foreign in ~/.cursor/mcp.json)   -     F ✓ ...
-legend: S system  P project  L local  F foreign  C client-compat; ✓ loaded ⊘ suppressed
+legend: U user  P project  L local  F foreign  C client-compat; ✓ loaded ⊘ suppressed
 ```
 
 Clicking a cell shows the provenance chain (winner file, shadowed entries, readers of the same file) and the actual native snippet.
@@ -1153,7 +1156,7 @@ Clicking a cell shows the provenance chain (winner file, shadowed entries, reade
 
 ```
 +-------------------------------------------------------------------------------------+
-| History                  [filter: all v] [entity...]   [Tag current...] [Remotes ▸] |
+| History                  [filter: All v] [entity...]   [Tag current...] [Remotes ▸] |
 +-------------------------------------------------------------------------------------+
 | ● apply: 2 files (claude-code, codex)          desktop · 2 min ago                 |
 | ● server: update github (env.GITHUB_TOOLSETS)   desktop · 2 min ago                 |
@@ -1167,7 +1170,7 @@ Clicking a cell shows the provenance chain (winner file, shadowed entries, reade
 +-------------------------------------------------------------------------------------+
 ```
 
-Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files touched and their outcomes; **Undo this apply** runs the one-click rollback. Restore of an arbitrary version opens a preview ("adds 1, changes 3, removes 0 entities") then the apply plan. A "Client file backups" tab lists apply runs with per-file restore.
+The filter is not a scope (History is cross-scope): **All**, **User** (commits of the user scope) or **Projects** (commits of any project). Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files touched and their outcomes; **Undo this apply** runs the one-click rollback. Restore of an arbitrary version opens a preview ("adds 1, changes 3, removes 0 entities") then the apply plan. A "Client file backups" tab lists apply runs with per-file restore.
 
 ### 13.6 Settings (SkillDock sections plus new ones)
 
@@ -1181,8 +1184,8 @@ Diff view: semantic by default, toggle raw. Apply commits (§8.7) show the files
 
 ### 13.7 Tools, Skills, Install
 
-- **Tools**: SkillDock grid (logo, type badge, Manage); paths shown per scope (User / Project for the active folder) with open buttons; capability summary (transports, env refs, project support). Manage dialog tabs Skills | MCP (Plugins hidden), scope-aware.
-- **Skills**: SkillDock list/grid/grouped views, source tabs per tool with managed/unmanaged/mismatch, detail with "Enable in Tools" pills, file browser, diff view; scope-aware (project scope shows project-enabled skills).
+- **Tools**: SkillDock grid (logo, type badge, Manage); paths shown per scope (User files, and the project files: at project scope named under the active project's placeholder path) with open buttons; capability summary (transports, env refs, project support). Manage dialog tabs Skills | MCP (Plugins hidden), scope-aware: at User it toggles the client in store servers; at project scope it toggles the client in that project's manifest entries with the MCP page's rules (13.2: the shown content hash, one edit at a time, each edit one commit that trusts and applies), lists the store servers the folder inherits read only with **Open on MCP page**, and is read only with **Review & trust** while the project is untrusted or changed.
+- **Skills**: SkillDock list/grid/grouped views, source tabs per tool with managed/unmanaged/mismatch, detail with "Enable in Tools" pills, file browser, diff view; scope-aware through the sidebar's scope (project scope shows project-enabled skills).
 - **Install**: Skill: Git | Local. MCP: Manual form | Paste config. Catalog tabs and the Plugin tab are hidden in v1 (catalogs and marketplaces are post-v1).
 
 ---

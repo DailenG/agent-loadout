@@ -1,7 +1,8 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
 // Grid layout, card markup and icons ported from DailenG/skilldock@181b52b src/app/routes/tools.tsx;
 // the refresh button from src/app/App.tsx. Data and capability summary are new (SPEC 13.7), as
-// are the Recommended badge and the "Get" action for an undetected recommended client (#2).
+// are the Recommended badge and the "Get" action for an undetected recommended client (#2), and
+// the project view: at project scope the cards name that project's files (SPEC 13.1).
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -12,8 +13,9 @@ import { useNotifications } from "@/app/components/notifications";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { ToolManageDialog } from "@/app/routes/tools/ToolManageDialog";
+import { useActiveScope } from "@/app/scope/ActiveScope";
 import { errorMessage, t } from "@/i18n/en";
-import type { ToolInfo } from "@/ipc/bindings";
+import type { ProjectRow, ToolInfo } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 
 function FolderOpenIcon() {
@@ -75,6 +77,8 @@ function transportSummary(tool: ToolInfo) {
 
 type ToolCardProps = {
   tool: ToolInfo;
+  /** The active project: its files are named under its placeholder path. */
+  project: ProjectRow | null;
   isOpening: boolean;
   openDisabled: boolean;
   onOpenFolder: () => void;
@@ -82,7 +86,7 @@ type ToolCardProps = {
   onGet: () => void;
 };
 
-function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
+function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
   const yesNo = (value: boolean) => (value ? t("tools.capability.yes") : t("tools.capability.no"));
 
   return (
@@ -169,7 +173,9 @@ function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage, onGet
           </button>
         </div>
         <div className="tool-card__path-row tools-path-row">
-          <span className="tool-card__path-label">{t("tools.projectFiles")}</span>
+          <span className="tool-card__path-label">
+            {project ? t("tools.projectFilesIn", { name: project.name }) : t("tools.projectFiles")}
+          </span>
           <ul
             className="tools-path-list"
             aria-label={t("tools.projectFilesAria", { name: tool.name })}
@@ -177,11 +183,15 @@ function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage, onGet
             {tool.projectFiles.length === 0 ? (
               <li className="tool-card__path-value">{t("tools.noProjectFiles")}</li>
             ) : (
-              tool.projectFiles.map((path) => (
-                <li key={path} className="tool-card__path-value" title={path}>
-                  {path}
-                </li>
-              ))
+              tool.projectFiles.map((path) => {
+                // `<P>/...` is relative to the project folder; other paths are user files keyed by project.
+                const shown = project && path.startsWith("<P>/") ? `${project.path}/${path.slice(4)}` : path;
+                return (
+                  <li key={path} className="tool-card__path-value" title={shown}>
+                    {shown}
+                  </li>
+                );
+              })
             )}
           </ul>
         </div>
@@ -205,9 +215,15 @@ function ToolCard({ tool, isOpening, openDisabled, onOpenFolder, onManage, onGet
   );
 }
 
-export function ToolsPage() {
+export type ToolsPageProps = {
+  /** Opens the MCP page, where inherited servers are changed. */
+  onOpenMcp: () => void;
+};
+
+export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
+  const { project } = useActiveScope();
   const tools = useQuery({
     queryKey: storeQueryKeys.tools,
     queryFn: async () => unwrap(await commands.listTools()),
@@ -291,6 +307,7 @@ export function ToolsPage() {
             <ToolCard
               key={tool.id}
               tool={tool}
+              project={project}
               isOpening={openingToolId === tool.id}
               openDisabled={Boolean(openingToolId)}
               onOpenFolder={() => void handleOpenFolder(tool.id)}
@@ -301,7 +318,15 @@ export function ToolsPage() {
         </div>
       </section>
       {managingTool ? (
-        <ToolManageDialog isOpen tool={managingTool} onClose={() => setManagingToolId("")} />
+        <ToolManageDialog
+          isOpen
+          tool={managingTool}
+          onClose={() => setManagingToolId("")}
+          onOpenMcp={() => {
+            setManagingToolId("");
+            onOpenMcp();
+          }}
+        />
       ) : null}
     </div>
   );

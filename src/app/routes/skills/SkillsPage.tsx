@@ -8,13 +8,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { storeQueryKeys, useInvalidateStore } from "@/app/apply/changeNotice";
-import { ScopeSelect, USER_SCOPE } from "@/app/components/ScopeSelect";
+import { useActiveScope } from "@/app/scope/ActiveScope";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { errorMessage, t } from "@/i18n/en";
-import type { SkillInfo, SkillScope, SkillUpdateCheck } from "@/ipc/bindings";
+import type { SkillInfo, SkillUpdateCheck } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
 import { RefreshIcon } from "../mcp/icons";
 import { GridIcon, GroupIcon, ListIcon, UpdateAllIcon } from "./icons";
@@ -66,12 +66,19 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   const invalidate = useInvalidateStore();
   const actions = useSkillActions();
   const { confirmRename, dialog: renameDialog } = useRenameConfirm();
-  const [scopeKey, setScopeKey] = useState(USER_SCOPE);
-  const scope: SkillScope = scopeKey === USER_SCOPE ? { kind: "user" } : { kind: "project", id: scopeKey };
+  // The sidebar's scope (SPEC 13.1); a switch closes the open card and returns to the store tab.
+  const { scope } = useActiveScope();
+  const scopeKey = scope.kind === "user" ? "user" : `project:${scope.id}`;
+  const [shownScopeKey, setShownScopeKey] = useState(scopeKey);
   const [source, setSource] = useState(STORE_SOURCE);
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<SkillViewMode>("list");
   const [expandedId, setExpandedId] = useState("");
+  if (shownScopeKey !== scopeKey) {
+    setShownScopeKey(scopeKey);
+    setExpandedId("");
+    setSource(STORE_SOURCE);
+  }
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [updates, setUpdates] = useState<Record<string, SkillUpdateCheck>>({});
   const [isChecking, setIsChecking] = useState(false);
@@ -209,17 +216,6 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <ScopeSelect
-        value={scopeKey}
-        ariaLabel={t("skills.scope.aria")}
-        userLabel={t("skills.scope.user")}
-        projectLabel={(name) => t("skills.scope.project", { name })}
-        onChange={(value) => {
-          setScopeKey(value);
-          setExpandedId("");
-          setSource(STORE_SOURCE);
-        }}
-      />
       <div className="skills-view-toggle" role="group" aria-label={t("skills.view.aria")}>
         {VIEW_MODES.map(({ mode, label, icon: Icon }) => (
           <button

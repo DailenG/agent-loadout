@@ -30,12 +30,13 @@ use specta::Type;
 use super::apply::mask_diff;
 use super::{AppState, CmdResult, Core, FileScope, IpcError, OpCounts, OutcomeKind, blocking};
 
-/// Which commits the list shows.
+/// Which commits the list shows: all, the user scope's (SPEC 13.1), or
+/// projects'.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryScope {
     All,
-    System,
+    User,
     Projects,
 }
 
@@ -383,7 +384,7 @@ pub fn history(core: &Core, filter: &HistoryFilter) -> CmdResult<Vec<HistoryEntr
     let entries = store.log(&LogFilter {
         entity: entity.map(str::to_owned),
         scope: match filter.scope {
-            HistoryScope::System => Some(TrailerScope::System),
+            HistoryScope::User => Some(TrailerScope::System),
             HistoryScope::All | HistoryScope::Projects => None,
         },
         limit: None,
