@@ -1,5 +1,5 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App, createQueryClient } from "@/app/App";
 import { McpPage } from "@/app/routes/mcp/McpPage";
@@ -61,6 +61,15 @@ function renderNotice(commands: MockTransportOptions["commands"] = {}) {
   return { onReview, ...view };
 }
 
+/** Finds the one-line notice and expands it into the message with Review and Dismiss. */
+async function openNotice(user: UserEvent) {
+  const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+  const toggle = within(notice).getByRole("button", { expanded: false });
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  return notice;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -68,7 +77,7 @@ afterEach(() => {
 describe("not-managed notice (#9)", () => {
   it("names the client and count from the every-scope summary, and Dismiss acknowledges what it showed", async () => {
     const { user, transport } = renderNotice();
-    const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+    const notice = await openNotice(user);
     expect(await within(notice).findByText("Claude Code has 2 MCP servers not managed by Loadout.")).toBeInTheDocument();
     const scan = transport.invocations.find((call) => call.command === "unmanagedSummary");
     expect(scan?.args[0]).toEqual({ kind: "all" });
@@ -94,7 +103,7 @@ describe("not-managed notice (#9)", () => {
 
   it("opens the Import page from Review and acknowledges", async () => {
     const { user, transport, onReview } = renderNotice();
-    const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+    const notice = await openNotice(user);
     await user.click(within(notice).getByRole("button", { name: t("import.notice.review") }));
     expect(onReview).toHaveBeenCalledOnce();
     expect(transport.calls).toContain("acknowledgeUnmanaged");
@@ -120,7 +129,7 @@ describe("not-managed notice (#9)", () => {
     );
     const section = await screen.findByRole("region", { name: "Not managed by Loadout (1)" });
     expect(within(section).getByText(t("import.unmanaged.new"))).toBeInTheDocument();
-    const notice = screen.getByRole("region", { name: t("import.notice.aria") });
+    const notice = await openNotice(user);
     await user.click(within(notice).getByRole("button", { name: t("import.notice.dismiss") }));
     await waitFor(() => expect(within(section).queryByText(t("import.unmanaged.new"))).toBeNull());
   });
@@ -138,7 +147,7 @@ describe("not-managed notice (#9)", () => {
       scanUnmanagedSkills: async () => ok(SKILLS),
     };
     const first = renderNotice(commands);
-    const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+    const notice = await openNotice(first.user);
     expect(within(notice).getByText("1 skill folder is not managed by Loadout.")).toBeInTheDocument();
     await first.user.click(within(notice).getByRole("button", { name: t("import.notice.dismiss") }));
     first.unmount();
@@ -170,7 +179,7 @@ describe("not-managed notice (#9)", () => {
         },
       },
     );
-    const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+    const notice = await openNotice(user);
     expect(await within(notice).findByText("Claude Code has 1 MCP server not managed by Loadout.")).toBeInTheDocument();
     const toggle = screen.getByRole("checkbox", { name: t("import.notice.setting.label") });
     expect(toggle).toBeChecked();
@@ -208,8 +217,73 @@ describe("not-managed notice (#9)", () => {
     await waitFor(() => expect(count(transport, "scanUnmanagedSkills")).toBe(2));
     expect(transport.calls).not.toContain("newUnmanaged");
 
+    await openNotice(user);
     await user.click(within(notice).getByRole("button", { name: t("import.notice.review") }));
     const nav = screen.getByRole("navigation", { name: t("app.nav.primary") });
     expect(within(nav).getByRole("button", { name: "Import" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("shows one line with the count and expands on click into the message and buttons (M36)", async () => {
+    const { user } = renderNotice({ scanUnmanagedSkills: async () => ok(SKILLS) });
+    const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+    const toggle = await within(notice).findByRole("button", { name: "3 not managed" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(panel).not.toBeNull();
+    expect(panel).not.toBeVisible();
+    expect(within(notice).queryByRole("button", { name: t("import.notice.review") })).toBeNull();
+    // The live region still says the whole message while the notice is one line.
+    expect(screen.getByTestId("unmanaged-notice-live")).toHaveTextContent(
+      "Claude Code has 2 MCP servers not managed by Loadout. 1 skill folder is not managed by Loadout.",
+    );
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(panel).toBeVisible();
+    expect(within(panel as HTMLElement).getByText(/Claude Code has 2 MCP servers/)).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(panel).not.toBeVisible();
+  });
+
+  it("opens from the keyboard, closes on Escape with focus back on the line, and on a press elsewhere", async () => {
+    const { user, transport } = renderNotice();
+    const notice = await screen.findByRole("region", { name: t("import.notice.aria") });
+    const toggle = await within(notice).findByRole("button", { name: "2 not managed" });
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.tab();
+    expect(within(notice).getByRole("button", { name: t("import.notice.review") })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.pointerDown(document.body);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // Opening and closing acknowledges nothing.
+    expect(transport.calls).not.toContain("acknowledgeUnmanaged");
+  });
+
+  it("shows only the count badge in the collapsed sidebar, which reviews", async () => {
+    const onReview = vi.fn();
+    const { user, transport } = renderWithProviders(<UnmanagedNotice collapsed onReview={onReview} />, {
+      commands: {
+        listTools: async () => ok(MOCK_TOOLS),
+        unmanagedSummary: async () => ok(summary("claude-code", ["docs", "github"])),
+      },
+    });
+    const badge = await screen.findByRole("button", {
+      name: "Claude Code has 2 MCP servers not managed by Loadout. Review",
+    });
+    expect(badge).toHaveTextContent(/^2$/);
+    expect(screen.queryByRole("region", { name: t("import.notice.aria") })).toBeNull();
+    expect(screen.queryByText("2 not managed")).toBeNull();
+    await user.click(badge);
+    expect(onReview).toHaveBeenCalledOnce();
+    expect(transport.calls).toContain("acknowledgeUnmanaged");
   });
 });

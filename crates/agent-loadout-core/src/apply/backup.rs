@@ -2,14 +2,22 @@
 //! `backups/files/<ts>-<apply-id>/<encoded-path>`, readable by the current
 //! user only, because client files may hold secrets. Machine-local; never
 //! pushed.
+//!
+//! An import that moves literal secrets to references leaves the old values
+//! in the backups its apply made (M35): [`mark_old_values`] records which
+//! ones in the run's result, and [`purge_old_values`] removes exactly those.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::apply::{ApplyEnv, journal};
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::paths::LoadoutHome;
-use crate::store::utc_datetime;
+use crate::secrets::SecretValue;
+use crate::secrets::scanner::MIN_TRACKED_LEN;
+use crate::store::{LOCK_TIMEOUT, StoreLock, utc_datetime};
 
 /// Directory under `backups/` holding one directory per apply run.
 pub const FILES_DIR: &str = "files";
@@ -231,4 +239,247 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let doy = (153 * mp + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
+}
+
+/// The client files whose backup of the finished run `apply_id` holds one
+/// of `values` (an import's extracted secrets, which the run replaced with
+/// references), each marked `old_values` in the run's result (M35). Values
+/// are compared in memory and never kept; values shorter than the leak
+/// scanner's minimum are not looked for, and a backup that cannot be read
+/// is left unmarked.
+pub fn mark_old_values(
+    fs: &dyn Fs,
+    state_dir: &Path,
+    apply_id: &str,
+    values: &[SecretValue],
+) -> Result<Vec<PathBuf>, CoreError> {
+    let needles = value_forms(values);
+    if needles.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(mut run) = journal::result(fs, state_dir, apply_id)? else {
+        return Ok(Vec::new());
+    };
+    let mut found = Vec::new();
+    for record in run.files.iter_mut().filter(|record| !record.backup_removed) {
+        let Some(backup) = record.backup.as_deref() else {
+            continue;
+        };
+        let Ok(bytes) = fs.read(Path::new(backup)) else {
+            continue;
+        };
+        if needles.iter().any(|needle| contains(&bytes, needle)) {
+            record.old_values = true;
+            found.push(PathBuf::from(&record.file));
+        }
+    }
+    if !found.is_empty() {
+        run.save_result(fs, state_dir)?;
+    }
+    Ok(found)
+}
+
+/// Each value as a client file may hold it: as is, trimmed, and escaped in
+/// a JSON or TOML string.
+fn value_forms(values: &[SecretValue]) -> Vec<Vec<u8>> {
+    let mut forms: BTreeSet<Vec<u8>> = BTreeSet::new();
+    for value in values {
+        let value = value.expose();
+        let escaped = serde_json::to_string(value).unwrap_or_default();
+        let escaped = escaped
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap_or_default();
+        for form in [value, value.trim(), escaped] {
+            if form.len() >= MIN_TRACKED_LEN {
+                forms.insert(form.as_bytes().to_vec());
+            }
+        }
+    }
+    forms.into_iter().collect()
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// The files of `files` that hold one of `values` (compared as in
+/// [`mark_old_values`]); a file that cannot be read is left out.
+pub(crate) fn files_holding(
+    fs: &dyn Fs,
+    files: &[PathBuf],
+    values: &[SecretValue],
+) -> Vec<PathBuf> {
+    let needles = value_forms(values);
+    if needles.is_empty() {
+        return Vec::new();
+    }
+    files
+        .iter()
+        .filter(|file| {
+            fs.read(file)
+                .is_ok_and(|bytes| needles.iter().any(|needle| contains(&bytes, needle)))
+        })
+        .cloned()
+        .collect()
+}
+
+/// What [`purge_old_values`] did.
+#[derive(Debug, Default)]
+pub struct Purge {
+    /// The client files whose backup was overwritten with zeros (and, but
+    /// for those in `not_deleted`, deleted): the old values are gone.
+    pub removed: Vec<PathBuf>,
+    /// Of `removed`, the client files whose zeroed backup could not be
+    /// deleted, with why. It holds no old value any more and is never
+    /// restored.
+    pub not_deleted: Vec<(PathBuf, CoreError)>,
+    /// The client files whose backup was left as it was, with why.
+    pub failed: Vec<(PathBuf, CoreError)>,
+}
+
+/// Removes the backups of apply run `apply_id` that hold old secret values
+/// (those [`mark_old_values`] marked; M35). A recorded backup is touched
+/// only when it is this run's backup of its file
+/// (`backups/files/<ts>-<apply-id>/<encoded file>`) and a regular file,
+/// not a link. It is overwritten with zeros in place, recorded as removed
+/// right then (so `restore --files` never writes the zeros back), and
+/// deleted. A failure is reported for its file and the others still go. A
+/// rollback or `restore --files` of that run then reports the file's
+/// original as no longer kept. A run left without backups is removed.
+/// Nothing marked is a no-op. Holds the store lock.
+pub fn purge_old_values(ax: &ApplyEnv<'_>, apply_id: &str) -> Result<Purge, CoreError> {
+    let fs = ax.fs;
+    let state_dir = ax.home.state_dir();
+    let _lock = StoreLock::acquire(fs, &state_dir, LOCK_TIMEOUT)?;
+    let Some(mut run) = journal::result(fs, &state_dir, apply_id)? else {
+        return Err(CoreError::new(
+            ErrorCode::NotFound,
+            format!("no apply run {apply_id:?} is recorded on this machine"),
+        ));
+    };
+    let mut purge = Purge::default();
+    let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
+    for record in run
+        .files
+        .iter_mut()
+        .filter(|record| record.old_values && !record.backup_removed)
+    {
+        let Some(backup) = record.backup.as_deref().map(PathBuf::from) else {
+            continue;
+        };
+        let file = PathBuf::from(&record.file);
+        if let Err(err) = check_backup_path(ax.home, apply_id, &backup, &file) {
+            purge.failed.push((file, err));
+            continue;
+        }
+        let fail = |what: &str, err: std::io::Error| {
+            CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(&backup)
+        };
+        if fs.is_regular_file(&backup) {
+            if let Err(err) = fs.overwrite_with_zeros(&backup) {
+                purge
+                    .failed
+                    .push((file, fail("cannot overwrite backup", err)));
+                continue;
+            }
+            // The old values are gone: from here on the backup is removed,
+            // whether or not the zeroed file can be deleted.
+            record.backup_removed = true;
+            if let Err(err) = fs.remove_file(&backup) {
+                purge
+                    .not_deleted
+                    .push((file.clone(), fail("cannot delete the zeroed backup", err)));
+            }
+        } else if fs.exists(&backup) || fs.is_dir(&backup) {
+            purge.failed.push((
+                file,
+                CoreError::new(
+                    ErrorCode::InvalidValue,
+                    "the recorded backup is not a regular file (a link or a folder); left alone",
+                )
+                .with_path(&backup),
+            ));
+            continue;
+        } else {
+            // Gone already (pruned, deleted by hand), or a dangling link,
+            // which holds no value either.
+            record.backup_removed = true;
+        }
+        purge.removed.push(file);
+        if let Some(dir) = backup.parent() {
+            dirs.insert(dir.to_path_buf());
+        }
+    }
+    if !purge.removed.is_empty() {
+        run.save_result(fs, &state_dir)?;
+    }
+    for dir in dirs {
+        if fs.read_dir(&dir).is_ok_and(|entries| entries.is_empty()) {
+            // Best effort: an empty run directory lists as a run without files.
+            let _ = fs.remove_dir_all(&dir);
+        }
+    }
+    Ok(purge)
+}
+
+/// Whether the recorded `backup` is run `apply_id`'s backup of `file`:
+/// `backups/files/<ts>-<apply-id>/<encode_path(file)>`, no `..`. The run
+/// result is a file on disk, so it is never trusted to name what to
+/// overwrite.
+fn check_backup_path(
+    home: &LoadoutHome,
+    apply_id: &str,
+    backup: &Path,
+    file: &Path,
+) -> Result<(), CoreError> {
+    let root = home.backups_dir().join(FILES_DIR);
+    let suffix = format!("-{apply_id}");
+    let in_run = backup.parent().is_some_and(|dir| {
+        dir.parent() == Some(root.as_path())
+            && dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.get(..16).and_then(parse_timestamp).is_some()
+                        && name.get(16..) == Some(suffix.as_str())
+                })
+    });
+    let plain = backup
+        .components()
+        .all(|part| !matches!(part, std::path::Component::ParentDir));
+    let named =
+        backup.file_name().and_then(|name| name.to_str()) == Some(encode_path(file).as_str());
+    if in_run && plain && named {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!(
+                "the recorded backup is not apply {apply_id}'s backup of this file; left alone"
+            ),
+        )
+        .with_path(backup))
+    }
+}
+
+/// The client files whose backup of apply run `apply_id` was removed
+/// because it held old secret values ([`purge_old_values`]): their content
+/// from before that run is no longer kept.
+pub fn removed_backups(
+    fs: &dyn Fs,
+    state_dir: &Path,
+    apply_id: &str,
+) -> Result<Vec<PathBuf>, CoreError> {
+    Ok(journal::result(fs, state_dir, apply_id)?
+        .map(|run| {
+            run.files
+                .into_iter()
+                .filter(|record| record.backup_removed)
+                .map(|record| PathBuf::from(record.file))
+                .collect()
+        })
+        .unwrap_or_default())
 }

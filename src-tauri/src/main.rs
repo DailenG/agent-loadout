@@ -125,6 +125,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::discover::add_discovered_projects,
             commands::import::scan_import,
             commands::import::apply_import,
+            commands::import::purge_import_backups,
             commands::import::unmanaged_summary,
             commands::import::new_unmanaged,
             commands::import::acknowledge_unmanaged,

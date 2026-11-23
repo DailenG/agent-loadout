@@ -13,7 +13,9 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use agent_loadout_core::adapters::detect::NoRegistry;
-use agent_loadout_core::apply::ApplyEnv;
+use agent_loadout_core::apply::rollback::{self, ApplySelector};
+use agent_loadout_core::apply::{ApplyEnv, backup};
+use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::store::diff::{ChangeKind, render};
 use agent_loadout_core::store::restore::{
     self, FileOutcome, RestoreRequest, prepare, restore_files,
@@ -458,6 +460,12 @@ impl Fs for RacyFs {
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         self.inner.remove_file(path)
     }
+    fn is_regular_file(&self, path: &Path) -> bool {
+        self.inner.is_regular_file(path)
+    }
+    fn overwrite_with_zeros(&self, path: &Path) -> io::Result<()> {
+        self.inner.overwrite_with_zeros(path)
+    }
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         self.inner.remove_dir_all(path)
     }
@@ -535,6 +543,105 @@ fn client_files_restore_from_apply_backups_through_cas() {
             .unwrap_err()
             .code(),
         ErrorCode::NotFound
+    );
+}
+
+/// Whether any file under `dir` holds `needle`.
+fn tree_holds(dir: &Path, needle: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.map(|entry| entry.unwrap().path()).any(|path| {
+        if path.is_dir() {
+            tree_holds(&path, needle)
+        } else {
+            String::from_utf8_lossy(&std::fs::read(&path).unwrap()).contains(needle)
+        }
+    })
+}
+
+/// M35: of a run's backups, only those holding an extracted value are
+/// marked and removed; the run's other backups stay. A file restore of the
+/// run restores the rest and reports the removed one, a rollback names it,
+/// and removing again is a no-op.
+#[test]
+fn old_value_backups_are_marked_and_removed_alone() {
+    const OLD_VALUE: &str = "planted-old-value-5c2f9a";
+    let claude_before = format!("{{\n  \"note\": \"{OLD_VALUE}\",\n  \"mcpServers\": {{}}\n}}\n");
+    let omp_before = "{\n  \"theme\": \"dark\",\n  \"mcpServers\": {}\n}\n";
+    let fx = Fx::new();
+    fx.write(&fx.claude(), &claude_before);
+    fx.write(&fx.omp(), omp_before);
+    fx.put_server(stdio(
+        "notes",
+        &["claude-code", "omp"],
+        &["-y", "@example/notes-mcp"],
+    ));
+    let (report, _) = fx.apply();
+    let apply_id = report.apply_id.clone();
+    let ax = fx.ax();
+    let state = fx.home.state_dir();
+    let backups = fx.home.backups_dir();
+    assert_eq!(
+        backup::list_runs(ax.fs, &fx.home).unwrap()[0].files.len(),
+        2
+    );
+
+    let none = backup::mark_old_values(ax.fs, &state, &apply_id, &[]).unwrap();
+    assert!(none.is_empty());
+    let values = [SecretValue::new(OLD_VALUE)];
+    let marked = backup::mark_old_values(ax.fs, &state, &apply_id, &values).unwrap();
+    assert_eq!(marked, [fx.claude()]);
+    assert!(tree_holds(&backups, OLD_VALUE));
+    assert!(
+        !tree_holds(&state, OLD_VALUE),
+        "only the file list is recorded"
+    );
+
+    let purge = backup::purge_old_values(&ax, &apply_id).unwrap();
+    assert_eq!(purge.removed, [fx.claude()]);
+    assert!(purge.failed.is_empty());
+    assert!(!tree_holds(&backups, OLD_VALUE));
+    let runs = backup::list_runs(ax.fs, &fx.home).unwrap();
+    assert_eq!(runs[0].files, [fx.omp()], "the other backup stays");
+    let again = backup::purge_old_values(&ax, &apply_id).unwrap();
+    assert!(again.removed.is_empty() && again.failed.is_empty());
+    assert_eq!(
+        backup::removed_backups(ax.fs, &state, &apply_id).unwrap(),
+        [fx.claude()]
+    );
+
+    let rolled =
+        rollback::rollback(&fx.store(), &ax, &ApplySelector::Id(apply_id.clone()), true).unwrap();
+    assert_eq!(rolled.unavailable_originals, [fx.claude()]);
+
+    let results = restore_files(&ax, &apply_id, None).unwrap();
+    assert_eq!(results.len(), 2, "{results:?}");
+    let outcome = |file: &Path| {
+        &results
+            .iter()
+            .find(|result| result.file == file)
+            .unwrap()
+            .outcome
+    };
+    assert!(matches!(outcome(&fx.claude()), FileOutcome::Removed));
+    assert!(matches!(
+        outcome(&fx.omp()),
+        FileOutcome::Restored { .. } | FileOutcome::Unchanged
+    ));
+    assert_eq!(fx.read(&fx.omp()), omp_before);
+
+    // The run's directory gone (its every backup removed): the restore
+    // still reports the removed file instead of finding nothing.
+    std::fs::remove_dir_all(backups.join(backup::FILES_DIR).join(&runs[0].dir)).unwrap();
+    let only_claude = restore_files(&ax, &apply_id, None).unwrap();
+    assert_eq!(only_claude.len(), 1);
+    assert!(matches!(only_claude[0].outcome, FileOutcome::Removed));
+    assert!(
+        backup::purge_old_values(&ax, "01NOSUCHAPPLYRUN0000000000")
+            .unwrap_err()
+            .code()
+            == ErrorCode::NotFound
     );
 }
 

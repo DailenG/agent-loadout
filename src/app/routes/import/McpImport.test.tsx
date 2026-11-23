@@ -149,7 +149,11 @@ const APPLIED: ImportApplied = {
   skipped: [],
   secrets: [{ alias: "GITHUB_GITHUB_TOKEN", server: "github", field: "env.GITHUB_TOKEN", destination: "keyring" }],
   change: MOCK_CHANGE,
+  backupsWithOldValues: [],
+  oldValuesInFiles: [],
 };
+
+const APPLY_ID = "01MOCKIMPORTAPPLY000000000";
 
 const STORE = {
   ...MOCK_SERVER_LIST,
@@ -236,15 +240,65 @@ describe("MCP import", () => {
 
   it("offers Pending changes after an import in review mode", async () => {
     const { user, onOpenPending } = renderSection([GITHUB], {
-      applyImport: async () => ok({ ...APPLIED, change: { commit: MOCK_CHANGE.commit, apply: null } }),
+      applyImport: async () =>
+        ok({ ...APPLIED, change: { commit: MOCK_CHANGE.commit, apply: null }, oldValuesInFiles: ["~/.claude.json"] }),
     });
     await screen.findByRole("article", { name: "github" });
     const dialog = await review(user);
     await user.click(within(dialog).getByRole("button", { name: "Import (1)" }));
     const result = await screen.findByRole("dialog", { name: t("import.result.title") });
     expect(within(result).getByText(t("import.result.reviewMode"))).toBeInTheDocument();
+    // No apply rewrote the file: it still holds the old values, and no backup is offered for removal.
+    expect(within(result).getByText(t("import.result.valuesStillInFiles", { files: "~/.claude.json" }))).toBeInTheDocument();
+    expect(within(result).queryByRole("button", { name: t("import.result.removeBackups") })).toBeNull();
     await user.click(within(result).getByRole("button", { name: t("import.result.openPending") }));
     expect(onOpenPending).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the old values in backups until Remove those backups now is confirmed", async () => {
+    const { user, transport } = renderSection([GITHUB], {
+      applyImport: async () => ok({ ...APPLIED, backupsWithOldValues: [{ applyId: APPLY_ID, file: "~/.claude.json" }] }),
+      purgeImportBackups: async (applyId) => ok({ applyId, removed: ["~/.claude.json"], notDeleted: [], failed: [] }),
+    });
+    await screen.findByRole("article", { name: "github" });
+    const dialog = await review(user);
+    await user.click(within(dialog).getByRole("button", { name: "Import (1)" }));
+    const result = await screen.findByRole("dialog", { name: t("import.result.title") });
+    expect(within(result).getByText(t("import.result.backupsNote"))).toBeInTheDocument();
+    expect(within(result).getByText(t("import.result.backupsFiles", { files: "~/.claude.json" }))).toBeInTheDocument();
+    const remove = within(result).getByRole("button", { name: t("import.result.removeBackups") });
+
+    // Cancel removes nothing.
+    await user.click(remove);
+    let confirm = await screen.findByRole("alertdialog", { name: t("import.result.removeBackupsTitle") });
+    expect(confirm).toHaveAccessibleDescription(t("import.result.removeBackupsQuestion", { files: "~/.claude.json" }));
+    expect(within(confirm).getByRole("button", { name: t("import.result.removeBackupsCancel") })).toHaveFocus();
+    await user.click(within(confirm).getByRole("button", { name: t("import.result.removeBackupsCancel") }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(transport.calls).not.toContain("purgeImportBackups");
+
+    await user.click(remove);
+    confirm = await screen.findByRole("alertdialog", { name: t("import.result.removeBackupsTitle") });
+    await user.click(within(confirm).getByRole("button", { name: t("import.result.removeBackupsConfirm") }));
+    const removed = t("import.result.backupsRemoved", { files: "~/.claude.json" });
+    await waitFor(() => expect(within(result).getByRole("status")).toHaveTextContent(removed));
+    expect(transport.invocations.filter((call) => call.command === "purgeImportBackups").map((call) => call.args[0])).toEqual([
+      APPLY_ID,
+    ]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(within(result).queryByRole("button", { name: t("import.result.removeBackups") })).toBeNull();
+    expect(within(result).queryByText(t("import.result.backupsNote"))).toBeNull();
+  });
+
+  it("shows no backups note when no backup holds an old value", async () => {
+    const { user } = renderSection([GITHUB]);
+    await screen.findByRole("article", { name: "github" });
+    const dialog = await review(user);
+    await user.click(within(dialog).getByRole("button", { name: "Import (1)" }));
+    const result = await screen.findByRole("dialog", { name: t("import.result.title") });
+    expect(within(result).queryByText(t("import.result.backupsNote"))).toBeNull();
+    expect(within(result).queryByRole("button", { name: t("import.result.removeBackups") })).toBeNull();
+    expect(within(result).queryByText(t("import.result.valuesStillInFiles", { files: "~/.claude.json" }))).toBeNull();
   });
 
   it("waits for a choice on a conflict, then imports both under checked ids", async () => {

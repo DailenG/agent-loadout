@@ -372,6 +372,10 @@ fn a_rewritten_entry_waits_in_review_mode_and_is_written_in_instant_mode() {
     let applied = import::apply_choices(&review.core, keyring()).unwrap();
     assert_eq!(applied.imported, ["chatty"]);
     assert!(applied.change.apply.is_none(), "review mode does not apply");
+    // M35: nothing is backed up yet, and the file still holds the value.
+    assert!(applied.backups_with_old_values.is_empty());
+    assert_eq!(applied.old_values_in_files, ["~/.claude.json"]);
+    assert!(!serde_json::to_string(&applied).unwrap().contains(PLANTED));
     assert_eq!(review.read(&review.claude()), before);
     let pending = super::apply::pending(&review.core).unwrap();
     let json = serde_json::to_string(&pending).unwrap();
@@ -388,6 +392,10 @@ fn a_rewritten_entry_waits_in_review_mode_and_is_written_in_instant_mode() {
     write(&instant.claude(), &servers(&[("chatty", &chatty)]));
     let applied = import::apply_choices(&instant.core, keyring()).unwrap();
     let run = applied.change.apply.expect("instant mode applies");
+    assert!(
+        applied.old_values_in_files.is_empty(),
+        "the apply rewrote it"
+    );
     assert_eq!(run.files_written, 1, "{run:#?}");
     let claude = instant.read(&instant.claude());
     assert!(!claude.contains(PLANTED), "{claude}");
@@ -395,6 +403,67 @@ fn a_rewritten_entry_waits_in_review_mode_and_is_written_in_instant_mode() {
     let ledger = Ledger::load(instant.core.fs.as_ref(), &instant.core.home.state_dir()).unwrap();
     assert_eq!(ledger.entries.len(), 1);
     assert_eq!(ledger.entries[0].server_id.as_deref(), Some("chatty"));
+}
+
+/// Whether any file under `dir` holds `needle`.
+fn tree_holds(dir: &Path, needle: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.map(|entry| entry.unwrap().path()).any(|path| {
+        if path.is_dir() {
+            tree_holds(&path, needle)
+        } else {
+            String::from_utf8_lossy(&std::fs::read(&path).unwrap()).contains(needle)
+        }
+    })
+}
+
+/// M35: the backup the import's apply made of the rewritten file keeps the
+/// old value. The import lists that backup (never the value),
+/// `purge_import_backups` removes exactly it (again: nothing), and undoing
+/// the import names the file whose previous content is no longer kept.
+#[test]
+fn backups_with_old_values_are_listed_removed_and_named_by_undo() {
+    let chatty = format!(
+        "{{\"type\": \"stdio\", \"command\": \"chatty\", \"env\": {{\"CHATTY_API_KEY\": \
+         \"{PLANTED}\"}}}}"
+    );
+    let fx = Fx::new();
+    write(&fx.claude(), &servers(&[("chatty", &chatty)]));
+    let applied = import::apply_choices(
+        &fx.core,
+        choices(
+            vec![pick("chatty", "claude-code", "chatty")],
+            vec![ImportSecretChoice {
+                name: "chatty".to_owned(),
+                field: None,
+                target: ImportSecretTarget::Keyring,
+            }],
+        ),
+    )
+    .unwrap();
+    let json = serde_json::to_string(&applied).unwrap();
+    assert!(!json.contains(PLANTED), "{json}");
+    let run = applied.change.apply.as_ref().expect("instant mode applies");
+    assert_eq!(applied.backups_with_old_values.len(), 1, "{json}");
+    let listed = &applied.backups_with_old_values[0];
+    assert_eq!(listed.file, "~/.claude.json");
+    assert_eq!(listed.apply_id, run.apply_id);
+    let backups = fx.core.home.backups_dir();
+    assert!(tree_holds(&backups, PLANTED), "the backup keeps the value");
+
+    let purge = import::purge_backups(&fx.core, &listed.apply_id).unwrap();
+    assert_eq!(purge.removed, ["~/.claude.json"]);
+    assert!(purge.failed.is_empty() && purge.not_deleted.is_empty());
+    assert!(!tree_holds(&backups, PLANTED), "no backup holds the value");
+    assert!(!tree_holds(&fx.core.home.state_dir(), PLANTED));
+    let again = import::purge_backups(&fx.core, &listed.apply_id).unwrap();
+    assert!(again.removed.is_empty() && again.failed.is_empty());
+
+    let undo = super::apply::undo(&fx.core, &listed.apply_id, false).unwrap();
+    assert_eq!(undo.unavailable_originals, ["~/.claude.json"]);
+    assert!(!serde_json::to_string(&undo).unwrap().contains(PLANTED));
 }
 
 /// A 1Password reference or an environment variable is recorded as given;

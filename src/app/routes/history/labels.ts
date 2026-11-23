@@ -47,12 +47,14 @@ export const FILE_RESTORE_KEYS = {
   restored: "history.backups.outcome.restored",
   unchanged: "history.backups.outcome.unchanged",
   failed: "history.backups.outcome.failed",
+  backup_removed: "history.backups.outcome.backupRemoved",
 } as const satisfies Record<FileRestoreOutcome, MessageKey>;
 
 export const FILE_RESTORE_TONES: Record<FileRestoreOutcome, string> = {
   restored: "tone-positive",
   unchanged: "tone-neutral",
   failed: "tone-danger",
+  backup_removed: "tone-warning",
 };
 
 /** The names `create_tag` accepts (SPEC 9.4). */

@@ -150,6 +150,10 @@ pub struct UndoResult {
     pub tag: String,
     pub commit: Option<String>,
     pub apply: ApplyRun,
+    /// Client files (placeholder paths) whose content from before the run
+    /// is no longer kept: their backup held old secret values and was
+    /// removed on request (M35).
+    pub unavailable_originals: Vec<String>,
 }
 
 fn needs_attention(entry: &agent_loadout_core::apply::EntryPlan) -> bool {
@@ -520,6 +524,11 @@ pub fn undo(core: &Core, apply_id: &str, confirmed: bool) -> CmdResult<UndoResul
         tag: report.tag.clone(),
         commit: report.commit.as_ref().map(ToString::to_string),
         apply: ApplyRun::new(&core.env, &report.apply),
+        unavailable_originals: report
+            .unavailable_originals
+            .iter()
+            .map(|file| placeholder_path(&core.env, file, None))
+            .collect(),
     })
 }
 

@@ -299,7 +299,14 @@ describe("ApplyDrawer", () => {
   it("asks before undoing when later applies changed the same entries", async () => {
     const undoApply = vi.fn(async (applyId: string, confirmed: boolean) =>
       confirmed
-        ? ok({ applyId, restored: [], tag: "auto/pre-rollback/mock", commit: null, apply: MOCK_APPLY_RUN })
+        ? ok({
+            applyId,
+            restored: [],
+            tag: "auto/pre-rollback/mock",
+            commit: null,
+            apply: MOCK_APPLY_RUN,
+            unavailableOriginals: [],
+          })
         : mockIpcError({ code: "confirmation_required", message: "synthetic" }),
     );
     const { user } = renderDrawer({

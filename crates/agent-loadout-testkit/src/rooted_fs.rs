@@ -94,6 +94,14 @@ impl Fs for RootedFs {
         RealFs.remove_dir_all(self.check(path))
     }
 
+    fn is_regular_file(&self, path: &Path) -> bool {
+        RealFs.is_regular_file(self.check(path))
+    }
+
+    fn overwrite_with_zeros(&self, path: &Path) -> io::Result<()> {
+        RealFs.overwrite_with_zeros(self.check(path))
+    }
+
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         RealFs.read_dir(self.check(path))
     }

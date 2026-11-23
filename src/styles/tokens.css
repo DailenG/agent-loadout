@@ -18941,14 +18941,6 @@ button.settings-form-item:disabled {
   z-index: 10;
 }
 
-/* Short windows (S6 finding 20): at 600px tall or less the sidebar's items
-   are 40px instead of 48px, so About is reached without scrolling. */
-@media (max-height: 600px) {
-  .nav-item {
-    padding-block: 6px;
-  }
-}
-
 /* Card icon buttons (Edit MCP Server key/value remove, skill card actions)
    keep their glyph at full strength: at 0.88 opacity the muted × fell to 4.25:1. */
 .skill-card__icon-button {
@@ -19486,6 +19478,15 @@ button.settings-form-item:disabled {
   margin-top: 6px;
 }
 
+/* M35: the note on backups that keep old secret values, and "Remove those
+   backups now". */
+.import-result__backups {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 /* In Tools > Manage the list is a grid of switches; the section spans it. */
 .tool-manage-dialog__list .import-unmanaged {
   grid-column: 1 / -1;
@@ -19497,16 +19498,73 @@ button.settings-form-item:disabled {
   font-size: 0.9rem;
 }
 
+/* end M33 */
+
+/* M36 compact not-managed notice (0.3.1): one line in the sidebar (icon and
+   "N not managed"); the message and its buttons float above that line, so
+   the notice never pushes Import, History, Settings or About out of view. */
 .unmanaged-notice {
   position: sticky;
   bottom: 0;
+  margin-top: 12px;
+}
+
+.unmanaged-notice__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--heading);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Opaque, so the nav items it floats over (sticky) do not show through. */
+.unmanaged-notice__toggle:hover,
+.unmanaged-notice.is-open .unmanaged-notice__toggle {
+  background: linear-gradient(var(--warning-soft), var(--warning-soft)), var(--surface-strong);
+}
+
+.unmanaged-notice__icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--warning-text);
+}
+
+.unmanaged-notice__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unmanaged-notice__panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 3;
   display: grid;
   gap: 8px;
-  margin-top: 16px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface-strong);
+  box-shadow: 0 12px 28px -14px rgba(15, 23, 42, 0.45);
+}
+
+.unmanaged-notice__panel[hidden] {
+  display: none;
 }
 
 .unmanaged-notice__message {
@@ -19527,9 +19585,11 @@ button.settings-form-item:disabled {
   flex: 1 1 auto;
 }
 
+/* Collapsed sidebar: only the count badge. */
 .unmanaged-notice--compact {
+  display: grid;
   justify-items: center;
-  padding: 6px;
+  padding: 4px 0;
 }
 
 .unmanaged-notice__compact {
@@ -19548,4 +19608,61 @@ button.settings-form-item:disabled {
   font-weight: 600;
   cursor: pointer;
 }
-/* end M33 */
+
+/* Short windows. S6 (finding 20) made the nav items 40px at 600px tall or
+   less so About is reached without scrolling; since M33 added Import, nine
+   items and the notice line no longer fit at the default 1088x680, nor at the
+   960x560 minimum. 40px items up to 720px tall; at 650px or less, denser
+   items, gaps and header spacing, so every item and the notice fit at 560px. */
+@media (max-height: 720px) {
+  .nav-item,
+  .app-shell.is-sidebar-collapsed .nav-item {
+    padding-block: 6px;
+  }
+}
+
+@media (max-height: 650px) {
+  .sidebar {
+    padding-bottom: 8px;
+  }
+
+  .brand-block {
+    padding-top: 2px;
+    padding-bottom: 6px;
+  }
+
+  .app-shell.is-sidebar-collapsed .brand-block {
+    min-height: 56px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .scope-switcher,
+  .scope-switcher-collapsed {
+    padding-bottom: 8px;
+  }
+
+  .sidebar-divider {
+    margin-bottom: 6px;
+  }
+
+  .nav-list {
+    gap: 4px;
+  }
+
+  .nav-item,
+  .app-shell.is-sidebar-collapsed .nav-item {
+    padding-block: 4px;
+  }
+
+  .nav-icon {
+    width: 24px;
+    height: 24px;
+    flex-basis: 24px;
+  }
+
+  .unmanaged-notice {
+    margin-top: 6px;
+  }
+}
+/* end M36 */

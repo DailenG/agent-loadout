@@ -92,6 +92,7 @@ const undone = (applyId: string): UndoResult => ({
   tag: "auto/pre-rollback/1",
   commit: null,
   apply: MOCK_APPLY_RUN,
+  unavailableOriginals: [],
 });
 
 function remote(name: string, status: Partial<RemoteStatusDto>): RemoteEntry {
@@ -289,6 +290,19 @@ describe("HistoryPage", () => {
     await user.click(within(actions).getByRole("button", { name: t("apply.undo.action") }));
     await waitFor(() => expect(argsOf(transport, "undoApply")).toEqual([["apply-2", false]]));
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("names the files whose previous content is gone after their backups were removed", async () => {
+    const { user } = renderPage({
+      commands: {
+        undoApply: async (applyId) => ok({ ...undone(applyId), unavailableOriginals: ["~/.claude.json"] }),
+      },
+    });
+    const { actions } = await selectRow(user, LATEST_APPLY.summary);
+    await user.click(within(actions).getByRole("button", { name: t("apply.undo.action") }));
+    expect(
+      await screen.findByText(t("apply.undo.doneUnavailable", { id: "apply-2", files: "~/.claude.json" })),
+    ).toBeInTheDocument();
   });
 
   it("asks before undoing an older apply, then confirms", async () => {

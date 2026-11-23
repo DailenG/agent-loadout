@@ -48,6 +48,17 @@ pub trait Fs: Send + Sync {
 
     fn remove_file(&self, path: &Path) -> io::Result<()>;
 
+    /// Whether `path` itself is a regular file: links are not followed, so
+    /// a symbolic link, a junction or another reparse point is not one.
+    fn is_regular_file(&self, path: &Path) -> bool;
+
+    /// Overwrites every byte of the existing regular file `path` with zero,
+    /// in place: the file is opened for writing without being created or
+    /// truncated, as many zero bytes as it holds are written from offset 0,
+    /// and the file is flushed to disk (`sync_all`). Its length stays the
+    /// same. Fails when `path` is missing or not a regular file.
+    fn overwrite_with_zeros(&self, path: &Path) -> io::Result<()>;
+
     fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
 
     /// Paths of the entries of a directory, sorted.
@@ -168,6 +179,31 @@ impl Fs for RealFs {
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         std::fs::remove_file(long(path))
+    }
+
+    fn is_regular_file(&self, path: &Path) -> bool {
+        std::fs::symlink_metadata(long(path)).is_ok_and(|meta| meta.file_type().is_file())
+    }
+
+    fn overwrite_with_zeros(&self, path: &Path) -> io::Result<()> {
+        let path = long(path);
+        if !std::fs::symlink_metadata(&path)?.file_type().is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
+        }
+        // No `create`, no `truncate`: the zeros land on the file's own
+        // blocks (as far as the file system allows), never on new ones.
+        let mut file = File::options().write(true).open(&path)?;
+        let mut left = file.metadata()?.len();
+        let zeros = [0u8; 64 * 1024];
+        while left > 0 {
+            let chunk = usize::try_from(left).map_or(zeros.len(), |left| left.min(zeros.len()));
+            file.write_all(&zeros[..chunk])?;
+            left -= chunk as u64;
+        }
+        file.sync_all()
     }
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {

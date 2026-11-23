@@ -249,6 +249,9 @@ pub enum FileRestoreOutcome {
     Restored,
     Unchanged,
     Failed,
+    // Not restored: the backup held old secret values and was removed on
+    // request (M35).
+    BackupRemoved,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -718,6 +721,7 @@ pub fn restore_files(
                     FileRestoreOutcome::Failed,
                     Some(super::scrubbed(&core.env, err, None)),
                 ),
+                FileOutcome::Removed => (FileRestoreOutcome::BackupRemoved, None),
             };
             FileRestoreEntry {
                 file: placeholder_path(&core.env, &result.file, None),

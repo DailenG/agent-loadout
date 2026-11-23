@@ -319,6 +319,25 @@ why, and where the secrets went; in review mode, **Open Pending changes**
 applies it. **Import...** on a not-managed entry (MCP page, Tools >
 Manage) opens this page with only that entry picked.
 
+When the import moved secrets out of a file, the apply backed that file
+up first, so the backup still holds the old values. The result says so:
+"The previous file contents, including the old values, are kept in
+backups so you can undo this import." **Remove those backups now** asks
+first, then overwrites exactly those backups with zeros and deletes them
+(other backups stay). Your disk, file system snapshots or backup tools
+(OneDrive, Time Machine, File History) may still keep older copies. After
+that, undoing the import still restores the store, but it reports the
+files whose previous content can no longer be restored. On the command
+line, `loadout import --remove-old-backups ...` does the same in the
+import run, and `loadout import --remove-old-backups=<APPLY-ID>` does it
+later (the import prints the apply id).
+
+In review mode, or when an entry is left to decide, the import writes
+nothing yet: the result says the file still holds the old values. The
+apply that rewrites it later backs it up again, and that backup is not
+marked for removal: delete that apply's folder under `backups/files` in
+Loadout's data folder, or let retention remove it (50 runs or 30 days).
+
 After the file watcher, window focus or **Refresh** find something new, a
 notice at the bottom of the sidebar says so, for example "omp has 5 MCP
 servers not managed by Loadout." (skill folders are counted too). Focus
@@ -665,6 +684,8 @@ secrets references, skills and each apply run.
   restores only some entities; `--apply` applies the result.
 - `loadout restore --files <APPLY-ID>` puts client files back byte for byte
   from the backups taken before that apply (`--file PATH` for one file).
+  A backup removed because it held old secret values is reported as
+  `backup_removed`; the run's other files are still restored.
 - `loadout backup` commits hand edits of the store files, and pushes to
   your remotes unless `--no-push`.
 

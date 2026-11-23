@@ -159,6 +159,7 @@ export const commands = {
 	addDiscoveredProjects: (ids: string[], options?: InvokeOptions) => typedError<DiscoveredProjectsAdded, IpcError>(__TAURI_INVOKE("add_discovered_projects", { ids }, options)),
 	scanImport: (scope: ImportScope | null, options?: InvokeOptions) => typedError<ImportScan, IpcError>(__TAURI_INVOKE("scan_import", { scope }, options)),
 	applyImport: (choices: ImportChoices, options?: InvokeOptions) => typedError<ImportApplied, IpcError>(__TAURI_INVOKE("apply_import", { choices }, options)),
+	purgeImportBackups: (applyId: string, options?: InvokeOptions) => typedError<BackupPurge, IpcError>(__TAURI_INVOKE("purge_import_backups", { applyId }, options)),
 	unmanagedSummary: (scope: ImportScope | null, options?: InvokeOptions) => typedError<UnmanagedSummary, IpcError>(__TAURI_INVOKE("unmanaged_summary", { scope }, options)),
 	newUnmanaged: (options?: InvokeOptions) => typedError<UnmanagedSummary, IpcError>(__TAURI_INVOKE("new_unmanaged", undefined, options)),
 	acknowledgeUnmanaged: (ids: string[], options?: InvokeOptions) => typedError<number, IpcError>(__TAURI_INVOKE("acknowledge_unmanaged", { ids }, options)),
@@ -339,6 +340,28 @@ export type ApplyRun = {
 export type ApplyStatusKind = "done" | "file_failed" | "needs_decision" | "missing_secrets" | "trust_required";
 
 export type ApplyTriggerKind = "instant" | "review" | "restore" | "rollback" | "pull";
+
+/**  What `purge_import_backups` did; files under their placeholder roots. */
+export type BackupPurge = {
+	applyId: string,
+	/**
+	 *  Files whose backup was overwritten with zeros and removed: undoing
+	 *  the import can no longer bring back their previous content.
+	 */
+	removed: string[],
+	/**
+	 *  Of `removed`, files whose zeroed backup could not be deleted; it
+	 *  holds no old value any more and is never restored.
+	 */
+	notDeleted: BackupPurgeFailure[],
+	/**  Files whose backup was left as it was. */
+	failed: BackupPurgeFailure[],
+};
+
+export type BackupPurgeFailure = {
+	file: string,
+	error: IpcError,
+};
 
 /**  One apply run's client file backups. */
 export type BackupRunEntry = {
@@ -889,7 +912,7 @@ export type FileRestoreEntry = {
 	error: IpcError | null,
 };
 
-export type FileRestoreOutcome = "restored" | "unchanged" | "failed";
+export type FileRestoreOutcome = "restored" | "unchanged" | "failed" | "backup_removed";
 
 /**  Which layer a client file belongs to (SPEC 6.1). */
 export type FileScope = "user" | "project" | "project_local";
@@ -973,6 +996,17 @@ export type ImportApplied = {
 	skipped: ImportSkipped[],
 	secrets: ImportedSecret[],
 	change: ChangeResult,
+	/**
+	 *  The backups the import's apply made of files that held an extracted
+	 *  secret: they keep its old value until `purge_import_backups`.
+	 */
+	backupsWithOldValues: OldValueBackup[],
+	/**
+	 *  User files (placeholder paths) that still hold an extracted value:
+	 *  no apply rewrote them yet (review mode, an entry left to decide).
+	 *  The backups of the apply that later rewrites them are not marked.
+	 */
+	oldValuesInFiles: string[],
 };
 
 /**  Foreign entries sharing one name. */
@@ -1357,6 +1391,13 @@ export type NotAddedProject = {
 	candidate: string,
 	path: string,
 	error: IpcError,
+};
+
+/**  A client file backup that holds an extracted secret's old value. */
+export type OldValueBackup = {
+	applyId: string,
+	/**  Under its placeholder root. */
+	file: string,
 };
 
 /**  Planned or done create, update, remove and disable operations. */
@@ -2383,6 +2424,12 @@ export type UndoResult = {
 	tag: string,
 	commit: string | null,
 	apply: ApplyRun,
+	/**
+	 *  Client files (placeholder paths) whose content from before the run
+	 *  is no longer kept: their backup held old secret values and was
+	 *  removed on request (M35).
+	 */
+	unavailableOriginals: string[],
 };
 
 /**  One unmanaged entry. */

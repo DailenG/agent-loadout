@@ -15,9 +15,11 @@
 //! Other machines' files and every `*.applied.toml` are left alone. Rolling
 //! back a rollback restores the original.
 
-use crate::apply::ApplyEnv;
+use std::path::PathBuf;
+
 use crate::apply::exec::{ApplyReport, ApplyRequest, apply_in};
 use crate::apply::plan::PlanOptions;
+use crate::apply::{ApplyEnv, backup};
 use crate::error::{CoreError, ErrorCode};
 use crate::model::applied::ApplyTrigger;
 use crate::store::diff::trailer_entities;
@@ -75,6 +77,10 @@ pub struct RollbackReport {
     pub tag: String,
     pub apply: ApplyReport,
     pub commit: Option<CommitId>,
+    /// Client files whose content from before the run is no longer kept:
+    /// their backup of that run held old secret values and was removed on
+    /// request (M35), so `restore --files` cannot bring it back either.
+    pub unavailable_originals: Vec<PathBuf>,
 }
 
 /// This machine's apply commits, newest first.
@@ -202,11 +208,16 @@ pub fn rollback(
         }
         apply_in(tx, ax, &request)
     })?;
+    // The rollback is committed: a run result that cannot be read only
+    // leaves the note out.
+    let unavailable_originals =
+        backup::removed_backups(ax.fs, &ax.home.state_dir(), &plan.apply_id).unwrap_or_default();
     Ok(RollbackReport {
         plan,
         tag,
         apply: committed.value,
         commit: committed.commit,
+        unavailable_originals,
     })
 }
 

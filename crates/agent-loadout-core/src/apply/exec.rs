@@ -518,6 +518,8 @@ fn file_record(result: &TargetResult) -> FileRecord {
             .backup
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned()),
+        old_values: false,
+        backup_removed: false,
         error: result.error.as_ref().map(RecordedError::from),
     }
 }

@@ -826,6 +826,12 @@ impl Fs for ReadOnlyFs {
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         panic!("detection removed {}", path.display())
     }
+    fn is_regular_file(&self, path: &Path) -> bool {
+        self.0.is_regular_file(path)
+    }
+    fn overwrite_with_zeros(&self, path: &Path) -> io::Result<()> {
+        panic!("detection overwrote {}", path.display())
+    }
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         self.0.read_dir(path)
     }

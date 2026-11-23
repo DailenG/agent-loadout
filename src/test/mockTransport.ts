@@ -259,7 +259,14 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     runApply: async () => ok(MOCK_CHANGE),
     listAppliedRuns: async () => ok([]),
     undoApply: async (applyId) =>
-      ok({ applyId, restored: [], tag: "auto/pre-rollback/mock", commit: null, apply: MOCK_APPLY_RUN }),
+      ok({
+        applyId,
+        restored: [],
+        tag: "auto/pre-rollback/mock",
+        commit: null,
+        apply: MOCK_APPLY_RUN,
+        unavailableOriginals: [],
+      }),
     pendingStoreChanges: async () => ok([]),
     discardPending: async (entities) =>
       ok({ discarded: entities ?? [], commit: MOCK_CHANGE.commit, tag: "auto/pre-restore/mock" }),
@@ -268,7 +275,16 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     openToolHomepage: async () => ok(null),
     scanImport: async () => ok({ candidates: [], warnings: [] }),
     applyImport: async () =>
-      ok({ imported: [], definitionOnly: [], skipped: [], secrets: [], change: MOCK_CHANGE }),
+      ok({
+        imported: [],
+        definitionOnly: [],
+        skipped: [],
+        secrets: [],
+        change: MOCK_CHANGE,
+        backupsWithOldValues: [],
+        oldValuesInFiles: [],
+      }),
+    purgeImportBackups: async (applyId) => ok({ applyId, removed: [], notDeleted: [], failed: [] }),
     unmanagedSummary: async () => ok({ groups: [], total: 0, new: 0 }),
     newUnmanaged: async () => ok({ groups: [], total: 0, new: 0 }),
     acknowledgeUnmanaged: async () => ok(0),

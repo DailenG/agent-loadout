@@ -6,8 +6,11 @@
 //! Paths go out under their placeholder roots (`~`, `<P>`); values never
 //! go out: a literal secret is shown as the `${secret:<alias>}` reference
 //! it becomes, and a keyring destination takes the value from the client
-//! file inside core, so no choice carries one.
+//! file inside core, so no choice carries one. The backups the import's
+//! apply made of files that held an extracted value are listed (M35), and
+//! `purge_import_backups` removes exactly those.
 
+use agent_loadout_core::apply::backup;
 use agent_loadout_core::apply::import::{
     self, Candidate, ImportRequest, ScanFilter, ScanScope, SecretChoice, SecretDestination,
     VariantChoice, VariantPreview,
@@ -298,6 +301,43 @@ pub struct ImportApplied {
     pub skipped: Vec<ImportSkipped>,
     pub secrets: Vec<ImportedSecret>,
     pub change: ChangeResult,
+    /// The backups the import's apply made of files that held an extracted
+    /// secret: they keep its old value until `purge_import_backups`.
+    pub backups_with_old_values: Vec<OldValueBackup>,
+    /// User files (placeholder paths) that still hold an extracted value:
+    /// no apply rewrote them yet (review mode, an entry left to decide).
+    /// The backups of the apply that later rewrites them are not marked.
+    pub old_values_in_files: Vec<String>,
+}
+
+/// A client file backup that holds an extracted secret's old value.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OldValueBackup {
+    pub apply_id: String,
+    /// Under its placeholder root.
+    pub file: String,
+}
+
+/// What `purge_import_backups` did; files under their placeholder roots.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPurge {
+    pub apply_id: String,
+    /// Files whose backup was overwritten with zeros and removed: undoing
+    /// the import can no longer bring back their previous content.
+    pub removed: Vec<String>,
+    /// Of `removed`, files whose zeroed backup could not be deleted; it
+    /// holds no old value any more and is never restored.
+    pub not_deleted: Vec<BackupPurgeFailure>,
+    /// Files whose backup was left as it was.
+    pub failed: Vec<BackupPurgeFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct BackupPurgeFailure {
+    pub file: String,
+    pub error: IpcError,
 }
 
 fn destination_of(target: ImportSecretTarget) -> Result<SecretDestination, CoreError> {
@@ -372,18 +412,32 @@ pub fn apply_choices(core: &Core, choices: ImportChoices) -> CmdResult<ImportApp
             let ledger = Ledger::load(ax.fs, &core.home.state_dir())?;
             let (candidates, _) =
                 import::scan_with(&ax, &desired, &ledger, &ScanFilter::default())?;
-            let result = import::stage_import(tx, &ax, &candidates, &request)?;
+            let mut result = import::stage_import(tx, &ax, &candidates, &request)?;
             let n = result.imported.len();
             tx.set_summary(format!(
                 "import: {n} server{} ({})",
                 if n == 1 { "" } else { "s" },
                 result.imported.join(", ")
             ));
-            let report = import::apply_import(tx, &ax, &result)?;
-            Ok((result, report))
+            let applied = import::apply_import(tx, &ax, &mut result)?;
+            Ok((result, applied))
         })
         .map_err(|err| fail(&err))?;
-    let (result, report) = committed.value;
+    let (result, applied) = committed.value;
+    let report = applied.as_ref().map(|applied| &applied.report);
+    let backups_with_old_values = applied
+        .as_ref()
+        .map(|applied| {
+            applied
+                .old_value_backups
+                .iter()
+                .map(|file| OldValueBackup {
+                    apply_id: applied.report.apply_id.clone(),
+                    file: placeholder_path(&core.env, file, None),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(ImportApplied {
         imported: result.imported,
         definition_only: result.definition_only,
@@ -405,7 +459,40 @@ pub fn apply_choices(core: &Core, choices: ImportChoices) -> CmdResult<ImportApp
                 field: alias.field,
             })
             .collect(),
-        change: ChangeResult::new(&core.env, committed.commit.as_ref(), report.as_ref()),
+        change: ChangeResult::new(&core.env, committed.commit.as_ref(), report),
+        backups_with_old_values,
+        old_values_in_files: result
+            .old_values_in_files
+            .iter()
+            .map(|file| placeholder_path(&core.env, file, None))
+            .collect(),
+    })
+}
+
+/// Removes the backups of the import's apply run `apply_id` that hold the
+/// old values of extracted secrets: exactly those the import listed in
+/// [`ImportApplied::backups_with_old_values`] (recorded in the run's
+/// result; values are never kept). Nothing listed is a no-op.
+pub fn purge_backups(core: &Core, apply_id: &str) -> CmdResult<BackupPurge> {
+    let purge = backup::purge_old_values(&core.apply_env(), apply_id)
+        .map_err(|err| scrubbed(&core.env, &err, None))?;
+    let failures = |list: &[(std::path::PathBuf, CoreError)]| {
+        list.iter()
+            .map(|(file, err)| BackupPurgeFailure {
+                file: placeholder_path(&core.env, file, None),
+                error: scrubbed(&core.env, err, None),
+            })
+            .collect()
+    };
+    Ok(BackupPurge {
+        apply_id: apply_id.to_owned(),
+        removed: purge
+            .removed
+            .iter()
+            .map(|file| placeholder_path(&core.env, file, None))
+            .collect(),
+        not_deleted: failures(&purge.not_deleted),
+        failed: failures(&purge.failed),
     })
 }
 
@@ -525,6 +612,15 @@ pub async fn apply_import(
     choices: ImportChoices,
 ) -> CmdResult<ImportApplied> {
     blocking(&state, move |core| apply_choices(core, choices)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn purge_import_backups(
+    state: tauri::State<'_, AppState>,
+    apply_id: String,
+) -> CmdResult<BackupPurge> {
+    blocking(&state, move |core| purge_backups(core, &apply_id)).await
 }
 
 #[tauri::command]

@@ -259,9 +259,13 @@ fn files(ctx: &Context, apply_id: &str, only: Option<&std::path::Path>) -> Resul
         })
         .transpose()?;
     let results = restore::restore_files(&ctx.apply_env(), apply_id, only.as_deref())?;
-    let failed = results
-        .iter()
-        .any(|result| matches!(result.outcome, FileOutcome::Failed(_)));
+    // A file whose backup was removed is not restored either.
+    let failed = results.iter().any(|result| {
+        matches!(
+            result.outcome,
+            FileOutcome::Failed(_) | FileOutcome::Removed
+        )
+    });
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
@@ -287,6 +291,11 @@ fn files(ctx: &Context, apply_id: &str, only: Option<&std::path::Path>) -> Resul
                         err.code()
                     );
                 }
+                FileOutcome::Removed => println!(
+                    "no backup {}  (removed because it held old secret values; the content \
+                     the file had before this apply is no longer kept)",
+                    result.file.display()
+                ),
             }
         }
     }
@@ -300,6 +309,7 @@ fn file_json(result: &FileRestore) -> Value {
         }
         FileOutcome::Unchanged => ("unchanged", None, None),
         FileOutcome::Failed(err) => ("failed", None, Some(error_json(err))),
+        FileOutcome::Removed => ("backup_removed", None, None),
     };
     json!({
         "file": path_json(&result.file),

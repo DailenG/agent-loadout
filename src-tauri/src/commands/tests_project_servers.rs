@@ -554,6 +554,12 @@ impl<F: Fs> Fs for HookFs<F> {
     fn remove_file(&self, path: &Path) -> std::io::Result<()> {
         self.inner.remove_file(path)
     }
+    fn is_regular_file(&self, path: &Path) -> bool {
+        self.inner.is_regular_file(path)
+    }
+    fn overwrite_with_zeros(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.overwrite_with_zeros(path)
+    }
     fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
         self.inner.remove_dir_all(path)
     }

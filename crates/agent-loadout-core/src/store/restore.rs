@@ -408,6 +408,10 @@ pub enum FileOutcome {
     Unchanged,
     /// Not restored (`file_changed_during_apply`, `file_locked`, I/O).
     Failed(CoreError),
+    /// Not restored: its backup held old secret values and was removed on
+    /// request (M35), so the content it had before the run is no longer
+    /// kept.
+    Removed,
 }
 
 /// One client file of a [`restore_files`] run.
@@ -423,7 +427,9 @@ pub struct FileRestore {
 /// lists), or an apply id, which names that apply's newest run. Each
 /// file's current bytes go to a new run `<ts>-restore-<apply-id>-<ulid>`
 /// first (unique, so restoring twice never makes two runs of one id), so
-/// this is undoable the same way. Holds the store lock.
+/// this is undoable the same way. A file whose backup was removed because
+/// it held old secret values is reported [`FileOutcome::Removed`]. Holds
+/// the store lock.
 pub fn restore_files(
     ax: &ApplyEnv<'_>,
     run: &str,
@@ -433,10 +439,25 @@ pub fn restore_files(
     let state_dir = ax.home.state_dir();
     let _lock = StoreLock::acquire(fs, &state_dir, LOCK_TIMEOUT)?;
     let apply_id = run;
-    let run = find_run(ax, run)?;
-    let entries = fs.read_dir(&run).map_err(|err| {
-        CoreError::new(ErrorCode::IoError, format!("cannot list backups: {err}")).with_path(&run)
-    })?;
+    // A run result that cannot be read only leaves the removed backups
+    // unreported; the backups on disk still restore.
+    let removed: Vec<PathBuf> = backup::removed_backups(fs, &state_dir, run_apply_id(run))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|file| only.is_none_or(|only| same_path(ax, file, only)))
+        .collect();
+    // A run whose every backup was removed has no directory any more.
+    let run = match find_run(ax, run) {
+        Ok(run) => Some(run),
+        Err(err) if err.code() == ErrorCode::NotFound && !removed.is_empty() => None,
+        Err(err) => return Err(err),
+    };
+    let entries = match &run {
+        Some(run) => fs.read_dir(run).map_err(|err| {
+            CoreError::new(ErrorCode::IoError, format!("cannot list backups: {err}")).with_path(run)
+        })?,
+        None => Vec::new(),
+    };
     let mut files: Vec<(PathBuf, PathBuf)> = entries
         .into_iter()
         .filter_map(|backup| {
@@ -445,9 +466,12 @@ pub fn restore_files(
             Some((original, backup))
         })
         .filter(|(original, _)| only.is_none_or(|only| same_path(ax, original, only)))
+        // The record wins over the listing: a backup recorded as removed may
+        // still be on disk, zeroed, and is never written back.
+        .filter(|(original, _)| !removed.iter().any(|file| same_path(ax, original, file)))
         .collect();
     files.sort();
-    if files.is_empty() {
+    if files.is_empty() && removed.is_empty() {
         return Err(CoreError::new(
             ErrorCode::NotFound,
             match only {
@@ -456,7 +480,16 @@ pub fn restore_files(
             },
         ));
     }
-
+    let mut results: Vec<FileRestore> = removed
+        .into_iter()
+        .map(|file| FileRestore {
+            file,
+            outcome: FileOutcome::Removed,
+        })
+        .collect();
+    let Some(run) = run else {
+        return Ok(results);
+    };
     // `restore-<apply id>-<ulid>`, with the apply id the run goes back to
     // (a restore of a restore names the original apply), so names never
     // grow.
@@ -475,7 +508,6 @@ pub fn restore_files(
     );
     let undo_dir = backup::run_dir(ax.home, ax.env.now(), &undo_id);
     let mut ledger = Ledger::load(fs, &state_dir)?;
-    let mut results = Vec::new();
     for (file, saved) in files {
         // A failed file never prevents the others; the ledger is saved
         // after each restored file (SPEC 8.4 step 5).
@@ -490,6 +522,15 @@ pub fn restore_files(
         results.push(FileRestore { file, outcome });
     }
     Ok(results)
+}
+
+/// The apply id a run argument names: the id in `<ts>-<apply id>`, else the
+/// argument itself.
+fn run_apply_id(run: &str) -> &str {
+    match run.get(..16).and_then(backup::parse_timestamp) {
+        Some(_) if run.as_bytes().get(16) == Some(&b'-') => &run[17..],
+        _ => run,
+    }
 }
 
 /// The backup run directory named `run` exactly, else the newest run of

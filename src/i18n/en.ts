@@ -421,6 +421,8 @@ const messages = {
   "apply.saved.reviewMode": "{message} The change waits for review in Pending changes.",
   "apply.undo.action": "Undo this apply",
   "apply.undo.done": "Undid apply {id}.",
+  "apply.undo.doneUnavailable":
+    "Undid apply {id}. The previous content of {files} cannot be restored: its backup held old secret values and was removed.",
   // MCP page (src/app/routes/mcp): add "mcp.*" keys below this line.
   "mcp.loading": "Loading MCP servers…",
   "mcp.toolbar.aria": "MCP toolbar",
@@ -908,6 +910,7 @@ const messages = {
   "history.backups.outcome.restored": "Restored",
   "history.backups.outcome.unchanged": "Unchanged",
   "history.backups.outcome.failed": "Failed",
+  "history.backups.outcome.backupRemoved": "Backup removed",
   "history.backups.done": "Restored {restored} of {total} files.",
   "history.strip.aria": "Backup status",
   "history.remotes.label": "Remotes:",
@@ -1373,6 +1376,23 @@ const messages = {
   "import.result.attention": "Some entries need attention in Pending changes.",
   "import.result.close": "Close",
   "import.result.openPending": "Open Pending changes",
+  "import.result.backupsNote":
+    "The previous file contents, including the old values, are kept in backups so you can undo this import.",
+  "import.result.backupsFiles": "Backed up: {files}",
+  "import.result.removeBackups": "Remove those backups now",
+  "import.result.removeBackupsTitle": "Remove the backups with old values?",
+  "import.result.removeBackupsQuestion":
+    "The backups of {files} hold the old secret values. After you remove them, undoing this import cannot bring back those files' previous contents.",
+  "import.result.removeBackupsCancel": "Keep backups",
+  "import.result.removeBackupsConfirm": "Remove backups",
+  "import.result.removingBackups": "Removing…",
+  "import.result.backupsRemoved": "Removed the backups with the old values: {files}. Undoing this import can no longer restore those files.",
+  "import.result.backupsRemoveFailed": "Could not remove the backup of {file}: {error}",
+  "import.result.backupsRemoveError": "The backups could not be removed: {error}",
+  "import.result.backupsNotDeleted":
+    "The backup of {file} was overwritten with zeros, so the old values are gone, but the file could not be deleted: {error}",
+  "import.result.valuesStillInFiles":
+    "The old values are still in {files} until an apply rewrites it. The backups that apply makes are not marked, so they cannot be removed here: delete that apply's folder under backups/files in Loadout's data folder, or let retention remove it (50 runs or 30 days).",
   "import.manifest.add": "Add to project manifest",
   "import.manifest.addAria": "Add {id} to the manifest of {project}",
   "import.manifest.done": "Added",
@@ -1396,6 +1416,9 @@ const messages = {
   "import.notice.setting.description":
     "Tell me once when a client file or skill folder gets something Loadout does not manage.",
   /* end M33 */
+  /* M36 compact not-managed notice (0.3.1). */
+  "import.notice.short": "{count} not managed",
+  /* end M36 */
 } as const;
 
 export type MessageKey = keyof typeof messages;

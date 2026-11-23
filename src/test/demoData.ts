@@ -44,6 +44,7 @@ import type {
   ImportScope,
   ImportSource,
   ImportVariant,
+  OldValueBackup,
   ServerDraft,
   UnmanagedGroup,
   UnmanagedSummary,
@@ -1192,8 +1193,19 @@ function unmanagedSummary(scope: ImportScope | null): UnmanagedSummary {
   return { groups, total: entries.length, new: entries.filter((entry) => entry.new).length };
 }
 
+/** The backups the demo's last import listed, until "Remove those backups now". */
+let importBackups: OldValueBackup[] = [];
+
 function importApplied(choices: ImportChoices): ImportApplied {
-  const result: ImportApplied = { imported: [], definitionOnly: [], skipped: [], secrets: [], change: MOCK_CHANGE };
+  const result: ImportApplied = {
+    imported: [],
+    definitionOnly: [],
+    skipped: [],
+    secrets: [],
+    change: MOCK_CHANGE,
+    backupsWithOldValues: [],
+    oldValuesInFiles: [],
+  };
   for (const pick of choices.picks) {
     const variant = IMPORT_CANDIDATES.find((candidate) => candidate.name === pick.name)?.variants.find((item) => item.key === pick.source);
     if (!variant) {
@@ -1209,6 +1221,15 @@ function importApplied(choices: ImportChoices): ImportApplied {
         field: choice.field ?? "",
         destination: choice.target.kind,
       });
+    }
+    // The rewritten user files of an enabled definition with extracted secrets keep the old values in backups.
+    const applyId = MOCK_CHANGE.apply?.applyId;
+    if (applyId && variant.enables && choices.secrets.some((item) => item.name === pick.name)) {
+      for (const source of variant.sources.filter((item) => !item.projectId)) {
+        if (!result.backupsWithOldValues.some((backup) => backup.file === source.file)) {
+          result.backupsWithOldValues.push({ applyId, file: source.file });
+        }
+      }
     }
   }
   return result;
@@ -1292,7 +1313,16 @@ export function buildDemoDataset(): MockTransportOptions {
       addDiscoveredProjects: async (ids) => ok(discoveredAdded(ids)),
       /* M33 */
       scanImport: async () => ok({ candidates: IMPORT_CANDIDATES, warnings: [] }),
-      applyImport: async (choices) => ok(importApplied(choices)),
+      applyImport: async (choices) => {
+        const applied = importApplied(choices);
+        importBackups = applied.backupsWithOldValues;
+        return ok(applied);
+      },
+      purgeImportBackups: async (applyId) => {
+        const removed = importBackups.filter((backup) => backup.applyId === applyId).map((backup) => backup.file);
+        importBackups = importBackups.filter((backup) => backup.applyId !== applyId);
+        return ok({ applyId, removed, notDeleted: [], failed: [] });
+      },
       unmanagedSummary: async (scope) => ok(unmanagedSummary(scope)),
       acknowledgeUnmanaged: async (ids) => {
         ids.forEach((id) => ACKNOWLEDGED.add(id));

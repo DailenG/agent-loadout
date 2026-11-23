@@ -1018,19 +1018,34 @@ Arguments:
   [NAME]...  Entry names to import; all importable entries when none
 
 Options:
-      --home <PATH>                  Data directory to use instead of LOADOUT_HOME or the per-OS default
-      --scan                         List candidates, their sources, conflicts and secrets; change nothing
-      --client <CLIENT>              Only entries of this client (repeatable)
-      --json                         Print machine-readable JSON to stdout
-      --scope <SCOPE>                Which files to read: user files (system), the files of the known projects, or both [default: all] [possible values: system, project, all]
-      --yes                          Answer yes to confirmations (rolling back an older apply run)
-      --project <ID>                 Only the files of this known project (its id)
-      --only                         Copy the definitions without enabling them (no ownership taken)
-      --pick <NAME=CLIENT>           Import NAME as CLIENT has it, under NAME (repeatable; picks one definition of an entry that differs between clients). CLIENT may be a source key from --scan (omp#work, claude-code@PROJECT-ID) for a client's other file
-      --as <NAME=CLIENT>             Import NAME as CLIENT has it, as NAME-CLIENT (repeatable; with --pick, imports both definitions). CLIENT may be a source key
-      --skip <NAME>                  Leave NAME out (repeatable)
-      --extract <NAME[:FIELD]=DEST>  Where NAME's literal secrets go: keyring, op://VAULT/ITEM/FIELD, op-env://ENV/NAME or env:VAR. NAME:FIELD (env.KEY, headers.KEY, args[N], url) sets one field (repeatable)
-  -h, --help                         Print help
+      --home <PATH>
+          Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --scan
+          List candidates, their sources, conflicts and secrets; change nothing
+      --client <CLIENT>
+          Only entries of this client (repeatable)
+      --json
+          Print machine-readable JSON to stdout
+      --scope <SCOPE>
+          Which files to read: user files (system), the files of the known projects, or both [default: all] [possible values: system, project, all]
+      --yes
+          Answer yes to confirmations (rolling back an older apply run)
+      --project <ID>
+          Only the files of this known project (its id)
+      --only
+          Copy the definitions without enabling them (no ownership taken)
+      --pick <NAME=CLIENT>
+          Import NAME as CLIENT has it, under NAME (repeatable; picks one definition of an entry that differs between clients). CLIENT may be a source key from --scan (omp#work, claude-code@PROJECT-ID) for a client's other file
+      --as <NAME=CLIENT>
+          Import NAME as CLIENT has it, as NAME-CLIENT (repeatable; with --pick, imports both definitions). CLIENT may be a source key
+      --skip <NAME>
+          Leave NAME out (repeatable)
+      --extract <NAME[:FIELD]=DEST>
+          Where NAME's literal secrets go: keyring, op://VAULT/ITEM/FIELD, op-env://ENV/NAME or env:VAR. NAME:FIELD (env.KEY, headers.KEY, args[N], url) sets one field (repeatable)
+      --remove-old-backups[=<APPLY-ID>]
+          Remove the client file backups that still hold the old values of extracted secrets: those of this import's apply, or with =APPLY-ID those of an earlier import (then nothing is imported). Undoing that import can then no longer bring those files' earlier content back
+  -h, --help
+          Print help
 ```
 
 ## `loadout adopt`

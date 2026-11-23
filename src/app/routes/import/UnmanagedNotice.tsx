@@ -1,14 +1,17 @@
 // The "not managed by Loadout" notice (#9 option A): after the drift
 // triggers (watcher, window focus, Refresh) the shell reads the entries not
 // acknowledged yet from the shared every-scope summary (`unmanaged.ts`) and
-// the skill folders of the user scope, and shows a small banner in the
-// sidebar, "omp has 5 MCP servers not managed by Loadout. Review". Review
-// opens the Import page; Review and Dismiss both acknowledge what was
-// shown, so the same entries never come back. Settings turns it off (on by
-// default), kept in the webview's storage like the theme.
+// the skill folders of the user scope, and shows a one-line notice in the
+// sidebar, "5 not managed" (M36: the full message and its buttons pushed the
+// nav out of view). It expands on click or Enter/Space into the message,
+// "omp has 5 MCP servers not managed by Loadout.", with Review and Dismiss,
+// floating above the line so the sidebar never grows. Review opens the
+// Import page; Review and Dismiss both acknowledge what was shown, so the
+// same entries never come back. Settings turns it off (on by default), kept
+// in the webview's storage like the theme.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { importQueryKeys, storeQueryKeys } from "@/app/apply/changeNotice";
 import { SettingsItem } from "@/app/components/SettingsGroup";
 import { useUnmanagedSkillCount } from "@/app/routes/import/skills/useUnmanagedSkillCount";
@@ -108,6 +111,8 @@ export function UnmanagedNotice({ collapsed, onReview }: UnmanagedNoticeProps) {
     onReview();
   }
 
+  const total = entries.length + skillKeys.length;
+
   return (
     <>
       {/* Mounted while the app runs, so a new message is announced. */}
@@ -123,22 +128,89 @@ export function UnmanagedNotice({ collapsed, onReview }: UnmanagedNoticeProps) {
             data-tooltip={message}
             onClick={review}
           >
-            <span aria-hidden="true">{entries.length + skillKeys.length}</span>
+            <span aria-hidden="true">{total}</span>
           </button>
         </div>
       ) : (
-        <section className="unmanaged-notice" aria-label={t("import.notice.aria")}>
-          <p className="unmanaged-notice__message">{message}</p>
-          <div className="unmanaged-notice__actions">
-            <button className="primary-button primary-button--compact" type="button" onClick={review}>
-              {t("import.notice.review")}
-            </button>
-            <button className="secondary-button secondary-button--compact" type="button" onClick={acknowledge}>
-              {t("import.notice.dismiss")}
-            </button>
-          </div>
-        </section>
+        <NoticeDisclosure
+          summary={t("import.notice.short", { count: total })}
+          message={message}
+          onReview={review}
+          onDismiss={acknowledge}
+        />
       )}
     </>
+  );
+}
+
+type NoticeDisclosureProps = {
+  summary: string;
+  message: string;
+  onReview: () => void;
+  onDismiss: () => void;
+};
+
+/** The expanded sidebar's one-line notice; the details float above it. */
+function NoticeDisclosure({ summary, message, onReview, onDismiss }: NoticeDisclosureProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+
+  // A press anywhere else closes the details, like a menu.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  function onKeyDown(event: KeyboardEvent) {
+    if (open && event.key === "Escape") {
+      event.stopPropagation();
+      setOpen(false);
+      toggleRef.current?.focus();
+    }
+  }
+
+  return (
+    <section
+      ref={rootRef}
+      className={`unmanaged-notice${open ? " is-open" : ""}`}
+      aria-label={t("import.notice.aria")}
+      onKeyDown={onKeyDown}
+    >
+      <button
+        ref={toggleRef}
+        className="unmanaged-notice__toggle"
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <svg className="unmanaged-notice__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M12 7.8v5.2M12 16.2v.01" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+        <span className="unmanaged-notice__summary">{summary}</span>
+      </button>
+      <div id={panelId} className="unmanaged-notice__panel" hidden={!open}>
+        <p className="unmanaged-notice__message">{message}</p>
+        <div className="unmanaged-notice__actions">
+          <button className="primary-button primary-button--compact" type="button" onClick={onReview}>
+            {t("import.notice.review")}
+          </button>
+          <button className="secondary-button secondary-button--compact" type="button" onClick={onDismiss}>
+            {t("import.notice.dismiss")}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }

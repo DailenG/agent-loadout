@@ -369,3 +369,163 @@ fn keyring_extraction_and_project_definitions() {
             .contains("keyring://loadout/CHATTY_CHATTY_API_KEY")
     );
 }
+
+/// Whether any file under `dir` holds `needle`.
+fn tree_holds(dir: &Path, needle: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.map(|entry| entry.unwrap().path()).any(|path| {
+        if path.is_dir() {
+            tree_holds(&path, needle)
+        } else {
+            String::from_utf8_lossy(&std::fs::read(&path).unwrap()).contains(needle)
+        }
+    })
+}
+
+/// M35: the backup the import's apply made of `~/.claude.json` keeps the
+/// extracted value. The import lists it, `--remove-old-backups=APPLY-ID`
+/// removes it later (again: nothing), `restore --files` and `rollback`
+/// then report that the file's previous content is no longer kept. No
+/// output holds the value.
+#[test]
+fn old_value_backups_are_listed_and_removed_later() {
+    let cli = Cli::new();
+    write(&cli.claude(), &servers(&[("chatty", &chatty())]));
+    let (code, doc, text) = cli.json(&["import", "--extract", "chatty=keyring"]);
+    assert!(!text.contains(PLANTED), "{text}");
+    assert_eq!(code, 0, "{doc:#}");
+    let apply_id = doc["apply"]["apply_id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        doc["backups_with_old_values"],
+        json!([{ "apply_id": apply_id, "file": "~/.claude.json" }])
+    );
+    assert!(doc["removed_backups"].is_null());
+    let backups = cli.home.join("backups");
+    assert!(tree_holds(&backups, PLANTED), "the backup keeps the value");
+
+    let (code, _, _) = cli.json(&[
+        "import",
+        &format!("--remove-old-backups={apply_id}"),
+        "chatty",
+    ]);
+    assert_ne!(code, 0, "names do not go with an earlier import's apply id");
+    let (code, doc, text) = cli.json(&["import", &format!("--remove-old-backups={apply_id}")]);
+    assert_eq!(code, 0, "{doc:#}");
+    assert!(!text.contains(PLANTED), "{text}");
+    assert_eq!(doc["removed"], json!(["~/.claude.json"]));
+    assert_eq!(doc["failed"], json!([]));
+    assert!(
+        !tree_holds(&cli.home, PLANTED),
+        "nothing under LOADOUT_HOME holds it"
+    );
+    let again = cli.ok(&["import", &format!("--remove-old-backups={apply_id}")]);
+    assert_eq!(again["removed"], json!([]));
+
+    let (code, doc, text) = cli.json(&["restore", "--files", &apply_id]);
+    assert_eq!(code, 1, "{doc:#}");
+    assert!(!text.contains(PLANTED), "{text}");
+    assert_eq!(doc["files"][0]["outcome"], "backup_removed");
+    let (code, doc, text) = cli.json(&["rollback", &apply_id]);
+    assert_eq!(code, 0, "{doc:#}");
+    assert!(!text.contains(PLANTED), "{text}");
+    assert_eq!(doc["unavailable_originals"], json!(["~/.claude.json"]));
+}
+
+/// `--remove-old-backups` removes them in the same run; without it, the
+/// text output says how to remove them later.
+#[test]
+fn old_value_backups_are_removed_in_the_same_run() {
+    let cli = Cli::new();
+    write(&cli.claude(), &servers(&[("chatty", &chatty())]));
+    let (code, doc, text) = cli.json(&[
+        "import",
+        "--remove-old-backups",
+        "--extract",
+        "chatty=keyring",
+    ]);
+    assert!(!text.contains(PLANTED), "{text}");
+    assert_eq!(code, 0, "{doc:#}");
+    assert_eq!(doc["imported"], json!(["chatty"]));
+    assert_eq!(
+        doc["removed_backups"],
+        json!({ "removed": ["~/.claude.json"], "not_deleted": [], "failed": [] })
+    );
+    assert_eq!(doc["old_values_in_files"], json!([]));
+    assert!(!tree_holds(&cli.home, PLANTED));
+
+    let cli = Cli::new();
+    write(&cli.claude(), &servers(&[("chatty", &chatty())]));
+    let output = cli.run(&["import", "--extract", "chatty=keyring"]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(!text.contains(PLANTED), "{text}");
+    assert!(text.contains("--remove-old-backups="), "{text}");
+    assert!(text.contains("~/.claude.json"), "{text}");
+}
+
+/// In review mode no apply rewrites the file: nothing is marked, so
+/// `--remove-old-backups` removes nothing, and the import says the file
+/// still holds the old values and that the later apply's backups are not
+/// marked. `--remove-old-backups=APPLY-ID` of an apply without marks says
+/// that, not that no backup holds a value.
+#[test]
+fn review_mode_says_the_file_still_holds_the_old_values() {
+    let cli = Cli::new();
+    cli.ok(&["server", "add", "seed", "--", "seed-mcp"]);
+    std::fs::write(
+        cli.home.join("store").join("settings.toml"),
+        "schema = 1\napply_mode = \"review\"\n",
+    )
+    .unwrap();
+    write(&cli.claude(), &servers(&[("chatty", &chatty())]));
+    let (code, doc, text) = cli.json(&[
+        "import",
+        "--remove-old-backups",
+        "--extract",
+        "chatty=keyring",
+    ]);
+    assert!(!text.contains(PLANTED), "{text}");
+    assert_eq!(code, 0, "{doc:#}");
+    assert_eq!(doc["imported"], json!(["chatty"]));
+    assert!(doc["apply"].is_null(), "review mode does not apply");
+    assert_eq!(doc["backups_with_old_values"], json!([]));
+    assert!(doc["removed_backups"].is_null());
+    assert_eq!(doc["old_values_in_files"], json!(["~/.claude.json"]));
+
+    let cli = Cli::new();
+    cli.ok(&["server", "add", "seed", "--", "seed-mcp"]);
+    std::fs::write(
+        cli.home.join("store").join("settings.toml"),
+        "schema = 1\napply_mode = \"review\"\n",
+    )
+    .unwrap();
+    write(&cli.claude(), &servers(&[("chatty", &chatty())]));
+    let output = cli.run(&["import", "--extract", "chatty=keyring"]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(!text.contains(PLANTED), "{text}");
+    assert!(
+        text.contains("note: the old values of the extracted secrets are still in ~/.claude.json"),
+        "{text}"
+    );
+    assert!(text.contains("are not marked"), "{text}");
+
+    // An apply without marks: the plain apply of `server add`.
+    let history = cli.ok(&["history"]);
+    let apply_id = history["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|commit| commit["apply"]["id"].as_str())
+        .expect("an apply commit")
+        .to_owned();
+    let output = cli.run(&["import", &format!("--remove-old-backups={apply_id}")]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(
+        text.contains("has no backups marked by an import as holding old secret values"),
+        "{text}"
+    );
+}

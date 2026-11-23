@@ -45,6 +45,7 @@ use crate::apply::plan::{Action, EntryPlan, EntryState, Plan, read_target};
 use crate::apply::render::{DesiredState, native_name, native_to_template, render};
 use crate::apply::{
     ApplyEnv, ApplyReport, ApplyRequest, Decision, OnConflict, PlanOptions, ScopeFilter, apply_in,
+    backup,
 };
 use crate::error::{CoreError, ErrorCode};
 use crate::formats::{Document, Format, NativeValue};
@@ -56,6 +57,7 @@ use crate::model::clients::{ClientSelection, NATIVE_NAME_KEY};
 use crate::model::ids::{self, IdKind};
 use crate::model::server::{Enable, Meta, Server, ServerFields, ToolFilter};
 use crate::model::settings::ApplyMode;
+use crate::secrets::SecretValue;
 use crate::secrets::catalog::{Catalog, overlay_path};
 use crate::secrets::classify::{classify_args_import, classify_import};
 use crate::secrets::delivery::Sharing;
@@ -1114,6 +1116,27 @@ pub struct ImportResult {
     /// take over without asking: every user file of that client holds the
     /// imported definition ([`apply_import`]).
     pub entries: Vec<(String, String)>,
+    /// The user files the enabled picks with extracted secrets come from,
+    /// after [`apply_import`]: those that still hold an extracted value
+    /// (M35). No apply rewrote them (review mode, an entry left a collision
+    /// to decide, a write that failed); the apply that later rewrites them
+    /// makes backups that are not marked.
+    pub old_values_in_files: Vec<PathBuf>,
+    /// The extracted values, until [`apply_import`] looks for them in the
+    /// backups its apply made (M35); never read anywhere else.
+    extracted: Vec<SecretValue>,
+    /// The user files the enabled picks with extracted secrets come from.
+    extracted_from: BTreeSet<PathBuf>,
+}
+
+/// The instant apply of an import ([`apply_import`]).
+#[derive(Debug, Clone)]
+pub struct ImportApply {
+    pub report: ApplyReport,
+    /// The client files whose backup of this apply holds an extracted
+    /// secret's old value (M35), marked in the run's result for
+    /// [`backup::purge_old_values`].
+    pub old_value_backups: Vec<PathBuf>,
 }
 
 /// The instant apply of an import (SPEC 8.6, 8.7): in instant mode, plans
@@ -1124,11 +1147,33 @@ pub struct ImportResult {
 /// same client holds a different definition under that name (then it is
 /// left a collision to decide). Project files are not planned. `None` in
 /// review mode, where Pending changes shows those entries for a decision.
+///
+/// The backups the apply made of files that held an extracted value keep
+/// that old value; they are listed in [`ImportApply::old_value_backups`].
+/// The user files that still hold one afterwards are left in
+/// [`ImportResult::old_values_in_files`]. The extracted values leave
+/// `result` here either way.
 pub fn apply_import(
     tx: &mut Transaction<'_>,
     ax: &ApplyEnv<'_>,
+    result: &mut ImportResult,
+) -> Result<Option<ImportApply>, CoreError> {
+    let extracted = std::mem::take(&mut result.extracted);
+    let sources: Vec<PathBuf> = std::mem::take(&mut result.extracted_from)
+        .into_iter()
+        .collect();
+    let applied = instant_import(tx, ax, result, &extracted)?;
+    result.old_values_in_files = backup::files_holding(ax.fs, &sources, &extracted);
+    Ok(applied)
+}
+
+/// [`apply_import`] but for the files that still hold a value.
+fn instant_import(
+    tx: &mut Transaction<'_>,
+    ax: &ApplyEnv<'_>,
     result: &ImportResult,
-) -> Result<Option<ApplyReport>, CoreError> {
+    extracted: &[SecretValue],
+) -> Result<Option<ImportApply>, CoreError> {
     if result.enabled.is_empty() {
         // Definitions only (`only`, project files): nothing to write.
         return Ok(None);
@@ -1156,7 +1201,27 @@ pub fn apply_import(
         },
         trigger: ApplyTrigger::Instant,
     };
-    apply_in(tx, ax, &request).map(Some)
+    let mut report = apply_in(tx, ax, &request)?;
+    // The files are written: a run result that cannot be read or rewritten
+    // is a warning, never a reason to lose the import.
+    let old_value_backups =
+        match backup::mark_old_values(ax.fs, &ax.home.state_dir(), &report.apply_id, extracted) {
+            Ok(files) => files,
+            Err(err) => {
+                report.warnings.push(CoreError::new(
+                    err.code(),
+                    format!(
+                        "cannot tell which backups of this apply hold the old secret values: {}",
+                        err.message()
+                    ),
+                ));
+                Vec::new()
+            }
+        };
+    Ok(Some(ImportApply {
+        report,
+        old_value_backups,
+    }))
 }
 
 /// Stages `request` in `tx`: one store server per pick, each sensitive
@@ -1261,6 +1326,9 @@ pub fn stage_import(
                 if source.enables() && whole_client && !result.entries.contains(&pair) {
                     result.entries.push(pair);
                 }
+                if source.enables() && !extracted.is_empty() {
+                    result.extracted_from.insert(source.file.clone());
+                }
             }
         } else if !request.only {
             result.definition_only.push(id.to_owned());
@@ -1272,6 +1340,7 @@ pub fn stage_import(
             // The value stays in the client file until the apply rewrites
             // the entry; a store file holding it is refused.
             memory.record(extracted.value.expose());
+            result.extracted.push(extracted.value.clone());
             let Extraction { alias, field, .. } = extracted.extraction;
             result.aliases.push(ImportedAlias {
                 alias: alias.clone(),

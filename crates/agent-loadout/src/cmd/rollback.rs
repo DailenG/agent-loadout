@@ -4,6 +4,7 @@
 //! (exit code 4 without it).
 
 use agent_loadout_core::CoreError;
+use agent_loadout_core::apply::placeholder_path;
 use agent_loadout_core::apply::rollback::{self, ApplySelector};
 use clap::Args;
 use serde_json::json;
@@ -37,6 +38,11 @@ pub fn run(ctx: &Context, args: &RollbackArgs) -> Result<u8, CoreError> {
         &ApplySelector::parse(&args.apply),
         ctx.yes,
     )?;
+    let unavailable: Vec<String> = report
+        .unavailable_originals
+        .iter()
+        .map(|file| placeholder_path(&ctx.env, file, None))
+        .collect();
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
@@ -45,6 +51,7 @@ pub fn run(ctx: &Context, args: &RollbackArgs) -> Result<u8, CoreError> {
             "files": report.plan.files,
             "tag": report.tag,
             "apply": report_json(&report.apply, report.commit.as_ref()),
+            "unavailable_originals": unavailable,
         }));
     } else {
         println!(
@@ -59,6 +66,13 @@ pub fn run(ctx: &Context, args: &RollbackArgs) -> Result<u8, CoreError> {
             report.tag
         );
         print_report(&report.apply, report.commit.as_ref());
+        for file in &unavailable {
+            println!(
+                "note: the content {file} had before apply {} is no longer kept: its backup \
+                 held old secret values and was removed, so it cannot be restored.",
+                report.plan.apply_id
+            );
+        }
     }
     Ok(apply_exit_code(&report.apply))
 }

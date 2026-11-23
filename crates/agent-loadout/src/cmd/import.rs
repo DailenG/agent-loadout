@@ -1,20 +1,29 @@
 //! `loadout import [--scan] [--client C]... [--scope S] [--project ID]
 //! [--only] [--pick NAME=CLIENT]... [--as NAME=CLIENT]... [--skip NAME]...
-//! [--extract NAME[:FIELD]=DEST]... [NAME]...` (SPEC 8.6, 11.7, 14): list
-//! the foreign entries of the clients' user files and known projects'
-//! files, or turn them into store servers in one commit. In instant mode
-//! the import is applied in the same commit, which adopts every entry that
-//! renders identically without writing it.
+//! [--extract NAME[:FIELD]=DEST]... [--remove-old-backups[=APPLY-ID]]
+//! [NAME]...` (SPEC 8.6, 11.7, 14): list the foreign entries of the
+//! clients' user files and known projects' files, or turn them into store
+//! servers in one commit. In instant mode the import is applied in the
+//! same commit, which adopts every entry that renders identically without
+//! writing it. The backups that apply made of files holding an extracted
+//! secret keep its old value: they are listed, and removed with
+//! `--remove-old-backups` (in the same run, or later for an earlier
+//! import's apply id).
+
+use std::path::PathBuf;
 
 use agent_loadout_core::CoreError;
 use agent_loadout_core::ErrorCode;
+use agent_loadout_core::apply::backup::{self, Purge};
 use agent_loadout_core::apply::import::{
     self, Candidate, ImportRequest, ScanFilter, ScanScope, SecretChoice, SecretDestination,
     VariantPreview,
 };
 use agent_loadout_core::apply::ledger::Ledger;
+use agent_loadout_core::apply::placeholder_path;
 use agent_loadout_core::apply::render::DesiredState;
 use agent_loadout_core::apply::unmanaged::finding_id;
+use agent_loadout_core::brand;
 use agent_loadout_core::model::applied::Scope;
 use agent_loadout_core::store::Operation;
 use clap::Args;
@@ -63,6 +72,18 @@ pub struct ImportArgs {
     /// args[N], url) sets one field (repeatable).
     #[arg(long = "extract", value_name = "NAME[:FIELD]=DEST")]
     extracts: Vec<String>,
+    /// Remove the client file backups that still hold the old values of
+    /// extracted secrets: those of this import's apply, or with =APPLY-ID
+    /// those of an earlier import (then nothing is imported). Undoing that
+    /// import can then no longer bring those files' earlier content back.
+    #[arg(
+        long,
+        value_name = "APPLY-ID",
+        num_args = 0..=1,
+        require_equals = true,
+        conflicts_with = "scan"
+    )]
+    remove_old_backups: Option<Option<String>>,
     /// Entry names to import; all importable entries when none.
     #[arg(value_name = "NAME")]
     names: Vec<String>,
@@ -176,6 +197,9 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
         }
         return Ok(0);
     }
+    if let Some(Some(apply_id)) = &args.remove_old_backups {
+        return purge_only(ctx, args, apply_id);
+    }
 
     let store = ctx.open_store_for_change()?;
     let committed = store.transaction(Operation::new("server.import", "import"), |tx| {
@@ -183,18 +207,48 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
         let ledger = Ledger::load(ax.fs, &ctx.home.state_dir())?;
         let (candidates, warnings) = import::scan_with(&ax, &desired, &ledger, &filter)?;
         let request = args.request(&candidates)?;
-        let result = import::stage_import(tx, &ax, &candidates, &request)?;
+        let mut result = import::stage_import(tx, &ax, &candidates, &request)?;
         let count = result.imported.len();
         tx.set_summary(format!(
             "import: {count} server{} ({})",
             if count == 1 { "" } else { "s" },
             result.imported.join(", ")
         ));
-        let report = import::apply_import(tx, &ax, &result)?;
-        Ok((result, report, warnings))
+        let applied = import::apply_import(tx, &ax, &mut result)?;
+        Ok((result, applied, warnings))
     })?;
-    let (result, report, warnings) = committed.value;
+    let (result, applied, warnings) = committed.value;
     let commit = committed.commit;
+    let report = applied.as_ref().map(|applied| &applied.report);
+    let old_backups: &[PathBuf] = applied
+        .as_ref()
+        .map_or(&[], |applied| &applied.old_value_backups);
+    // After the commit: the backups stay until the import is in the store.
+    // The import is done either way, so a purge that cannot run is reported
+    // per file.
+    let purge = match (&args.remove_old_backups, report) {
+        (Some(None), Some(report)) if !old_backups.is_empty() => Some(
+            backup::purge_old_values(&ax, &report.apply_id).unwrap_or_else(|err| Purge {
+                failed: old_backups
+                    .iter()
+                    .map(|file| (file.clone(), err.clone()))
+                    .collect(),
+                ..Purge::default()
+            }),
+        ),
+        _ => None,
+    };
+    let old_backups_json = |apply_id: &str| {
+        old_backups
+            .iter()
+            .map(|file| json!({ "apply_id": apply_id, "file": placeholder_path(ax.env, file, None) }))
+            .collect::<Vec<_>>()
+    };
+    let old_values_in_files: Vec<String> = result
+        .old_values_in_files
+        .iter()
+        .map(|file| placeholder_path(ax.env, file, None))
+        .collect();
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
@@ -211,7 +265,10 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
                 "destination": alias.destination,
             })).collect::<Vec<_>>(),
             "commit": commit.as_ref().map(ToString::to_string),
-            "apply": report.as_ref().map(|report| report_json(report, commit.as_ref())),
+            "apply": report.map(|report| report_json(report, commit.as_ref())),
+            "backups_with_old_values": report.map_or_else(Vec::new, |report| old_backups_json(&report.apply_id)),
+            "removed_backups": purge.as_ref().map(|purge| purge_json(ctx, purge)),
+            "old_values_in_files": old_values_in_files,
             "warnings": warnings.iter().map(error_json).collect::<Vec<_>>(),
         }));
     } else {
@@ -242,11 +299,125 @@ pub fn run(ctx: &Context, args: &ImportArgs) -> Result<u8, CoreError> {
                 alias.alias, alias.server, alias.field, alias.destination
             );
         }
-        if let Some(report) = &report {
+        if let Some(report) = report {
             print_report(report, commit.as_ref());
+            match &purge {
+                Some(purge) => print_purge(ctx, &report.apply_id, purge),
+                None if !old_backups.is_empty() => {
+                    let files: Vec<String> = old_backups
+                        .iter()
+                        .map(|file| placeholder_path(ax.env, file, None))
+                        .collect();
+                    println!(
+                        "The backups this import made of {} keep the previous content, \
+                         including the old values of the extracted secrets, so you can undo \
+                         the import. Remove them with `{} import --remove-old-backups={}`.",
+                        files.join(", "),
+                        brand::BIN_NAME,
+                        report.apply_id
+                    );
+                }
+                None => {}
+            }
+        }
+        if !old_values_in_files.is_empty() {
+            println!(
+                "note: the old values of the extracted secrets are still in {} until an apply \
+                 rewrites it (review mode, or an entry left to decide). The backups that \
+                 apply makes are not marked, so --remove-old-backups cannot remove them: \
+                 delete that apply's folder under <LOADOUT_HOME>/backups/files by hand, or \
+                 let retention prune it (50 runs or 30 days).",
+                old_values_in_files.join(", ")
+            );
         }
     }
-    Ok(report.as_ref().map_or(0, apply_exit_code))
+    let code = report.map_or(0, apply_exit_code);
+    Ok(match &purge {
+        Some(purge) if purge_failed(purge) && code == 0 => 1,
+        _ => code,
+    })
+}
+
+/// A backup was left as it was, or its zeroed file could not be deleted.
+fn purge_failed(purge: &Purge) -> bool {
+    !purge.failed.is_empty() || !purge.not_deleted.is_empty()
+}
+
+/// `--remove-old-backups=APPLY-ID`: the backups of an earlier import's
+/// apply that hold old secret values are removed; nothing is imported.
+fn purge_only(ctx: &Context, args: &ImportArgs, apply_id: &str) -> Result<u8, CoreError> {
+    if !(args.names.is_empty()
+        && args.picks.is_empty()
+        && args.renames.is_empty()
+        && args.skips.is_empty()
+        && args.extracts.is_empty()
+        && !args.only)
+    {
+        return Err(usage(
+            "--remove-old-backups=APPLY-ID removes the backups of an earlier import; \
+             it imports nothing, so it takes no names or import choices",
+        ));
+    }
+    let purge = backup::purge_old_values(&ctx.apply_env(), apply_id)?;
+    if ctx.json {
+        let mut doc = purge_json(ctx, &purge);
+        doc["schema"] = json!(JSON_SCHEMA);
+        doc["apply_id"] = json!(apply_id);
+        print_json(&doc);
+    } else {
+        print_purge(ctx, apply_id, &purge);
+    }
+    Ok(if purge_failed(&purge) { 1 } else { 0 })
+}
+
+/// What a purge removed and what it could not, files as placeholder paths.
+fn purge_json(ctx: &Context, purge: &Purge) -> Value {
+    json!({
+        "removed": purge
+            .removed
+            .iter()
+            .map(|file| placeholder_path(&ctx.env, file, None))
+            .collect::<Vec<_>>(),
+        "not_deleted": purge.not_deleted.iter().map(|(file, err)| json!({
+            "file": placeholder_path(&ctx.env, file, None),
+            "error": error_json(err),
+        })).collect::<Vec<_>>(),
+        "failed": purge.failed.iter().map(|(file, err)| json!({
+            "file": placeholder_path(&ctx.env, file, None),
+            "error": error_json(err),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn print_purge(ctx: &Context, apply_id: &str, purge: &Purge) {
+    if purge.removed.is_empty() && purge.failed.is_empty() {
+        println!(
+            "Apply {apply_id} has no backups marked by an import as holding old secret values."
+        );
+    }
+    for file in &purge.removed {
+        println!(
+            "Removed the backup of {} that held old secret values (apply {apply_id}).",
+            placeholder_path(&ctx.env, file, None)
+        );
+    }
+    for (file, err) in &purge.not_deleted {
+        eprintln!(
+            "error[{}]: the backup of {} was overwritten with zeros, so the old values are \
+             gone, but the zeroed file could not be deleted: {}",
+            err.code(),
+            placeholder_path(&ctx.env, file, None),
+            err.message()
+        );
+    }
+    for (file, err) in &purge.failed {
+        eprintln!(
+            "error[{}]: cannot remove the backup of {}: {}",
+            err.code(),
+            placeholder_path(&ctx.env, file, None),
+            err.message()
+        );
+    }
 }
 
 fn scope_str(scope: Scope) -> &'static str {

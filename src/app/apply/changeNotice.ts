@@ -109,7 +109,11 @@ export function useInvalidateStore() {
   }, [queryClient]);
 }
 
-/** Undoes an apply run (`loadout rollback`), then refetches and reports. */
+/**
+ * Undoes an apply run (`loadout rollback`), then refetches and reports. A
+ * file whose backup of that run held old secret values and was removed (M35)
+ * is named: its previous content cannot come back.
+ */
 export function useUndoApply() {
   const { commands } = useTransport();
   const { notify } = useNotifications();
@@ -118,7 +122,15 @@ export function useUndoApply() {
     async (applyId: string, confirmed = false) => {
       try {
         const result = unwrap(await commands.undoApply(applyId, confirmed));
-        notify({ tone: "success", message: t("apply.undo.done", { id: result.applyId }) });
+        const unavailable = result.unavailableOriginals;
+        notify(
+          unavailable.length > 0
+            ? {
+                tone: "info",
+                message: t("apply.undo.doneUnavailable", { id: result.applyId, files: unavailable.join(", ") }),
+              }
+            : { tone: "success", message: t("apply.undo.done", { id: result.applyId }) },
+        );
         return result;
       } catch (error) {
         notify({

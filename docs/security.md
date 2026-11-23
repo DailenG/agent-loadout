@@ -64,6 +64,27 @@ optional update check. Everything else works offline.
   permissions). `loadout restore --files <apply-id>` restores the copies.
   Backups can contain values from your client files, so they are never
   pushed to remotes.
+- **Old secret values in backups.** When an import moves literal secrets
+  out of a client file, the backup its apply took still holds them. The
+  import lists those backups (file paths only; values are compared in
+  memory during the import and never stored, logged or returned) and
+  offers to remove them: **Remove those backups now** in the app, or
+  `loadout import --remove-old-backups[=<apply-id>]`. Removal overwrites
+  each listed backup with zeros in place (same file, same length, flushed
+  to disk), then deletes it. Copies the system keeps elsewhere are out of
+  reach: SSDs (wear leveling), copy-on-write file systems, snapshots and
+  backup tools such as OneDrive, Time Machine or File History may still
+  hold the old bytes. The recorded path is never trusted on its own: only
+  that run's own backup of that file, as a regular file (not a link or
+  junction), is touched. The run's result in `state/applies/` records the
+  removal as soon as the zeros are written, so a later rollback or
+  `restore --files` says that file's previous content is no longer kept
+  and never writes a zeroed copy back. Not covered: backups of earlier
+  apply runs, and an import in review mode or an entry left a collision
+  to decide, where no apply rewrote the file yet. The import then says
+  the file still holds the old values; the backups of the apply that
+  rewrites it later are not marked, so delete that run's folder under
+  `backups/files` by hand or let retention prune it (50 runs or 30 days).
 - **Atomic, checked writes.** A file is written to a temporary file in the
   same folder and renamed into place (`ReplaceFileW` on Windows); before
   that, Loadout re-parses the result and checks that its own entries are

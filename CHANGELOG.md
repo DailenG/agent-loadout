@@ -8,7 +8,35 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-11-23
+## [0.3.1] - 2026-11-23
+
+The first published release of the 0.3 line: it contains everything listed
+under 0.3.0 below, plus these two changes from the 0.3.0 release check.
+
+### Added
+
+- An import that moves literal secrets out of client files now says that
+  the backups its apply took still hold the old values, lists those
+  backups, and removes exactly them on request (overwritten with zeros in
+  place, then deleted; only that run's own backups, never a link):
+  **Remove those backups now** in the app's import result (after a
+  confirmation), `loadout import --remove-old-backups` in the same run, or
+  `loadout import --remove-old-backups=<APPLY-ID>` later. Undoing that
+  import (`loadout rollback`, **Undo this apply**) and
+  `loadout restore --files` then report which files' previous content is
+  no longer kept, and restore the rest. In review mode, or when an entry
+  is left to decide, the import says the file still holds the old values
+  until an apply rewrites it (#3).
+
+### Changed
+
+- The app's not-managed notice is one line in the sidebar ("7 not
+  managed"); a click or Enter opens the message with Review and Dismiss
+  above it, and the collapsed sidebar shows only the count. The sidebar is
+  denser in short windows, so every nav item and the notice fit at the
+  default 1088x680 and at the 960x560 minimum (#9).
+
+## 0.3.0 (tagged, not published)
 
 ### Added
 
@@ -217,8 +245,8 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/DailenG/agent-loadout/compare/v0.2.1...v0.3.0
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.1...v0.3.1
 [0.2.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/DailenG/agent-loadout/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/DailenG/agent-loadout/compare/v0.1.2...v0.1.3

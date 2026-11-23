@@ -52,6 +52,14 @@ pub struct FileRecord {
     pub written: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<String>,
+    /// The backup holds a value an import moved to a secret (M35): the old
+    /// value, which the client file no longer holds.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub old_values: bool,
+    /// The backup was removed on request because it held old secret values
+    /// (M35): the file's content from before this run is no longer kept.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backup_removed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<RecordedError>,
 }
@@ -125,6 +133,12 @@ impl Journal {
         Ok(self)
     }
 
+    /// Rewrites the result of a finished run (`applies/<apply-id>.json`)
+    /// after its file records changed (M35).
+    pub fn save_result(&self, fs: &dyn Fs, state_dir: &Path) -> Result<(), CoreError> {
+        self.save(fs, &result_path(state_dir, &self.apply_id))
+    }
+
     fn save(&self, fs: &dyn Fs, path: &Path) -> Result<(), CoreError> {
         let mut text = serde_json::to_string_pretty(self).map_err(|err| {
             CoreError::new(
@@ -142,8 +156,12 @@ pub fn unfinished(fs: &dyn Fs, state_dir: &Path) -> Result<Vec<Journal>, CoreErr
     read_all(fs, &state_dir.join(JOURNAL_DIR))
 }
 
-/// The result of a finished run, if it is still kept.
+/// The result of a finished run, if it is still kept. An id that is not a
+/// ULID's letters and digits names no run.
 pub fn result(fs: &dyn Fs, state_dir: &Path, apply_id: &str) -> Result<Option<Journal>, CoreError> {
+    if apply_id.is_empty() || !apply_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Ok(None);
+    }
     let path = result_path(state_dir, apply_id);
     if !fs.exists(&path) {
         return Ok(None);

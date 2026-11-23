@@ -3,16 +3,24 @@
 // what it did (imported, skipped with reasons, secret aliases, the apply).
 // A definition found only in project files offers "Add to project manifest"
 // (`save_project_server` with `from`), after a trust review when the project
-// is not trusted.
+// is not trusted. The backups the apply made of files that held an extracted
+// secret keep its old value (M35): the result says so and offers "Remove
+// those backups now" (`purge_import_backups`) after a confirmation.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
-import { useChangeNotice, useInvalidateImports } from "@/app/apply/changeNotice";
+import { storeQueryKeys, useChangeNotice, useInvalidateImports } from "@/app/apply/changeNotice";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { TrustReviewDialog } from "@/app/routes/projects/TrustReviewDialog";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
-import type { ImportApplied, ManifestLayerKind, ProjectServerDraft, SecretDestinationKind } from "@/ipc/bindings";
+import type {
+  BackupPurgeFailure,
+  ImportApplied,
+  ManifestLayerKind,
+  ProjectServerDraft,
+  SecretDestinationKind,
+} from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 import {
   enabledClients,
@@ -86,6 +94,22 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
   // The manifest each offer writes to, when the user chose one (`placement.offersChoice`).
   const [layers, setLayers] = useState<Record<string, ManifestLayerKind>>({});
   const resultHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  // "Remove those backups now": the confirmation, the call, and what it removed.
+  const purgeTitleId = useId();
+  const purgeQuestionId = useId();
+  const [confirmingPurge, setConfirmingPurge] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const [purged, setPurged] = useState<{
+    removed: string[];
+    notDeleted: BackupPurgeFailure[];
+    failed: BackupPurgeFailure[];
+  } | null>(null);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
+  const oldBackups = result?.backupsWithOldValues ?? [];
+  // Files whose backup still holds an old value: all listed, or those a removal failed for.
+  const keptBackups = purged
+    ? purged.failed.map((failure) => failure.file)
+    : [...new Set(oldBackups.map((backup) => backup.file))];
 
   // The Import button is gone with the review: focus moves to the result's title, never the page.
   useEffect(() => {
@@ -109,6 +133,29 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
     } finally {
       setBusy(false);
       await queryClient.invalidateQueries({ queryKey: IMPORT_SCAN_KEY });
+    }
+  }
+
+  async function purgeBackups() {
+    setPurging(true);
+    setPurgeError(null);
+    try {
+      const removed = [...(purged?.removed ?? [])];
+      const notDeleted = [...(purged?.notDeleted ?? [])];
+      const failed: BackupPurgeFailure[] = [];
+      for (const applyId of new Set(oldBackups.map((backup) => backup.applyId))) {
+        const purge = unwrap(await commands.purgeImportBackups(applyId));
+        removed.push(...purge.removed);
+        notDeleted.push(...purge.notDeleted);
+        failed.push(...purge.failed);
+      }
+      setPurged({ removed, notDeleted, failed });
+    } catch (failure) {
+      setPurgeError(failureText(failure));
+    } finally {
+      setPurging(false);
+      setConfirmingPurge(false);
+      await queryClient.invalidateQueries({ queryKey: storeQueryKeys.fileBackups });
     }
   }
 
@@ -329,6 +376,47 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
               ? t("import.result.applied")
               : t("import.result.attention")}
         </p>
+        {oldBackups.length > 0 ? (
+          <div className="import-result__backups">
+            {purged && purged.removed.length > 0 ? (
+              <p className="migrate-note">{t("import.result.backupsRemoved", { files: purged.removed.join(", ") })}</p>
+            ) : null}
+            {purged?.failed.map((failure) => (
+              <p key={failure.file} className="migrate-note" role="alert">
+                {t("import.result.backupsRemoveFailed", { file: failure.file, error: errorMessage(failure.error.code) })}
+              </p>
+            ))}
+            {purged?.notDeleted.map((failure) => (
+              <p key={`zeroed-${failure.file}`} className="migrate-note" role="alert">
+                {t("import.result.backupsNotDeleted", { file: failure.file, error: errorMessage(failure.error.code) })}
+              </p>
+            ))}
+            {purgeError ? (
+              <p className="migrate-note" role="alert">
+                {t("import.result.backupsRemoveError", { error: purgeError })}
+              </p>
+            ) : null}
+            {keptBackups.length > 0 ? (
+              <>
+                {purged ? null : <p className="migrate-note">{t("import.result.backupsNote")}</p>}
+                <p className="migrate-item__detail">{t("import.result.backupsFiles", { files: keptBackups.join(", ") })}</p>
+                <button
+                  className="secondary-button secondary-button--compact"
+                  type="button"
+                  disabled={purging}
+                  onClick={() => setConfirmingPurge(true)}
+                >
+                  {t("import.result.removeBackups")}
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {result.oldValuesInFiles.length > 0 ? (
+          <p className="migrate-note">
+            {t("import.result.valuesStillInFiles", { files: result.oldValuesInFiles.join(", ") })}
+          </p>
+        ) : null}
       </>
     );
     actions = (
@@ -381,13 +469,15 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
         <div className="project-dialog__body settings-dialog__body">
           {/* Mounted with the dialog, so the result is announced when it arrives. */}
           <p className="sr-only" role="status" aria-live="polite">
-            {result
-              ? t("import.result.summary", {
-                  imported: result.imported.length,
-                  definitions: result.definitionOnly.length,
-                  skipped: result.skipped.length,
-                })
-              : ""}
+            {!result
+              ? ""
+              : purged && purged.removed.length > 0
+                ? t("import.result.backupsRemoved", { files: purged.removed.join(", ") })
+                : t("import.result.summary", {
+                    imported: result.imported.length,
+                    definitions: result.definitionOnly.length,
+                    skipped: result.skipped.length,
+                  })}
           </p>
           {body}
         </div>
@@ -403,6 +493,38 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
             void addToManifest(offer);
           }}
         />
+      ) : null}
+      {confirmingPurge ? (
+        <Modal
+          className="tool-manage-dialog project-dialog"
+          role="alertdialog"
+          labelledBy={purgeTitleId}
+          describedBy={purgeQuestionId}
+          dismissible={!purging}
+          onClose={() => setConfirmingPurge(false)}
+        >
+          <h3 id={purgeTitleId}>{t("import.result.removeBackupsTitle")}</h3>
+          <p id={purgeQuestionId}>{t("import.result.removeBackupsQuestion", { files: keptBackups.join(", ") })}</p>
+          <div className="tool-manage-dialog__actions">
+            <button
+              className="secondary-button secondary-button--compact"
+              type="button"
+              disabled={purging}
+              onClick={() => setConfirmingPurge(false)}
+              data-autofocus
+            >
+              {t("import.result.removeBackupsCancel")}
+            </button>
+            <button
+              className="primary-button primary-button--compact"
+              type="button"
+              disabled={purging}
+              onClick={() => void purgeBackups()}
+            >
+              {purging ? t("import.result.removingBackups") : t("import.result.removeBackupsConfirm")}
+            </button>
+          </div>
+        </Modal>
       ) : null}
     </>
   );
