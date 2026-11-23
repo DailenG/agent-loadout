@@ -20,7 +20,7 @@ categories = ["command-line-utilities", "development-tools", "config"]
 agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.2.0" }
 agent-loadout-testkit = { path = "crates/agent-loadout-testkit" }
 clap = { version = "4", features = ["derive"] }
-dirs = "6"
+dirs = "7"
 getrandom = "0.4"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 hmac = "0.13"
@@ -49,7 +49,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 # 2.x, the version insta already pulls in.
-similar = "2"
+similar = "3"
 # loadout.exe links the VC runtime statically and the UCRT (part of
 # Windows) dynamically, as Tauri does for the app, so the CLI runs on a
 # machine without the Visual C++ Redistributable (0.1.2 did not: STATUS_DLL_NOT_FOUND).
