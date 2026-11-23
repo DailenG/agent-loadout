@@ -4,21 +4,30 @@
 //! of them this machine has not acknowledged yet (the "new unmanaged
 //! entries" notice).
 //!
+//! [`scan_findings`] lists the same findings as [`findings`] of a full
+//! scan, by name only: no entry is converted to store fields, no preview or
+//! secret extraction is made, and each client file is parsed once. The
+//! notice runs it on focus and file-watcher events.
+//!
 //! Acknowledged findings are a machine-local fact (`state/unmanaged-seen.json`,
 //! never synced): they name client files of this machine. A finding is
 //! identified by [`Source::key`] and the entry name (`claude-code/github`,
 //! `cursor@app-1a2b/postgres`), never by a path, so the id can cross IPC.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::apply::import::{Candidate, Source};
+use crate::apply::ApplyEnv;
+use crate::apply::import::{self, Candidate, ScanFilter, Source, source_key};
+use crate::apply::ledger::Ledger;
+use crate::apply::render::DesiredState;
 use crate::apply::write_atomic;
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::model::applied::Scope;
+use crate::store::Store;
 
 /// The file in `state/`.
 pub const SEEN_FILE: &str = "unmanaged-seen.json";
@@ -60,6 +69,63 @@ pub fn findings(candidates: &[Candidate]) -> Vec<Finding> {
         }
     }
     out
+}
+
+/// The findings [`findings`] gives for a [`import::scan_with`] of the same
+/// files, in the same order, by name only (see the module docs).
+pub fn scan_findings(
+    ax: &ApplyEnv<'_>,
+    desired: &DesiredState,
+    ledger: &Ledger,
+    filter: &ScanFilter,
+) -> Result<(Vec<Finding>, Vec<CoreError>), CoreError> {
+    // Grouped by name in first-seen order, as the scan's candidates are.
+    let mut by_name: Vec<Vec<Finding>> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut ids: HashSet<String> = HashSet::new();
+    let mut warnings = Vec::new();
+    import::walk(ax, desired, ledger, filter, &mut warnings, &mut |found| {
+        let project_id = found.project.map(|project| project.id.as_str());
+        let key = source_key(
+            found.spec.id,
+            found.slot.as_deref(),
+            found.target.scope,
+            project_id,
+        );
+        let id = format!("{key}/{}", found.name);
+        if !ids.insert(id.clone()) {
+            return Ok(());
+        }
+        let finding = Finding {
+            id,
+            client: found.spec.id,
+            scope: found.target.scope,
+            project_id: project_id.map(str::to_owned),
+            project_root: found.project.map(|project| project.root.clone()),
+            name: found.name,
+            file: found.target.file.clone(),
+        };
+        match index.get(&finding.name) {
+            Some(&at) => by_name[at].push(finding),
+            None => {
+                index.insert(finding.name.clone(), by_name.len());
+                by_name.push(vec![finding]);
+            }
+        }
+        Ok(())
+    })?;
+    Ok((by_name.into_iter().flatten().collect(), warnings))
+}
+
+/// [`scan_findings`] against `store` as this machine sees it
+/// ([`import::store_inputs`]). Read-only: creates nothing.
+pub fn store_findings(
+    store: Option<&Store<'_>>,
+    ax: &ApplyEnv<'_>,
+    filter: &ScanFilter,
+) -> Result<(Vec<Finding>, Vec<CoreError>), CoreError> {
+    let (desired, ledger) = import::store_inputs(store, ax)?;
+    scan_findings(ax, &desired, &ledger, filter)
 }
 
 /// The findings of one client in one scope (one project).

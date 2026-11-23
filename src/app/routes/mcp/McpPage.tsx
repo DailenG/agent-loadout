@@ -13,6 +13,8 @@ import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useEventCallback } from "@/app/components/useEventCallback";
+import type { ImportTarget } from "@/app/routes/import/model";
+import { useScopeUnmanaged, UnmanagedSection } from "@/app/routes/import/UnmanagedSection";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
 import { errorMessage, t } from "@/i18n/en";
@@ -36,6 +38,8 @@ export type McpPageProps = {
   onOpenPending: () => void;
   /** Opens the Install page. */
   onOpenInstall: () => void;
+  /** Opens the Import page with an entry picked ("Import…" on a not-managed entry). */
+  onOpenImport: (target?: ImportTarget) => void;
 };
 
 type DialogState =
@@ -413,7 +417,7 @@ const McpServerCard = memo(function McpServerCard({
  * The MCP page (SPEC 13.2): one card per store server with its client pills, or at project
  * scope the servers of that project's manifests.
  */
-export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
+export function McpPage({ onOpenPending, onOpenInstall, onOpenImport }: McpPageProps) {
   const { commands } = useTransport();
   const changeNotice = useChangeNotice();
   const setServerClients = useSetServerClients();
@@ -444,6 +448,19 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
     setProjectDialog(null);
   }
   const deleteActionRef = useRef<HTMLButtonElement | null>(null);
+  const unmanaged = useScopeUnmanaged();
+  const managedCount = inProject ? projectServers.data?.servers.length : servers.data?.servers.length;
+  const scopeClients = (inProject ? projectServers.data?.clients : servers.data?.clients) ?? [];
+  const clientNames = useMemo(() => new Map(scopeClients.map((client) => [client.id, client.name])), [scopeClients]);
+  const counts =
+    managedCount !== undefined && unmanaged.data ? (
+      <p className="import-counts" role="note">
+        {t("import.counts", { managed: managedCount, unmanaged: unmanaged.data.total })}
+      </p>
+    ) : null;
+  const unmanagedSection = (
+    <UnmanagedSection summary={unmanaged.data} clientNames={clientNames} onImport={onOpenImport} />
+  );
 
   useEffect(() => {
     if (!deleteConfirmingId) {
@@ -576,6 +593,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
     return (
       <div className="mcp-route">
         <HeaderToolbar>{toolbar}</HeaderToolbar>
+        {counts}
         <ProjectServersView
           projectId={projectId}
           query={deferredQuery}
@@ -584,6 +602,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
           onDialog={setProjectDialog}
           onBusy={setProjectBusy}
         />
+        {unmanagedSection}
       </div>
     );
   }
@@ -591,6 +610,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
   return (
     <div className="mcp-route">
       <HeaderToolbar>{toolbar}</HeaderToolbar>
+      {counts}
 
       {servers.isError ? (
         <div className="dialog-error mcp-page-error" role="alert">
@@ -659,6 +679,7 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
           </div>
         ) : null}
       </section>
+      {unmanagedSection}
 
       {dialog ? (
         <ServerEditDialog

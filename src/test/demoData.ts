@@ -31,8 +31,24 @@ import type {
   ToolInfo,
   ToolSkillDir,
   TrustReview,
+  /* M34 */
+  DiscoveredProjectsAdded,
+  ProjectDiscovery,
+  SkillAdoptChoice,
+  SkillAdoptResult,
+  UnmanagedSkills,
+  /* M33 */
+  ImportApplied,
+  ImportCandidate,
+  ImportChoices,
+  ImportScope,
+  ImportSource,
+  ImportVariant,
+  ServerDraft,
+  UnmanagedGroup,
+  UnmanagedSummary,
 } from "@/ipc/bindings";
-import { MOCK_CHANGE, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
+import { MOCK_CHANGE, mockAdoptResult, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
 
 const problem = (code: IpcError["code"], message: string): IpcError => ({ code, message });
 
@@ -568,6 +584,8 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
     entries: [
       { name: "code-review", path: "~/.claude/skills/code-review", class: "managed", linkTarget: "%LOCALAPPDATA%/Loadout/store/skills/code-review", skillId: "code-review", description: "Review a diff for correctness, security and style before it lands." },
       { name: "pdf-tools", path: "~/.claude/skills/pdf-tools", class: "unmanaged", linkTarget: null, skillId: null, description: "Fill and split PDF files." },
+      { name: "release-notes", path: "~/.claude/skills/release-notes", class: "unmanaged", linkTarget: null, skillId: null, description: "Draft release notes from merged pull requests." },
+      { name: "My Notes", path: "~/.claude/skills/My Notes", class: "unmanaged", linkTarget: null, skillId: null, description: null },
     ],
   },
   {
@@ -577,6 +595,7 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
     exists: true,
     entries: [
       { name: "code-review", path: "~/.omp/agent/skills/code-review", class: "managed", linkTarget: "%LOCALAPPDATA%/Loadout/store/skills/code-review", skillId: "code-review", description: "Review a diff for correctness, security and style before it lands." },
+      { name: "release-notes", path: "~/.omp/agent/skills/release-notes", class: "unmanaged", linkTarget: null, skillId: null, description: "Release notes with a changelog section and upgrade notes." },
     ],
   },
   {
@@ -586,9 +605,172 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
     exists: true,
     entries: [
       { name: "incident-triage", path: "~/.codex/skills/incident-triage", class: "mismatch", linkTarget: null, skillId: "incident-triage", description: null },
+      { name: "pdf-tools", path: "~/.codex/skills/pdf-tools", class: "unmanaged", linkTarget: null, skillId: null, description: "Fill and split PDF files." },
     ],
   },
 ];
+
+/* M34 skills adopt (#3): the unmanaged folders above as the adopt scan sees them. */
+const UNMANAGED_SKILLS: UnmanagedSkills = {
+  candidates: [
+    {
+      name: "pdf-tools",
+      conflict: false,
+      variants: [
+        {
+          hash: "b3f1c2a9d0e4",
+          folders: [
+            { client: "claude-code", path: "~/.claude/skills/pdf-tools" },
+            { client: "codex", path: "~/.codex/skills/pdf-tools" },
+          ],
+          inStore: false,
+          description: "Fill and split PDF files.",
+          bytes: 6_140,
+        },
+      ],
+    },
+    {
+      name: "release-notes",
+      conflict: true,
+      variants: [
+        {
+          hash: "5d8e0a7c1b22",
+          folders: [{ client: "claude-code", path: "~/.claude/skills/release-notes" }],
+          inStore: false,
+          description: "Draft release notes from merged pull requests.",
+          bytes: 2_310,
+        },
+        {
+          hash: "9a4f6e3d2c10",
+          folders: [{ client: "omp", path: "~/.omp/agent/skills/release-notes" }],
+          inStore: false,
+          description: "Release notes with a changelog section and upgrade notes.",
+          bytes: 3_985,
+        },
+      ],
+    },
+    {
+      name: "incident-triage",
+      conflict: true,
+      variants: [
+        { hash: "17c0e9b4a6f3", folders: [], inStore: true, description: "Triage an incident from alerts to a first summary.", bytes: 4_402 },
+        {
+          hash: "e2a95d7f8b01",
+          folders: [{ client: "codex", path: "~/.codex/skills/incident-triage" }],
+          inStore: false,
+          description: "Triage an incident, with the on-call runbook links.",
+          bytes: 5_017,
+        },
+      ],
+    },
+  ],
+  problems: [
+    {
+      client: "claude-code",
+      name: "My Notes",
+      path: "~/.claude/skills/My Notes",
+      error: problem("invalid_id", "\"My Notes\" is not a skill id; import it under another id"),
+    },
+  ],
+};
+
+/** The scan of one client: its folders only; a name with one content left is no conflict. */
+function unmanagedSkills(client: string | null): UnmanagedSkills {
+  if (!client) {
+    return UNMANAGED_SKILLS;
+  }
+  const candidates = UNMANAGED_SKILLS.candidates
+    .map((candidate) => {
+      const variants = candidate.variants
+        .map((variant) => ({ ...variant, folders: variant.folders.filter((folder) => folder.client === client) }))
+        .filter((variant) => variant.inStore || variant.folders.length > 0);
+      return { ...candidate, variants, conflict: variants.length > 1 };
+    })
+    .filter((candidate) => candidate.variants.some((variant) => variant.folders.length > 0));
+  return { candidates, problems: UNMANAGED_SKILLS.problems.filter((entry) => entry.client === client) };
+}
+
+/**
+ * An adopt of the demo folders by the core's rules (a conflict without a
+ * choice stays a conflict), with the Codex copy of pdf-tools kept: it holds
+ * a git repository.
+ */
+function adoptResult(client: string | null, choices: SkillAdoptChoice[]): SkillAdoptResult {
+  const result = mockAdoptResult(unmanagedSkills(client), choices);
+  const folders = result.folders.map((folder) =>
+    folder.status === "adopted" && folder.client === "codex" && folder.name === "pdf-tools"
+      ? {
+          ...folder,
+          status: "kept" as const,
+          trash: null,
+          error: problem("invalid_value", "the folder holds a git repository, which the store copy leaves out; it is kept"),
+        }
+      : folder,
+  );
+  return { ...result, folders, needsAttention: result.needsAttention || folders.some((folder) => folder.status === "kept") };
+}
+
+/* M34 Discover projects (#3): folders the clients know that are not projects here. */
+const DISCOVERY: ProjectDiscovery = {
+  candidates: [
+    {
+      id: "d-4c1f0e9a7b32",
+      name: "data-pipeline",
+      path: "~/Code/data-pipeline",
+      clients: ["claude-code", "codex"],
+      manifest: null,
+      error: null,
+    },
+    {
+      id: "d-8e2d5a1c9f04",
+      name: "docs-site",
+      path: "~/Code/docs-site",
+      clients: ["claude-code", "omp"],
+      manifest: { id: "docs-site-5b7e", name: "Docs site", layout: "shared", known: false },
+      error: null,
+    },
+    {
+      id: "d-b05e7c3a2d61",
+      name: "mobile-app",
+      path: "%EXTERNAL%/Projects/mobile-app",
+      clients: ["omp"],
+      manifest: null,
+      error: null,
+    },
+    {
+      id: "d-f3a90b6d1e58",
+      name: "legacy-cms",
+      path: "~/Code/legacy-cms",
+      clients: ["claude-code"],
+      manifest: null,
+      error: problem("parse_error", "<P>/.loadout/project.toml is not valid TOML (line 4)"),
+    },
+  ],
+  warnings: [problem("parse_error", "~/.codex/config.toml could not be read; the other clients were")],
+};
+
+function discoveredAdded(ids: string[]): DiscoveredProjectsAdded {
+  const picked = DISCOVERY.candidates.filter((candidate) => ids.includes(candidate.id));
+  return {
+    commit: picked.length > 0 ? MOCK_CHANGE.commit : null,
+    added: picked
+      .filter((candidate) => candidate.name !== "mobile-app")
+      .map((candidate) => ({
+        candidate: candidate.id,
+        id: candidate.manifest?.id ?? `${candidate.name}-${candidate.id.slice(2, 6)}`,
+        path: candidate.path,
+        createdManifest: candidate.manifest === null,
+        trust: "untrusted" as const,
+      })),
+    failed: picked
+      .filter((candidate) => candidate.name === "mobile-app")
+      .map((candidate) => ({
+        candidate: candidate.id,
+        path: candidate.path,
+        error: problem("already_exists", "project mobile-app-0c3e is known at another folder that still holds it"),
+      })),
+  };
+}
 
 // --- Tools --------------------------------------------------------------------
 
@@ -832,6 +1014,206 @@ const MIGRATION: MigrationReport = {
   ],
 };
 
+/* M33 MCP import and not-managed entries (#3, #9): foreign entries in the client files. */
+const USER_FILES: Record<string, string> = {
+  "claude-code": "~/.claude.json",
+  omp: "~/.omp/agent/mcp.json",
+  cursor: "~/.cursor/mcp.json",
+  codex: "~/.codex/config.toml",
+};
+
+function importDraft(id: string, fields: Partial<ServerDraft>): ServerDraft {
+  return {
+    id,
+    displayName: null,
+    description: null,
+    transport: "stdio",
+    command: null,
+    args: [],
+    url: null,
+    cwd: null,
+    env: [],
+    headers: [],
+    clients: { allDetected: false, clients: [] },
+    delivery: null,
+    toolsAllow: [],
+    toolsDeny: [],
+    ...fields,
+  };
+}
+
+function userSource(client: string, name: string): ImportSource {
+  return { key: client, id: `${client}/${name}`, client, scope: "user", projectId: null, trusted: null, file: USER_FILES[client] };
+}
+
+function projectSource(client: string, name: string, project: ProjectRow, file: string): ImportSource {
+  const key = `${client}@${project.id}`;
+  return { key, id: `${key}/${name}`, client, scope: "project", projectId: project.id, trusted: project.trust === "trusted", file };
+}
+
+function importVariant(fields: Partial<ImportVariant> & Pick<ImportVariant, "key" | "suggestedId" | "sources">): ImportVariant {
+  return { draft: null, error: null, enables: true, secrets: [], ...fields };
+}
+
+const [WEB_SHOP, API_GATEWAY] = PROJECTS;
+
+const IMPORT_CANDIDATES: ImportCandidate[] = [
+  {
+    name: "notion",
+    inStore: false,
+    conflict: false,
+    variants: [
+      importVariant({
+        key: "omp",
+        suggestedId: "notion",
+        draft: importDraft("notion", {
+          command: "npx",
+          args: ["-y", "@notionhq/notion-mcp-server"],
+          env: [{ key: "NOTION_TOKEN", value: "${secret:NOTION_NOTION_TOKEN}" }],
+        }),
+        secrets: [{ field: "env.NOTION_TOKEN", suggestedAlias: "NOTION_NOTION_TOKEN", reason: "token_format" }],
+        sources: [userSource("omp", "notion"), userSource("claude-code", "notion")],
+      }),
+    ],
+  },
+  {
+    name: "docs",
+    inStore: false,
+    conflict: true,
+    variants: [
+      importVariant({
+        key: "omp",
+        suggestedId: "docs",
+        draft: importDraft("docs", { transport: "http", url: "https://docs.example.dev/mcp" }),
+        sources: [userSource("omp", "docs")],
+      }),
+      importVariant({
+        key: "cursor",
+        suggestedId: "docs-cursor",
+        draft: importDraft("docs-cursor", { command: "docs-mcp", args: ["--stdio", "--root", "~/Docs"] }),
+        sources: [userSource("cursor", "docs")],
+      }),
+    ],
+  },
+  {
+    name: "brave-search",
+    inStore: false,
+    conflict: false,
+    variants: [
+      importVariant({
+        key: "cursor",
+        suggestedId: "brave-search",
+        draft: importDraft("brave-search", {
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-brave-search"],
+          env: [{ key: "BRAVE_API_KEY", value: "${secret:BRAVE_SEARCH_BRAVE_API_KEY}" }],
+        }),
+        secrets: [{ field: "env.BRAVE_API_KEY", suggestedAlias: "BRAVE_SEARCH_BRAVE_API_KEY", reason: "sensitive_key" }],
+        sources: [userSource("cursor", "brave-search"), projectSource("cursor", "brave-search", WEB_SHOP, "<P>/.cursor/mcp.json")],
+      }),
+    ],
+  },
+  {
+    name: "stripe",
+    inStore: false,
+    conflict: false,
+    variants: [
+      importVariant({
+        key: `claude-code@${API_GATEWAY.id}`,
+        suggestedId: "stripe",
+        enables: false,
+        draft: importDraft("stripe", {
+          command: "npx",
+          args: ["-y", "@stripe/mcp", "--tools=all"],
+          env: [{ key: "STRIPE_SECRET_KEY", value: "${secret:STRIPE_STRIPE_SECRET_KEY}" }],
+        }),
+        secrets: [{ field: "env.STRIPE_SECRET_KEY", suggestedAlias: "STRIPE_STRIPE_SECRET_KEY", reason: "sensitive_key" }],
+        sources: [projectSource("claude-code", "stripe", API_GATEWAY, "<P>/.mcp.json")],
+      }),
+    ],
+  },
+  {
+    name: "context7",
+    inStore: true,
+    conflict: false,
+    variants: [
+      importVariant({
+        key: "codex",
+        suggestedId: "context7",
+        draft: importDraft("context7", { command: "npx", args: ["-y", "@upstash/context7-mcp"] }),
+        sources: [userSource("codex", "context7")],
+      }),
+    ],
+  },
+  {
+    name: "local-scripts",
+    inStore: false,
+    conflict: false,
+    variants: [
+      importVariant({
+        key: "codex",
+        suggestedId: "local-scripts",
+        error: problem("invalid_value", "unsupported variable in args"),
+        sources: [userSource("codex", "local-scripts")],
+      }),
+    ],
+  },
+];
+
+/** Acknowledged on this machine (Dismiss adds to it): the notice names omp's two new entries. */
+const ACKNOWLEDGED = new Set([
+  "claude-code/notion",
+  "cursor/docs",
+  "cursor/brave-search",
+  "codex/context7",
+  "codex/local-scripts",
+  `cursor@${WEB_SHOP.id}/brave-search`,
+  `claude-code@${API_GATEWAY.id}/stripe`,
+]);
+
+function unmanagedSummary(scope: ImportScope | null): UnmanagedSummary {
+  const groups: UnmanagedGroup[] = [];
+  for (const candidate of IMPORT_CANDIDATES) {
+    for (const source of candidate.variants.flatMap((variant) => variant.sources)) {
+      const inScope =
+        scope?.kind === "project" ? source.projectId === scope.id : scope?.kind === "projects" ? source.scope !== "user" : scope?.kind === "all" || source.scope === "user";
+      if (!inScope) {
+        continue;
+      }
+      let group = groups.find((item) => item.client === source.client && item.projectId === source.projectId);
+      if (!group) {
+        group = { client: source.client, scope: source.scope, projectId: source.projectId, files: [source.file], entries: [] };
+        groups.push(group);
+      }
+      group.entries.push({ id: source.id, name: candidate.name, new: !ACKNOWLEDGED.has(source.id) });
+    }
+  }
+  const entries = groups.flatMap((group) => group.entries);
+  return { groups, total: entries.length, new: entries.filter((entry) => entry.new).length };
+}
+
+function importApplied(choices: ImportChoices): ImportApplied {
+  const result: ImportApplied = { imported: [], definitionOnly: [], skipped: [], secrets: [], change: MOCK_CHANGE };
+  for (const pick of choices.picks) {
+    const variant = IMPORT_CANDIDATES.find((candidate) => candidate.name === pick.name)?.variants.find((item) => item.key === pick.source);
+    if (!variant) {
+      result.skipped.push({ name: pick.name, error: problem("not_found", "gone since the scan") });
+      continue;
+    }
+    (variant.enables ? result.imported : result.definitionOnly).push(pick.id);
+    for (const choice of choices.secrets.filter((item) => item.name === pick.name)) {
+      const key = (choice.field ?? "").replace(/^\w+\./, "");
+      result.secrets.push({
+        alias: `${pick.id}_${key}`.toUpperCase().replace(/[^A-Z0-9]+/g, "_"),
+        server: pick.id,
+        field: choice.field ?? "",
+        destination: choice.target.kind,
+      });
+    }
+  }
+  return result;
+}
+
 // --- The dataset --------------------------------------------------------------
 
 const notMocked = (what: string) => mockIpcError({ code: "not_found", message: `${what} is not in the demo dataset` });
@@ -903,6 +1285,19 @@ export function buildDemoDataset(): MockTransportOptions {
         ok({ aliases: ALIASES, undefined: ["LINEAR_API_KEY"], environment: null, opAccount: "work.1password.com", serviceAccountSet: false }),
       listSkills: async (scope) => ok(skillList(scope)),
       listSkillToolDirs: async () => ok(SKILL_TOOL_DIRS),
+      /* M34 */
+      scanUnmanagedSkills: async (_scope, client) => ok(unmanagedSkills(client)),
+      adoptSkills: async (_scope, client, choices) => ok(adoptResult(client, choices)),
+      discoverProjects: async () => ok(DISCOVERY),
+      addDiscoveredProjects: async (ids) => ok(discoveredAdded(ids)),
+      /* M33 */
+      scanImport: async () => ok({ candidates: IMPORT_CANDIDATES, warnings: [] }),
+      applyImport: async (choices) => ok(importApplied(choices)),
+      unmanagedSummary: async (scope) => ok(unmanagedSummary(scope)),
+      acknowledgeUnmanaged: async (ids) => {
+        ids.forEach((id) => ACKNOWLEDGED.add(id));
+        return ok(ids.length);
+      },
       listSkillFiles: async () =>
         ok([
           { path: "SKILL.md", bytes: 3_412 },

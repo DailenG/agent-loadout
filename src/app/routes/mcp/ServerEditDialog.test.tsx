@@ -6,6 +6,11 @@ import type { ClientPreview, ConvertedServer, ServerDraft } from "@/ipc/bindings
 import { MOCK_CLIENTS, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import { ServerEditDialog, type ServerEditDialogProps } from "./ServerEditDialog";
+// The TOML tab loads CodeMirror lazily (React.lazy). Under a loaded test run
+// that first import can outlast waitFor's 1 s default and fail the first test
+// to open the tab; importing the module here makes the lazy import resolve
+// from the module cache.
+import "./TomlEditor";
 
 // jsdom has no layout; CodeMirror measures text ranges.
 beforeAll(() => {

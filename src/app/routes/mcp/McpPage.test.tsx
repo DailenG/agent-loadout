@@ -59,7 +59,7 @@ const LIST: ServerList = {
 function renderPage() {
   const onOpenPending = vi.fn();
   const onOpenInstall = vi.fn();
-  const view = renderWithProviders(<McpPage onOpenPending={onOpenPending} onOpenInstall={onOpenInstall} />, {
+  const view = renderWithProviders(<McpPage onOpenPending={onOpenPending} onOpenInstall={onOpenInstall} onOpenImport={vi.fn()} />, {
     commands: { listServers: async () => ok(LIST) },
   });
   return { onOpenPending, onOpenInstall, ...view };
@@ -154,7 +154,7 @@ describe("McpPage", () => {
   });
 
   it("shows the empty state with Add and Paste config", async () => {
-    renderWithProviders(<McpPage onOpenPending={vi.fn()} onOpenInstall={vi.fn()} />);
+    renderWithProviders(<McpPage onOpenPending={vi.fn()} onOpenInstall={vi.fn()} onOpenImport={vi.fn()} />);
     expect(await screen.findByText("No MCP servers yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add server" })).toBeInTheDocument();
     const toolbar = screen.getByTestId("header-toolbar");
@@ -187,7 +187,7 @@ describe("McpPage", () => {
       const [open, setOpen] = useState(false);
       return (
         <>
-          <McpPage onOpenPending={() => setOpen(true)} onOpenInstall={vi.fn()} />
+          <McpPage onOpenPending={() => setOpen(true)} onOpenInstall={vi.fn()} onOpenImport={vi.fn()} />
           <ApplyDrawer open={open} onClose={() => setOpen(false)} />
         </>
       );

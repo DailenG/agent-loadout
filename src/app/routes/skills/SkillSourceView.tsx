@@ -3,12 +3,14 @@
 // row per entry of a tool's skill folder with its management status badge (managed, unmanaged,
 // conflict), import, open folder, two-click delete and expandable details. Delete moves the entry
 // to the trash and never deletes (SPEC 12.5); managed entries link to their store skill instead.
-// The agents CLI list (SPEC 12.4) is new.
+// The agents CLI list (SPEC 12.4) is new. Adopt (one folder, or every name with one content)
+// replaces real folders with links to the store (#3).
 
 import { useEffect, useRef, useState } from "react";
 import { t } from "@/i18n/en";
 import type { AgentsCliList, SkillScope, ToolSkillDir, ToolSkillEntry } from "@/ipc/bindings";
 import { IpcFailure } from "@/ipc/transport";
+import { AdoptDialog } from "../import/skills/AdoptDialog";
 import { DeleteIcon } from "../mcp/icons";
 import { useSkillActions } from "./actions";
 import { FolderIcon, ImportIcon, SkillMonogram } from "./icons";
@@ -21,11 +23,13 @@ type EntryRowProps = {
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onShowManaged: (skillId: string) => void;
+  /** Opens the adopt dialog for this folder. */
+  onAdopt: () => void;
   /** Asks the user before importing under a new id; resolves true to go on. */
   confirmRename: () => Promise<boolean>;
 };
 
-function EntryRow({ dir, entry, scope, expanded, onExpandedChange, onShowManaged, confirmRename }: EntryRowProps) {
+function EntryRow({ dir, entry, scope, expanded, onExpandedChange, onShowManaged, onAdopt, confirmRename }: EntryRowProps) {
   const actions = useSkillActions();
   const [isImporting, setIsImporting] = useState(false);
   const [isTrashConfirming, setIsTrashConfirming] = useState(false);
@@ -108,6 +112,17 @@ function EntryRow({ dir, entry, scope, expanded, onExpandedChange, onShowManaged
             onClick={() => onShowManaged(entry.skillId!)}
           >
             {t("skills.source.showManaged")}
+          </button>
+        ) : null}
+        {entry.class !== "managed" && !entry.linkTarget ? (
+          <button
+            className="secondary-button secondary-button--compact"
+            type="button"
+            onClick={onAdopt}
+            aria-label={t("skills.source.adoptAria", { name: entry.name })}
+            data-tooltip={t("skills.source.adoptTooltip")}
+          >
+            {t("skills.source.adopt")}
           </button>
         ) : null}
         {entry.class === "unmanaged" && !entry.linkTarget ? (
@@ -214,18 +229,28 @@ type ToolSkillListProps = {
 /** One client's skill folder (SPEC 12.5). */
 export function ToolSkillList({ dir, scope, query, onShowManaged, confirmRename }: ToolSkillListProps) {
   const [expanded, setExpanded] = useState("");
+  // `""`: every name with one content; a name: that folder.
+  const [adopting, setAdopting] = useState<string | null>(null);
   const needle = query.trim().toLowerCase();
   const rows = dir.entries.filter(
     (entry) => !needle || [entry.name, entry.description ?? "", entry.path].join(" ").toLowerCase().includes(needle),
   );
+  const hasRealFolders = dir.entries.some((entry) => entry.class !== "managed" && !entry.linkTarget);
 
   return (
     <>
-      <p className="skills-source-folder" title={dir.dir}>
-        {dir.exists
-          ? t("skills.source.folder", { path: dir.dir })
-          : t("skills.source.folderMissing", { tool: dir.name, path: dir.dir })}
-      </p>
+      <div className="skills-source-folder-row">
+        <p className="skills-source-folder" title={dir.dir}>
+          {dir.exists
+            ? t("skills.source.folder", { path: dir.dir })
+            : t("skills.source.folderMissing", { tool: dir.name, path: dir.dir })}
+        </p>
+        {hasRealFolders ? (
+          <button className="secondary-button secondary-button--compact" type="button" onClick={() => setAdopting("")}>
+            {t("skills.source.adoptAll")}
+          </button>
+        ) : null}
+      </div>
       <div className="card-list">
         {rows.length > 0 ? (
           rows.map((entry) => (
@@ -237,6 +262,7 @@ export function ToolSkillList({ dir, scope, query, onShowManaged, confirmRename 
               expanded={expanded === entry.name}
               onExpandedChange={(open) => setExpanded(open ? entry.name : "")}
               onShowManaged={onShowManaged}
+              onAdopt={() => setAdopting(entry.name)}
               confirmRename={confirmRename}
             />
           ))
@@ -247,6 +273,19 @@ export function ToolSkillList({ dir, scope, query, onShowManaged, confirmRename 
           </div>
         )}
       </div>
+      {adopting !== null ? (
+        <AdoptDialog
+          title={
+            adopting
+              ? t("skills.source.adoptDialog.title", { name: adopting })
+              : t("skills.source.adoptAllDialog.title", { tool: dir.name })
+          }
+          scope={scope}
+          client={dir.client}
+          name={adopting || undefined}
+          onClose={() => setAdopting(null)}
+        />
+      ) : null}
     </>
   );
 }

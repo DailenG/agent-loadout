@@ -83,7 +83,7 @@ describe("Refresh buttons", () => {
 
   it("rechecks the servers from the MCP toolbar", async () => {
     const { transport, user } = renderWithProviders(
-      <McpPage onOpenPending={() => undefined} onOpenInstall={() => undefined} />,
+      <McpPage onOpenPending={() => undefined} onOpenInstall={() => undefined} onOpenImport={() => undefined} />,
     );
     const before = await settled(transport, "listServers");
 

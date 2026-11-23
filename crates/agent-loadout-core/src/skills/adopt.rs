@@ -19,15 +19,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::{CoreError, ErrorCode};
+use crate::fs::Fs;
 use crate::layering::{Project, ProjectRepo, same_path};
 use crate::model::applied::Scope;
 use crate::model::clients::ClientSelection;
 use crate::model::ids::{self, IdKind};
 use crate::model::skill_meta::{SkillEnable, SkillMeta, SkillSource, SkillSourceKind};
 use crate::skills::classify::{self, EntryClass};
+use crate::skills::hash_cache::{FolderHashCache, Summary};
 use crate::skills::link::{self, CLIENT_SKILLS, Replacement, SyncReport};
 use crate::skills::{
-    SKILL_FILE, SkillFiles, SkillsEnv, content_hash, files_size, frontmatter, read_folder, store,
+    SKILL_FILE, SkillFiles, SkillsEnv, content_hash, frontmatter, read_folder, store,
 };
 use crate::store::{self as store_mod, CommitId, Operation, Store, Transaction};
 
@@ -51,7 +53,9 @@ pub struct Variant {
     /// `description` from its `SKILL.md`.
     pub description: Option<String>,
     pub bytes: u64,
-    files: SkillFiles,
+    /// The files, when this scan read them ([`scan`]; [`scan_cached`]
+    /// may answer from its cache).
+    files: Option<SkillFiles>,
 }
 
 impl Variant {
@@ -199,7 +203,8 @@ impl AdoptReport {
 }
 
 /// The unmanaged folders of `scope` (`project` for the project scope),
-/// grouped by name, every client's or `client`'s only. Reads only.
+/// grouped by name, every client's or `client`'s only. Reads only; every
+/// folder is read.
 pub fn scan(
     store: Option<&Store<'_>>,
     sx: &SkillsEnv<'_>,
@@ -207,10 +212,59 @@ pub fn scan(
     project: Option<&Path>,
     client: Option<&str>,
 ) -> Result<UnmanagedScan, CoreError> {
+    scan_with(store, sx, scope, project, client, None)
+}
+
+/// [`scan`] with folder contents summarized through `cache`: a folder
+/// whose file listing (paths, sizes, modification times) is unchanged is
+/// not read again. The result is the same as [`scan`]'s, except that its
+/// variants hold no files (an adopt scans again, without the cache).
+pub fn scan_cached(
+    store: Option<&Store<'_>>,
+    sx: &SkillsEnv<'_>,
+    scope: Scope,
+    project: Option<&Path>,
+    client: Option<&str>,
+    cache: &FolderHashCache,
+) -> Result<UnmanagedScan, CoreError> {
+    scan_with(store, sx, scope, project, client, Some(cache))
+}
+
+/// A folder read for a scan: its summary, and its files unless the cache
+/// answered.
+struct Read {
+    summary: Summary,
+    files: Option<SkillFiles>,
+}
+
+fn read(fs: &dyn Fs, dir: &Path, cache: Option<&FolderHashCache>) -> Result<Read, CoreError> {
+    match cache {
+        Some(cache) => Ok(Read {
+            summary: cache.summary(fs, dir)?,
+            files: None,
+        }),
+        None => {
+            let files = read_folder(fs, dir)?;
+            Ok(Read {
+                summary: Summary::of(&files),
+                files: Some(files),
+            })
+        }
+    }
+}
+
+fn scan_with(
+    store: Option<&Store<'_>>,
+    sx: &SkillsEnv<'_>,
+    scope: Scope,
+    project: Option<&Path>,
+    client: Option<&str>,
+    cache: Option<&FolderHashCache>,
+) -> Result<UnmanagedScan, CoreError> {
     if let Some(client) = client {
         link::skills_dir(sx.env, client, scope, project)?;
     }
-    let mut groups: BTreeMap<String, Vec<(FoundFolder, SkillFiles)>> = BTreeMap::new();
+    let mut groups: BTreeMap<String, Vec<(FoundFolder, Read)>> = BTreeMap::new();
     let mut problems = Vec::new();
     // A project's repository: folders it tracks belong to the team.
     let repo = match (scope, project) {
@@ -259,14 +313,14 @@ pub fn scan(
                 ));
                 continue;
             }
-            match read_folder(sx.fs, &entry.path) {
-                Ok(files) if files.contains_key(SKILL_FILE) => {
+            match read(sx.fs, &entry.path, cache) {
+                Ok(found) if found.summary.has_skill_file => {
                     groups.entry(entry.name.clone()).or_default().push((
                         FoundFolder {
                             client: dir.client,
                             path: entry.path.clone(),
                         },
-                        files,
+                        found,
                     ));
                 }
                 Ok(_) => problems.push(problem(store::missing_skill_file(&entry.path))),
@@ -277,46 +331,53 @@ pub fn scan(
     let mut candidates = Vec::new();
     for (name, found) in groups {
         let mut variants: Vec<Variant> = Vec::new();
-        for (folder, files) in found {
-            let hash = content_hash(&files);
-            match variants.iter_mut().find(|variant| variant.hash == hash) {
+        for (folder, found) in found {
+            match variants
+                .iter_mut()
+                .find(|variant| variant.hash == found.summary.hash)
+            {
                 Some(variant) => variant.folders.push(folder),
-                None => variants.push(variant(hash, vec![folder], files)),
+                None => variants.push(variant(found, vec![folder])),
             }
         }
-        if let Some(store) = store
-            && let Some(skill) = store::get(store, &name)?
-        {
-            if !skill.has_content {
-                // Metadata without content: the id is taken, and there is
-                // nothing to compare with.
-                for variant in variants {
-                    for folder in variant.folders {
-                        problems.push(FolderProblem {
-                            client: folder.client,
-                            name: name.clone(),
-                            error: CoreError::new(
-                                ErrorCode::AlreadyExists,
-                                format!(
-                                    "skill {name:?} is in the store without content; remove it \
-                                     or import the folder under another id"
-                                ),
-                            )
-                            .with_path(&folder.path),
-                            path: folder.path,
-                        });
+        if let Some(store) = store {
+            match stored(store, &name, cache)? {
+                Stored::Absent => {}
+                Stored::WithoutContent => {
+                    // Metadata without content (or content that does not
+                    // read): the id is taken, and there is nothing to
+                    // compare with.
+                    for variant in variants {
+                        for folder in variant.folders {
+                            problems.push(FolderProblem {
+                                client: folder.client,
+                                name: name.clone(),
+                                error: CoreError::new(
+                                    ErrorCode::AlreadyExists,
+                                    format!(
+                                        "skill {name:?} is in the store without content; remove \
+                                         it or import the folder under another id"
+                                    ),
+                                )
+                                .with_path(&folder.path),
+                                path: folder.path,
+                            });
+                        }
                     }
+                    continue;
                 }
-                continue;
-            }
-            let files = store::read_content(store, &name)?;
-            let hash = content_hash(&files);
-            match variants.iter_mut().find(|variant| variant.hash == hash) {
-                Some(variant) => variant.in_store = true,
-                None => {
-                    let mut stored = variant(hash, Vec::new(), files);
-                    stored.in_store = true;
-                    variants.push(stored);
+                Stored::Content(found) => {
+                    match variants
+                        .iter_mut()
+                        .find(|variant| variant.hash == found.summary.hash)
+                    {
+                        Some(variant) => variant.in_store = true,
+                        None => {
+                            let mut stored = variant(found, Vec::new());
+                            stored.in_store = true;
+                            variants.push(stored);
+                        }
+                    }
                 }
             }
         }
@@ -329,23 +390,43 @@ pub fn scan(
     })
 }
 
-fn variant(hash: String, folders: Vec<FoundFolder>, files: SkillFiles) -> Variant {
-    Variant {
-        hash,
-        folders,
-        in_store: false,
-        description: description(&files),
-        bytes: files_size(&files),
-        files,
+/// The store skill of a name, as a scan compares with it.
+enum Stored {
+    Absent,
+    /// Metadata only, a store folder that is a link, or content that does
+    /// not read ([`store::StoreSkill::has_content`] false).
+    WithoutContent,
+    Content(Read),
+}
+
+fn stored(
+    store: &Store<'_>,
+    id: &str,
+    cache: Option<&FolderHashCache>,
+) -> Result<Stored, CoreError> {
+    let fs = store.fs();
+    let dir = store::content_dir(store, id)?;
+    match crate::skills::entry(fs, &dir)? {
+        crate::skills::Entry::Dir => Ok(match read(fs, &dir, cache) {
+            Ok(found) => Stored::Content(found),
+            Err(_) => Stored::WithoutContent,
+        }),
+        crate::skills::Entry::Missing if !fs.exists(&store.path(&store::meta_path(id)?)?) => {
+            Ok(Stored::Absent)
+        }
+        _ => Ok(Stored::WithoutContent),
     }
 }
 
-fn description(files: &SkillFiles) -> Option<String> {
-    let text = String::from_utf8_lossy(files.get(SKILL_FILE)?);
-    frontmatter::parse(&text)
-        .ok()
-        .flatten()
-        .and_then(|fm| fm.description().map(str::to_owned))
+fn variant(found: Read, folders: Vec<FoundFolder>) -> Variant {
+    Variant {
+        hash: found.summary.hash,
+        folders,
+        in_store: false,
+        description: found.summary.description,
+        bytes: found.summary.bytes,
+        files: found.files,
+    }
 }
 
 /// Adopt every name with one content; conflicts are left for a choice.
@@ -634,7 +715,8 @@ fn result(
 fn display_name(name: &str, variant: &Variant) -> String {
     variant
         .files
-        .get(SKILL_FILE)
+        .as_ref()
+        .and_then(|files| files.get(SKILL_FILE))
         .and_then(|text| {
             frontmatter::parse(&String::from_utf8_lossy(text))
                 .ok()
@@ -735,7 +817,12 @@ fn stage(
                     "skill {id:?} was added to the store meanwhile"
                 )));
             }
-            store::stage_content(tx, id, &item.variant.files)?;
+            let files = item
+                .variant
+                .files
+                .as_ref()
+                .ok_or_else(|| changed(format!("the content of skill {id:?} was not read")))?;
+            store::stage_content(tx, id, files)?;
             let mut meta = SkillMeta::new(id);
             meta.name = Some(item.display_name.clone());
             meta.source = Some(SkillSource {

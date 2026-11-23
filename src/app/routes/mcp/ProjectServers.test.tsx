@@ -103,7 +103,7 @@ async function renderProjectScope(commands: MockTransportOptions["commands"] = {
   const view = renderWithProviders(
     <>
       <ScopeDriver projectIds={[PROJECT.id]} />
-      <McpPage onOpenPending={onOpenPending} onOpenInstall={() => undefined} />
+      <McpPage onOpenPending={onOpenPending} onOpenInstall={() => undefined} onOpenImport={() => undefined} />
     </>,
     {
       commands: {

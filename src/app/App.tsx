@@ -23,7 +23,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
-import { storeQueryKeys } from "@/app/apply/changeNotice";
+import { importQueryKeys, NOTICE_STALE_MS, storeQueryKeys } from "@/app/apply/changeNotice";
 import { useDriftTriggers } from "@/app/apply/driftTriggers";
 import { PendingChangesPill } from "@/app/apply/PendingChangesPill";
 import { AppTooltip } from "@/app/components/AppTooltip";
@@ -32,6 +32,8 @@ import { HeaderToolbarProvider } from "@/app/components/HeaderSlots";
 import { NotificationProvider, useNotifications } from "@/app/components/notifications";
 import { SettingsGroup, SettingsItem, ThemePicker } from "@/app/components/SettingsGroup";
 import { useThemePreference, type ThemePreference } from "@/app/components/theme";
+import type { ImportTarget } from "@/app/routes/import/model";
+import { UnmanagedNotice, UnmanagedNoticeSetting } from "@/app/routes/import/UnmanagedNotice";
 import { MigrateSection } from "@/app/routes/migrate/MigrateSection";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
 import { SkillsPage } from "@/app/routes/skills/SkillsPage";
@@ -57,6 +59,9 @@ const HistoryPage = lazy(() =>
 );
 const InstallPage = lazy(() =>
   import("@/app/routes/install/InstallPage").then((module) => ({ default: module.InstallPage })),
+);
+const ImportPage = lazy(() =>
+  import("@/app/routes/import/ImportPage").then((module) => ({ default: module.ImportPage })),
 );
 const McpPage = lazy(() => import("@/app/routes/mcp/McpPage").then((module) => ({ default: module.McpPage })));
 const ProjectsPage = lazy(() =>
@@ -87,6 +92,7 @@ export type RouteKey =
   | "projects"
   | "tools"
   | "install"
+  | "import"
   | "publish"
   | "history"
   | "settings"
@@ -151,6 +157,12 @@ const routes: RouteDefinition[] = [
     emptyKey: "page.empty.install",
   },
   {
+    key: "import",
+    labelKey: "app.nav.import.label",
+    descriptionKey: "app.nav.import.description",
+    emptyKey: "page.empty.title",
+  },
+  {
     key: "publish",
     labelKey: "app.nav.publish.label",
     descriptionKey: "app.nav.publish.description",
@@ -195,8 +207,13 @@ export function createQueryClient() {
   // The plan and the server pills cost a whole plan run each. The watcher,
   // window focus, Refresh and every store change invalidate them explicitly,
   // so a mount (opening the apply drawer, revisiting MCP) reads the cache.
-  for (const queryKey of [storeQueryKeys.pendingPlan, storeQueryKeys.servers]) {
+  for (const queryKey of [storeQueryKeys.pendingPlan, storeQueryKeys.servers, importQueryKeys.unmanaged]) {
     client.setQueryDefaults(queryKey, { staleTime: Infinity });
+  }
+  // The notice's full scans: focus and watcher refetch them at most once a
+  // minute (`throttledDriftQueryKeys`); imports and Refresh always do.
+  for (const queryKey of [importQueryKeys.unmanagedAll, importQueryKeys.unmanagedSkills]) {
+    client.setQueryDefaults(queryKey, { staleTime: NOTICE_STALE_MS });
   }
   return client;
 }
@@ -301,6 +318,21 @@ function NavRouteIcon(props: { route: RouteKey }) {
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
           d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  if (route === "import") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M4.5 13.5v3.8a1.7 1.7 0 0 0 1.7 1.7h11.6a1.7 1.7 0 0 0 1.7-1.7v-3.8M12 4.5v9m0 0-3.5-3.5M12 13.5l3.5-3.5"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.8"
@@ -620,6 +652,7 @@ function SettingsPage(props: {
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   onOpenPending: () => void;
+  onOpenImport: () => void;
 }) {
   return (
     <div className="placeholder-grid settings-page">
@@ -627,9 +660,10 @@ function SettingsPage(props: {
         <SettingsItem label={t("settings.theme.label")} description={t("settings.theme.description")}>
           <ThemePicker value={props.theme} onChange={props.onThemeChange} />
         </SettingsItem>
+        <UnmanagedNoticeSetting />
       </SettingsGroup>
       <VersioningSection onOpenPending={props.onOpenPending} />
-      <MigrateSection onOpenPending={props.onOpenPending} />
+      <MigrateSection onOpenImport={props.onOpenImport} />
       <SecretsSection onOpenPending={props.onOpenPending} />
       <UpdatesSection />
     </div>
@@ -678,6 +712,9 @@ function RoutePage(props: {
   route: RouteDefinition;
   onNavigate: (route: RouteKey) => void;
   onOpenPending: () => void;
+  /** Opens the Import page, with an entry picked when `target` is given. */
+  onOpenImport: (target?: ImportTarget) => void;
+  importTarget: ImportTarget | null;
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
 }) {
@@ -688,6 +725,7 @@ function RoutePage(props: {
         theme={props.theme}
         onThemeChange={props.onThemeChange}
         onOpenPending={props.onOpenPending}
+        onOpenImport={() => props.onOpenImport()}
       />
     );
   }
@@ -699,11 +737,12 @@ function RoutePage(props: {
       <McpPage
         onOpenPending={props.onOpenPending}
         onOpenInstall={() => props.onNavigate("install")}
+        onOpenImport={props.onOpenImport}
       />
     );
   }
   if (route.key === "tools") {
-    return <ToolsPage onOpenMcp={() => props.onNavigate("mcp")} />;
+    return <ToolsPage onOpenMcp={() => props.onNavigate("mcp")} onOpenImport={props.onOpenImport} />;
   }
   if (route.key === "history") {
     return (
@@ -721,6 +760,9 @@ function RoutePage(props: {
   }
   if (route.key === "install") {
     return <InstallPage onOpenSkills={() => props.onNavigate("skills")} />;
+  }
+  if (route.key === "import") {
+    return <ImportPage target={props.importTarget} onOpenPending={props.onOpenPending} />;
   }
   return <EmptyPage message={t(route.emptyKey)} />;
 }
@@ -764,6 +806,7 @@ function AppContent(props: { features: FeatureFlags }) {
   const brandIconRef = useRef<HTMLDivElement | null>(null);
   const pageContentRef = useRef<HTMLElement | null>(null);
   const [activeRoute, setActiveRoute] = useState<RouteKey>("skills");
+  const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarHandleTop, setSidebarHandleTop] = useState<number | null>(null);
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
@@ -782,7 +825,13 @@ function AppContent(props: { features: FeatureFlags }) {
     if (pageContentRef.current) {
       pageContentRef.current.scrollTop = 0;
     }
+    setImportTarget(null);
     setActiveRoute(route);
+  }
+
+  function openImport(target?: ImportTarget) {
+    navigate("import");
+    setImportTarget(target ?? null);
   }
 
   useLayoutEffect(() => {
@@ -874,6 +923,7 @@ function AppContent(props: { features: FeatureFlags }) {
             );
           })}
         </nav>
+        <UnmanagedNotice collapsed={isSidebarCollapsed} onReview={() => openImport()} />
       </aside>
       <main className="main-panel" data-active-route={activeDefinition.key}>
         {isMacOS ? (
@@ -911,6 +961,8 @@ function AppContent(props: { features: FeatureFlags }) {
                   route={activeDefinition}
                   onNavigate={navigate}
                   onOpenPending={openPending}
+                  onOpenImport={openImport}
+                  importTarget={importTarget}
                   theme={theme}
                   onThemeChange={setTheme}
                 />

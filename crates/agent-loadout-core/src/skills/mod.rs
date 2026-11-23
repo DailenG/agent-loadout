@@ -17,6 +17,7 @@ pub mod adopt;
 pub mod agents_cli;
 pub mod classify;
 pub mod frontmatter;
+pub mod hash_cache;
 pub mod install;
 pub mod link;
 #[cfg(test)]

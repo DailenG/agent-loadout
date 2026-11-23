@@ -711,3 +711,209 @@ fn unmanaged_summary_and_acknowledgments() {
     let all = import::summary(&fx.core, Some(ImportScope::User), false).unwrap();
     assert_eq!((all.total, all.new), (3, 1));
 }
+
+/// A machine with `projects` known projects (every other one trusted), each
+/// with a `.mcp.json` of `entries` foreign entries; omp's default and work
+/// profiles; and one `~/.claude.json` holding user entries, a private
+/// container for each known project and `unrelated` other folders.
+fn large_fixture(fx: &Fx, projects: usize, unrelated: usize, entries: usize) {
+    use agent_loadout_core::adapters::adapter;
+    use agent_loadout_core::model::applied::Scope;
+    use agent_loadout_core::model::clients::ClientPrefs;
+
+    drop(fx.store());
+    let fs = fx.core.fs.as_ref();
+    let state = fx.core.home.state_dir();
+    let machine = agent_loadout_core::store::Machine::load(fs, &state)
+        .unwrap()
+        .unwrap()
+        .id;
+    let entry = |i: usize, tag: &str| (format!("srv-{i}"), stdio("npx", &["-y", tag]));
+    let block = |tag: &str| -> String {
+        (0..entries)
+            .map(|i| {
+                let (name, value) = entry(i, tag);
+                format!("\"{name}\": {value}")
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut overlay = format!(
+        "schema = 1\nmachine_id = \"{machine}\"\nlabel = \"test-desk\"\nos = \"{}\"\n",
+        fx.core.env.os().as_str()
+    );
+    let mut trust = TrustStore::load(fs, &state).unwrap();
+    let claude = adapter("claude-code").unwrap();
+    let mut claude_projects = Vec::new();
+    for p in 0..projects {
+        let id = format!("proj{p}-ab12");
+        let root = fx.th.projects().join(format!("proj{p}"));
+        write(
+            &root.join(".loadout").join("project.local.toml"),
+            &format!("schema = 1\nid = \"{id}\"\nname = \"proj{p}\"\n"),
+        );
+        write(
+            &root.join(".mcp.json"),
+            &format!("{{\"mcpServers\": {{{}}}}}\n", block("mcp")),
+        );
+        overlay.push_str(&format!(
+            "\n[projects.{id}]\npath = {:?}\n",
+            root.to_string_lossy()
+        ));
+        if p % 2 == 0 {
+            trust.trust(&Project::load(fs, &root).unwrap().unwrap());
+        }
+        let target = claude
+            .mcp_targets(
+                &fx.core.env,
+                fs,
+                Scope::ProjectLocal,
+                Some(&root),
+                &ClientPrefs::default(),
+            )
+            .unwrap()
+            .swap_remove(0);
+        claude_projects.push(target.container_keys().unwrap()[1].clone());
+    }
+    trust.save(fs, &state).unwrap();
+    for u in 0..unrelated {
+        claude_projects.push(format!("/elsewhere/folder-{u}"));
+    }
+    let projects_json = claude_projects
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            format!(
+                "{}: {{\"mcpServers\": {{{}}}}}",
+                serde_json::to_string(key).unwrap(),
+                block(&format!("local-{}", i % 3))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    write(
+        &fx.claude(),
+        &format!(
+            "{{\"mcpServers\": {{{}}},\n\"projects\": {{\n{projects_json}\n}}}}\n",
+            block("user")
+        ),
+    );
+    write(&omp(fx), &servers(&[("docs", &stdio("docs-mcp", &[]))]));
+    write(
+        &fx.th
+            .home()
+            .join(".omp")
+            .join("profiles")
+            .join("work")
+            .join("agent")
+            .join("mcp.json"),
+        &servers(&[("docs", &stdio("docs-mcp", &["--work"]))]),
+    );
+    fx.stage(&[
+        (&format!("machines/{machine}.toml"), &overlay),
+        (
+            "clients.toml",
+            "schema = 1\n\n[omp]\nprofiles = [\"default\", \"work\"]\n",
+        ),
+    ]);
+}
+
+/// Timing of the unmanaged notice on a large machine (run by hand:
+/// `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored
+/// unmanaged_timing --nocapture`).
+#[test]
+#[ignore]
+fn unmanaged_timing() {
+    let fx = Fx::new();
+    large_fixture(&fx, 30, 300, 10);
+    use agent_loadout_core::apply::import::{ScanFilter, scan_with, store_inputs};
+    use agent_loadout_core::apply::unmanaged::{findings, scan_findings};
+    let runs = 5;
+    let time = |f: &mut dyn FnMut()| {
+        f(); // warm the file system cache
+        let started = std::time::Instant::now();
+        for _ in 0..runs {
+            f();
+        }
+        started.elapsed() / runs
+    };
+    let mut total = 0;
+    let notice = time(&mut || total = import::summary(&fx.core, None, true).unwrap().total);
+    let ax = fx.core.apply_env();
+    let store = fx.core.open_store().unwrap();
+    let inputs = time(&mut || {
+        store_inputs(store.as_ref(), &ax).unwrap();
+    });
+    let (desired, ledger) = store_inputs(store.as_ref(), &ax).unwrap();
+    let filter = ScanFilter::default();
+    let names = time(&mut || {
+        scan_findings(&ax, &desired, &ledger, &filter).unwrap();
+    });
+    let user_only = ScanFilter {
+        clients: None,
+        scope: agent_loadout_core::apply::import::ScanScope::User,
+    };
+    let user = time(&mut || {
+        scan_findings(&ax, &desired, &ledger, &user_only).unwrap();
+    });
+    let claude_only = ScanFilter {
+        clients: Some(vec!["claude-code".to_owned()]),
+        scope: agent_loadout_core::apply::import::ScanScope::All,
+    };
+    let claude = time(&mut || {
+        scan_findings(&ax, &desired, &ledger, &claude_only).unwrap();
+    });
+    println!("unmanaged_timing: user files only {user:?}; claude-code only {claude:?}");
+    // The previous path: a full scan (every entry converted), then findings.
+    let full = time(&mut || {
+        let (candidates, _) = scan_with(&ax, &desired, &ledger, &filter).unwrap();
+        findings(&candidates);
+    });
+    let scan = time(&mut || {
+        import::scan(&fx.core, None).unwrap();
+    });
+    println!(
+        "unmanaged_timing: {total} findings; new_unmanaged {notice:?}; store inputs {inputs:?}; \
+         names-only walk {names:?}; full scan + findings {full:?}; scan_import with previews \
+         {scan:?} (per call)"
+    );
+}
+
+/// The names-only findings of the notice equal the full scan's: same ids,
+/// groups, files and new flags, with projects (trusted or not), omp
+/// profiles and one `~/.claude.json` shared by the user and every project.
+#[test]
+fn names_only_findings_equal_the_full_scan() {
+    use agent_loadout_core::apply::import::{ScanFilter, scan_store};
+    use agent_loadout_core::apply::unmanaged::{self, Seen, store_findings};
+
+    let fx = Fx::new();
+    large_fixture(&fx, 3, 4, 3);
+    import::acknowledge(
+        &fx.core,
+        &["omp/docs".to_owned(), "claude-code/srv-1".to_owned()],
+    )
+    .unwrap();
+    let store = fx.core.open_store().unwrap();
+    let ax = fx.core.apply_env();
+    let seen = Seen::load(fx.core.fs.as_ref(), &fx.core.home.state_dir()).unwrap();
+    let filter = ScanFilter::default();
+    let full = scan_store(store.as_ref(), &ax, &filter).unwrap();
+    let full = unmanaged::groups(unmanaged::findings(&full.candidates), &seen);
+    let (names, _) = store_findings(store.as_ref(), &ax, &filter).unwrap();
+    let names = unmanaged::groups(names, &seen);
+    assert_eq!(names, full);
+    let ids: Vec<&str> = names
+        .iter()
+        .flat_map(|g| g.entries.iter().map(|(f, _)| f.id.as_str()))
+        .collect();
+    for id in [
+        "omp#work/docs",
+        "claude-code/srv-0",
+        "claude-code@proj1-ab12/srv-2",
+        "claude-code@proj2-ab12/local/srv-0",
+    ] {
+        assert!(ids.contains(&id), "{id}: {ids:?}");
+    }
+    assert!(names.iter().flat_map(|g| &g.entries).any(|(_, new)| !new));
+}

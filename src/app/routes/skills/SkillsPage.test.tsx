@@ -7,6 +7,7 @@ import {
   MOCK_SKILL_CHANGE,
   MOCK_SKILL_CLIENTS,
   MOCK_SKILL_INSTALLED,
+  mockAdoptResult,
   mockIpcError,
   ok,
   type MockTransportOptions,
@@ -421,5 +422,104 @@ describe("SkillsPage", () => {
     expect(await screen.findByText("No skills installed yet")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Install from Git" }));
     expect(onOpenInstall).toHaveBeenCalled();
+  });
+
+  it("adopts one folder, or every name with one content, from a tool folder (#3)", async () => {
+    const scan = {
+      candidates: [
+        {
+          name: "hand-made",
+          conflict: false,
+          variants: [
+            { hash: "h-hand", folders: [{ client: "claude-code", path: "~/.claude/skills/hand-made" }], inStore: false, description: "Made by hand.", bytes: 1024 },
+          ],
+        },
+        {
+          name: "two-ways",
+          conflict: true,
+          variants: [
+            { hash: "h-a", folders: [{ client: "claude-code", path: "~/.claude/skills/two-ways" }], inStore: false, description: null, bytes: 512 },
+            { hash: "h-b", folders: [], inStore: true, description: null, bytes: 600 },
+          ],
+        },
+        {
+          name: "notes",
+          conflict: false,
+          variants: [
+            { hash: "h-notes", folders: [{ client: "claude-code", path: "~/.claude/skills/notes" }], inStore: true, description: null, bytes: 256 },
+          ],
+        },
+      ],
+      problems: [],
+    };
+    const { user, transport } = renderPage({
+      scanUnmanagedSkills: async () => ok(scan),
+      // The core's rules: a scanned conflict without a choice is reported as a conflict.
+      adoptSkills: async (_scope, _client, choices) => ok(mockAdoptResult(scan, choices)),
+    });
+    const adoptCalls = () => transport.invocations.filter((call) => call.command === "adoptSkills");
+    await user.click(await screen.findByRole("tab", { name: "Claude Code 3" }));
+    // A link elsewhere is no folder to adopt.
+    expect(within(screen.getByRole("article", { name: "elsewhere" })).queryByRole("button", { name: "Adopt elsewhere" })).toBeNull();
+
+    await expectModalKeyboard(user, {
+      trigger: within(screen.getByRole("article", { name: "hand-made" })).getByRole("button", { name: "Adopt hand-made" }),
+      name: t("skills.source.adoptDialog.title", { name: "hand-made" }),
+      description: t("adopt.dialog.intro"),
+    });
+    await user.click(within(screen.getByRole("article", { name: "hand-made" })).getByRole("button", { name: "Adopt hand-made" }));
+    let dialog = await screen.findByRole("dialog", { name: t("skills.source.adoptDialog.title", { name: "hand-made" }) });
+    expect(await within(dialog).findByRole("checkbox", { name: /hand-made/ })).toBeChecked();
+    expect(within(dialog).queryByText("notes")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: t("adopt.action", { count: 1 }) }));
+    // Every scanned name not offered is skipped explicitly.
+    await waitFor(() =>
+      expect(adoptCalls()[0]?.args).toEqual([
+        { kind: "user" },
+        "claude-code",
+        [
+          { name: "hand-made", action: { kind: "pick", variant: "h-hand" } },
+          { name: "two-ways", action: { kind: "skip" } },
+          { name: "notes", action: { kind: "skip" } },
+        ],
+      ]),
+    );
+    expect(transport.invocations.find((call) => call.command === "scanUnmanagedSkills")?.args).toEqual([
+      { kind: "user" },
+      "claude-code",
+    ]);
+    // The result covers the folder offered: nothing kept, no attention toast.
+    await waitFor(() =>
+      expect(within(dialog).getByRole("status")).toHaveTextContent(
+        t("adopt.result.summary", { adopted: 1, kept: 0, skipped: 0 }),
+      ),
+    );
+    expect(within(dialog).getByRole("heading", { name: t("adopt.result.title") })).toHaveFocus();
+    expect(within(dialog).queryByRole("region", { name: t("adopt.result.kept") })).toBeNull();
+    expect(within(dialog).queryByText("two-ways")).toBeNull();
+    expect(await screen.findByText(t("adopt.done", { count: 1 }))).toBeInTheDocument();
+    expect(screen.queryByText(/stayed as they were/)).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: t("adopt.dialog.close") }));
+
+    // "Adopt all identical" leaves names with several contents out.
+    await user.click(screen.getByRole("button", { name: t("skills.source.adoptAll") }));
+    dialog = await screen.findByRole("dialog", { name: t("skills.source.adoptAllDialog.title", { tool: "Claude Code" }) });
+    expect(await within(dialog).findByRole("checkbox", { name: /hand-made/ })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: /notes/ })).toBeChecked();
+    expect(within(dialog).queryByText("two-ways")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: t("adopt.action", { count: 2 }) }));
+    await waitFor(() =>
+      expect(adoptCalls()[1]?.args[2]).toEqual([
+        { name: "hand-made", action: { kind: "pick", variant: "h-hand" } },
+        { name: "two-ways", action: { kind: "skip" } },
+        { name: "notes", action: { kind: "pick", variant: "h-notes" } },
+      ]),
+    );
+    await waitFor(() =>
+      expect(within(dialog).getByRole("status")).toHaveTextContent(
+        t("adopt.result.summary", { adopted: 2, kept: 0, skipped: 0 }),
+      ),
+    );
+    expect(within(dialog).queryByText("two-ways")).toBeNull();
   });
 });

@@ -23,6 +23,7 @@ use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
 use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, EntryClass};
+use agent_loadout_core::skills::hash_cache::FolderHashCache;
 use agent_loadout_core::skills::install::{self, ChangeKind, InstallRequest, Source, UpdateStatus};
 use agent_loadout_core::skills::link::{self, CLIENT_SKILLS, LinkMethod, LinkStatus, SkillLedger};
 use agent_loadout_core::skills::{
@@ -1636,8 +1637,16 @@ fn problems_of(
         .collect()
 }
 
+/// Content summaries of the folders `scan_unmanaged_skills` read, for this
+/// process: the unmanaged-entry notice scans on focus and watcher events,
+/// and an unchanged folder (same file listing) is not read again.
+static FOLDER_HASHES: std::sync::LazyLock<FolderHashCache> =
+    std::sync::LazyLock::new(FolderHashCache::new);
+
 /// The unmanaged folders of `scope` (every client's, or `client`'s),
-/// grouped by name and content (SPEC 8.6, 12.5). Reads only.
+/// grouped by name and content (SPEC 8.6, 12.5). Reads only; folder
+/// contents come from [`FOLDER_HASHES`] while their listing is unchanged
+/// (an adopt reads and compares every folder again).
 pub fn scan_unmanaged(
     core: &Core,
     scope: &SkillScope,
@@ -1647,8 +1656,15 @@ pub fn scan_unmanaged(
     let env = &core.env;
     let root = root.as_deref();
     let store = core.open_store()?;
-    let scan = adopt::scan(store.as_ref(), &sx(core), scope, root, client)
-        .map_err(|err| scrubbed(env, &err, root))?;
+    let scan = adopt::scan_cached(
+        store.as_ref(),
+        &sx(core),
+        scope,
+        root,
+        client,
+        &FOLDER_HASHES,
+    )
+    .map_err(|err| scrubbed(env, &err, root))?;
     Ok(UnmanagedSkills {
         candidates: scan
             .candidates

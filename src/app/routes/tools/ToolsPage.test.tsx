@@ -155,10 +155,11 @@ const PROJECT_SERVERS: ProjectServerList = {
 
 function renderPage(commands: MockTransportOptions["commands"] = {}, options: Omit<RenderOptions, "commands"> = {}) {
   const onOpenMcp = vi.fn();
+  const onOpenImport = vi.fn();
   const view = renderWithProviders(
     <>
       <ScopeDriver projectIds={[PROJECT.id]} />
-      <ToolsPage onOpenMcp={onOpenMcp} />
+      <ToolsPage onOpenMcp={onOpenMcp} onOpenImport={onOpenImport} />
     </>,
     {
       ...options,
@@ -171,7 +172,7 @@ function renderPage(commands: MockTransportOptions["commands"] = {}, options: Om
       },
     },
   );
-  return { onOpenMcp, ...view };
+  return { onOpenMcp, onOpenImport, ...view };
 }
 
 async function openManage(user: UserEvent, name: string) {

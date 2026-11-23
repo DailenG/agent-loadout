@@ -19,6 +19,7 @@ const PAGES: MessageKey[] = [
   "app.nav.projects.label",
   "app.nav.tools.label",
   "app.nav.install.label",
+  "app.nav.import.label",
   "app.nav.history.label",
   "app.nav.settings.label",
   "app.nav.about.label",

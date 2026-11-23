@@ -42,6 +42,54 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 - App backend for skill adopt and Discover projects:
   `scan_unmanaged_skills`, `adopt_skills`, `discover_projects` and
   `add_discovered_projects` (#3).
+- App: the Import page's **Skills** section lists the unmanaged skill
+  folders of the active scope (every client or one): a name with the same
+  content everywhere is one row, a name with several contents asks to use
+  one content, keep each (the others as `name-<client>`, with a hint that
+  their `SKILL.md` keeps the original name) or skip. **Adopt** shows what
+  was adopted, what was kept and why (differs, holds a repository, tracked
+  by the project, an empty folder or executable file the store would
+  lose), and where the originals went in the trash. An untrusted project
+  offers **Review & trust** first (#3).
+- App: a client's skill folder on the Skills page gains **Adopt** on each
+  real folder and **Adopt all identical** for every name with one content
+  (#3).
+- App: **Discover projects** on the Import page and in the Projects page
+  toolbar and empty state: the folders your clients know, with the clients
+  that know each and its manifest, as a checklist; **Add selected** adds
+  them untrusted and offers **Review & trust** for each added project
+  (#3).
+- App: an **Import** page (after Install) gathers everything that brings an
+  existing setup in: MCP servers, skills, projects and the SkillDock
+  migration, whose entry point moved here from Settings (#3).
+- App: the Import page's **MCP servers** section scans the user files and
+  every known project's files (filter by User files or Projects). Identical
+  entries are one row with their files; a conflict shows its definitions
+  side by side to use one, import both under their own IDs (editable,
+  checked against the store) or skip. Each literal secret goes to the OS
+  keyring (default, the value never shown), a 1Password reference, an
+  environment variable, or the server is skipped. **Review import** sums
+  up what is imported, for which clients, and where each secret goes;
+  one apply follows, and the result lists imported, skipped (with the
+  reason) and moved secrets, with **Open Pending changes** in review mode.
+  An entry found only in project files is marked **Definition only** and
+  offers **Add to project manifest**, enabled for the clients whose files
+  hold it: an entry in a shared file goes to the shared manifest by
+  default; for Claude Code and Devin, which also have a private target,
+  **Private** adds a private entry instead and leaves the shared one. An
+  untrusted project asks for **Review & trust** first (#3).
+- App: **Not managed by Loadout** lists the foreign MCP entries of the
+  active scope per client and file on the MCP page and in Tools > Manage,
+  with "N managed, M not managed by Loadout" and **Import...** on each
+  entry, which opens the Import page with that entry picked; each Tools
+  card shows its client's count (#3).
+- App: a sidebar notice after the watcher, window focus or Refresh, such
+  as "omp has 5 MCP servers not managed by Loadout.", with skill folders
+  counted too. **Review** opens the Import page; Review and Dismiss
+  acknowledge what was shown, so the same entries never show again.
+  Focus and watcher events scan client files and skill folders at most
+  once a minute; Settings > Preferences > **Not-managed notice** turns it
+  off (#9).
 
 ### Changed
 

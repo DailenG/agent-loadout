@@ -169,18 +169,21 @@ No macOS installer is published. Install the CLI with cargo as above.
    in Settings.
 3. Open **Tools** to see which clients Loadout detected and where their
    config files are.
-4. Bring in what you already have:
-   - From SkillDock: Settings, **Migrate from SkillDock...** (or
+4. Bring in what you already have, from the **Import** page or the
+   command line:
+   - From SkillDock: Import, **Migrate from SkillDock...** (or
      `loadout migrate skilldock`). See
      [Migrating from SkillDock](#migrating-from-skilldock).
-   - From your clients' own config files:
-     `loadout import --scan` lists the MCP servers your clients already
-     have; `loadout import` brings them into the store and takes ownership
-     of them (`--only` copies the definitions without enabling them).
-     `loadout skills adopt` lists the skill folders your clients have that
-     Loadout does not manage, and `loadout skills adopt --all` brings them
-     in (see [Skills](#skills)). `loadout project discover` lists the
-     project folders your clients already know.
+   - From your clients' own config files: the Import page's **MCP
+     servers**, **Skills** and **Discover projects** sections (see
+     [Importing in the app](#importing-in-the-app)), or
+     `loadout import --scan`, which lists the MCP servers your clients
+     already have; `loadout import` brings them into the store and takes
+     ownership of them (`--only` copies the definitions without enabling
+     them). `loadout skills adopt` lists the skill folders your clients
+     have that Loadout does not manage, and `loadout skills adopt --all`
+     brings them in (see [Skills](#skills)). `loadout project discover`
+     lists the project folders your clients already know.
 5. Add or edit servers on the **MCP** page and turn them on per client.
    Each change is applied to the client files at once (instant mode), and
    the result is shown in a notification you can undo.
@@ -230,18 +233,23 @@ always starts at User. The pages:
   updates; per-skill details with **Enable in Tools** (per client), Enable
   in Project, files and update diffs. Source tabs show each client's skill
   folder with Managed, Unmanaged and Conflict entries, plus the Agents CLI
-  skills; unmanaged ones can be imported into the store or moved to the
-  trash.
+  skills; unmanaged ones can be adopted (**Adopt** on one folder, **Adopt
+  all identical** for every name with one content), imported into the
+  store or moved to the trash.
 - **MCP**: your servers with their per-client state (enabled, disabled,
   pending, drift, blocked, not supported). At project scope it lists that
   project's manifest servers (see [Projects and trust](#projects-and-trust)).
   Toolbar: search, Refresh, **Paste config** (paste a server entry from any
   client's JSON or TOML) and **Add**. The edit dialog has Form, TOML and
   Preview tabs; Preview shows the entry each client gets, with secrets
-  masked.
-- **Projects**: Add folder, Init manifest..., and per project Open,
-  Effective config (which server each client loads in that folder and from
-  which file), Apply, Remove from list, and Review change & trust.
+  masked. Below the list, **Not managed by Loadout** shows the entries
+  the client files of the scope hold that Loadout leaves alone, per client
+  and file, with **Import...** on each; the line above the list counts
+  both ("7 managed, 3 not managed by Loadout").
+- **Projects**: Add folder, Init manifest..., **Discover projects**, and
+  per project Open, Effective config (which server each client loads in
+  that folder and from which file), Apply, Remove from list, and Review
+  change & trust.
 - **Tools**: every client with its tier, whether it is installed, its user
   and project config files (with Open folder), and a capability summary.
   At project scope the project files are named under that project's
@@ -249,16 +257,21 @@ always starts at User. The pages:
   the store, at project scope in that project's manifest (the store
   servers the project inherits are listed read only, with **Open on MCP
   page**; an untrusted or changed project is read only until **Review &
-  trust**).
+  trust**). Each card counts the client's entries not managed by Loadout,
+  and **Manage** lists them with **Import...**.
 - **Install**: Skill (Git or Local folder or `.zip`/`.skill` archive) and
   MCP (Manual form or Paste config).
+- **Import**: bring in what your clients already have: MCP servers,
+  skill folders, project folders, and the SkillDock migration (see
+  [Importing in the app](#importing-in-the-app)).
 - **History**: every store commit, filtered by All, User or Projects
   (History covers every scope and does not follow the switcher), with Show
   diff, Undo this apply, Restore this version, Restore entity..., Tag and
   Download zip; a Client file backups tab; and the remotes strip with sync
   state and conflicts.
-- **Settings**: App Preferences (Appearance), Versioning & Backup
-  (remotes), Migration, Secrets, and Updates (see [Updates](#updates)).
+- **Settings**: App Preferences (Appearance, the not-managed notice),
+  Versioning & Backup (remotes), Migration (a link to the Import page),
+  Secrets, and Updates (see [Updates](#updates)).
 - **About**: version, app identifier, repository and data directory.
 
 A **pending changes** pill appears in the header when changes wait for
@@ -266,6 +279,53 @@ review or an apply left something blocked or undecided; it opens the
 **Pending changes** drawer with per-file diffs, Apply all, Apply selected,
 Discard pending (review mode) and Resolve... for entries that need a
 decision.
+
+### Importing in the app
+
+The **Import** page's **MCP servers** section reads the MCP entries of
+your user files and of every project this machine knows (trusted or not;
+reading changes nothing) and lists those Loadout does not manage. Filter
+them by **User files** or **Projects**.
+
+- An entry that is the same in several files is one row, with the files
+  listed. It is checked; uncheck what you want to leave alone.
+- A name with different definitions shows them side by side. Choose
+  **Use the definition from ...**, **Import both under their own IDs**
+  (the second gets `NAME-<client>`; you can edit each ID) or **Skip for
+  now**.
+- **Already in the store** marks a name the store has; import it under
+  another ID or leave it.
+- A value that looks like a secret needs a destination: **OS keyring**
+  (the default; the value moves from the client file into the keyring and
+  is never shown), a **1Password reference** (`op://vault/item/field` or
+  `op-env://<environment>/<NAME>`), an **Environment variable**, or **Skip
+  this server**. The store keeps a `${secret:ALIAS}` reference.
+- **Definition only** marks an entry found only in project files: it is
+  stored but enabled nowhere. After the import, **Add to project
+  manifest** names it in that project's manifest, for the clients whose
+  files hold it. An entry in a shared file (`.mcp.json`) goes to the
+  shared manifest by default, which manages that entry for everyone using
+  the repository; for Claude Code and Devin, **Private** instead leaves
+  the shared entry alone and adds a private one. An untrusted project asks
+  for **Review & trust** first.
+- Under **Import both**, a secret both definitions hold can only go to the
+  keyring (each value gets its own alias) or skip the server.
+- Only the entries the filter shows are imported.
+
+**Review import...** shows each server with the clients it is enabled for
+and where each secret goes; **Import** makes one commit and, in instant
+mode, one apply. The result lists what was imported, what was skipped and
+why, and where the secrets went; in review mode, **Open Pending changes**
+applies it. **Import...** on a not-managed entry (MCP page, Tools >
+Manage) opens this page with only that entry picked.
+
+After the file watcher, window focus or **Refresh** find something new, a
+notice at the bottom of the sidebar says so, for example "omp has 5 MCP
+servers not managed by Loadout." (skill folders are counted too). Focus
+and watcher events rescan at most once a minute; **Refresh** always does.
+**Review** opens the Import page; **Review** and **Dismiss** both mark
+what was shown as seen on this machine, so it does not come back. Turn
+the notice off in Settings, Preferences, **Not-managed notice**.
 
 ## The command line
 
@@ -438,7 +498,7 @@ SPEC section 5.5.
 |---|---|---|
 | Create a manifest | `loadout project init [PATH] [--shared] [--name NAME]` | Projects, Init manifest... |
 | Register a project someone else created | `loadout project add PATH` | Projects, Add folder |
-| Add the folders your clients already know | `loadout project discover [--add ID]... [--all]` | |
+| Add the folders your clients already know | `loadout project discover [--add ID]... [--all]` | Projects (or Import), Discover projects |
 | Review and trust | `loadout project trust PATH` | Review change & trust |
 | Move private servers into the shared manifest | `loadout project share ID [--server NAME]...` | |
 | List and forget | `loadout project ls`, `loadout project rm ID` | Remove from list |
@@ -453,7 +513,11 @@ them in one commit. A folder without a manifest gets a private
 `project.local.toml`, as Init writes it. Nothing is trusted: each project
 waits for `loadout project trust` like any other. VS Code and Cursor keep
 their recent folders in a database without a documented format, so they
-are not read.
+are not read. In the app, **Discover projects** (Projects toolbar, the
+empty Projects page, or the Import page) lists the same folders with the
+clients that know each and its manifest, if any; check the ones you want
+and choose **Add selected**. Each added project shows **Review & trust**;
+a folder that cannot be added says why.
 
 **MCP page at project scope.** Pick a project in the sidebar's Scope
 switcher. The page lists the servers in that project's manifests (both
@@ -671,6 +735,16 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
   tracks it; it is reported and left as it is. When Loadout's data folder
   is on another drive, the original is copied into `backups/trash` and
   checked before it is removed.
+- In the app, the Import page's **Skills** section does the same for the
+  scope picked in the sidebar (all clients, or one with the filter): names
+  with one content are checked, and for a name with several contents you
+  choose **Use one content**, **Keep each content** (the others become
+  `NAME-<client>`; their `SKILL.md` keeps `name: NAME`, which some clients
+  expect to match the folder) or **Skip for now**. The result lists what
+  was adopted, what was kept and why, and the trash folder that holds the
+  originals. On the Skills page, a client's source tab has **Adopt** on
+  each real folder and **Adopt all identical**. A project must be trusted
+  first: the section offers **Review & trust**.
 - Skills installed by the agents CLI (`~/.agents/skills`) are listed read
   only; `loadout skills vendor NAME` copies one into the store.
 
@@ -682,7 +756,8 @@ folder or a foreign link with the same name is reported and left alone.
 Loadout imports SkillDock's servers, skills, tags, settings and backup
 repository. `~/.skilldock` is only read, never changed, so you can go back.
 
-- App: Settings, **Migrate from SkillDock...**. The wizard shows what would
+- App: Import, **From SkillDock**, **Migrate from SkillDock...** (Settings,
+  Migration, **Open Import** leads there too). The wizard shows what would
   be migrated, asks where each plaintext secret value should go (OS
   keyring, a 1Password reference, an environment variable, or Set later),
   then migrates in one commit after tagging the store.

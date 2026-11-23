@@ -453,11 +453,13 @@ pub fn summary(
         clients: None,
         scope: scan_scope(scope),
     };
-    let scan = import::scan_store(store.as_ref(), &core.apply_env(), &filter).map_err(fail)?;
+    // Names only: the notice runs this on focus and watcher events.
+    let (findings, _) =
+        unmanaged::store_findings(store.as_ref(), &core.apply_env(), &filter).map_err(fail)?;
     let seen = Seen::load(core.fs.as_ref(), &core.home.state_dir()).map_err(fail)?;
     let mut total = 0;
     let mut new = 0;
-    let groups = unmanaged::groups(unmanaged::findings(&scan.candidates), &seen)
+    let groups = unmanaged::groups(findings, &seen)
         .into_iter()
         .filter_map(|group| {
             let root = group.project_root.as_deref();

@@ -1,7 +1,7 @@
 // Projects page (SPEC 13.3): the projects this machine knows, Add folder and
 // Init manifest (the folder is picked in the OS dialog and stays in the
-// backend), the trust review, Apply, Remove from list, and the effective
-// config matrix of a project.
+// backend), the trust review, Apply, Remove from list, the effective config
+// matrix of a project, and Discover projects (#3) in a dialog.
 
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
@@ -10,6 +10,7 @@ import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
+import { DiscoverProjectsSection } from "@/app/routes/import/projects/DiscoverProjectsSection";
 import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
 import { EffectiveMatrixView } from "@/app/routes/projects/EffectiveMatrix";
 import { LAYOUT_KEYS, TRUST_KEYS, failureText } from "@/app/routes/projects/labels";
@@ -108,7 +109,10 @@ export function ProjectsPage() {
   const flow = useAddFolderFlow({ onAdded: (change) => setScope({ kind: "project", id: change.id }) });
   const [matrixOf, setMatrixOf] = useState<string | null>(null);
   const [removing, setRemoving] = useState<ProjectRow | null>(null);
+  const [discovering, setDiscovering] = useState(false);
   const removeQuestionId = useId();
+  const discoverTitleId = useId();
+  const discoverDescriptionId = useId();
 
   const apply = useMutation({
     mutationFn: async (project: ProjectRow) => ({
@@ -168,6 +172,13 @@ export function ProjectsPage() {
         >
           {t("projects.action.initManifest")}
         </button>
+        <button
+          className="secondary-button secondary-button--compact"
+          type="button"
+          onClick={() => setDiscovering(true)}
+        >
+          {t("projects.action.discover")}
+        </button>
       </HeaderToolbar>
       <section className="projects-section">
         {projects.isPending ? <p className="tools-note">{t("projects.loading")}</p> : null}
@@ -184,14 +195,19 @@ export function ProjectsPage() {
           <div className="panel-card empty-state page-empty-state">
             <h3>{t("page.empty.title")}</h3>
             <p>{t("page.empty.projects")}</p>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={flow.picking}
-              onClick={() => flow.start("add")}
-            >
-              {t("projects.action.addFolder")}
-            </button>
+            <div className="empty-state__actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={flow.picking}
+                onClick={() => flow.start("add")}
+              >
+                {t("projects.action.addFolder")}
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setDiscovering(true)}>
+                {t("projects.action.discover")}
+              </button>
+            </div>
           </div>
         ) : null}
         <div className="project-list">
@@ -210,6 +226,31 @@ export function ProjectsPage() {
         </div>
       </section>
       {flow.dialogs}
+      {discovering ? (
+        <Modal
+          className="tool-manage-dialog project-dialog adopt-dialog"
+          labelledBy={discoverTitleId}
+          describedBy={discoverDescriptionId}
+          onClose={() => setDiscovering(false)}
+        >
+          <div className="tool-manage-dialog__header">
+            <div className="tool-manage-dialog__title">
+              <h3 id={discoverTitleId}>{t("discover.title")}</h3>
+            </div>
+            <button
+              className="tool-manage-dialog__close"
+              type="button"
+              onClick={() => setDiscovering(false)}
+              aria-label={t("adopt.dialog.close")}
+            >
+              ×
+            </button>
+          </div>
+          <div className="adopt-dialog__body">
+            <DiscoverProjectsSection onCancel={() => setDiscovering(false)} descriptionId={discoverDescriptionId} />
+          </div>
+        </Modal>
+      ) : null}
       {removing ? (
         <Modal
           className="tool-manage-dialog project-dialog"

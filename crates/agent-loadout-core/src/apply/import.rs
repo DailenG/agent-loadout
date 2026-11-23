@@ -34,7 +34,7 @@
 //! native entries ([`server_from_native`]: "import their change", pasted
 //! snippets) still refuse sensitive literals.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::adapters::caps::FieldSet;
@@ -47,7 +47,7 @@ use crate::apply::{
     ApplyEnv, ApplyReport, ApplyRequest, Decision, OnConflict, PlanOptions, ScopeFilter, apply_in,
 };
 use crate::error::{CoreError, ErrorCode};
-use crate::formats::{Document, NativeValue};
+use crate::formats::{Document, Format, NativeValue};
 use crate::layering::projects::{overlay_doc, unknown_project};
 use crate::layering::{ProjectStatus, TrustState, TrustStore, known_projects};
 use crate::model::TomlDocument;
@@ -316,21 +316,36 @@ impl Source {
     /// `#<slot>` after the client for a client's second file in that scope
     /// (`omp#work`, `claude-desktop#2`).
     pub fn key(&self) -> String {
-        let client = match &self.slot {
-            Some(slot) => format!("{}#{slot}", self.client),
-            None => self.client.to_owned(),
-        };
-        match (&self.project, self.scope) {
-            (None, _) => client,
-            (Some(project), Scope::ProjectLocal) => format!("{client}@{}/local", project.id),
-            (Some(project), _) => format!("{client}@{}", project.id),
-        }
+        source_key(
+            self.client,
+            self.slot.as_deref(),
+            self.scope,
+            self.project.as_ref().map(|project| project.id.as_str()),
+        )
     }
 
     /// Importing this source enables the store server for its client: a
     /// user file of a client Loadout writes.
     pub fn enables(&self) -> bool {
         self.scope == Scope::User && adapter(self.client).is_none_or(|spec| !is_read_only(spec))
+    }
+}
+
+/// [`Source::key`] from its parts.
+pub(crate) fn source_key(
+    client: &str,
+    slot: Option<&str>,
+    scope: Scope,
+    project_id: Option<&str>,
+) -> String {
+    let client = match slot {
+        Some(slot) => format!("{client}#{slot}"),
+        None => client.to_owned(),
+    };
+    match (project_id, scope) {
+        (None, _) => client,
+        (Some(id), Scope::ProjectLocal) => format!("{client}@{id}/local"),
+        (Some(id), _) => format!("{client}@{id}"),
     }
 }
 
@@ -527,6 +542,94 @@ pub fn scan_with(
     ledger: &Ledger,
     filter: &ScanFilter,
 ) -> Result<(Vec<Candidate>, Vec<CoreError>), CoreError> {
+    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut by_name: HashMap<String, usize> = HashMap::new();
+    let mut keys: HashSet<(usize, String)> = HashSet::new();
+    let mut skips = Vec::new();
+    let mut warnings = Vec::new();
+    walk(ax, desired, ledger, filter, &mut warnings, &mut |found| {
+        let Some(value) = found.doc.get(found.container, &found.name)? else {
+            return Ok(());
+        };
+        let spec = found.spec;
+        let name = found.name;
+        if let Some(reason) = spec
+            .mcp
+            .as_ref()
+            .and_then(|mcp| mcp.mapper.skipped_by_client(&value))
+        {
+            skips.push(
+                CoreError::new(
+                    ErrorCode::ClientSkipsEntry,
+                    format!(
+                        "{} entry {name:?} {reason}; importing it starts a server {} does not \
+                         run today",
+                        spec.display_name, spec.display_name
+                    ),
+                )
+                .with_path(&found.target.file),
+            );
+        }
+        let def = read_native(spec, &name, &value);
+        let source = Source {
+            client: spec.id,
+            scope: found.target.scope,
+            project: found.project.cloned(),
+            slot: found.slot,
+            file: found.target.file.clone(),
+            value,
+            def,
+        };
+        let at = match by_name.get(&name) {
+            Some(&at) => at,
+            None => {
+                by_name.insert(name.clone(), candidates.len());
+                candidates.push(Candidate {
+                    in_store: desired.servers.contains_key(&name.to_ascii_lowercase()),
+                    name,
+                    sources: Vec::new(),
+                    variants: Vec::new(),
+                    identical: false,
+                });
+                candidates.len() - 1
+            }
+        };
+        if keys.insert((at, source.key())) {
+            candidates[at].sources.push(source);
+        }
+        Ok(())
+    })?;
+    warnings.extend(skips);
+    for candidate in &mut candidates {
+        candidate.group();
+    }
+    Ok((candidates, warnings))
+}
+
+/// One foreign entry [`walk`] meets.
+pub(crate) struct Found<'a> {
+    pub spec: &'static AdapterSpec,
+    pub target: &'a Target,
+    pub project: Option<&'a SourceProject>,
+    /// [`Source::slot`].
+    pub slot: Option<String>,
+    pub doc: &'a Document,
+    pub container: &'a [&'a str],
+    pub name: String,
+}
+
+/// Calls `visit` for every foreign entry of the files `filter` selects (see
+/// [`scan_with`]), in file order. Each file is read and parsed once, however
+/// many targets it holds (`~/.claude.json`: the user container and one per
+/// project); ownership is looked up once per target.
+pub(crate) fn walk(
+    ax: &ApplyEnv<'_>,
+    desired: &DesiredState,
+    ledger: &Ledger,
+    filter: &ScanFilter,
+    warnings: &mut Vec<CoreError>,
+    visit: &mut dyn FnMut(Found<'_>) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
     let selected: Vec<&'static AdapterSpec> = ADAPTERS
         .iter()
         .copied()
@@ -537,24 +640,68 @@ pub fn scan_with(
                 .is_none_or(|ids| ids.iter().any(|id| id == spec.id))
         })
         .collect();
-    let mut scanner = Scanner {
-        ax,
-        desired,
-        ledger,
-        candidates: Vec::new(),
-        warnings: Vec::new(),
+    let mut files = Files::default();
+    let mut read = |spec: &'static AdapterSpec,
+                    targets: &[Target],
+                    project: Option<&SourceProject>,
+                    warnings: &mut Vec<CoreError>|
+     -> Result<(), CoreError> {
+        for (index, target) in targets.iter().enumerate() {
+            let Some(doc) = files.doc(ax.fs, target, warnings)? else {
+                continue;
+            };
+            let keys = target.container_keys()?;
+            let container: Vec<&str> = keys.iter().map(String::as_str).collect();
+            let names = match doc.list(&container) {
+                Ok(names) => names,
+                Err(err) => {
+                    warnings.push(err.with_path(&target.file));
+                    continue;
+                }
+            };
+            let pointer = container_pointer(&keys);
+            let file = target.file.to_string_lossy().into_owned();
+            let owned: HashSet<&str> = ledger
+                .in_container(LedgerSlot {
+                    scope: target.scope,
+                    project_id: project.map(|project| project.id.as_str()),
+                    file: &file,
+                    container: &pointer,
+                })
+                .map(|entry| entry.key.as_str())
+                .collect();
+            let slot = target
+                .profile
+                .clone()
+                .or_else(|| (index > 0).then(|| (index + 1).to_string()));
+            for name in names {
+                if owned.contains(name.as_str()) {
+                    continue;
+                }
+                visit(Found {
+                    spec,
+                    target,
+                    project,
+                    slot: slot.clone(),
+                    doc,
+                    container: &container,
+                    name,
+                })?;
+            }
+        }
+        Ok(())
     };
     if matches!(filter.scope, ScanScope::All | ScanScope::User) {
         for &spec in &selected {
             let prefs = desired.prefs(spec.id);
             if let Ok(targets) = spec.mcp_targets(ax.env, ax.fs, Scope::User, None, &prefs) {
-                scanner.read(spec, &targets, None)?;
+                read(spec, &targets, None, warnings)?;
             }
         }
     }
     if filter.scope != ScanScope::User {
         let trust = TrustStore::load(ax.fs, &ax.home.state_dir()).unwrap_or_else(|err| {
-            scanner.warnings.push(err);
+            warnings.push(err);
             TrustStore::default()
         });
         let known = known_projects(ax.fs, ax.env, desired.overlay.as_ref(), &trust);
@@ -570,7 +717,7 @@ pub fn scan_with(
             let trusted = match &project.status {
                 ProjectStatus::Missing => continue,
                 ProjectStatus::Failed(err) => {
-                    scanner.warnings.push(err.clone());
+                    warnings.push(err.clone());
                     continue;
                 }
                 ProjectStatus::Loaded { trust, .. } => *trust == TrustState::Trusted,
@@ -586,125 +733,61 @@ pub fn scan_with(
                     if let Ok(targets) =
                         spec.mcp_targets(ax.env, ax.fs, scope, Some(&project.root), &prefs)
                     {
-                        scanner.read(spec, &targets, Some(&source_project))?;
+                        read(spec, &targets, Some(&source_project), warnings)?;
                     }
                 }
             }
         }
     }
-    let Scanner {
-        mut candidates,
-        warnings,
-        ..
-    } = scanner;
-    for candidate in &mut candidates {
-        candidate.group();
-    }
-    Ok((candidates, warnings))
+    Ok(())
 }
 
-struct Scanner<'a, 'e> {
-    ax: &'a ApplyEnv<'e>,
-    desired: &'a DesiredState,
-    ledger: &'a Ledger,
-    candidates: Vec<Candidate>,
-    warnings: Vec<CoreError>,
+/// The client files one scan read: each read and parsed once (a parse
+/// error is reported once, for the first target that reads the file).
+#[derive(Default)]
+struct Files {
+    docs: HashMap<(PathBuf, Format), Option<Document>>,
 }
 
-impl Scanner<'_, '_> {
-    fn read(
+impl Files {
+    fn doc(
         &mut self,
-        spec: &'static AdapterSpec,
-        targets: &[Target],
-        project: Option<&SourceProject>,
-    ) -> Result<(), CoreError> {
-        for (index, target) in targets.iter().enumerate() {
-            let Some(bytes) = read_target(self.ax.fs, &target.file)? else {
-                continue;
-            };
-            let doc = match Document::parse(&bytes, target.format) {
-                Ok(doc) => doc,
-                Err(err) => {
-                    self.warnings.push(err.with_path(&target.file));
-                    continue;
-                }
-            };
-            let keys = target.container_keys()?;
-            let container: Vec<&str> = keys.iter().map(String::as_str).collect();
-            let pointer = container_pointer(&keys);
-            let file = target.file.to_string_lossy().into_owned();
-            let names = match doc.list(&container) {
-                Ok(names) => names,
-                Err(err) => {
-                    self.warnings.push(err.with_path(&target.file));
-                    continue;
-                }
-            };
-            for name in names {
-                let slot = LedgerSlot {
-                    scope: target.scope,
-                    project_id: project.map(|project| project.id.as_str()),
-                    file: &file,
-                    container: &pointer,
-                };
-                if self.ledger.get(&slot, &name).is_some() {
-                    continue;
-                }
-                let Some(value) = doc.get(&container, &name)? else {
-                    continue;
-                };
-                if let Some(reason) = spec
-                    .mcp
-                    .as_ref()
-                    .and_then(|mcp| mcp.mapper.skipped_by_client(&value))
-                {
-                    self.warnings.push(
-                        CoreError::new(
-                            ErrorCode::ClientSkipsEntry,
-                            format!(
-                                "{} entry {name:?} {reason}; importing it starts a server {} \
-                                 does not run today",
-                                spec.display_name, spec.display_name
-                            ),
-                        )
-                        .with_path(&target.file),
-                    );
-                }
-                let def = read_native(spec, &name, &value);
-                let source = Source {
-                    client: spec.id,
-                    scope: target.scope,
-                    project: project.cloned(),
-                    slot: target
-                        .profile
-                        .clone()
-                        .or_else(|| (index > 0).then(|| (index + 1).to_string())),
-                    file: target.file.clone(),
-                    value,
-                    def,
-                };
-                let key = source.key();
-                match self.candidates.iter_mut().find(|c| c.name == name) {
-                    Some(candidate) => {
-                        if !candidate.sources.iter().any(|s| s.key() == key) {
-                            candidate.sources.push(source);
-                        }
+        fs: &dyn crate::fs::Fs,
+        target: &Target,
+        warnings: &mut Vec<CoreError>,
+    ) -> Result<Option<&Document>, CoreError> {
+        let key = (target.file.clone(), target.format);
+        if !self.docs.contains_key(&key) {
+            let doc = match read_target(fs, &target.file)? {
+                None => None,
+                Some(bytes) => match Document::parse(&bytes, target.format) {
+                    Ok(doc) => Some(doc),
+                    Err(err) => {
+                        warnings.push(err.with_path(&target.file));
+                        None
                     }
-                    None => self.candidates.push(Candidate {
-                        in_store: self
-                            .desired
-                            .servers
-                            .contains_key(&name.to_ascii_lowercase()),
-                        name,
-                        sources: vec![source],
-                        variants: Vec::new(),
-                        identical: false,
-                    }),
-                }
-            }
+                },
+            };
+            self.docs.insert(key.clone(), doc);
         }
-        Ok(())
+        Ok(self.docs[&key].as_ref())
     }
+}
+
+/// What a scan runs against as this machine sees the store: the desired
+/// state (an empty one when there is no store yet) with this machine's
+/// overlay, and the ledger. Read-only: creates nothing.
+pub fn store_inputs(
+    store: Option<&Store<'_>>,
+    ax: &ApplyEnv<'_>,
+) -> Result<(DesiredState, Ledger), CoreError> {
+    let state = ax.home.state_dir();
+    let machine = Machine::load(ax.fs, &state)?;
+    let desired = match store {
+        Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
+        None => DesiredState::empty(),
+    };
+    Ok((desired, Ledger::load(ax.fs, &state)?))
 }
 
 /// A scan as this machine sees the store: its known projects and its
@@ -722,13 +805,7 @@ pub fn scan_store(
     ax: &ApplyEnv<'_>,
     filter: &ScanFilter,
 ) -> Result<StoreScan, CoreError> {
-    let state = ax.home.state_dir();
-    let machine = Machine::load(ax.fs, &state)?;
-    let desired = match store {
-        Some(store) => DesiredState::load(store, machine.as_ref().map(|m| m.id.as_str()))?,
-        None => DesiredState::empty(),
-    };
-    let ledger = Ledger::load(ax.fs, &state)?;
+    let (desired, ledger) = store_inputs(store, ax)?;
     let (candidates, warnings) = scan_with(ax, &desired, &ledger, filter)?;
     Ok(StoreScan {
         candidates,

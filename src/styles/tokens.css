@@ -18964,3 +18964,588 @@ button.settings-form-item:disabled {
   outline: none;
 }
 /* end M29 */
+
+/* M34 skills adopt and Discover projects (#3): the Import page sections, the
+   Skills page adopt dialog and the Projects page Discover dialog. */
+.adopt-section {
+  display: grid;
+  gap: 10px;
+}
+
+.adopt-section__title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--heading);
+}
+
+.adopt-section__description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.adopt-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.adopt-panel,
+.adopt-group,
+.adopt-result,
+.adopt-result__group {
+  display: grid;
+  gap: 8px;
+}
+
+.adopt-panel,
+.adopt-result {
+  gap: 14px;
+}
+
+.adopt-group h4,
+.adopt-result__group h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--heading);
+}
+
+.adopt-group > .project-dialog__hint {
+  margin: 0;
+}
+
+.adopt-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adopt-item,
+.discover-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 0.84rem;
+}
+
+.adopt-item--conflict {
+  border-color: var(--line-strong);
+}
+
+.adopt-item__title,
+.adopt-variant__head,
+.adopt-item__badges,
+.discover-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.adopt-item__body {
+  display: grid;
+  gap: 4px;
+  padding-left: 24px;
+}
+
+.adopt-item__badges:empty {
+  display: none;
+}
+
+.adopt-choice {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.adopt-choice legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--heading);
+}
+
+.adopt-choice > p {
+  margin: 0;
+}
+
+.adopt-choice--variants {
+  padding: 8px 0 0 12px;
+  border-left: 2px solid var(--line);
+}
+
+.adopt-variant > span {
+  min-width: 0;
+}
+
+.adopt-folders {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+}
+
+.adopt-folders li {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.adopt-folders__client {
+  flex: 0 0 auto;
+  color: var(--heading);
+  font-size: 0.78rem;
+}
+
+.adopt-path {
+  min-width: 0;
+  color: var(--muted);
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.adopt-problems summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  color: var(--heading);
+}
+
+.adopt-result-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.adopt-result-row:last-child {
+  border-bottom: 0;
+}
+
+.adopt-reason {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.adopt-result__summary,
+.adopt-result__trash {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+/* The summary's live region stays mounted; empty, it takes no room. */
+.adopt-result__summary:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.adopt-result__title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.adopt-untrusted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  font-size: 0.82rem;
+}
+
+.adopt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.adopt-actions > .project-dialog__hint {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+.adopt-dialog {
+  max-width: 720px;
+  width: min(720px, 92vw);
+}
+
+.adopt-dialog__body {
+  max-height: calc(100vh - 200px);
+  overflow: auto;
+  padding: 4px 2px 12px;
+}
+
+.discover-item.is-blocked {
+  opacity: 0.8;
+}
+
+.discover-item__meta {
+  padding-left: 24px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.discover-item__problem {
+  flex-basis: 100%;
+  color: var(--danger-text);
+}
+
+.discover-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.discover-added {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.discover-added:last-child {
+  border-bottom: 0;
+}
+
+.discover-added__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+
+.skills-source-folder-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* end M34 */
+
+/* M33 import hub, MCP import, not-managed sections and the notice (#3, #9). */
+.import-route {
+  display: grid;
+  gap: 28px;
+  padding-bottom: 24px;
+}
+
+.import-mcp {
+  display: grid;
+  gap: 12px;
+}
+
+.import-mcp__toolbar,
+.import-mcp__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.import-mcp__footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.import-candidates {
+  display: grid;
+  gap: 10px;
+}
+
+.import-candidate {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.import-candidate:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+.import-candidate__head,
+.import-variant__head,
+.import-unmanaged__group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.import-candidate__name {
+  color: var(--heading);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.import-candidate__include {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--heading);
+  font-size: 0.84rem;
+}
+
+.import-candidate__note,
+.import-variant__note,
+.import-result__offer span {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.import-candidate__choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--heading);
+  font-size: 0.84rem;
+}
+
+.import-candidate__choice legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.import-candidate__choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.import-candidate__variants {
+  display: grid;
+  gap: 8px;
+}
+
+.import-candidate__variants.is-side-by-side {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.import-candidate__id {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 260px);
+  justify-content: start;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 0.82rem;
+  color: var(--heading);
+}
+
+.import-candidate__id input {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-control);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--heading);
+  font: inherit;
+}
+
+.import-candidate__id input[aria-invalid="true"] {
+  border-color: var(--danger-text);
+}
+
+.import-candidate__problem,
+.import-variant__error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 0.78rem;
+}
+
+/* Under the field, so the label column keeps its width. */
+.import-candidate__problem {
+  grid-column: 2;
+}
+
+.import-candidate__secrets {
+  display: grid;
+  gap: 6px;
+}
+
+.import-candidate__secrets .migrate-secret__input {
+  font-size: 0.84rem;
+}
+
+.import-variant {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 0.82rem;
+}
+
+.import-variant__launch {
+  overflow-wrap: anywhere;
+  color: var(--heading);
+  font-size: 0.78rem;
+}
+
+.import-variant__sources,
+.import-unmanaged__files,
+.import-unmanaged__entries {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-variant__sources li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--heading);
+}
+
+.import-variant__file,
+.import-unmanaged__files li {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.import-counts {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.import-unmanaged {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.import-unmanaged__group {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.import-unmanaged__entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-unmanaged__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--heading);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.import-result__offer {
+  margin-top: 6px;
+}
+
+/* In Tools > Manage the list is a grid of switches; the section spans it. */
+.tool-manage-dialog__list .import-unmanaged {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+}
+
+.import-unmanaged__group-head strong {
+  color: var(--heading);
+  font-size: 0.9rem;
+}
+
+.unmanaged-notice {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.unmanaged-notice__message {
+  margin: 0;
+  color: var(--heading);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.unmanaged-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.unmanaged-notice__actions button {
+  flex: 1 1 auto;
+}
+
+.unmanaged-notice--compact {
+  justify-items: center;
+  padding: 6px;
+}
+
+.unmanaged-notice__compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* end M33 */

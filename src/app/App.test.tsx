@@ -75,6 +75,7 @@ describe("App shell", () => {
       "Projects",
       "Tools",
       "Install",
+      "Import",
       "History",
       "Settings",
       "About",
@@ -97,6 +98,7 @@ describe("App shell", () => {
       "Projects",
       "Tools",
       "Install",
+      "Import",
       "Publish",
       "History",
       "Settings",
@@ -356,6 +358,9 @@ describe("settings and about", () => {
       commands: { planSkilldockMigration: async () => mockIpcError({ code: "not_found", message: "none" }) },
     });
     await user.click(within(primaryNav()).getByRole("button", { name: "Settings" }));
+    // Settings points at the Import page, where the migration opens now.
+    await user.click(await screen.findByRole("button", { name: t("migrate.section.openImport") }));
+    expect(within(primaryNav()).getByRole("button", { name: "Import" })).toHaveAttribute("aria-current", "page");
     await user.click(await screen.findByRole("button", { name: t("migrate.section.open") }));
 
     expect(await screen.findByText(t("migrate.notFound"))).toBeInTheDocument();

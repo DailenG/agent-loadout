@@ -13,11 +13,13 @@ import { Modal } from "@/app/components/Modal";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useNotifications } from "@/app/components/notifications";
+import type { ImportTarget } from "@/app/routes/import/model";
+import { unmanagedByClient, UnmanagedSection } from "@/app/routes/import/UnmanagedSection";
 import { useProjectServers } from "@/app/routes/mcp/ProjectServers";
 import { TrustReviewDialog } from "@/app/routes/projects/TrustReviewDialog";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { errorMessage, t } from "@/i18n/en";
-import type { ClientChoice, PillState, ProjectServerRow, ServerRow, ToolInfo } from "@/ipc/bindings";
+import type { ClientChoice, PillState, ProjectServerRow, ServerRow, ToolInfo, UnmanagedSummary } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 
 export type ToolManageDialogProps = {
@@ -26,6 +28,10 @@ export type ToolManageDialogProps = {
   tool: ToolInfo;
   /** Opens the MCP page (inherited servers are changed there). */
   onOpenMcp: () => void;
+  /** Not-managed entries of the sidebar's scope (this client's are listed). */
+  unmanaged?: UnmanagedSummary;
+  /** Opens the Import page with an entry picked. */
+  onOpenImport: (target: ImportTarget) => void;
 };
 
 type CapabilityRow = {
@@ -60,7 +66,7 @@ function failureText(error: unknown): string {
   return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
 }
 
-export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManageDialogProps) {
+export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp, unmanaged, onOpenImport }: ToolManageDialogProps) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
   const reportChange = useChangeNotice();
@@ -214,6 +220,14 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManag
               <RecommendedBadge clientId={tool.id} />
             </div>
             <p>{t("tools.dialog.summary", { enabled: enabledCount, total: allRows.length })}</p>
+            {unmanaged ? (
+              <p>
+                {t("import.counts", {
+                  managed: enabledCount,
+                  unmanaged: unmanagedByClient(unmanaged).get(tool.id) ?? 0,
+                })}
+              </p>
+            ) : null}
           </div>
           <button
             className="tool-manage-dialog__close"
@@ -348,6 +362,12 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManag
               })}
             </section>
           ) : null}
+          <UnmanagedSection
+            summary={unmanaged}
+            clientNames={new Map([[tool.id, tool.name]])}
+            client={tool.id}
+            onImport={onOpenImport}
+          />
         </div>
 
         <div className="tool-manage-dialog__actions">

@@ -1,20 +1,17 @@
-// Settings section that opens the SkillDock migration wizard (SPEC 15.1).
+// Settings section pointing at the SkillDock migration (SPEC 15.1), whose
+// wizard opens from the Import page since 0.3.0 (#3).
 
-import { useState } from "react";
 import { SettingsGroup, SettingsItem } from "@/app/components/SettingsGroup";
 import { t } from "@/i18n/en";
-import { MigrateWizard } from "./MigrateWizard";
 
-export function MigrateSection({ onOpenPending }: { onOpenPending: () => void }) {
-  const [open, setOpen] = useState(false);
+export function MigrateSection({ onOpenImport }: { onOpenImport: () => void }) {
   return (
     <SettingsGroup title={t("migrate.section.title")}>
-      <SettingsItem label={t("migrate.section.label")} description={t("migrate.section.description")}>
-        <button className="secondary-button secondary-button--compact" type="button" onClick={() => setOpen(true)}>
-          {t("migrate.section.open")}
+      <SettingsItem label={t("migrate.section.label")} description={t("migrate.section.movedDescription")}>
+        <button className="secondary-button secondary-button--compact" type="button" onClick={onOpenImport}>
+          {t("migrate.section.openImport")}
         </button>
       </SettingsItem>
-      {open ? <MigrateWizard onClose={() => setOpen(false)} onOpenPending={onOpenPending} /> : null}
     </SettingsGroup>
   );
 }

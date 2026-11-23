@@ -9,7 +9,7 @@
 mod support;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use agent_loadout_core::ErrorCode;
 use agent_loadout_core::adapters::detect::NoRegistry;
@@ -21,6 +21,7 @@ use agent_loadout_core::model::skill_meta::DistributionMethod;
 use agent_loadout_core::remote::git::SystemRunner;
 use agent_loadout_core::skills::adopt::{self, AdoptAction, AdoptChoice, FolderStatus};
 use agent_loadout_core::skills::classify;
+use agent_loadout_core::skills::hash_cache::FolderHashCache;
 use agent_loadout_core::skills::install::Naming;
 use agent_loadout_core::skills::link::{self, LinkMethod, ORIGIN_ADOPTED, SkillLedger};
 use agent_loadout_core::skills::{LinkKind, LinkStatus, SkillsEnv, store};
@@ -715,4 +716,229 @@ fn a_renamed_skill_skips_an_id_a_folder_uses() {
     assert!(is_link(&omp_skills(&fx).join("diff-omp-2")));
     assert!(std::fs::symlink_metadata(&omp_diff).is_err());
     assert!(!is_link(&unrelated) && fx.read(&unrelated.join("SKILL.md")).contains("Something"));
+}
+
+// The scan cache of the unmanaged-entry notice (#3, #9).
+
+fn cursor_skills(fx: &Fx) -> PathBuf {
+    fx.th.home().join(".cursor").join("skills")
+}
+
+/// A scan as lines (names, contents, clients, folders, problems); the
+/// variants' files are left out (a cached scan does not hold them).
+fn shown(scan: &adopt::UnmanagedScan) -> Vec<String> {
+    let mut out = Vec::new();
+    for candidate in &scan.candidates {
+        for variant in &candidate.variants {
+            let folders: Vec<String> = variant
+                .folders
+                .iter()
+                .map(|folder| format!("{}={}", folder.client, folder.path.display()))
+                .collect();
+            out.push(format!(
+                "{} {} {} {:?} {:?} {}",
+                candidate.name,
+                variant.hash,
+                variant.in_store,
+                variant.description,
+                folders,
+                variant.bytes
+            ));
+        }
+    }
+    for problem in &scan.problems {
+        out.push(format!(
+            "problem {} {} {}",
+            problem.client,
+            problem.name,
+            problem.error.code()
+        ));
+    }
+    out
+}
+
+fn mtime(path: &Path) -> SystemTime {
+    std::fs::metadata(path).unwrap().modified().unwrap()
+}
+
+fn set_mtime(path: &Path, time: SystemTime) {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
+}
+
+fn hash_of(scan: &adopt::UnmanagedScan, name: &str) -> String {
+    scan.candidate(name).unwrap().variants[0].hash.clone()
+}
+
+#[test]
+fn a_cached_scan_equals_a_full_one_and_edits_invalidate_it() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let sx = sx(&fx, &env);
+    let store = fx.store();
+    let notes = skill(&fx, &claude_skills(&fx), "notes", "Take notes.");
+    skill(&fx, &claude_skills(&fx), "shared", "Same.");
+    skill(&fx, &codex_skills(&fx), "shared", "Same.");
+    skill(&fx, &claude_skills(&fx), "diff", "Claude's.");
+    skill(&fx, &omp_skills(&fx), "diff", "omp's.");
+    fx.write(&codex_skills(&fx).join("empty").join("README.md"), "x\n");
+    // A store skill one folder equals.
+    let source = skill(&fx, &fx.th.root().join("src"), "stored", "In the store.");
+    agent_loadout_core::skills::install::install(
+        &store,
+        &sx,
+        &agent_loadout_core::skills::InstallRequest::new(
+            agent_loadout_core::skills::Source::Local(source),
+        ),
+    )
+    .unwrap();
+    skill(&fx, &cursor_skills(&fx), "stored", "In the store.");
+
+    let cache = FolderHashCache::new();
+    let full = || adopt::scan(Some(&store), &sx, Scope::User, None, None).unwrap();
+    let cached = || adopt::scan_cached(Some(&store), &sx, Scope::User, None, None, &cache).unwrap();
+    let first = cached();
+    assert_eq!(shown(&first), shown(&full()));
+    assert!(first.candidate("stored").unwrap().variants[0].in_store);
+    assert_eq!(
+        cache.len(),
+        8,
+        "the seven folders scanned (one without SKILL.md) and the store copy"
+    );
+    assert_eq!(shown(&cached()), shown(&full()), "answered from the cache");
+
+    let file = notes.join("scripts").join("run.sh");
+    let before = hash_of(&full(), "notes");
+    let old = mtime(&file);
+
+    // Same size, new modification time.
+    fx.write(&file, "echo no\n");
+    set_mtime(&file, old + Duration::from_secs(5));
+    let after = hash_of(&full(), "notes");
+    assert_ne!(after, before);
+    assert_eq!(hash_of(&cached(), "notes"), after);
+
+    // Same modification time, new size.
+    let old = mtime(&file);
+    fx.write(&file, "echo longer\n");
+    set_mtime(&file, old);
+    let longer = hash_of(&full(), "notes");
+    assert_ne!(longer, after);
+    assert_eq!(hash_of(&cached(), "notes"), longer);
+    assert_eq!(shown(&cached()), shown(&full()));
+}
+
+/// An edit that keeps a file's size and modification time is not seen by
+/// the cache; adopt never uses it: a choice made from that stale scan is
+/// refused, and the fresh content is what gets stored.
+#[test]
+fn adopt_reads_again_what_the_cache_holds() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let sx = sx(&fx, &env);
+    let store = fx.store();
+    let notes = skill(&fx, &claude_skills(&fx), "notes", "Take notes.");
+    let cache = FolderHashCache::new();
+    let stale = adopt::scan_cached(Some(&store), &sx, Scope::User, None, None, &cache).unwrap();
+
+    let file = notes.join("scripts").join("run.sh");
+    let old = mtime(&file);
+    fx.write(&file, "echo no\n");
+    set_mtime(&file, old);
+    let cached = adopt::scan_cached(Some(&store), &sx, Scope::User, None, None, &cache).unwrap();
+    assert_eq!(hash_of(&cached, "notes"), hash_of(&stale, "notes"));
+
+    let choice = |variant: String| AdoptChoice {
+        name: "notes".to_owned(),
+        action: AdoptAction::Pick { variant },
+    };
+    let err = adopt::adopt(
+        &store,
+        &sx,
+        Scope::User,
+        None,
+        None,
+        &[choice(hash_of(&stale, "notes"))],
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), ErrorCode::EntryChanged);
+    assert!(!is_link(&notes));
+
+    let fresh = adopt::scan(Some(&store), &sx, Scope::User, None, None).unwrap();
+    let report = adopt::adopt(
+        &store,
+        &sx,
+        Scope::User,
+        None,
+        None,
+        &[choice(hash_of(&fresh, "notes"))],
+    )
+    .unwrap();
+    assert_eq!(report.folders[0].status, FolderStatus::Adopted);
+    let stored = store::content_dir(&store, "notes").unwrap();
+    assert_eq!(fx.read(&stored.join("scripts").join("run.sh")), "echo no\n");
+}
+
+/// Timing of the notice's scan over 300 unmanaged folders (100 each in
+/// Claude Code, Codex and Cursor, about 100 KB each): full, cached cold,
+/// cached warm. `cargo test -p agent-loadout-core --release --test
+/// skills_adopt -- --ignored --nocapture perf_`.
+#[test]
+#[ignore = "timing; run by hand"]
+fn perf_scan_300_unmanaged_folders() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let sx = sx(&fx, &env);
+    let store = fx.store();
+    let chunk = "lorem ipsum dolor sit amet\n".repeat(900);
+    for (n, dir) in [claude_skills(&fx), codex_skills(&fx), cursor_skills(&fx)]
+        .iter()
+        .enumerate()
+    {
+        for i in 0..100 {
+            let folder = skill(&fx, dir, &format!("skill-{n}-{i:03}"), "Fixture.");
+            for f in 0..4 {
+                fx.write(&folder.join("docs").join(format!("part-{f}.md")), &chunk);
+            }
+        }
+    }
+    let time = |what: &str, run: &dyn Fn() -> adopt::UnmanagedScan| {
+        let start = Instant::now();
+        let scan = run();
+        let took = start.elapsed();
+        println!(
+            "{what:<14} {:>8.1} ms ({} candidates)",
+            took.as_secs_f64() * 1000.0,
+            scan.candidates.len()
+        );
+        scan
+    };
+    let cache = FolderHashCache::new();
+    let full = time("full", &|| {
+        adopt::scan(Some(&store), &sx, Scope::User, None, None).unwrap()
+    });
+    let cold = time("cached, cold", &|| {
+        adopt::scan_cached(Some(&store), &sx, Scope::User, None, None, &cache).unwrap()
+    });
+    let warm = time("cached, warm", &|| {
+        adopt::scan_cached(Some(&store), &sx, Scope::User, None, None, &cache).unwrap()
+    });
+    time("full, again", &|| {
+        adopt::scan(Some(&store), &sx, Scope::User, None, None).unwrap()
+    });
+    // What a warm scan still costs: listing and classifying the folders.
+    let start = Instant::now();
+    classify::scan(&sx, Scope::User, None).unwrap();
+    println!(
+        "{:<14} {:>8.1} ms",
+        "classify only",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
+    assert_eq!(full.candidates.len(), 300);
+    assert_eq!(shown(&cold), shown(&full));
+    assert_eq!(shown(&warm), shown(&full));
 }

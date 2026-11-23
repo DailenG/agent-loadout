@@ -239,3 +239,30 @@ fn adopt_groups_folders_and_replaces_them_with_links() {
     .unwrap_err();
     assert_eq!(err.code, ErrorCode::EntryChanged);
 }
+
+/// The notice's scan answers unchanged folders from the process cache and
+/// sees an edit at once (#3, #9).
+#[test]
+fn the_unmanaged_scan_sees_an_edit_after_a_cached_answer() {
+    let fx = Fx::new();
+    let claude = fx.th.home().join(".claude").join("skills");
+    let notes = skill(&claude, "notes", "Same.");
+    let scan = || skills::scan_unmanaged(&fx.core, &SkillScope::User, None).unwrap();
+    let hash = |scan: &skills::UnmanagedSkills| scan.candidates[0].variants[0].hash.clone();
+    let first = scan();
+    let second = scan();
+    assert_eq!(
+        serde_json::to_string(&first).unwrap(),
+        serde_json::to_string(&second).unwrap()
+    );
+    write(
+        &notes.join("SKILL.md"),
+        "---\nname: notes\ndescription: Edited by hand.\n---\n",
+    );
+    let edited = scan();
+    assert_ne!(hash(&edited), hash(&first));
+    assert_eq!(
+        edited.candidates[0].variants[0].description.as_deref(),
+        Some("Edited by hand.")
+    );
+}

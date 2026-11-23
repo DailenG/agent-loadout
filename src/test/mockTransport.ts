@@ -16,11 +16,15 @@ import type {
   ProviderEntry,
   RemotesOverview,
   ServerList,
+  SkillAdoptChoice,
+  SkillAdoptResult,
+  SkillAdoptedFolder,
   SkillChange,
   SkillClient,
   SkillInstalled,
   SkillList,
   ToolInfo,
+  UnmanagedSkills,
 } from "@/ipc/bindings";
 import type { CommandResult, Commands, Transport } from "@/ipc/transport";
 
@@ -173,6 +177,54 @@ export const MOCK_SKILL_INSTALLED: SkillInstalled = {
   links: null,
   warnings: [],
 };
+
+/**
+ * What `adopt_skills` answers for `scan` and `choices`, by the core's rules
+ * (M32): a picked content is adopted and other contents differ; "both"
+ * adopts every content, the others as `name-<client>`; a skip is skipped;
+ * a name with several contents and no choice is a conflict, which (like a
+ * kept folder) needs attention. Every adopted folder goes to the trash.
+ */
+export function mockAdoptResult(scan: UnmanagedSkills, choices: SkillAdoptChoice[]): SkillAdoptResult {
+  const folders: SkillAdoptedFolder[] = [];
+  const added: string[] = [];
+  for (const candidate of scan.candidates) {
+    const action = choices.find((choice) => choice.name === candidate.name)?.action ?? null;
+    const primary = action?.kind === "pick" ? action.variant : action?.kind === "both" ? action.primary : null;
+    for (const variant of candidate.variants) {
+      const renamed = action?.kind === "both" && variant.hash !== primary && variant.folders[0]
+        ? `${candidate.name}-${variant.folders[0].client}`
+        : null;
+      const skillId = primary === null ? null : variant.hash === primary ? candidate.name : renamed;
+      if (skillId && !variant.inStore && !added.includes(skillId)) {
+        added.push(skillId);
+      }
+      for (const folder of variant.folders) {
+        const status: SkillAdoptedFolder["status"] = primary === null
+          ? action === null && candidate.conflict ? "conflict" : "skipped"
+          : skillId ? "adopted" : "differs";
+        folders.push({
+          client: folder.client,
+          name: candidate.name,
+          path: folder.path,
+          skillId,
+          status,
+          trash: status === "adopted" ? `%LOCALAPPDATA%/Loadout/backups/trash/20261123T101500Z-${folder.client}-${candidate.name}` : null,
+          error: null,
+        });
+      }
+    }
+  }
+  return {
+    commit: added.length > 0 ? MOCK_CHANGE.commit : null,
+    added,
+    reused: [],
+    folders,
+    problems: scan.problems,
+    links: MOCK_SKILL_CHANGE.links,
+    needsAttention: folders.some((folder) => folder.status === "conflict" || folder.status === "kept"),
+  };
+}
 
 export function createMockTransport(options: MockTransportOptions = {}): MockTransport {
   const calls: (keyof Commands)[] = [];

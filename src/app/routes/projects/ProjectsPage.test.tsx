@@ -277,4 +277,35 @@ describe("ProjectsPage", () => {
       initial: (dialog) => within(dialog).getByRole("button", { name: t("projects.cancel") }),
     });
   });
+
+  it("opens Discover projects from the toolbar and from the empty state (#3)", async () => {
+    const discovery = {
+      candidates: [
+        { id: "d-0a1b2c3d4e5f", name: "web-shop", path: "~/Code/web-shop", clients: ["claude-code"], manifest: null, error: null },
+      ],
+      warnings: [],
+    };
+    const { user, transport, unmount } = renderPage({ commands: { discoverProjects: async () => ok(discovery) } });
+    await expectModalKeyboard(user, {
+      trigger: await screen.findByRole("button", { name: t("projects.action.discover") }),
+      name: t("discover.title"),
+      description: t("discover.description"),
+    });
+    expect(transport.calls).toContain("discoverProjects");
+    unmount();
+
+    const empty = renderWithProviders(<ProjectsPage />, { commands: { discoverProjects: async () => ok(discovery) } });
+    const state = (await screen.findByText(t("page.empty.projects"))).closest(".empty-state") as HTMLElement;
+    await empty.user.click(within(state).getByRole("button", { name: t("projects.action.discover") }));
+    const dialog = await screen.findByRole("dialog", { name: t("discover.title") });
+    expect(await within(dialog).findByRole("checkbox", { name: /web-shop/ })).toBeInTheDocument();
+    await empty.user.click(within(dialog).getByRole("checkbox", { name: /web-shop/ }));
+    await empty.user.click(within(dialog).getByRole("button", { name: t("discover.add", { count: 1 }) }));
+    // Add selected is gone with the list: focus moves to the result's heading, inside the dialog.
+    await waitFor(() =>
+      expect(within(dialog).getByRole("heading", { name: t("discover.result.title") })).toHaveFocus(),
+    );
+    await empty.user.click(within(dialog).getByRole("button", { name: t("adopt.dialog.close") }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+  });
 });

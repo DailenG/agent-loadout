@@ -6,7 +6,7 @@ import { t } from "@/i18n/en";
 import type { MigrationApplied, MigrationReport } from "@/ipc/bindings";
 import { MOCK_CHANGE, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
-import { MigrateSection } from "./MigrateSection";
+import { ImportPage } from "@/app/routes/import/ImportPage";
 import { MigrateWizard } from "./MigrateWizard";
 
 const REPORT: MigrationReport = {
@@ -200,8 +200,8 @@ describe("MigrateWizard", () => {
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
   });
 
-  it("moves focus into the wizard from Settings and back to its button (#11)", async () => {
-    const { user } = renderWithProviders(<MigrateSection onOpenPending={vi.fn()} />, {
+  it("moves focus into the wizard from the Import page and back to its button (#11)", async () => {
+    const { user } = renderWithProviders(<ImportPage target={null} onOpenPending={vi.fn()} />, {
       commands: { planSkilldockMigration: async () => ok(REPORT) },
     });
     await expectModalKeyboard(user, {

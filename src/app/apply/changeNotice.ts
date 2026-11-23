@@ -2,7 +2,7 @@
 // refetched, and a toast reports the instant apply that went with it, with
 // "Undo this apply" when the run was recorded.
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useNotifications } from "@/app/components/notifications";
 import { errorMessage, t } from "@/i18n/en";
@@ -39,6 +39,55 @@ export const storeQueryKeys = {
   skillFile: ["read_skill_file"],
 } as const;
 
+/**
+ * The scans of client files and skill folders behind the not-managed lists
+ * and notice (#3, #9). Not store keys: imports, adopts, added projects and
+ * acknowledgments refetch them (`useInvalidateImports`); other store
+ * changes refetch the summaries once, coalesced (`STORE_COALESCE_MS`);
+ * drift triggers refetch the notice's scans only when older than
+ * `NOTICE_STALE_MS`.
+ */
+export const importQueryKeys = {
+  /** Prefix of `["unmanaged_summary", kind, id]`: the MCP and Tools lists with the notice off. */
+  unmanaged: ["unmanaged_summary"],
+  /** `unmanaged_summary({kind:"all"})`: the notice and, with it on, the MCP and Tools lists. */
+  unmanagedAll: ["unmanaged_summary_all"],
+  /** Prefix of `["scan_unmanaged_skills", scope, client]`. */
+  unmanagedSkills: ["scan_unmanaged_skills"],
+} as const;
+
+/** At most one full scan per minute from focus and watcher events. */
+export const NOTICE_STALE_MS = 60_000;
+
+/** Store changes in quick succession refetch the not-managed summaries once. */
+export const STORE_COALESCE_MS = 1_000;
+
+const coalesceTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>();
+
+/** Schedules one refetch of the summaries after the last of a burst of store changes. */
+function refetchSummariesSoon(queryClient: QueryClient) {
+  clearTimeout(coalesceTimers.get(queryClient));
+  coalesceTimers.set(
+    queryClient,
+    setTimeout(() => {
+      coalesceTimers.delete(queryClient);
+      for (const queryKey of [importQueryKeys.unmanaged, importQueryKeys.unmanagedAll]) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    }, STORE_COALESCE_MS),
+  );
+}
+
+/** Refetches the not-managed scans after an import, adopt, added projects or acknowledgment. */
+export function useInvalidateImports() {
+  const queryClient = useQueryClient();
+  return useCallback(async () => {
+    await Promise.all(
+      Object.values(importQueryKeys).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    );
+  }, [queryClient]);
+}
+
 const STATUS_KEYS = {
   done: "apply.status.done",
   file_failed: "apply.status.file_failed",
@@ -51,6 +100,7 @@ const STATUS_KEYS = {
 export function useInvalidateStore() {
   const queryClient = useQueryClient();
   return useCallback(async () => {
+    refetchSummariesSoon(queryClient);
     await Promise.all(
       Object.values(storeQueryKeys).map((queryKey) =>
         queryClient.invalidateQueries({ queryKey }),

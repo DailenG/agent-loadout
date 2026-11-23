@@ -13,6 +13,8 @@ import { useNotifications } from "@/app/components/notifications";
 import { useEventCallback } from "@/app/components/useEventCallback";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
+import type { ImportTarget } from "@/app/routes/import/model";
+import { unmanagedByClient, useScopeUnmanaged } from "@/app/routes/import/UnmanagedSection";
 import { projectRelativePath } from "@/app/routes/projects/labels";
 import { ToolManageDialog } from "@/app/routes/tools/ToolManageDialog";
 import { useActiveScope } from "@/app/scope/ActiveScope";
@@ -82,6 +84,8 @@ type ToolCardProps = {
   /** The active project: its files are named under its placeholder path. */
   project: ProjectRow | null;
   isOpening: boolean;
+  /** Entries of this client's files in the sidebar's scope not managed by Loadout. */
+  unmanagedCount: number;
   openDisabled: boolean;
   /** Stable across renders (the card is memoized), so these take the tool's ID. */
   onOpenFolder: (toolId: string) => void;
@@ -106,7 +110,7 @@ function ToolsRefreshButton() {
   );
 }
 
-const ToolCard = memo(function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
+const ToolCard = memo(function ToolCard({ tool, project, unmanagedCount, isOpening, openDisabled, onOpenFolder, onManage, onGet }: ToolCardProps) {
   const yesNo = (value: boolean) => (value ? t("tools.capability.yes") : t("tools.capability.no"));
 
   return (
@@ -131,6 +135,11 @@ const ToolCard = memo(function ToolCard({ tool, project, isOpening, openDisabled
               ) : null}
               {!tool.supported ? (
                 <span className="status-badge tone-warning">{t("tools.unsupportedOs")}</span>
+              ) : null}
+              {unmanagedCount > 0 ? (
+                <span className="status-badge tone-warning">
+                  {t("import.unmanaged.toolBadge", { count: unmanagedCount })}
+                </span>
               ) : null}
             </div>
           </div>
@@ -239,9 +248,11 @@ const ToolCard = memo(function ToolCard({ tool, project, isOpening, openDisabled
 export type ToolsPageProps = {
   /** Opens the MCP page, where inherited servers are changed. */
   onOpenMcp: () => void;
+  /** Opens the Import page with an entry picked. */
+  onOpenImport: (target?: ImportTarget) => void;
 };
 
-export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
+export function ToolsPage({ onOpenMcp, onOpenImport }: ToolsPageProps) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
   const { project } = useActiveScope();
@@ -249,6 +260,8 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
     queryKey: storeQueryKeys.tools,
     queryFn: async () => unwrap(await commands.listTools()),
   });
+  const unmanaged = useScopeUnmanaged();
+  const unmanagedCounts = useMemo(() => unmanagedByClient(unmanaged.data), [unmanaged.data]);
   // Detected first, then the recommended client, then table order
   // (Array.prototype.sort is stable).
   const sortedTools = useMemo(() => {
@@ -321,6 +334,7 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
               key={tool.id}
               tool={tool}
               project={project}
+              unmanagedCount={unmanagedCounts.get(tool.id) ?? 0}
               isOpening={openingToolId === tool.id}
               openDisabled={Boolean(openingToolId)}
               onOpenFolder={handleOpenFolder}
@@ -335,9 +349,14 @@ export function ToolsPage({ onOpenMcp }: ToolsPageProps) {
           isOpen
           tool={managingTool}
           onClose={() => setManagingToolId("")}
+          unmanaged={unmanaged.data}
           onOpenMcp={() => {
             setManagingToolId("");
             onOpenMcp();
+          }}
+          onOpenImport={(target) => {
+            setManagingToolId("");
+            onOpenImport(target);
           }}
         />
       ) : null}
