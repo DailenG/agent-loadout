@@ -14,6 +14,7 @@ import {
   ok,
   type MockTransportOptions,
 } from "@/test/mockTransport";
+import { USER_EVENT_OPTIONS } from "@/test/renderWithProviders";
 
 // Paths arrive under their placeholder roots, as the backend sends them.
 const TRUSTED_PROJECT: ProjectRow = {
@@ -38,7 +39,7 @@ const UNTRUSTED_PROJECT: ProjectRow = {
 
 function renderApp(options: MockTransportOptions = {}, features?: FeatureFlags) {
   const transport = createMockTransport(options);
-  const user = userEvent.setup();
+  const user = userEvent.setup(USER_EVENT_OPTIONS);
   const view = render(
     <App transport={transport} queryClient={createQueryClient()} features={features} />,
   );
@@ -347,6 +348,17 @@ describe("settings and about", () => {
     expect(toast).toHaveTextContent(errorMessage("profile_not_found"));
     expect(screen.getAllByText(errorMessage("profile_not_found"))).toHaveLength(2);
     expect(screen.queryByText(/cannot determine/)).toBeNull();
+  });
+
+  it("does not repeat an error the page shows inline as a toast", async () => {
+    const { user } = renderApp({
+      commands: { planSkilldockMigration: async () => mockIpcError({ code: "not_found", message: "none" }) },
+    });
+    await user.click(within(primaryNav()).getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: t("migrate.section.open") }));
+
+    expect(await screen.findByText(t("migrate.notFound"))).toBeInTheDocument();
+    expect(screen.queryByText(errorMessage("not_found"))).toBeNull();
   });
 });
 

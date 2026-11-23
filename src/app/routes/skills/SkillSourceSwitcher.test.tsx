@@ -30,8 +30,11 @@ describe("SkillSourceSwitcher", () => {
       expect(within(tab).getByText(name)).toBeVisible();
       expect(tab).not.toHaveAttribute("title");
     }
-    expect(within(tabs[0]).getByText(t("recommended.badge"))).toBeInTheDocument();
-    expect(within(tabs[1]).queryByText(t("recommended.badge"))).not.toBeInTheDocument();
+    const mark = within(tabs[0]).getByRole("img", { name: t("recommended.badge") });
+    expect(mark).toHaveAttribute("data-tooltip", t("recommended.tooltip"));
+    expect(tabs[0]).toHaveAccessibleDescription(t("recommended.tooltip"));
+    expect(within(tabs[1]).queryByRole("img", { name: t("recommended.badge") })).not.toBeInTheDocument();
+    expect(tabs[1]).not.toHaveAttribute("aria-describedby");
   });
 
   it("names the tools in the More menu too", async () => {

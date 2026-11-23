@@ -689,7 +689,14 @@ function RoutePage(props: {
   return <EmptyPage message={t(route.emptyKey)} />;
 }
 
-/** Shows every failed query as an error toast, localized from its code. */
+declare module "@tanstack/react-query" {
+  interface Register {
+    /** `inlineError`: the query's view shows its failure itself, so no toast repeats it (M28b finding 10). */
+    queryMeta: { inlineError?: boolean };
+  }
+}
+
+/** Shows every failed query as an error toast, localized from its code, except those shown inline. */
 function useQueryErrorToasts() {
   const queryClient = useQueryClient();
   const { notify } = useNotifications();
@@ -697,7 +704,7 @@ function useQueryErrorToasts() {
   useEffect(
     () =>
       queryClient.getQueryCache().subscribe((event) => {
-        if (event.type !== "updated" || event.action.type !== "error") {
+        if (event.type !== "updated" || event.action.type !== "error" || event.query.meta?.inlineError) {
           return;
         }
         const error = event.action.error;
@@ -838,7 +845,6 @@ function AppContent(props: { features: FeatureFlags }) {
             {/* Tauri's drag-region script maximizes on double-click
                 (`core:window:allow-internal-toggle-maximize`). */}
             <div className="window-topbar__drag-region" data-tauri-drag-region aria-hidden="true" />
-            <WindowsWindowControls />
           </div>
         ) : null}
         <header className="page-header">
@@ -869,6 +875,9 @@ function AppContent(props: { features: FeatureFlags }) {
             </RouteErrorBoundary>
           </HeaderToolbarProvider>
         </section>
+        {/* Last in the panel so Tab reaches them after the page, not between
+            the sidebar and the page (M28b finding 19); drawn top right. */}
+        {isWindows ? <WindowsWindowControls /> : null}
       </main>
       <ApplyDrawer open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
       <FirstRunBackupRemote />

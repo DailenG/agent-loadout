@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
 import { RefreshButton } from "@/app/apply/RefreshButton";
-import { HeaderToolbar } from "@/app/components/HeaderSlots";
+import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
@@ -261,11 +261,12 @@ export function McpPage({ onOpenPending, onOpenInstall }: McpPageProps) {
           className="secondary-button secondary-button--compact skills-toolbar-button"
           type="button"
           onClick={() => setDialog({ mode: "create", focusPaste: true })}
+          {...collapsibleAction(t("mcp.toolbar.paste"), "late")}
         >
           <span aria-hidden="true" className="skills-toolbar-button__icon">
             <PasteIcon />
           </span>
-          <span>{t("mcp.toolbar.paste")}</span>
+          <span className={HEADER_ACTION_LABEL}>{t("mcp.toolbar.paste")}</span>
         </button>
       )}
       <button

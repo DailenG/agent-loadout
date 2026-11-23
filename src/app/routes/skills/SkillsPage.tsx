@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { storeQueryKeys, useInvalidateStore } from "@/app/apply/changeNotice";
 import { useActiveScope } from "@/app/scope/ActiveScope";
-import { HeaderToolbar } from "@/app/components/HeaderSlots";
+import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
@@ -236,11 +236,12 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
         type="button"
         onClick={() => void invalidate()}
         disabled={isFetching}
+        {...collapsibleAction(t("skills.refresh"), "early")}
       >
         <span aria-hidden="true" className="skills-toolbar-button__icon">
           <RefreshIcon isSpinning={isFetching} />
         </span>
-        <span>{t("skills.refresh")}</span>
+        <span className={HEADER_ACTION_LABEL}>{t("skills.refresh")}</span>
       </button>
       {available.length > 0 ? (
         <button
@@ -260,11 +261,12 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
           type="button"
           onClick={() => void handleCheckUpdates()}
           disabled={isChecking || skills.length === 0}
+          {...collapsibleAction(isChecking ? t("skills.checkingUpdates") : t("skills.checkUpdates"), "late")}
         >
           <span aria-hidden="true" className="skills-toolbar-button__icon">
             <UpdateAllIcon isSpinning={isChecking} />
           </span>
-          <span>{isChecking ? t("skills.checkingUpdates") : t("skills.checkUpdates")}</span>
+          <span className={HEADER_ACTION_LABEL}>{isChecking ? t("skills.checkingUpdates") : t("skills.checkUpdates")}</span>
         </button>
       )}
       <ToolbarGoInstallButton onClick={onOpenInstall} />

@@ -7,7 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { storeQueryKeys, useInvalidateStore, useUndoApply } from "@/app/apply/changeNotice";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
-import { HeaderToolbar } from "@/app/components/HeaderSlots";
+import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { CommitDetailPanel } from "@/app/routes/history/CommitDetailPanel";
@@ -289,6 +289,33 @@ function ChangesTab({ filter, onOpenPending }: { filter: HistoryFilter; onOpenPe
   );
 }
 
+function TagIcon() {
+  return (
+    <svg className="skills-toolbar-button__svg" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M3.75 4.75v4.4c0 .4.16.78.44 1.06l5.6 5.6a1.5 1.5 0 0 0 2.12 0l3.4-3.4a1.5 1.5 0 0 0 0-2.12l-5.6-5.6a1.5 1.5 0 0 0-1.06-.44h-4.4a.5.5 0 0 0-.5.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="7" cy="7.5" r="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RemotesIcon() {
+  return (
+    <svg className="skills-toolbar-button__svg" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M6 15.25h8.25a3.25 3.25 0 0 0 .4-6.48 4.75 4.75 0 0 0-9.15.9A2.8 2.8 0 0 0 6 15.25Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function HistoryPage({ onOpenPending, onOpenSettings }: HistoryPageProps) {
   const [scope, setScope] = useState<HistoryScope>("all");
   const [entityDraft, setEntityDraft] = useState("");
@@ -330,14 +357,26 @@ export function HistoryPage({ onOpenPending, onOpenSettings }: HistoryPageProps)
             />
           </label>
           <button
-            className="secondary-button secondary-button--compact"
+            className="secondary-button secondary-button--compact skills-toolbar-button"
             type="button"
             onClick={() => setTaggingCurrent(true)}
+            {...collapsibleAction(t("history.toolbar.tagCurrent"), "late")}
           >
-            {t("history.toolbar.tagCurrent")}
+            <span aria-hidden="true" className="skills-toolbar-button__icon">
+              <TagIcon />
+            </span>
+            <span className={HEADER_ACTION_LABEL}>{t("history.toolbar.tagCurrent")}</span>
           </button>
-          <button className="secondary-button secondary-button--compact" type="button" onClick={onOpenSettings}>
-            {t("history.toolbar.remotes")}
+          <button
+            className="secondary-button secondary-button--compact skills-toolbar-button"
+            type="button"
+            onClick={onOpenSettings}
+            {...collapsibleAction(t("history.toolbar.remotes"), "early")}
+          >
+            <span aria-hidden="true" className="skills-toolbar-button__icon">
+              <RemotesIcon />
+            </span>
+            <span className={HEADER_ACTION_LABEL}>{t("history.toolbar.remotes")}</span>
           </button>
         </section>
       </HeaderToolbar>

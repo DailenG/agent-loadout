@@ -66,7 +66,7 @@ describe("RestoreFromRemoteDialog", () => {
       },
     );
     const dialog = screen.getByRole("dialog", { name: t("settings.versioning.restore.title") });
-    await user.click(within(dialog).getByRole("button", { name: "Choose folder..." }));
+    await user.click(within(dialog).getByRole("button", { name: "Choose folder…" }));
 
     const table = await within(dialog).findByRole("table");
     const rows = within(table).getAllByRole("row").slice(1);
@@ -115,7 +115,7 @@ describe("RestoreFromRemoteDialog", () => {
         restoreFromRemote: async () => ok({ ...RESULT, kind: "restored", from: "mirror" }),
       },
     });
-    await user.click(screen.getByRole("button", { name: "Choose folder..." }));
+    await user.click(screen.getByRole("button", { name: "Choose folder…" }));
     await screen.findByText(t("settings.versioning.restore.direct"));
     await user.click(screen.getByRole("button", { name: t("settings.versioning.restore.submit") }));
     await waitFor(() =>

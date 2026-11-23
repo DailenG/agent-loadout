@@ -138,7 +138,7 @@ describe.skipIf(missing !== null)("History smoke", () => {
     // Tag the current version.
     await app.click("//nav//button[normalize-space(.)='History']");
     await app.find(`${list}/li`);
-    await app.click("//button[normalize-space(.)='Tag current...']");
+    await app.click("//button[normalize-space(.)='Tag current…']");
     const tagDialog = "//div[@role='dialog' and .//h3[normalize-space(.)='Tag the current version']]";
     await app.type(`${tagDialog}//label[.//span[normalize-space(.)='Name']]//input`, "pre-change");
     await app.click(`${tagDialog}//button[normalize-space(.)='Create tag']`);

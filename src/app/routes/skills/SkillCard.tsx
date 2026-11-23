@@ -15,7 +15,7 @@ import type { SkillClient, SkillInfo, SkillProject, SkillUpdateCheck } from "@/i
 import { DeleteIcon, PowerToggleIcon, RefreshIcon } from "../mcp/icons";
 import { useSkillActions } from "./actions";
 import { OpenFolderIcon, SkillMonogram, ViewFileIcon } from "./icons";
-import { LINK_METHOD_KEYS, ORIGIN_KEYS, monogram } from "./labels";
+import { formatSize, LINK_METHOD_KEYS, ORIGIN_KEYS, monogram } from "./labels";
 import { SkillFileDialog, SkillUpdateDialog } from "./SkillFileDialog";
 import { ProjectSkillPanel, ToolSyncPanel } from "./ToolSyncPanel";
 
@@ -339,7 +339,7 @@ export function SkillCard(props: SkillCardProps) {
           ) : null}
           <div>
             <dt>{t("skill.card.size")}</dt>
-            <dd>{t("skill.card.sizeValue", { size: Math.max(1, Math.round(skill.bytes / 1024)) })}</dd>
+            <dd>{formatSize(skill.bytes)}</dd>
           </div>
         </dl>
         {extraFields.length > 0 ? (

@@ -162,7 +162,7 @@ describe.skipIf(missing !== null)("Skills smoke", () => {
     expect(managed).toContain("Managed");
     await app.click("//button[@role='tab' and contains(normalize-space(.), 'Store')]");
 
-    await app.click(`${card}//button[normalize-space(.)='Disable All']`);
+    await app.click(`${card}//button[normalize-space(.)='Disable all']`);
     await waitFor(() => !isLink(link) && !existsSync(link), "the link removed");
     passed = true;
   });

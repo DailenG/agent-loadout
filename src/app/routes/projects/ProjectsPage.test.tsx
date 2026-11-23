@@ -173,7 +173,7 @@ describe("ProjectsPage", () => {
     const dialog = await screen.findByRole("dialog", { name: t("projects.review.title", { name: "home-lab" }) });
     expect(within(dialog).getByRole("note")).toHaveTextContent(t("projects.review.intro"));
     const diff = await within(dialog).findByLabelText(
-      t("projects.review.diff", { file: "<P>/.loadout/project.toml" }),
+      t("projects.review.diff", { file: ".loadout/project.toml" }),
     );
     expect(diff).toHaveTextContent('+command = "curl-pipe-sh"');
     expect(diff).toHaveTextContent('-command = "docs-mcp"');

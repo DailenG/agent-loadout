@@ -1,6 +1,7 @@
 // Portions derived from SkillDock (https://github.com/DailenG/skilldock), MIT, Copyright (c) 2026 wanghuan
 // Ported from DailenG/skilldock@181b52b src/app/components/ToolbarGoInstallButton.tsx.
 
+import { collapsibleAction, HEADER_ACTION_LABEL } from "@/app/components/HeaderSlots";
 import { t } from "@/i18n/en";
 
 function GoInstallIcon() {
@@ -44,11 +45,12 @@ export function ToolbarGoInstallButton(props: ToolbarGoInstallButtonProps) {
       className="secondary-button secondary-button--compact skills-toolbar-button skills-toolbar-button--go-install"
       type="button"
       onClick={props.onClick}
+      {...collapsibleAction(t("toolbar.goInstall"), "early")}
     >
       <span aria-hidden="true" className="skills-toolbar-button__icon">
         <GoInstallIcon />
       </span>
-      <span>{t("toolbar.goInstall")}</span>
+      <span className={HEADER_ACTION_LABEL}>{t("toolbar.goInstall")}</span>
     </button>
   );
 }

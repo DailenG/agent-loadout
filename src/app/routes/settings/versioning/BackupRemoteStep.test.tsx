@@ -48,7 +48,7 @@ describe("BackupRemoteStep", () => {
     });
     await user.click(screen.getByRole("button", { name: "Folder" }));
     await screen.findByRole("dialog", { name: t("settings.versioning.add.title") });
-    await user.click(screen.getByRole("button", { name: "Choose folder..." }));
+    await user.click(screen.getByRole("button", { name: "Choose folder…" }));
     await screen.findByText("E:/Backups/loadout");
     await user.type(screen.getByRole("textbox", { name: t("settings.versioning.add.name") }), "usb");
     await user.click(screen.getByRole("button", { name: "Add" }));

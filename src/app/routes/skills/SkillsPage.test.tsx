@@ -133,7 +133,7 @@ describe("SkillsPage", () => {
     expect(await screen.findByText("Enabled repo-notes.")).toBeInTheDocument();
   });
 
-  it("disables everywhere from Disable All and names entries that need attention", async () => {
+  it("disables everywhere from Disable all and names entries that need attention", async () => {
     const { user, transport } = renderPage({
       setSkillClients: async () =>
         ok({
@@ -160,7 +160,7 @@ describe("SkillsPage", () => {
     const alpha = await screen.findByRole("article", { name: "alpha" });
     await user.click(within(alpha).getByRole("button", { name: "Expand alpha" }));
     expect(within(alpha).getByText("~/.claude/skills/alpha")).toBeInTheDocument();
-    await user.click(within(alpha).getByRole("button", { name: "Disable All" }));
+    await user.click(within(alpha).getByRole("button", { name: "Disable all" }));
     await waitFor(() =>
       expect(transport.invocations).toContainEqual({ command: "setSkillClients", args: ["alpha", [], false, null] }),
     );

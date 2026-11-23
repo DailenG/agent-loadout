@@ -10,6 +10,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { HEADER_ACTION_LABEL } from "@/app/components/HeaderSlots";
 
 type TooltipAnchor = {
   element: HTMLElement;
@@ -38,6 +39,33 @@ function findTooltipAnchor(target: EventTarget | null) {
   return target instanceof Element
     ? target.closest<HTMLElement>("[data-tooltip]")
     : null;
+}
+
+/**
+ * The anchor for a focused element: its own `data-tooltip`, or else a mark
+ * inside it (or inside its `<label>`) that opts in with
+ * `data-tooltip-on-parent-focus`, such as the Recommended star in a chip, so
+ * a tooltip on a non-focusable mark still shows on keyboard focus (M28c, #2).
+ */
+function findFocusTooltipAnchor(target: EventTarget | null) {
+  const own = findTooltipAnchor(target);
+  if (own || !(target instanceof HTMLElement)) {
+    return own;
+  }
+  const host = target.closest("label") ?? target;
+  return host.querySelector<HTMLElement>("[data-tooltip][data-tooltip-on-parent-focus]");
+}
+
+/**
+ * True for a collapsible header action (`data-tooltip-icon-only`) whose text
+ * label is on screen: its tooltip would only repeat the label (#13).
+ */
+function showsOwnLabel(element: HTMLElement) {
+  if (!element.hasAttribute("data-tooltip-icon-only")) {
+    return false;
+  }
+  const label = element.querySelector<HTMLElement>(`.${HEADER_ACTION_LABEL}`);
+  return label != null && label.getBoundingClientRect().width > 1;
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -92,7 +120,7 @@ export function AppTooltip() {
 
   const scheduleTooltip = useCallback((element: HTMLElement) => {
     const text = element.dataset.tooltip?.trim();
-    if (!text) {
+    if (!text || showsOwnLabel(element)) {
       return;
     }
 
@@ -129,14 +157,14 @@ export function AppTooltip() {
     }
 
     function handleFocusIn(event: FocusEvent) {
-      const anchor = findTooltipAnchor(event.target);
+      const anchor = findFocusTooltipAnchor(event.target);
       if (anchor) {
         scheduleTooltip(anchor);
       }
     }
 
     function handleFocusOut(event: FocusEvent) {
-      const anchor = findTooltipAnchor(event.target);
+      const anchor = findFocusTooltipAnchor(event.target);
       if (anchor && trackedElementRef.current === anchor) {
         hideTooltip();
       }

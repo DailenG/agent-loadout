@@ -63,7 +63,7 @@ describe("VersioningSection", () => {
   it('shows "No backup remote" with Add when there is no remote', async () => {
     renderWithProviders(<VersioningSection />);
     expect(await screen.findByText("No backup remote")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Versioning & Backup" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Versioning and backup" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add remote" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: t("settings.versioning.pushAll") })).toBeNull();
     expect(screen.getByText(t("settings.versioning.retention.days", { days: 90 }))).toBeInTheDocument();
@@ -91,9 +91,9 @@ describe("VersioningSection", () => {
     ).toBeInTheDocument();
     expect(within(origin).getByText(t("settings.versioning.auth.token"))).toBeInTheDocument();
     expect(within(origin).getByText(t("settings.versioning.token.stored"))).toBeInTheDocument();
-    expect(within(origin).getByRole("button", { name: "Set token..." })).toBeInTheDocument();
+    expect(within(origin).getByRole("button", { name: "Set token…" })).toBeInTheDocument();
     // Only token remotes carry token buttons.
-    expect(within(usb).queryByRole("button", { name: "Set token..." })).toBeNull();
+    expect(within(usb).queryByRole("button", { name: "Set token…" })).toBeNull();
   });
 
   it("pushes one remote by name, and all remotes with null", async () => {
@@ -159,7 +159,7 @@ describe("VersioningSection", () => {
   it("sets and clears a remote token without showing it", async () => {
     const { user, transport } = renderSection();
     const origin = await screen.findByRole("article", { name: "origin" });
-    await user.click(within(origin).getByRole("button", { name: "Set token..." }));
+    await user.click(within(origin).getByRole("button", { name: "Set token…" }));
     const dialog = await screen.findByRole("dialog", { name: t("settings.versioning.token.title", { name: "origin" }) });
     const input = within(dialog).getByLabelText(t("settings.versioning.token.label"));
     expect(input).toHaveAttribute("type", "password");

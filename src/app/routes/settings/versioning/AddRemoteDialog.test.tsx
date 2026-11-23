@@ -53,7 +53,7 @@ describe("AddRemoteDialog", () => {
       },
     });
     await user.click(kindButton("settings.versioning.kind.folder"));
-    await user.click(screen.getByRole("button", { name: "Choose folder..." }));
+    await user.click(screen.getByRole("button", { name: "Choose folder…" }));
     expect(await screen.findByText("~/Dropbox/loadout")).toBeInTheDocument();
     expect(screen.getByText("Inside a Dropbox folder: supported, one subfolder per machine")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: new RegExp(`^${t("settings.versioning.mode.repoPerMachine")}`) })).toBeChecked();

@@ -21,11 +21,11 @@ describe("InstallPage", () => {
 
   it("installs from a git URL with the optional folder, ref and id", async () => {
     const { user, transport, onOpenSkills } = renderPage();
-    const install = screen.getByRole("button", { name: "Install Skill" });
+    const install = screen.getByRole("button", { name: "Install skill" });
     expect(install).toBeDisabled();
-    await user.type(screen.getByRole("textbox", { name: "Git Repository URL" }), " https://github.com/acme/skills ");
-    await user.type(screen.getByRole("textbox", { name: "Skill Folder in the Repository (optional)" }), "skills/alpha");
-    await user.type(screen.getByRole("textbox", { name: "Branch or Tag (optional)" }), "main");
+    await user.type(screen.getByRole("textbox", { name: "Git repository URL" }), " https://github.com/acme/skills ");
+    await user.type(screen.getByRole("textbox", { name: "Skill folder in the repository (optional)" }), "skills/alpha");
+    await user.type(screen.getByRole("textbox", { name: "Branch or tag (optional)" }), "main");
     await user.click(install);
     await waitFor(() =>
       expect(transport.invocations).toContainEqual({
@@ -36,7 +36,7 @@ describe("InstallPage", () => {
     expect(await screen.findByText("Installed repo-notes as repo-notes.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View in Skills" }));
     expect(onOpenSkills).toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Git Repository URL" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Git repository URL" })).toHaveValue("");
   });
 
   it("asks before installing a taken id as a new skill", async () => {
@@ -46,8 +46,8 @@ describe("InstallPage", () => {
           ? ok({ ...MOCK_SKILL_INSTALLED, id: "repo-notes-2", renamedFrom: "repo-notes" })
           : mockIpcError({ code: "already_exists", message: "taken" }),
     });
-    await user.type(screen.getByRole("textbox", { name: "Git Repository URL" }), "https://github.com/acme/notes");
-    await user.click(screen.getByRole("button", { name: "Install Skill" }));
+    await user.type(screen.getByRole("textbox", { name: "Git repository URL" }), "https://github.com/acme/notes");
+    await user.click(screen.getByRole("button", { name: "Install skill" }));
     const confirm = await screen.findByRole("dialog", { name: "Skill id already in the store" });
     // A taken id is a question, not an error toast.
     expect(screen.queryByText("An entry with this name already exists.")).toBeNull();
@@ -67,12 +67,12 @@ describe("InstallPage", () => {
     });
     await user.click(screen.getByRole("tab", { name: "Local" }));
     expect(screen.queryByRole("textbox", { name: /path/i })).toBeNull();
-    const install = screen.getByRole("button", { name: "Install Skill" });
+    const install = screen.getByRole("button", { name: "Install skill" });
     expect(install).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Choose archive" }));
     expect(transport.invocations).toContainEqual({ command: "pickSkillSource", args: ["archive"] });
     expect(await screen.findByText("~/Downloads/repo-notes")).toBeInTheDocument();
-    await user.type(screen.getByRole("textbox", { name: "Skill Id (optional)" }), "notes");
+    await user.type(screen.getByRole("textbox", { name: "Skill ID (optional)" }), "notes");
     await user.click(install);
     await waitFor(() =>
       expect(transport.invocations).toContainEqual({ command: "installLocalSkill", args: ["folder-1", "notes", false] }),

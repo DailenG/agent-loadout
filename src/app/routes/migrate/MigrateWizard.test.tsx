@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { MigrationApplied, MigrationReport } from "@/ipc/bindings";
 import { MOCK_CHANGE, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
@@ -53,6 +54,17 @@ function renderWizard(commands: MockTransportOptions["commands"] = {}) {
   return { onClose, onOpenPending, ...view };
 }
 
+/**
+ * Replaces a field's value with one paste (one input event) instead of a
+ * keystroke per character: the validation under test runs on the value, and
+ * per-key typing re-rendered the wizard dozens of times per field, which ran
+ * past the 5s test timeout under full-suite load.
+ */
+async function enter(user: UserEvent, field: HTMLElement, value: string) {
+  await user.clear(field);
+  await user.paste(value);
+}
+
 describe("MigrateWizard", () => {
   it("shows the dry run with every item, its status and offers, filtered by status", async () => {
     const { user, transport } = renderWizard();
@@ -60,8 +72,11 @@ describe("MigrateWizard", () => {
     expect(screen.getByText(/A dry run of ~\/\.skilldock/)).toBeInTheDocument();
     expect(within(report).getAllByRole("listitem", { name: undefined }).length).toBeGreaterThanOrEqual(4);
     expect(within(report).getByText("Replace SkillDock wrapper for codex/context7 after the migration.")).toBeInTheDocument();
-    expect(within(report).getByText(/A required field is missing\. no command/)).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Skipped (1)" }));
+    expect(within(report).getByText("A required field is missing (no command).")).toBeInTheDocument();
+    const skipped = screen.getByRole("button", { name: "Skipped (1)" });
+    expect(skipped).toHaveAttribute("aria-pressed", "false");
+    await user.click(skipped);
+    expect(skipped).toHaveAttribute("aria-pressed", "true");
     expect(within(report).getByText("~/.skilldock/plugins")).toBeInTheDocument();
     expect(within(report).queryByText("context7")).toBeNull();
     expect(transport.calls).not.toContain("applySkilldockMigration");
@@ -77,15 +92,15 @@ describe("MigrateWizard", () => {
     expect(keyValue).toHaveAttribute("type", "password");
     const next = screen.getByRole("button", { name: "Next" });
     expect(next).toBeDisabled();
-    await user.type(keyValue, "typed-value");
+    await enter(user, keyValue, "typed-value");
 
     await user.click(screen.getByRole("combobox", { name: "Destination for notes args[2]" }));
     await user.click(await screen.findByRole("option", { name: /Environment variable/ }));
-    await user.type(screen.getByLabelText("Environment variable for notes args[2]"), "NOTES_TOKEN");
+    await enter(user, screen.getByLabelText("Environment variable for notes args[2]"), "NOTES_TOKEN");
 
     await user.click(screen.getByRole("combobox", { name: "Destination for issues headers.Authorization" }));
     await user.click(await screen.findByRole("option", { name: /1Password reference/ }));
-    await user.type(screen.getByLabelText("1Password reference for issues headers.Authorization"), "op://Dev/Issues/token");
+    await enter(user, screen.getByLabelText("1Password reference for issues headers.Authorization"), "op://Dev/Issues/token");
     expect(next).toBeEnabled();
     await user.click(next);
 
@@ -112,25 +127,22 @@ describe("MigrateWizard", () => {
     await screen.findByRole("list", { name: "Migration report" });
     await user.click(screen.getByRole("button", { name: "Next" }));
     const next = screen.getByRole("button", { name: "Next" });
-    await user.type(screen.getByLabelText("Value for notes env.NOTES_API_KEY"), "v");
+    await enter(user, screen.getByLabelText("Value for notes env.NOTES_API_KEY"), "v");
     await user.click(screen.getByRole("combobox", { name: "Destination for notes args[2]" }));
     await user.click(await screen.findByRole("option", { name: /Environment variable/ }));
     const env = screen.getByLabelText("Environment variable for notes args[2]");
-    await user.type(env, "1BAD NAME");
+    await enter(user, env, "1BAD NAME");
     expect(screen.getByText(/Use a variable name/)).toBeInTheDocument();
-    await user.clear(env);
-    await user.type(env, "NOTES_TOKEN");
+    await enter(user, env, "NOTES_TOKEN");
     await user.click(screen.getByRole("combobox", { name: "Destination for issues headers.Authorization" }));
     await user.click(await screen.findByRole("option", { name: /1Password reference/ }));
     const op = screen.getByLabelText("1Password reference for issues headers.Authorization");
     for (const bad of ["op://Dev/Issues", "op://Dev//token", "op://a/b/c/d/e", "Dev/Issues/token"]) {
-      await user.clear(op);
-      await user.type(op, bad);
+      await enter(user, op, bad);
       expect(screen.getByText(/Use op:\/\/vault\/item\/field/)).toBeInTheDocument();
       expect(next).toBeDisabled();
     }
-    await user.clear(op);
-    await user.type(op, "op://Dev/Issues/section/token");
+    await enter(user, op, "op://Dev/Issues/section/token");
     expect(screen.queryByText(/Use op:\/\/vault\/item\/field/)).toBeNull();
     expect(next).toBeEnabled();
   });

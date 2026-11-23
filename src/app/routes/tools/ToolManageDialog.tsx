@@ -221,7 +221,7 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManag
     <>
       <div className="dialog-backdrop" role="presentation" onClick={onClose}>
         <div
-          className="tool-manage-dialog"
+          className="tool-manage-dialog tool-manage-dialog--tools"
           role="dialog"
           aria-modal="true"
           aria-labelledby={dialogTitleId}
@@ -242,12 +242,6 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp }: ToolManag
               aria-label={t("tools.dialog.close")}
             >
               ×
-            </button>
-          </div>
-
-          <div className="tool-manage-dialog__tabs" role="tablist" aria-label={t("tools.dialog.tabs")}>
-            <button className="tool-manage-dialog__tab is-selected" type="button" role="tab" aria-selected>
-              MCP
             </button>
           </div>
 

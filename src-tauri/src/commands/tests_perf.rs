@@ -32,7 +32,21 @@ const SKILLS: usize = 300;
 const PROJECTS: usize = 20;
 const EDITS: usize = 300;
 const FOREIGN: usize = 25;
+/// Runs per command; slow commands run fewer times (see [`runs_for`]).
 const RUNS: usize = 7;
+
+/// Runs for a command whose first run took `first`: the slowest commands
+/// take tens of seconds on this dataset, and 7 runs of each would keep the
+/// test busy for over an hour.
+fn runs_for(first: Duration) -> usize {
+    if first > Duration::from_secs(15) {
+        1
+    } else if first > Duration::from_secs(2) {
+        3
+    } else {
+        RUNS
+    }
+}
 
 /// Every other adapter (and the first four) gets a user file, as on a
 /// machine with about half the clients installed.
@@ -156,6 +170,7 @@ fn project_manifest(i: usize) -> String {
 
 struct Timing {
     name: String,
+    runs: usize,
     min: Duration,
     median: Duration,
     max: Duration,
@@ -165,20 +180,34 @@ struct Timing {
 fn time<T: serde::Serialize>(out: &mut Vec<Timing>, name: &str, mut f: impl FnMut() -> T) {
     let mut runs = Vec::with_capacity(RUNS);
     let mut bytes = 0;
-    for _ in 0..RUNS {
+    let mut planned = RUNS;
+    while runs.len() < planned {
         let start = Instant::now();
         let value = f();
         runs.push(start.elapsed());
+        if runs.len() == 1 {
+            planned = runs_for(runs[0]);
+        }
         bytes = serde_json::to_vec(&value).map(|v| v.len()).unwrap_or(0);
     }
     runs.sort();
+    let n = runs.len();
+    // Printed as it goes: the whole run takes tens of minutes.
+    eprintln!("timed {name}: median {} ms ({n} runs)", ms(runs[n / 2]));
     out.push(Timing {
         name: name.to_owned(),
+        runs: n,
         min: runs[0],
-        median: runs[RUNS / 2],
-        max: runs[RUNS - 1],
+        median: runs[n / 2],
+        max: runs[n - 1],
         bytes,
     });
+}
+
+fn record(setup: &mut Vec<(&'static str, Duration)>, name: &'static str, started: Instant) {
+    let elapsed = started.elapsed();
+    eprintln!("setup {name}: {} ms", ms(elapsed));
+    setup.push((name, elapsed));
 }
 
 fn ms(d: Duration) -> f64 {
@@ -195,7 +224,7 @@ fn perf_baseline_commands() {
 
     let started = Instant::now();
     let detected = client_files(core);
-    setup.push(("client files", started.elapsed()));
+    record(&mut setup, "client files", started);
 
     let started = Instant::now();
     let files: Vec<(String, String)> = (0..SERVERS)
@@ -207,14 +236,11 @@ fn perf_baseline_commands() {
         })
         .collect();
     stage(core, &files);
-    setup.push(("stage 200 servers (one commit)", started.elapsed()));
+    record(&mut setup, "stage 200 servers (one commit)", started);
 
     let started = Instant::now();
     let first = apply::pending(core).unwrap();
-    setup.push((
-        "first pending plan (200 servers x clients)",
-        started.elapsed(),
-    ));
+    record(&mut setup, "first pending plan (200 servers x clients)", started);
     eprintln!(
         "first plan: {} files, {} pending, {} writes",
         first.files.len(),
@@ -224,7 +250,7 @@ fn perf_baseline_commands() {
 
     let started = Instant::now();
     apply::run(core, None).unwrap();
-    setup.push(("first apply (all client files)", started.elapsed()));
+    record(&mut setup, "first apply (all client files)", started);
 
     let started = Instant::now();
     for e in 0..EDITS {
@@ -238,21 +264,29 @@ fn perf_baseline_commands() {
         );
     }
     apply::run(core, None).unwrap();
-    setup.push(("300 edit commits + apply", started.elapsed()));
+    record(&mut setup, "300 edit commits + apply", started);
 
     let started = Instant::now();
     for i in 0..SKILLS {
         let folder = skill_folder(&fx.th.projects(), i);
+        let step = Instant::now();
         skills::install_local(core, &folder, None, false).unwrap();
+        if i % 100 == 0 || i == SKILLS - 1 {
+            eprintln!("skill {i}: install {} ms", ms(step.elapsed()));
+        }
     }
-    setup.push(("install 300 local skills", started.elapsed()));
+    record(&mut setup, "install 300 local skills", started);
 
     let started = Instant::now();
     let skill_clients: Vec<String> = detected.iter().take(3).map(|c| (*c).to_owned()).collect();
     for i in (0..SKILLS).step_by(3) {
+        let step = Instant::now();
         skills::set_clients(core, &format!("skill-{i:03}"), &skill_clients, true, None).unwrap();
+        if i % 99 == 0 {
+            eprintln!("skill {i}: enable for 3 clients {} ms", ms(step.elapsed()));
+        }
     }
-    setup.push(("enable 100 skills for 3 clients", started.elapsed()));
+    record(&mut setup, "enable 100 skills for 3 clients", started);
 
     let started = Instant::now();
     let mut project_ids = Vec::new();
@@ -260,15 +294,22 @@ fn perf_baseline_commands() {
         let root = fx.th.projects().join(format!("project-{i}"));
         std::fs::create_dir_all(root.join(".loadout")).unwrap();
         std::fs::write(root.join(".loadout/project.toml"), project_manifest(i)).unwrap();
+        let step = Instant::now();
         let added = projects::add(core, &root).unwrap();
+        let add_ms = ms(step.elapsed());
+        let step = Instant::now();
         if i % 5 != 4 {
             let hash = projects::review(core, &added.id).unwrap().hash;
             projects::trust(core, &added.id, &hash).unwrap();
         }
+        eprintln!(
+            "project {i}: add {add_ms} ms, review + trust {} ms",
+            ms(step.elapsed())
+        );
         project_ids.push(added.id);
     }
     apply::run(core, None).unwrap();
-    setup.push(("add 20 projects (16 trusted) + apply", started.elapsed()));
+    record(&mut setup, "add 20 projects (16 trusted) + apply", started);
 
     let commits = fx.commits();
     let project = project_ids[0].clone();
@@ -379,11 +420,14 @@ fn perf_baseline_commands() {
     for (name, d) in &setup {
         eprintln!("| {name} | {} |", ms(*d));
     }
-    eprintln!("\n| Command | min ms | median ms | max ms | JSON bytes |\n|---|---|---|---|---|");
+    eprintln!(
+        "\n| Command | runs | min ms | median ms | max ms | JSON bytes |\n|---|---|---|---|---|---|"
+    );
     for t in &out {
         eprintln!(
-            "| {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} |",
             t.name,
+            t.runs,
             ms(t.min),
             ms(t.median),
             ms(t.max),
@@ -396,6 +440,7 @@ fn perf_baseline_commands() {
             .map(|t| {
                 serde_json::json!({
                     "name": t.name,
+                    "runs": t.runs,
                     "minMs": ms(t.min),
                     "medianMs": ms(t.median),
                     "maxMs": ms(t.max),

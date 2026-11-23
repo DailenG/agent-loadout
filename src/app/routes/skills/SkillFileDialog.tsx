@@ -10,7 +10,7 @@ import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { t } from "@/i18n/en";
 import type { SkillFileChange, SkillInfo, SkillUpdateCheck } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
-import { CHANGE_KIND_KEYS, failureText } from "./labels";
+import { CHANGE_KIND_KEYS, failureText, fileTreeRows, formatSize } from "./labels";
 import { SkillDiffView } from "./SkillDiffView";
 
 type FileItemProps = {
@@ -34,6 +34,25 @@ function FileItem({ path, selected, badge, onSelect }: FileItemProps) {
       <span className="skill-file-dialog__tree-label">{parts[parts.length - 1]}</span>
       {badge ? <span className="skill-file-dialog__language-badge">{badge}</span> : null}
     </button>
+  );
+}
+
+/** A folder's heading in the files tree (M28c, finding 16): not a control, its files follow indented. */
+function FolderRow({ name, depth }: { name: string; depth: number }) {
+  return (
+    <div
+      className="skill-file-dialog__tree-item skill-file-dialog__tree-item--directory skill-file-dialog__tree-folder"
+      style={{ paddingLeft: `${12 + depth * 14}px` }}
+    >
+      <span className="skill-file-dialog__tree-label">{`${name}/`}</span>
+    </div>
+  );
+}
+
+/** The sidebar rows for `paths`: folder headings, then each file through `file`. */
+function treeItems(paths: readonly string[], file: (path: string) => ReactNode): ReactNode[] {
+  return fileTreeRows(paths).map((row) =>
+    row.kind === "folder" ? <FolderRow key={`folder:${row.path}`} name={row.name} depth={row.depth} /> : file(row.path),
   );
 }
 
@@ -108,7 +127,7 @@ export function SkillFileDialog({ skill, onClose }: { skill: SkillInfo; onClose:
     <DialogShell
       title={t("skill.files.title", { name: skill.name })}
       onClose={onClose}
-      sidebar={paths.map((path) => (
+      sidebar={treeItems(paths, (path) => (
         <FileItem key={path} path={path} selected={path === current} onSelect={() => setSelected(path)} />
       ))}
     >
@@ -116,7 +135,7 @@ export function SkillFileDialog({ skill, onClose }: { skill: SkillInfo; onClose:
         <div className="skill-file-dialog__file-identity">
           <strong>{current}</strong>
           {file.data ? (
-            <span className="skill-file-dialog__language-badge">{t("skill.files.size", { size: file.data.bytes })}</span>
+            <span className="skill-file-dialog__language-badge">{formatSize(file.data.bytes)}</span>
           ) : null}
         </div>
       </div>
@@ -161,15 +180,21 @@ export function SkillUpdateDialog({ skill, check, isUpdating, onUpdate, onClose 
     <DialogShell
       title={t("skill.update.title", { name: skill.name })}
       onClose={onClose}
-      sidebar={check.changes.map((change) => (
-        <FileItem
-          key={change.path}
-          path={change.path}
-          badge={t(CHANGE_KIND_KEYS[change.kind])}
-          selected={change.path === selected?.path}
-          onSelect={() => setSelected(change)}
-        />
-      ))}
+      sidebar={treeItems(
+        check.changes.map((change) => change.path),
+        (path) => {
+          const change = check.changes.find((item) => item.path === path)!;
+          return (
+            <FileItem
+              key={change.path}
+              path={change.path}
+              badge={t(CHANGE_KIND_KEYS[change.kind])}
+              selected={change.path === selected?.path}
+              onSelect={() => setSelected(change)}
+            />
+          );
+        },
+      )}
       footer={
         <>
           <button className="secondary-button" type="button" onClick={onClose}>

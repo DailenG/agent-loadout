@@ -12,20 +12,30 @@
   --surface-muted: #f7f9fc;
   --line: #dce4f0;
   --line-strong: #c7d4e6;
-  --muted: #6b7280;
+  /* M28c (#12): interactive boundaries (inputs, select triggers, card buttons) need 3:1. */
+  --line-control: #7e889a;
+  --muted: #5f6672;
   --heading: #1f2937;
   --accent: #3b82f6;
   --accent-soft: rgba(59, 130, 246, 0.12);
-  --button-primary: #3d7def;
-  --button-primary-hover: #3271df;
+  /* M28c (#12): text tokens for accent and status text on surfaces and soft fills (4.5:1). */
+  --accent-text: #1d4ed8;
+  --button-primary: #2563eb;
+  --button-primary-top: #2f6cec;
+  --button-primary-hover: #1d4ed8;
+  --button-primary-hover-top: #2a62e6;
   --button-primary-soft: rgba(61, 125, 239, 0.09);
   --button-primary-soft-hover: rgba(61, 125, 239, 0.14);
   --button-primary-border: rgba(61, 125, 239, 0.24);
   --success: #27b36a;
   --success-soft: rgba(39, 179, 106, 0.12);
+  --success-text: #166534;
   --warning: #f59d3d;
   --warning-soft: rgba(245, 157, 61, 0.15);
-  --danger: #d25a5a;
+  --warning-text: #92400e;
+  --danger: #c0392b;
+  --danger-text: #b42318;
+  --focus-ring: #3b82f6;
   --shadow: 0 8px 24px rgba(23, 35, 63, 0.08);
   --tooltip-delay: 600ms;
   --tooltip-surface: rgba(255, 255, 255, 0.76);
@@ -49,6 +59,7 @@
   --surface-muted: #202020;
   --line: #3b3b3b;
   --line-strong: #515151;
+  --line-control: #7a7a7a;
   --muted: #c4c4c4;
   --heading: #f3f3f3;
   --text: #e8e8e8;
@@ -56,16 +67,23 @@
   --accent: #ffc21a;
   --accent-strong: #ffd45c;
   --accent-soft: rgba(255, 194, 26, 0.13);
+  --accent-text: #ffc21a;
   --button-primary: #ffc21a;
+  --button-primary-top: #ffc21a;
   --button-primary-hover: #ffcf4d;
+  --button-primary-hover-top: #ffcf4d;
   --button-primary-soft: rgba(255, 194, 26, 0.1);
   --button-primary-soft-hover: rgba(255, 194, 26, 0.16);
   --button-primary-border: rgba(255, 194, 26, 0.34);
   --success: #52d889;
   --success-soft: rgba(82, 216, 137, 0.13);
+  --success-text: #52d889;
   --warning: #ffc85c;
   --warning-soft: rgba(255, 200, 92, 0.14);
+  --warning-text: #ffc85c;
   --danger: #ff7b7b;
+  --danger-text: #ff7b7b;
+  --focus-ring: #ffc21a;
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
   --tooltip-surface: rgba(45, 45, 45, 0.96);
   --tooltip-border: rgba(255, 255, 255, 0.12);
@@ -162,7 +180,7 @@ button *,
   width: 100%;
   min-width: 0;
   min-height: 40px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   padding: 0 12px;
   background: var(--surface-strong);
@@ -340,7 +358,7 @@ code {
 .publishing-platform-bar__tab.is-active {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .publishing-platform-bar__tab.is-active > span {
@@ -380,7 +398,7 @@ code {
 }
 
 .publishing-platform-bar__context .is-connected {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .publishing-platform-bar__account {
@@ -722,7 +740,7 @@ code {
 }
 
 .app-notification--success .app-notification__message {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .app-notification--error {
@@ -741,7 +759,7 @@ code {
 }
 
 .app-notification--success .app-notification__icon {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .app-notification--error .app-notification__icon {
@@ -749,7 +767,7 @@ code {
 }
 
 .app-notification--info .app-notification__icon {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .app-notification__message {
@@ -789,7 +807,7 @@ code {
   border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 6px;
   background: rgba(59, 130, 246, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
@@ -1439,7 +1457,7 @@ code {
 
 .nav-item.is-selected .nav-icon {
   background: rgba(59, 130, 246, 0.16);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .nav-sub-item {
@@ -2177,7 +2195,7 @@ code {
   min-height: var(--header-control-height);
   min-width: 180px;
   gap: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 9px;
   padding: 0 10px;
   background: var(--surface);
@@ -2544,7 +2562,7 @@ code {
   width: 100%;
   height: 44px;
   min-height: 44px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   padding: 0 12px;
   background: var(--surface-strong);
@@ -2933,8 +2951,8 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -3109,7 +3127,7 @@ code {
 
 .link-badge--market {
   background: rgba(47, 120, 255, 0.09);
-  color: #2f78ff;
+  color: var(--accent-text);
 }
 
 .link-badge--local {
@@ -3268,7 +3286,7 @@ code {
 .skill-tag-filter-bar__item:hover,
 .skill-tag-filter-bar__item:focus-visible {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface) 88%);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-tag-filter-bar__item.has-tag:hover,
@@ -3280,7 +3298,7 @@ code {
 
 .skill-tag-filter-bar__item.is-active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface) 82%);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -3309,6 +3327,11 @@ code {
   background: color-mix(in srgb, var(--skill-tag-color) 13%, var(--surface) 87%);
   color: color-mix(in srgb, var(--skill-tag-color) 78%, var(--heading) 22%);
   font-weight: 400;
+}
+
+/* M28c (#12): in dark the tone mixes toward the light heading so the text keeps 4.5:1. */
+:root[data-theme="dark"] .skill-card__tag.has-tag {
+  color: color-mix(in srgb, var(--skill-tag-color) 45%, var(--heading) 55%);
 }
 
 .skill-tag-filter-control.tag-tone-neutral,
@@ -3404,7 +3427,7 @@ code {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--line) 58%);
   outline: none;
   background: color-mix(in srgb, var(--accent) 12%, var(--surface) 88%);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-card__tag.has-tag:hover,
@@ -3502,7 +3525,7 @@ code {
   min-width: 0;
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 8px;
   background: var(--surface);
   color: var(--heading);
@@ -3549,7 +3572,7 @@ code {
 
 .skill-tag-editor__create:hover {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-tag-editor__create:disabled,
@@ -3648,15 +3671,15 @@ code {
 
 .skill-card__enabled-toggle.is-empty {
   background: rgba(100, 116, 139, 0.1);
-  color: #7b8492;
+  color: var(--muted);
 }
 
 .skill-card__icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 6px;
@@ -3675,7 +3698,7 @@ code {
 .skill-card__icon-button:hover:not(:disabled) {
   border-color: rgba(47, 120, 255, 0.18);
   background: rgba(47, 120, 255, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
   opacity: 1;
 }
 
@@ -3695,7 +3718,7 @@ code {
 }
 
 .skill-card__icon-button--update {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-card__file-preview-button {
@@ -3817,7 +3840,7 @@ code {
 .sync-button,
 .solid-button,
 .source-tab.is-selected {
-  background: linear-gradient(180deg, #4b87f3 0%, var(--button-primary) 100%);
+  background: linear-gradient(180deg, var(--button-primary-top) 0%, var(--button-primary) 100%);
   color: #ffffff;
   font-weight: 500;
   border-color: rgba(61, 125, 239, 0.76);
@@ -3827,14 +3850,14 @@ code {
 .primary-button:hover:not(:disabled),
 .sync-button:hover:not(:disabled),
 .solid-button:hover:not(:disabled) {
-  background: linear-gradient(180deg, #4381ee 0%, var(--button-primary-hover) 100%);
+  background: linear-gradient(180deg, var(--button-primary-hover-top) 0%, var(--button-primary-hover) 100%);
   border-color: rgba(50, 113, 223, 0.82);
   box-shadow: 0 5px 12px rgba(47, 111, 223, 0.18);
 }
 
 .market-tab.is-selected {
   background: rgba(47, 120, 255, 0.12);
-  color: #2f78ff;
+  color: var(--accent-text);
   border-color: rgba(47, 120, 255, 0.24);
   box-shadow: none;
 }
@@ -3997,13 +4020,13 @@ code {
 .batch-action-button.tone-accent {
   border-color: color-mix(in srgb, var(--accent) 34%, var(--line) 66%);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .batch-action-button.tone-success {
   border-color: color-mix(in srgb, var(--success) 34%, var(--line) 66%);
   background: var(--success-soft);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .batch-action-button.tone-warning {
@@ -4214,7 +4237,7 @@ code {
 .secondary-button--compact.is-selected {
   background: rgba(47, 120, 255, 0.08);
   border-color: rgba(47, 120, 255, 0.24);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-card__quick-action {
@@ -4263,12 +4286,12 @@ code {
 
 .tone-positive {
   background: var(--success-soft);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .tone-info {
   background: rgba(47, 120, 255, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .tone-pending-commit {
@@ -4283,7 +4306,7 @@ code {
 
 .tone-warning {
   background: var(--warning-soft);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .skill-card__details {
@@ -4407,7 +4430,7 @@ code {
 }
 
 .skill-card__list-actions .skill-card__icon-button--update {
-  color: var(--accent);
+  color: var(--accent-text);
   opacity: 0.96;
 }
 
@@ -4430,7 +4453,7 @@ code {
 
 .skill-card__chevron-button:hover .skill-card__chevron,
 .skill-card__chevron-button:focus-visible .skill-card__chevron {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-scope-badge {
@@ -4622,7 +4645,7 @@ code {
 }
 
 .unmanaged-skill-row__publish-button {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .unmanaged-skill-row__type-badges {
@@ -4878,7 +4901,7 @@ code {
 .skill-card-detail-modal__action.is-primary {
   border-color: rgba(47, 120, 255, 0.28);
   background: rgba(47, 120, 255, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-card-detail-modal__close {
@@ -5405,7 +5428,7 @@ code {
   width: 100%;
   min-height: 36px;
   border-radius: 10px;
-  border: 1px solid #d8e2f0;
+  border: 1px solid var(--line-control);
   background: #f8fbff;
   padding: 0 36px 0 34px;
   font-size: 0.76rem;
@@ -5552,7 +5575,7 @@ code {
 
 .market-tab.is-selected:hover {
   background: rgba(47, 120, 255, 0.16);
-  color: #2f78ff;
+  color: var(--accent-text);
   border-color: rgba(47, 120, 255, 0.28);
 }
 
@@ -5582,7 +5605,7 @@ code {
 .source-tab.is-selected:focus-visible {
   border-color: transparent;
   background: var(--button-primary-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
   box-shadow: none;
 }
@@ -5829,7 +5852,7 @@ code {
   border-radius: 9px;
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: #2f6fda;
+  color: var(--accent-text);
   font-size: 0.7rem;
   font-weight: 600;
   box-shadow: none;
@@ -6401,7 +6424,7 @@ code {
 }
 
 .repo-install__notice {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .repo-install__selection {
@@ -6696,7 +6719,7 @@ code {
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 7px;
   background: color-mix(in srgb, var(--accent) 9%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.7rem;
   font-weight: 500;
   line-height: 1.2;
@@ -6792,7 +6815,7 @@ code {
     color-mix(in srgb, var(--success) 16%, var(--surface) 84%),
     color-mix(in srgb, var(--success) 9%, var(--surface) 91%)
   );
-  color: var(--success);
+  color: var(--success-text);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--success) 14%, transparent),
     0 8px 18px color-mix(in srgb, var(--success) 12%, transparent);
@@ -6845,7 +6868,7 @@ code {
 .plugin-install-preview__host-toggle.is-selected .plugin-install-preview__host-icon {
   border-color: color-mix(in srgb, var(--success) 30%, var(--line) 70%);
   background: color-mix(in srgb, var(--success) 10%, var(--surface-strong) 90%);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .plugin-install-preview__host-toggle.is-installed {
@@ -7015,7 +7038,7 @@ code {
 
 .local-install-subtab.is-selected {
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
   box-shadow: none;
 }
@@ -7038,7 +7061,7 @@ code {
 
 .local-install-subtab.is-selected:hover {
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .local-install-panel,
@@ -7122,12 +7145,12 @@ code {
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent),
     0 14px 30px color-mix(in srgb, var(--success) 16%, transparent);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .local-install-dropzone.is-dragging strong,
 .local-install-dropzone.is-dragging span {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .local-install-dropzone.is-selected {
@@ -7151,7 +7174,7 @@ code {
   grid-row: auto;
   width: 30px;
   height: 30px;
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .local-install-dropzone strong {
@@ -7174,7 +7197,7 @@ code {
 }
 
 .local-install-dropzone__selected span:last-child {
-  color: var(--success);
+  color: var(--success-text);
   font-weight: 600;
 }
 
@@ -7200,7 +7223,7 @@ code {
 .local-install-form input {
   width: 100%;
   height: 44px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface) 94%, #000000 6%);
   color: var(--heading);
@@ -7242,7 +7265,7 @@ code {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
   background: color-mix(in srgb, var(--surface) 92%, var(--accent-soft) 8%);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
   transform: translateY(-1px);
 }
 
@@ -7547,7 +7570,7 @@ code {
   border-color: var(--button-primary-border);
   border-radius: 8px;
   background: var(--button-primary-soft);
-  color: #2f6fda;
+  color: var(--accent-text);
   box-shadow: none;
   font-size: 0.75rem;
   font-weight: 500;
@@ -7857,7 +7880,7 @@ code {
   border-radius: 999px;
   padding: 3px 8px;
   background: rgba(47, 120, 255, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.72rem;
   font-weight: 500;
 }
@@ -8022,7 +8045,7 @@ code {
 
 .skill-file-dialog__panel-toggle button.is-selected {
   background: rgba(47, 120, 255, 0.09);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-file-dialog__view-toggle-button {
@@ -8052,7 +8075,7 @@ code {
 
 .skill-file-dialog__view-toggle-button.is-selected {
   background: rgba(47, 120, 255, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-file-dialog__view-toggle-button svg {
@@ -8195,7 +8218,7 @@ code {
 
 .skill-file-dialog__tree-item--file.is-selected {
   background: rgba(47, 120, 255, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: 2px 0 0 rgba(47, 120, 255, 0.72) inset;
 }
 
@@ -8279,7 +8302,7 @@ code {
   margin-left: auto;
   border-radius: 6px;
   background: rgba(47, 120, 255, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: "SF Mono", "JetBrains Mono", monospace;
   font-size: 0.64rem;
   font-weight: 700;
@@ -8392,7 +8415,7 @@ code {
 }
 
 .skill-file-dialog__dirty {
-  color: var(--warning);
+  color: var(--warning-text);
   font-size: 0.78rem;
   font-weight: 600;
 }
@@ -8401,7 +8424,7 @@ code {
   width: 100%;
   height: 100%;
   min-height: 0;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: var(--skill-dialog-content-radius);
   padding: 14px 16px;
   resize: none;
@@ -8475,7 +8498,7 @@ code {
 
 .skill-diff__display-toggle button.is-selected {
   background: rgba(47, 120, 255, 0.09);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-diff__editor {
@@ -8801,7 +8824,7 @@ code {
 }
 
 .skill-file-dialog__markdown a {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skill-file-dialog__markdown table {
@@ -8998,7 +9021,7 @@ code {
 }
 
 .tool-card__status.is-positive {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .tool-card__simple-copy {
@@ -9018,7 +9041,7 @@ code {
 }
 
 .tool-card__path-label {
-  color: #59677b;
+  color: var(--muted);
   font-size: 0.74rem;
   line-height: 1.35;
   white-space: nowrap;
@@ -9073,7 +9096,7 @@ code {
 .tool-card__path-button:hover:not(:disabled) {
   border-color: rgba(47, 120, 255, 0.2);
   background: rgba(47, 120, 255, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
   transform: translateY(-1px);
 }
 
@@ -9138,7 +9161,7 @@ code {
 }
 
 .primary-button--compact {
-  background: linear-gradient(180deg, #4b87f3 0%, var(--button-primary) 100%);
+  background: linear-gradient(180deg, var(--button-primary-top) 0%, var(--button-primary) 100%);
   border-color: rgba(61, 125, 239, 0.76);
   min-height: 32px;
   padding: 0 11px;
@@ -9158,7 +9181,7 @@ code {
 }
 
 .primary-button--compact:hover:not(:disabled) {
-  background: linear-gradient(180deg, #4381ee 0%, var(--button-primary-hover) 100%);
+  background: linear-gradient(180deg, var(--button-primary-hover-top) 0%, var(--button-primary-hover) 100%);
   border-color: rgba(50, 113, 223, 0.82);
   box-shadow: 0 5px 12px rgba(47, 111, 223, 0.18);
   transform: translateY(-1px);
@@ -9177,7 +9200,7 @@ code {
   border-radius: 8px;
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: #2f6fda;
+  color: var(--accent-text);
   font-size: 0.74rem;
   font-weight: 500;
   box-shadow: none;
@@ -9349,7 +9372,7 @@ code {
   justify-content: center;
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -9369,7 +9392,7 @@ code {
   padding: 0 16px;
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -9386,7 +9409,7 @@ code {
 .skillhub-publish-form textarea {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 8px;
   background: var(--surface-muted);
   color: var(--heading);
@@ -9508,7 +9531,7 @@ code {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   transition:
     background-color 120ms ease,
@@ -9518,7 +9541,7 @@ code {
 .publish-skill-row__market-title-link:hover,
 .publish-skill-row__market-title-link:focus-visible {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .publish-skill-row__market-title-link svg {
@@ -9599,7 +9622,7 @@ code {
 }
 
 .publish-skill-row__action.is-loading {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .tone-danger {
@@ -9684,7 +9707,7 @@ code {
 .publish-confirm-dialog__changelog textarea {
   min-height: 86px;
   resize: vertical;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   padding: 10px 12px;
   background: var(--surface-strong);
@@ -9703,7 +9726,7 @@ code {
 .dialog-card.publish-confirm-dialog .publish-confirm-dialog__primary-button {
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -9982,7 +10005,7 @@ code {
   border-radius: 999px;
   border: 1px solid rgba(59, 130, 246, 0.2);
   background: rgba(59, 130, 246, 0.09);
-  color: #2f78ff;
+  color: var(--accent-text);
   font-size: 0.7rem;
   font-weight: 500;
   letter-spacing: 0.03em;
@@ -10047,7 +10070,7 @@ code {
 .settings-field select {
   width: 100%;
   min-height: 40px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 12px;
   padding: 0 12px;
   background: var(--surface-strong);
@@ -10149,7 +10172,7 @@ button.settings-form-item:disabled {
   min-height: 36px;
   flex: 1;
   align-items: stretch;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   background: var(--surface-strong);
   overflow: hidden;
@@ -10202,7 +10225,7 @@ button.settings-form-item:disabled {
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -10396,7 +10419,7 @@ button.settings-form-item:disabled {
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font: inherit;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -10673,7 +10696,7 @@ button.settings-form-item:disabled {
 }
 
 .settings-backup-node-dialog__note-action.is-save {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .settings-backup-node-dialog__note-action:hover:not(:disabled) {
@@ -10835,7 +10858,7 @@ button.settings-form-item:disabled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.62rem;
   font-weight: 500;
   letter-spacing: 0;
@@ -10958,7 +10981,7 @@ button.settings-form-item:disabled {
 .settings-theme-option.is-selected {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--line) 72%);
   background: var(--surface-strong);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
@@ -11024,7 +11047,7 @@ button.settings-form-item:disabled {
 .settings-layout-option.is-selected {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--line) 72%);
   background: var(--surface-strong);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
@@ -11242,7 +11265,7 @@ button.settings-form-item:disabled {
 .settings-form-item__control .app-select__trigger {
   width: 100%;
   min-height: 38px;
-  border: 1px solid #dce4f0;
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   padding: 0 12px;
   background: #f4f7fc;
@@ -11268,7 +11291,7 @@ button.settings-form-item:disabled {
   justify-content: space-between;
   width: 100%;
   min-height: 38px;
-  border: 1px solid #dce4f0;
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   padding: 0 12px;
   background: #f4f7fc;
@@ -11698,45 +11721,6 @@ button.settings-form-item:disabled {
   color: var(--muted);
 }
 
-.tool-manage-dialog__tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(236, 242, 251, 0.5);
-}
-
-.tool-manage-dialog__tab {
-  min-width: 86px;
-  min-height: 32px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 450;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.tool-manage-dialog__tab.is-selected {
-  background: var(--surface-strong);
-  color: var(--heading);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
-}
-
-.tool-manage-dialog__tab:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
 .tool-manage-dialog__close {
   width: 34px;
   height: 34px;
@@ -11766,7 +11750,7 @@ button.settings-form-item:disabled {
 .tool-manage-dialog__search {
   width: 100%;
   min-height: 34px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   padding: 0 12px 0 34px;
   background: var(--surface-strong);
@@ -11896,7 +11880,7 @@ button.settings-form-item:disabled {
   border-radius: 10px;
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: #2f6fda;
+  color: var(--accent-text);
   font-size: 0.8rem;
   font-weight: 600;
   box-shadow: none;
@@ -11993,8 +11977,7 @@ button.settings-form-item:disabled {
 .skill-card-detail-modal__close:focus-visible,
 .skill-detail-modal__close:focus-visible,
 .skill-file-dialog__close:focus-visible,
-.tool-manage-dialog__close:focus-visible,
-.tool-manage-dialog__tab:focus-visible {
+.tool-manage-dialog__close:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
   outline-offset: 2px;
 }
@@ -12021,7 +12004,7 @@ button.settings-form-item:disabled {
   flex-shrink: 0;
   background: rgba(47, 120, 255, 0.07);
   border-color: rgba(47, 120, 255, 0.2);
-  color: #2f78ff;
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -12137,7 +12120,7 @@ button.settings-form-item:disabled {
 }
 
 .skills-source-tab.is-selected {
-  color: var(--accent);
+  color: var(--accent-text);
   background: rgba(47, 120, 255, 0.12);
   font-weight: 500;
   box-shadow: none;
@@ -12191,7 +12174,6 @@ button.settings-form-item:disabled {
   color: inherit;
   font-size: 0.75rem;
   font-weight: 500;
-  opacity: 0.68;
 }
 
 .skills-source-menu {
@@ -12271,7 +12253,7 @@ button.settings-form-item:disabled {
 .skills-source-menu-item:hover,
 .skills-source-menu-item.is-selected {
   background: rgba(47, 120, 255, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .skills-source-menu-item .skills-source-tab__logo {
@@ -12799,7 +12781,7 @@ button.settings-form-item:disabled {
 .plugins-page__toggle-icon-button.is-partial {
   border-color: rgba(59, 130, 246, 0.24);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .plugins-page__toggle-icon-button.is-partial:hover:not(:disabled) {
@@ -13122,7 +13104,7 @@ button.settings-form-item:disabled {
   height: 24px;
   border-radius: 8px;
   background: rgba(47, 120, 255, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.74rem;
   font-weight: 800;
   overflow: hidden;
@@ -13671,7 +13653,7 @@ button.settings-form-item:disabled {
 .mcp-form-field input,
 .mcp-json-editor {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 8px;
   background: #fbfdff;
   color: var(--heading);
@@ -13705,7 +13687,8 @@ button.settings-form-item:disabled {
 
 .mcp-form-apps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* M28c (#2): cells wide enough for "Claude Desktop (Not supported)"; names wrap, never cut. */
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 6px;
 }
 
@@ -13738,9 +13721,7 @@ button.settings-form-item:disabled {
 
 .mcp-form-app span:last-child {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .mcp-form-app.is-selected {
@@ -13913,14 +13894,6 @@ button.settings-form-item:disabled {
 
   .tool-manage-dialog__search-wrap {
     flex-basis: 100%;
-  }
-
-  .tool-manage-dialog__tabs {
-    width: 100%;
-  }
-
-  .tool-manage-dialog__tab {
-    flex: 1 1 0;
   }
 
   .tool-manage-dialog__list {
@@ -15089,14 +15062,14 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skills-source-more-button:focus-visible {
   border-color: rgba(255, 194, 26, 0.3);
   background: #2a281f;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .link-badge__type-mark--skill,
 :root[data-theme="dark"] .link-badge__type-mark--mcp {
   border-color: rgba(255, 194, 26, 0.2);
   background: rgba(255, 194, 26, 0.11);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .link-badge--mcp-monogram {
@@ -15105,7 +15078,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .skill-card__enabled-toggle {
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-card__enabled-toggle:hover:not(:disabled),
@@ -15123,7 +15096,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skill-card__icon-button:hover:not(:disabled) {
   border-color: rgba(255, 194, 26, 0.24);
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-card:hover,
@@ -15184,7 +15157,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .secondary-button--compact.is-selected {
   border-color: rgba(255, 194, 26, 0.28);
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .source-tab.is-selected,
@@ -15193,7 +15166,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .source-tab.is-selected:focus-visible {
   border-color: rgba(255, 194, 26, 0.48);
   background: rgba(255, 194, 26, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: 0 6px 16px rgba(255, 194, 26, 0.09);
 }
 
@@ -15219,7 +15192,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .install-category-tab.is-selected {
   border-color: rgba(255, 194, 26, 0.2);
   background: rgba(255, 194, 26, 0.11);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .market-tab-row {
@@ -15264,7 +15237,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .market-search-scope__button.is-selected {
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .settings-panel {
@@ -15385,7 +15358,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .about-action-card__icon {
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .about-action-card__title,
@@ -15417,17 +15390,6 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .tool-card__path-button {
   color: #aeb8c6;
-}
-
-:root[data-theme="dark"] .tool-manage-dialog__tabs {
-  background: #171717;
-}
-
-:root[data-theme="dark"] .tool-manage-dialog__tab.is-selected {
-  border-color: rgba(255, 194, 26, 0.18);
-  background: #2a281f;
-  color: var(--accent);
-  box-shadow: 0 7px 16px rgba(0, 0, 0, 0.2);
 }
 
 :root[data-theme="dark"] .tool-manage-dialog__list {
@@ -15505,7 +15467,7 @@ button.settings-form-item:disabled {
 }
 
 :root[data-theme="dark"] .skill-group-section__source a {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-group-section__count {
@@ -15573,7 +15535,7 @@ button.settings-form-item:disabled {
 }
 
 :root[data-theme="dark"] .about-action-card__link {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .dialog-backdrop {
@@ -15618,7 +15580,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .skill-file-dialog__panel-toggle button.is-selected {
   background: rgba(255, 194, 26, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-file-dialog__view-toggle-button {
@@ -15632,7 +15594,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .skill-file-dialog__view-toggle-button.is-selected {
   background: rgba(255, 194, 26, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-file-dialog__view-toggle-button:focus-visible {
@@ -15650,7 +15612,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .skill-file-dialog__tree-item--file.is-selected {
   background: rgba(255, 194, 26, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: 2px 0 0 rgba(255, 194, 26, 0.72) inset;
 }
 
@@ -15759,7 +15721,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .skill-diff__display-toggle button.is-selected {
   background: rgba(255, 194, 26, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-diff__editor {
@@ -15896,7 +15858,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .plugins-page__plugin-type-mark {
   border-color: rgba(255, 194, 26, 0.2);
   background: rgba(255, 194, 26, 0.11);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.24);
 }
 
@@ -15999,7 +15961,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skill-detail-modal__action-link--primary {
   border-color: rgba(255, 194, 26, 0.34);
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-detail-modal__action-link--primary:hover,
@@ -16082,7 +16044,7 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .settings-language-picker__option.is-selected {
   background: rgba(255, 194, 26, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skills-source-menu__popover {
@@ -16117,7 +16079,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skills-source-menu-item:hover,
 :root[data-theme="dark"] .skills-source-menu-item.is-selected {
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .mcp-edit-dialog {
@@ -16303,7 +16265,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .source-tab.is-selected:focus-visible {
   border-color: transparent;
   background: var(--button-primary-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -16318,12 +16280,12 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .tone-info {
   background: rgba(255, 194, 26, 0.095);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .tone-pending-commit {
   background: var(--warning-soft);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 :root[data-theme="dark"] .tone-pending-push {
@@ -16334,7 +16296,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skill-group-section__state--commit {
   border-color: rgba(255, 200, 92, 0.26);
   background: var(--warning-soft);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 :root[data-theme="dark"] .skill-group-section__state--pending {
@@ -16380,7 +16342,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skills-view-toggle__button.is-active,
 :root[data-theme="dark"] .skills-group-view-control.is-active {
   background: rgba(255, 194, 26, 0.13);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow:
     0 0 0 1px rgba(255, 194, 26, 0.2) inset,
     0 4px 10px rgba(0, 0, 0, 0.2);
@@ -16397,7 +16359,7 @@ button.settings-form-item:disabled {
 }
 
 :root[data-theme="dark"] .skills-group-view-control.is-active .app-select__trigger {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skills-group-view-control__button.is-active:hover,
@@ -16406,7 +16368,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skills-group-mode-select .app-select__trigger:focus-visible,
 :root[data-theme="dark"] .skills-group-mode-select .app-select__trigger[aria-expanded="true"] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -16454,7 +16416,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .mcp-server-card--grid .mcp-server-card__actions .skill-card__icon-button:hover:not(:disabled) {
   border-color: rgba(255, 194, 26, 0.3);
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-card--grid.is-expanded,
@@ -16490,7 +16452,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .skill-card-detail-modal__action.is-primary {
   border-color: rgba(255, 194, 26, 0.34);
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-card-detail-modal__close {
@@ -16514,7 +16476,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .tool-summary-pill {
   border-color: rgba(255, 194, 26, 0.22);
   background: rgba(255, 194, 26, 0.1);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .marketplace-skill-file-dialog > .skill-file-dialog__body {
@@ -16547,7 +16509,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .mcp-server-card__tool-chip.is-enabled {
   border-color: rgba(255, 194, 26, 0.28);
   background: rgba(255, 194, 26, 0.095);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .mcp-server-card__tool-chip.is-enabled:hover:not(:disabled) {
@@ -16599,7 +16561,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .plugins-page__toggle-icon-button.is-partial {
   border-color: rgba(255, 200, 92, 0.36);
   background: rgba(255, 200, 92, 0.12);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 :root[data-theme="dark"] .plugins-page__toggle-icon-button.is-partial:hover:not(:disabled) {
@@ -16628,14 +16590,14 @@ button.settings-form-item:disabled {
 
 :root[data-theme="dark"] .skill-card__enabled-toggle.is-empty {
   background: rgba(255, 255, 255, 0.07);
-  color: #9a9a9a;
+  color: var(--muted);
 }
 
 :root[data-theme="dark"] .skill-card__icon-button.skill-card__icon-button--update,
 :root[data-theme="dark"] .tool-list-row--grid .tool-list-row__actions .skill-card__icon-button.skill-card__icon-button--update {
   border-color: rgba(255, 194, 26, 0.24);
   background: rgba(255, 194, 26, 0.09);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 :root[data-theme="dark"] .skill-card__icon-button.skill-card__icon-button--update:hover:not(:disabled),
@@ -16716,7 +16678,7 @@ button.settings-form-item:disabled {
 :root[data-theme="dark"] .tool-manage-dialog__done-button {
   border-color: var(--button-primary-border);
   background: var(--button-primary-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: none;
 }
 
@@ -16801,7 +16763,7 @@ button.settings-form-item:disabled {
   border: 1px solid rgba(47, 120, 255, 0.24);
   border-radius: 999px;
   background: rgba(47, 120, 255, 0.08);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.76rem;
   font-weight: 500;
   cursor: pointer;
@@ -16993,11 +16955,11 @@ button.settings-form-item:disabled {
 }
 
 .apply-count--create {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .apply-count--update {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .apply-count--remove,
@@ -17121,7 +17083,7 @@ button.settings-form-item:disabled {
 }
 
 .tools-capabilities dt {
-  color: #59677b;
+  color: var(--muted);
 }
 
 .tools-capabilities dd {
@@ -17139,12 +17101,12 @@ button.settings-form-item:disabled {
  * key/value rows, chip inputs, paste box, TOML editor and preview blocks. */
 .mcp-server-card__problem {
   margin-top: 4px;
-  color: #a35a00;
+  color: var(--warning-text);
   font-size: 0.76rem;
 }
 
 .mcp-server-card.is-invalid .mcp-server-card__subtitle {
-  color: #b42318;
+  color: var(--danger-text);
 }
 
 .mcp-layer-chip {
@@ -17203,7 +17165,7 @@ button.settings-form-item:disabled {
 .tool-pill.mcp-pill.is-blocked {
   border-color: #f2a7a0;
   background: #fdecea;
-  color: #b42318;
+  color: var(--danger-text);
 }
 
 .tool-pill.mcp-pill.is-not-supported {
@@ -17262,7 +17224,7 @@ button.settings-form-item:disabled {
 }
 
 .mcp-form-error {
-  color: #b42318;
+  color: var(--danger-text);
   font-size: 0.76rem;
 }
 
@@ -17281,7 +17243,7 @@ button.settings-form-item:disabled {
   gap: 6px;
   min-height: 36px;
   padding: 4px 6px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 8px;
   background: #fbfdff;
 }
@@ -17401,7 +17363,7 @@ button.settings-form-item:disabled {
 
 .mcp-paste-result__problem {
   flex-basis: 100%;
-  color: #a35a00;
+  color: var(--warning-text);
 }
 
 .mcp-paste-result .secondary-button {
@@ -17469,13 +17431,13 @@ button.settings-form-item:disabled {
 
 .mcp-preview__problem {
   margin: 0;
-  color: #b42318;
+  color: var(--danger-text);
   font-size: 0.8rem;
 }
 
 .mcp-preview__warning {
   margin: 0;
-  color: #a35a00;
+  color: var(--warning-text);
   font-size: 0.76rem;
 }
 
@@ -17542,7 +17504,7 @@ button.settings-form-item:disabled {
 
 .project-card__problem {
   margin: 0;
-  color: #b42318;
+  color: var(--danger-text);
   font-size: 0.8rem;
 }
 
@@ -17717,7 +17679,7 @@ button.settings-form-item:disabled {
 }
 
 .matrix-cell.has-warning .matrix-cell__mark {
-  color: #a35a00;
+  color: var(--warning-text);
 }
 
 .matrix-cell__layer {
@@ -17945,7 +17907,7 @@ button.settings-form-item:disabled {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.72rem;
 }
 
@@ -17955,12 +17917,25 @@ button.settings-form-item:disabled {
 }
 
 .history-tag__delete {
-  padding: 0 2px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
   border: 0;
+  border-radius: 999px;
   background: none;
   color: inherit;
   line-height: 1;
   cursor: pointer;
+}
+
+/* M28c (#12): a 24x24 hit area around the small glyph (WCAG 2.5.8). */
+.history-tag__delete::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 
 .history-detail {
@@ -18165,7 +18140,7 @@ button.settings-form-item:disabled {
 }
 
 .history-strip__conflicts {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .history-strip__hint {
@@ -18563,7 +18538,7 @@ button.settings-form-item:disabled {
 .migrate-secret__input {
   min-height: 36px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 10px;
   background: var(--surface-strong);
   color: var(--heading);
@@ -18605,17 +18580,24 @@ button.settings-form-item:disabled {
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 0.68rem;
+  color: var(--accent-text);
+  font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1.15;
   white-space: nowrap;
 }
 
-.recommended-badge--compact {
-  min-height: 16px;
-  padding: 1px 5px;
-  font-size: 0.62rem;
+/* M28c (#2): the star that stands in for the badge in dense chip rows. */
+.recommended-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-text);
+}
+
+.recommended-mark svg {
+  display: block;
 }
 
 .skills-source-tab__name {
@@ -18628,9 +18610,7 @@ button.settings-form-item:disabled {
 
 .mcp-form-app__name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .tool-card__header-actions {
@@ -18682,11 +18662,11 @@ button.settings-form-item:disabled {
 }
 
 .scope-trust--trusted {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .scope-trust--review {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .scope-trust--broken {
@@ -18697,7 +18677,7 @@ button.settings-form-item:disabled {
   margin-top: 3px;
   border-top: 1px solid var(--line);
   border-radius: 0 0 8px 8px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .scope-switcher__popover .app-select__option--action .app-select__icon {
@@ -18847,3 +18827,168 @@ button.settings-form-item:disabled {
   padding-left: calc(var(--sidebar-handle-width) + 16px);
 }
 /* end M28 */
+
+/* M28c review fixes (#12, #13, #2 and the M28b S6 list). */
+
+/* One keyboard focus ring (#12): 2px --focus-ring with a 2px gap on every
+   control, over component rules that drop the outline. */
+:is(
+    button,
+    a[href],
+    summary,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="switch"],
+    [tabindex]:not([tabindex="-1"]),
+    input[type="checkbox"],
+    input[type="radio"]
+  ):focus-visible {
+  outline: 2px solid var(--focus-ring) !important;
+  outline-offset: 2px;
+}
+
+/* Text fields show the ring on the field; header search fields on their wrapper. */
+:is(input:not([type="checkbox"]):not([type="radio"]), textarea, select):not(.search-field--header input):focus-visible {
+  outline: 2px solid var(--focus-ring) !important;
+  outline-offset: 0;
+}
+
+.search-field--header:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
+/* Header toolbars fit one row at the default window (#13). The toolbar host
+   is a size container (it already fills the row beside the title and the
+   pending pill), so the rules follow its real width with the sidebar open or
+   collapsed. Search fields shrink first (230px down to 140px); then the
+   `early` actions (Refresh, Install, Remotes) show only their icon, then the
+   `late` ones (Check updates, Paste config, Tag current). Primary actions
+   (Add, Update all) keep their label. The label stays as the accessible
+   name, and the tooltip shows it while it is hidden. */
+.page-header__row > .mcp-header-toolbar-slot {
+  container: header-toolbar / inline-size;
+}
+
+.mcp-header-toolbar-slot .search-field--header {
+  flex: 1 1 140px;
+  width: auto;
+  min-width: 140px;
+  max-width: 230px;
+}
+
+@container header-toolbar (max-width: 700px) {
+  .mcp-header-toolbar-slot [data-collapse="early"].secondary-button--compact {
+    position: relative;
+    justify-content: center;
+    width: var(--header-control-height);
+    padding: 0;
+    gap: 0;
+  }
+
+  .mcp-header-toolbar-slot [data-collapse="early"] .header-action__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@container header-toolbar (max-width: 540px) {
+  .mcp-header-toolbar-slot [data-collapse="late"].secondary-button--compact {
+    position: relative;
+    justify-content: center;
+    width: var(--header-control-height);
+    padding: 0;
+    gap: 0;
+  }
+
+  .mcp-header-toolbar-slot [data-collapse="late"] .header-action__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Manage dialog (S6 findings 8 and 17): a column whose list scrolls, so the
+   dialog fits its content (no empty panel at user scope) and the project
+   note keeps the 12px gap above the search field instead of landing in the
+   list's shrinking grid row. */
+.tool-manage-dialog--tools {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: min(630px, calc(100vh - 64px));
+}
+
+.tool-manage-dialog--tools > * {
+  flex: 0 0 auto;
+}
+
+.tool-manage-dialog--tools > .tool-manage-dialog__list {
+  flex: 0 1 auto;
+}
+
+/* Dialog footers (S6 finding 11): Cancel and the primary button keep 8px apart. */
+.tool-manage-dialog__actions {
+  gap: 8px;
+}
+
+/* Skill and MCP monogram tiles (S6 finding 14): the type mark wears a ring in
+   the surface color, so it sits on the tile's corner without cutting its
+   edge; in dark its fill is opaque for the same reason. */
+.link-badge__type-mark {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 2px 6px rgba(15, 23, 42, 0.1);
+}
+
+:root[data-theme="dark"] .link-badge__type-mark--skill,
+:root[data-theme="dark"] .link-badge__type-mark--mcp {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+/* Skill files viewer (S6 finding 16): folder headings are not controls. */
+.skill-file-dialog__tree-item.skill-file-dialog__tree-folder,
+.skill-file-dialog__tree-item.skill-file-dialog__tree-folder:hover {
+  cursor: default;
+  background: transparent;
+}
+
+/* Tools cards (S6 finding 18): "User files" and "In each project" sit on
+   their path's center line. */
+.tool-card__path-row.tools-path-row {
+  align-items: center;
+}
+
+/* Windows window controls (S6 finding 19) come last in the main panel's DOM
+   (and Tab order) and are drawn in the top right corner, as before. */
+.main-panel > .window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 10;
+}
+
+/* Short windows (S6 finding 20): at 600px tall or less the sidebar's items
+   are 40px instead of 48px, so About is reached without scrolling. */
+@media (max-height: 600px) {
+  .nav-item {
+    padding-block: 6px;
+  }
+}
+
+/* Card icon buttons (Edit MCP Server key/value remove, skill card actions)
+   keep their glyph at full strength: at 0.88 opacity the muted × fell to 4.25:1. */
+.skill-card__icon-button {
+  opacity: 1;
+}
+/* end M28c */

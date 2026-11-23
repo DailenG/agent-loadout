@@ -212,7 +212,7 @@ describe("ToolsPage", () => {
     ).toBeInTheDocument();
     expect(
       within(claude.getByRole("list", { name: t("tools.projectFilesAria", { name: "Claude Code" }) })).getByText(
-        "<P>/.mcp.json",
+        ".mcp.json",
       ),
     ).toBeInTheDocument();
     expect(claude.getByText("stdio / HTTP / SSE")).toBeInTheDocument();
@@ -259,10 +259,10 @@ describe("ToolsPage", () => {
       "Cursor",
       "Claude Desktop",
     ]);
-    expect(within(cards[1]).getByText(t("recommended.badge"))).toHaveAttribute(
-      "data-tooltip",
-      t("recommended.tooltip"),
-    );
+    const badge = within(cards[1]).getByText(t("recommended.badge"));
+    expect(badge).toHaveAttribute("data-tooltip", t("recommended.tooltip"));
+    expect(badge).toHaveAttribute("tabindex", "0");
+    expect(badge).toHaveAccessibleDescription(t("recommended.tooltip"));
     expect(within(cards[0]).queryByText(t("recommended.badge"))).not.toBeInTheDocument();
   });
 
@@ -318,7 +318,8 @@ describe("ToolsPage", () => {
   it("follows the sidebar to a project and names that project's files", async () => {
     const { user } = renderPage();
     const claude = within((await screen.findAllByRole("article"))[0]);
-    expect(claude.getByText("<P>/.mcp.json")).toBeInTheDocument();
+    expect(claude.getByText(t("tools.projectFiles"))).toBeInTheDocument();
+    expect(claude.getByText(".mcp.json")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: driveProject(PROJECT.id) }));
     expect(await claude.findByText(t("tools.projectFilesIn", { name: "web" }))).toBeInTheDocument();
     expect(

@@ -29,11 +29,20 @@ function ToolbarHost({ children }: { children: ReactElement }) {
   );
 }
 
+/**
+ * `delay: null`: user-event runs each key and pointer step without a
+ * `setTimeout(0)` between them. With the default, every typed character
+ * waited for a timer turn, and under the full suite's parallel workers a
+ * typed URL could take seconds (the M28c timeouts). Shared by App-level
+ * tests that set up user-event themselves.
+ */
+export const USER_EVENT_OPTIONS = { delay: null } as const;
+
 export function renderWithProviders(ui: ReactElement, options: RenderOptions = {}) {
   const { scope, ...transportOptions } = options;
   const transport = createMockTransport(transportOptions);
   const queryClient = createQueryClient();
-  const user = userEvent.setup();
+  const user = userEvent.setup(USER_EVENT_OPTIONS);
   const view = render(
     <TransportContext.Provider value={transport}>
       <QueryClientProvider client={queryClient}>

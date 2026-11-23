@@ -15,7 +15,7 @@ import {
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
-import { RecommendedBadge } from "@/app/components/RecommendedBadge";
+import { RecommendedBadge, recommendedReasonId } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import {
@@ -700,6 +700,7 @@ export type ClientGridProps = {
 /** The client checkbox grid with "All detected clients". */
 export function ClientGrid({ clients, choice, onChange }: ClientGridProps) {
   const { allDetected, clients: chosen } = choice;
+  const baseId = useId();
 
   function setAllDetected(checked: boolean) {
     onChange(
@@ -733,18 +734,20 @@ export function ClientGrid({ clients, choice, onChange }: ClientGridProps) {
             : !client.detected
               ? t("mcp.dialog.clientNotInstalled", { name: client.name })
               : client.name;
+          const reasonId = recommendedReasonId(baseId, client.id);
           return (
             <label key={client.id} className={`mcp-form-app${checked ? " is-selected" : ""}${disabled ? " is-disabled" : ""}`}>
               <input
                 type="checkbox"
                 aria-label={label}
+                aria-describedby={reasonId}
                 checked={checked}
                 disabled={disabled}
                 onChange={(event) => setClient(client.id, event.target.checked)}
               />
               <ToolLogo clientId={client.id} name={client.name} />
               <span className="mcp-form-app__name">{label}</span>
-              <RecommendedBadge clientId={client.id} />
+              <RecommendedBadge clientId={client.id} variant="mark" reasonId={reasonId} />
             </label>
           );
         })}

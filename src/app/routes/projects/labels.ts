@@ -39,3 +39,19 @@ export const LAYER_KEYS = {
 export function failureText(error: unknown) {
   return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
 }
+
+/** The prefix the backend puts on paths inside the project folder. */
+const PROJECT_ROOT = "<P>/";
+
+/**
+ * A path as people read it: `<P>/.mcp.json` (inside the project folder)
+ * becomes `.mcp.json`, or `<root>/.mcp.json` when the folder is given.
+ * Other paths (user files) are unchanged.
+ */
+export function projectRelativePath(path: string, root?: string): string {
+  if (!path.startsWith(PROJECT_ROOT)) {
+    return path;
+  }
+  const rest = path.slice(PROJECT_ROOT.length);
+  return root ? `${root}/${rest}` : rest;
+}

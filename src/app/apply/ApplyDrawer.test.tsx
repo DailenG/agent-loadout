@@ -129,7 +129,10 @@ describe("ApplyDrawer", () => {
 
   it("groups files by scope with op counts and clients", async () => {
     renderDrawer();
-    const user = await screen.findByRole("region", { name: t("apply.scope.user") });
+    // Wait on a text query: `findByRole` polls the whole drawer's accessibility
+    // tree every 50ms, which under the full suite's load outran its 1s budget.
+    await screen.findAllByText(t("apply.scope.user"));
+    const user = screen.getByRole("region", { name: t("apply.scope.user") });
     const project = screen.getByRole("region", { name: t("apply.scope.project") });
     expect(screen.queryByRole("region", { name: t("apply.scope.projectLocal") })).not.toBeInTheDocument();
 
@@ -196,7 +199,10 @@ describe("ApplyDrawer", () => {
 
   it("applies everything with null", async () => {
     const { user, transport } = renderDrawer();
-    await user.click(await screen.findByRole("button", { name: t("apply.action.all") }));
+    const all = await screen.findByRole("button", { name: t("apply.action.all") });
+    // The button renders disabled until the plan has loaded.
+    await waitFor(() => expect(all).toBeEnabled());
+    await user.click(all);
     await waitFor(() =>
       expect(transport.invocations.find((item) => item.command === "runApply")?.args[0]).toBeNull(),
     );

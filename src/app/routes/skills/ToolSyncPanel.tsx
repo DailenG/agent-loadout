@@ -5,10 +5,10 @@
 // `enable.clients`), Enable All selects all detected clients, and the link/copy method is a
 // setting of the skill (SPEC 12.2). ProjectSkillPanel is new (SPEC 12.3).
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
-import { RecommendedBadge } from "@/app/components/RecommendedBadge";
+import { RecommendedBadge, recommendedReasonId } from "@/app/components/RecommendedBadge";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { t } from "@/i18n/en";
 import type { SkillClient, SkillInfo, SkillMethod, SkillProject } from "@/ipc/bindings";
@@ -39,6 +39,7 @@ type ToolSyncPanelProps = {
 
 export function ToolSyncPanel({ skill, clients, isBulkUpdatingExternally = false, onBulkUpdatingChange }: ToolSyncPanelProps) {
   const actions = useSkillActions();
+  const baseId = useId();
   const [enabled, setEnabled] = useState<string[]>(skill.clients);
   const [pending, setPending] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState<"enable" | "disable" | null>(null);
@@ -128,6 +129,7 @@ export function ToolSyncPanel({ skill, clients, isBulkUpdatingExternally = false
             : client.detected
               ? t("skill.tools.tooltip.disabled")
               : t("skill.tools.tooltip.notDetected");
+          const reasonId = recommendedReasonId(baseId, client.id);
           return (
             <button
               key={client.id}
@@ -136,12 +138,13 @@ export function ToolSyncPanel({ skill, clients, isBulkUpdatingExternally = false
               onClick={() => void handleToggle(client)}
               aria-pressed={on}
               aria-label={on ? t("skill.tools.aria.disable", { name: client.name }) : t("skill.tools.aria.enable", { name: client.name })}
+              aria-describedby={reasonId}
               data-tooltip={tooltip}
               disabled={isBulk || pending.includes(client.id)}
             >
               <PillLogo client={client} />
               <span className="tool-pill__name">{client.name}</span>
-              <RecommendedBadge clientId={client.id} className="recommended-badge--compact" />
+              <RecommendedBadge clientId={client.id} variant="mark" reasonId={reasonId} />
               <span className="sr-only">{on ? t("skill.tools.toggle.on") : t("skill.tools.toggle.off")}</span>
             </button>
           );

@@ -27,6 +27,11 @@ export default defineConfig({
     // The e2e specs (`*.spec.ts`) need the app; the e2e helpers' unit
     // tests (`*.test.ts`) do not.
     include: ["src/**/*.test.{ts,tsx}", "tests/e2e/**/*.test.ts"],
+    // Half the cores: with one jsdom worker per core, environment setup
+    // (about half the run) starved the running tests and role queries ran
+    // past their 1s/5s budgets now and then (M28c). The run takes about as
+    // long; the tests see steady timing.
+    maxWorkers: "50%",
     environmentOptions: {
       jsdom: {
         url: "http://127.0.0.1/",

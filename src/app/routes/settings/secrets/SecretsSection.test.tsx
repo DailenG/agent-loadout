@@ -144,7 +144,7 @@ describe("SecretsSection", () => {
           }),
       },
     });
-    await user.click(await screen.findByRole("button", { name: "Map a 1Password Environment..." }));
+    await user.click(await screen.findByRole("button", { name: "Map a 1Password Environment…" }));
     const dialog = await screen.findByRole("dialog", { name: t("settings.secrets.map.title") });
     await user.type(within(dialog).getByRole("textbox", { name: t("settings.secrets.map.id") }), "env-1");
     await user.click(within(dialog).getByRole("button", { name: t("settings.secrets.map.load") }));
@@ -168,7 +168,7 @@ describe("SecretsSection", () => {
     const { user, transport } = renderSection({
       commands: { listOpEnvironment: async () => ok({ names: null }) },
     });
-    await user.click(await screen.findByRole("button", { name: "Map a 1Password Environment..." }));
+    await user.click(await screen.findByRole("button", { name: "Map a 1Password Environment…" }));
     const dialog = await screen.findByRole("dialog", { name: t("settings.secrets.map.title") });
     await user.type(within(dialog).getByRole("textbox", { name: t("settings.secrets.map.id") }), "env-2");
     await user.click(within(dialog).getByRole("button", { name: t("settings.secrets.map.load") }));

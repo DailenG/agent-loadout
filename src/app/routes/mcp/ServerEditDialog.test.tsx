@@ -317,7 +317,7 @@ describe("ServerEditDialog", () => {
     const { user } = renderDialog();
     await user.click(screen.getByRole("button", { name: "Add variable" }));
     await user.click(screen.getByRole("combobox", { name: "Insert a reference into value 1" }));
-    await user.click(screen.getByRole("option", { name: "Environment variable..." }));
+    await user.click(screen.getByRole("option", { name: "Environment variable…" }));
     await user.type(screen.getByLabelText("Variable name"), "HOME_DIR");
     await user.click(screen.getByRole("button", { name: "Insert" }));
     expect(screen.getByLabelText("Value 1")).toHaveValue("${env:HOME_DIR}");

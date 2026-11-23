@@ -4,9 +4,9 @@
 // here are the store, each client's skill folder in the page's scope, and the agents CLI. The
 // recommended client comes first and every tab shows its tool's name (#2).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { orderByRecommended } from "@/app/clients";
-import { RecommendedBadge } from "@/app/components/RecommendedBadge";
+import { RecommendedBadge, recommendedReasonId } from "@/app/components/RecommendedBadge";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { t } from "@/i18n/en";
 import { ManagedLibraryIcon } from "./icons";
@@ -44,6 +44,7 @@ type SkillSourceSwitcherProps = {
 
 export function SkillSourceSwitcher({ active, storeCount, tools: incoming, onChange }: SkillSourceSwitcherProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const baseId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const tools = orderByRecommended(incoming, (tool) => tool.id);
   const activeTool = tools.find((tool) => tool.id === active);
@@ -83,6 +84,7 @@ export function SkillSourceSwitcher({ active, storeCount, tools: incoming, onCha
   function toolButton(tool: SourceTab, className: string) {
     const isMenuItem = className.includes("menu-item");
     const selected = tool.id === active;
+    const reasonId = recommendedReasonId(baseId, tool.id);
     return (
       <button
         key={tool.id}
@@ -91,11 +93,12 @@ export function SkillSourceSwitcher({ active, storeCount, tools: incoming, onCha
         role={isMenuItem ? "menuitem" : "tab"}
         aria-selected={isMenuItem ? undefined : selected}
         aria-label={`${tool.name} ${tool.count}`}
+        aria-describedby={reasonId}
         onClick={() => choose(tool.id)}
       >
         <SourceLogo tab={tool} />
         <span className="skills-source-tab__name">{tool.name}</span>
-        <RecommendedBadge clientId={tool.id} className="recommended-badge--compact" />
+        <RecommendedBadge clientId={tool.id} variant="mark" reasonId={reasonId} />
         <span className="skills-source-tab__count">{tool.count}</span>
       </button>
     );

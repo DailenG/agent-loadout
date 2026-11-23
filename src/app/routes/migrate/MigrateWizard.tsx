@@ -15,6 +15,7 @@ import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { useNotifications } from "@/app/components/notifications";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import type {
+  ErrorCode,
   MigrationApplied,
   MigrationExtraction,
   MigrationItemStatus,
@@ -54,6 +55,15 @@ const CHOICES: AppSelectOption<SecretChoice>[] = [
 
 function failureText(error: unknown) {
   return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
+}
+
+/** An item's detail; with an error code, the message with the raw detail in parentheses. */
+function itemDetail(code: ErrorCode | null, detail: string): string {
+  if (!code) {
+    return detail;
+  }
+  const message = errorMessage(code);
+  return detail ? `${message.replace(/\.$/, "")} (${detail}).` : message;
 }
 
 function offerText(offer: MigrationOffer): string {
@@ -191,6 +201,8 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
     queryKey: MIGRATION_PLAN_KEY,
     queryFn: async () => unwrap(await commands.planSkilldockMigration()),
     retry: false,
+    // The wizard shows the failure (and "no SkillDock data") itself.
+    meta: { inlineError: true },
   });
 
   const report = plan.data;
@@ -271,14 +283,13 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
     body = (
       <>
         <p className="migrate-note">{t("migrate.report.intro", { source: report.source })}</p>
-        <div className="migrate-filter" role="tablist" aria-label={t("migrate.filter.aria")}>
+        <div className="skills-source-tabs migrate-filter" role="group" aria-label={t("migrate.filter.aria")}>
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              className={`filter-tab${filter === tab.key ? " active is-selected" : ""}`}
+              className={`skills-source-tab${filter === tab.key ? " is-selected" : ""}`}
               type="button"
-              role="tab"
-              aria-selected={filter === tab.key}
+              aria-pressed={filter === tab.key}
               onClick={() => setFilter(tab.key)}
             >
               {tab.label}
@@ -293,7 +304,7 @@ export function MigrateWizard({ onClose, onOpenPending }: MigrateWizardProps) {
                 <span className="status-badge tone-neutral">{t(`migrate.kind.${item.kind}` as MessageKey)}</span>
                 <span className={`status-badge ${STATUS_TONES[item.status]}`}>{t(STATUS_KEYS[item.status])}</span>
               </div>
-              <p className="migrate-item__detail">{item.code ? `${errorMessage(item.code)} ${item.detail}` : item.detail}</p>
+              <p className="migrate-item__detail">{itemDetail(item.code, item.detail)}</p>
               {item.offers.length > 0 ? (
                 <ul className="migrate-item__offers">
                   {item.offers.map((offer, offerIndex) => (

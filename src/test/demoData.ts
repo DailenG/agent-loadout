@@ -15,6 +15,7 @@ import type {
   EffectiveMatrix,
   HistoryEntry,
   IpcError,
+  MigrationReport,
   PendingPlan,
   PillState,
   ProjectRow,
@@ -811,6 +812,26 @@ const ALIASES: AliasEntry[] = [
   { alias: "GATEWAY_KEY", reference: "env:GATEWAY_KEY", source: "machine", storeReference: "op://Work/Gateway/key", description: null, envName: "GATEWAY_KEY", servers: [] },
 ];
 
+// What the Migrate from SkillDock wizard finds: migrated, review and skipped
+// items, plus secrets to extract.
+const MIGRATION: MigrationReport = {
+  source: "~/.skilldock",
+  servers: ["context7", "notes"],
+  skills: ["repo-notes"],
+  counts: { migrated: 2, needsReview: 1, skipped: 1 },
+  files: ["servers/context7.toml", "servers/notes.toml", "skills/repo-notes/SKILL.md"],
+  extractions: [
+    { server: "notes", field: "env.NOTES_API_KEY", alias: "NOTES_API_KEY", reason: "key_name", suggestedRef: "keyring://loadout/NOTES_API_KEY" },
+    { server: "issues", field: "headers.Authorization", alias: "ISSUES_AUTHORIZATION", reason: "key_name", suggestedRef: "keyring://loadout/ISSUES_AUTHORIZATION" },
+  ],
+  items: [
+    { kind: "server", name: "context7", status: "migrated", detail: "unwrapped from mcp-filter", code: null, id: "context7", offers: [{ kind: "replace_wrapper", client: "codex", name: "context7" }] },
+    { kind: "skill", name: "repo-notes", status: "migrated", detail: "copied", code: null, id: "repo-notes", offers: [] },
+    { kind: "server", name: "broken", status: "needs_review", detail: "no command", code: "missing_field", id: null, offers: [] },
+    { kind: "plugin", name: "~/.skilldock/plugins", status: "skipped", detail: "plugins are not migrated", code: null, id: null, offers: [] },
+  ],
+};
+
 // --- The dataset --------------------------------------------------------------
 
 const notMocked = (what: string) => mockIpcError({ code: "not_found", message: `${what} is not in the demo dataset` });
@@ -854,6 +875,7 @@ export function buildDemoDataset(): MockTransportOptions {
         };
         return ok(detail);
       },
+      planSkilldockMigration: async () => ok(MIGRATION),
       pendingPlan: async () => ok(PENDING_PLAN),
       pendingStoreChanges: async () => ok([{ entity: "server/context7", kind: "changed" }]),
       listAppliedRuns: async () => ok(APPLIED_RUNS),

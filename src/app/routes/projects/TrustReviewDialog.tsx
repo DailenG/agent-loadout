@@ -7,7 +7,7 @@ import { useEffect, useId } from "react";
 import { useChangeNotice } from "@/app/apply/changeNotice";
 import { diffLineClass } from "@/app/apply/labels";
 import { useNotifications } from "@/app/components/notifications";
-import { failureText } from "@/app/routes/projects/labels";
+import { failureText, projectRelativePath } from "@/app/routes/projects/labels";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import type { ManifestChangeKind, ReviewedFile } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
@@ -27,13 +27,15 @@ export type TrustReviewDialogProps = {
 
 function ReviewedFileView({ file }: { file: ReviewedFile }) {
   const lines = (file.diff ?? file.content ?? "").replace(/\n$/, "").split("\n");
+  // The project folder is under the dialog title; the file is named relative to it.
+  const path = projectRelativePath(file.path);
   const label = file.diff
-    ? t("projects.review.diff", { file: file.path })
-    : t("projects.review.content", { file: file.path });
+    ? t("projects.review.diff", { file: path })
+    : t("projects.review.content", { file: path });
   return (
-    <section className="project-review__file" aria-label={file.path}>
+    <section className="project-review__file" aria-label={path}>
       <div className="project-review__file-head">
-        <strong>{file.path}</strong>
+        <strong>{path}</strong>
         <span className="status-badge tone-warning">{t(CHANGE_KEYS[file.change])}</span>
       </div>
       {file.change === "removed" || file.change === "unchanged" ? null : (

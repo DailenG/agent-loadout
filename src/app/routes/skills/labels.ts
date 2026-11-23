@@ -89,3 +89,32 @@ export function monogram(value: string): string {
   const first = Array.from(value.trim()).find((character) => /[\p{L}\p{N}]/u.test(character));
   return (first ?? "?").toLocaleUpperCase();
 }
+
+/** A size as the skill card shows it: whole kilobytes, at least 1 KB. */
+export function formatSize(bytes: number): string {
+  return t("skill.card.sizeValue", { size: Math.max(1, Math.round(bytes / 1024)) });
+}
+
+/** One row of the skill files tree: a folder heading or a file. */
+export type FileTreeRow = { kind: "folder" | "file"; path: string; name: string; depth: number };
+
+/**
+ * The rows of a skill's files tree: the paths sorted, each folder once as a
+ * heading row before its first file, files indented under their folder.
+ */
+export function fileTreeRows(paths: readonly string[]): FileTreeRow[] {
+  const rows: FileTreeRow[] = [];
+  const shown = new Set<string>();
+  for (const path of [...paths].sort((left, right) => left.localeCompare(right))) {
+    const parts = path.split("/");
+    for (let depth = 0; depth < parts.length - 1; depth += 1) {
+      const folder = parts.slice(0, depth + 1).join("/");
+      if (!shown.has(folder)) {
+        shown.add(folder);
+        rows.push({ kind: "folder", path: folder, name: parts[depth], depth });
+      }
+    }
+    rows.push({ kind: "file", path, name: parts[parts.length - 1], depth: parts.length - 1 });
+  }
+  return rows;
+}

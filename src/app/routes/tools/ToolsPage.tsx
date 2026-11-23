@@ -12,6 +12,7 @@ import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
+import { projectRelativePath } from "@/app/routes/projects/labels";
 import { ToolManageDialog } from "@/app/routes/tools/ToolManageDialog";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { errorMessage, t } from "@/i18n/en";
@@ -184,8 +185,9 @@ function ToolCard({ tool, project, isOpening, openDisabled, onOpenFolder, onMana
               <li className="tool-card__path-value">{t("tools.noProjectFiles")}</li>
             ) : (
               tool.projectFiles.map((path) => {
-                // `<P>/...` is relative to the project folder; other paths are user files keyed by project.
-                const shown = project && path.startsWith("<P>/") ? `${project.path}/${path.slice(4)}` : path;
+                // `<P>/...` is relative to the project folder: under the active project's folder, or
+                // bare under "In each project" at user scope. Other paths are user files keyed by project.
+                const shown = projectRelativePath(path, project?.path);
                 return (
                   <li key={path} className="tool-card__path-value" title={shown}>
                     {shown}
