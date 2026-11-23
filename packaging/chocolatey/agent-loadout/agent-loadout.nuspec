@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>agent-loadout</id>
+    <version>0.1.2</version>
+    <title>Loadout</title>
+    <authors>Dailen Gunter</authors>
+    <owners>DailenG</owners>
+    <projectUrl>https://github.com/DailenG/agent-loadout</projectUrl>
+    <packageSourceUrl>https://github.com/DailenG/agent-loadout/tree/main/packaging/chocolatey</packageSourceUrl>
+    <projectSourceUrl>https://github.com/DailenG/agent-loadout</projectSourceUrl>
+    <docsUrl>https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md</docsUrl>
+    <bugTrackerUrl>https://github.com/DailenG/agent-loadout/issues</bugTrackerUrl>
+    <licenseUrl>https://github.com/DailenG/agent-loadout/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <iconUrl>https://cdn.jsdelivr.net/gh/DailenG/agent-loadout@v0.1.2/src-tauri/icons/128x128.png</iconUrl>
+    <copyright>Copyright (c) 2026 Dailen Gunter</copyright>
+    <tags>loadout agent-loadout mcp mcp-server ai claude-code codex cursor copilot skills developer-tools cli foss</tags>
+    <summary>Manage MCP servers, skills and secret references for AI coding clients from one versioned, offline store.</summary>
+    <description><![CDATA[Loadout manages MCP servers, skills and secret references for AI coding clients (Claude Code, Codex, omp, Pi, Claude Desktop, VS Code with GitHub Copilot, Cursor and more) from one versioned, offline store. It writes each client's native config files, never touches entries it did not create, and keeps secret values out of the store.
+
+This package installs the desktop app (`agent-loadout-app.exe`, Start menu entry "Loadout") and the command-line tool `loadout`.
+
+## Features
+
+- One store for MCP servers and skills, applied to every client in its own config format.
+- Git-backed history with diff, rollback, tags, backups and remotes.
+- Secrets stay as references (environment, OS keyring, 1Password); a leak scanner checks every store commit.
+- Project scope: per-project manifests next to your code.
+
+## Package notes
+
+- **Per-user install.** The upstream installer installs for one Windows account only: the account that runs `choco`. It installs into that account's `%LOCALAPPDATA%\Programs\Loadout` and adds that folder to that account's user `PATH` (open a new terminal to use `loadout`). Other accounts on the machine do not get it. Run `choco` from an elevated prompt of the account that will use Loadout. Running as the SYSTEM account (as some deployment tools do) is refused, because the app would land in the SYSTEM profile.
+- **Updates.** The app has its own updater (Settings, Updates). If it updates itself first, Chocolatey keeps listing the older version until the next `choco upgrade agent-loadout`, which installs the current release over it. To leave updates to Chocolatey alone, clear "Check for updates" in Settings, Updates.
+- **Uninstall** removes the program and its `PATH` entry and keeps your Loadout data (store, history, backups).
+- 64-bit Windows only.
+]]></description>
+    <releaseNotes>https://github.com/DailenG/agent-loadout/releases/tag/v0.1.2</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

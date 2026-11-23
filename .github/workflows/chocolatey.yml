@@ -1,0 +1,134 @@
+# Chocolatey (M25): keeps the agent-loadout package on the Chocolatey
+# Community Repository in step with the GitHub releases.
+#
+# `update` runs the Chocolatey Automatic Package Updater (chocolatey-au,
+# pinned below) on packaging/chocolatey/agent-loadout/update.ps1, which
+# reads the latest release and its SHA256SUMS. Whatever the result, when
+# the nuspec version is not on community.chocolatey.org yet (in any
+# moderation state), it packs and pushes that version. So the first run
+# with the key pushes the committed version, a new release goes out right
+# after it is published, and a failed push or commit is retried by the next
+# run. `commit` then writes the updated package files back to the default
+# branch; it is the only job that can write, and it never sees the key.
+#
+# Configuration: the `chocolatey` environment (deployment branches and
+# tags: the default branch and v*) holds the secret CHOCO_API_KEY, an API
+# key from https://community.chocolatey.org/account. Nothing here prints it.
+
+name: Chocolatey
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Scheduled runs carry no repository payload; their ref is the default
+  # branch. A release event's ref is its tag, so it needs the payload.
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch || github.ref_name }}
+
+concurrency:
+  group: chocolatey
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: windows-latest
+    environment: chocolatey
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.files.outputs.version }}
+      patch: ${{ steps.files.outputs.patch }}
+    steps:
+      # The package files live on the default branch, and that is where the
+      # update is committed.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          persist-credentials: false
+
+      - name: Install chocolatey-au
+        run: choco install chocolatey-au --version 1.0.0 --yes --no-progress
+
+      - name: Update from the latest GitHub release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./packaging/chocolatey/agent-loadout/update.ps1
+
+      - name: Collect the changed package files
+        id: files
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nuspec = 'packaging/chocolatey/agent-loadout/agent-loadout.nuspec'
+          $version = ([xml](Get-Content -Raw -LiteralPath $nuspec)).package.metadata.version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $patch = (git diff -- packaging/chocolatey/agent-loadout) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw 'git diff failed' }
+          if ($patch) {
+            git diff --stat -- packaging/chocolatey/agent-loadout
+            $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($patch + "`n"))
+            "patch=$b64" >> $env:GITHUB_OUTPUT
+          } else {
+            'No package file changed.'
+          }
+
+      - name: Push to the Chocolatey Community Repository if missing
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+          VERSION: ${{ steps.files.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $page = "https://community.chocolatey.org/packages/agent-loadout/$env:VERSION"
+          $status = (Invoke-WebRequest -Uri $page -Method Head -SkipHttpErrorCheck -UseBasicParsing).StatusCode
+          if ($status -eq 200) {
+            "agent-loadout $env:VERSION is already on the community repository; nothing to push."
+            exit 0
+          }
+          if ($status -ne 404) { throw "unexpected HTTP $status from $page" }
+          if (-not $env:CHOCO_API_KEY) { throw 'CHOCO_API_KEY is not set on the chocolatey environment.' }
+          $out = Join-Path $env:RUNNER_TEMP 'nupkg'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          choco pack packaging/chocolatey/agent-loadout/agent-loadout.nuspec --output-directory $out --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco pack failed ($LASTEXITCODE)" }
+          $nupkg = Join-Path $out "agent-loadout.$env:VERSION.nupkg"
+          choco push $nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco push failed ($LASTEXITCODE)" }
+
+  commit:
+    needs: update
+    if: needs.update.outputs.patch != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+
+      - name: Commit the updated package files
+        env:
+          PATCH: ${{ needs.update.outputs.patch }}
+          VERSION: ${{ needs.update.outputs.version }}
+        run: |
+          set -euo pipefail
+          patch="$RUNNER_TEMP/chocolatey.patch"
+          printf '%s' "$PATCH" | base64 -d > "$patch"
+          if git apply --numstat "$patch" | cut -f3 | grep -v '^packaging/chocolatey/agent-loadout/'; then
+            echo "::error::the update touched files outside packaging/chocolatey/agent-loadout"
+            exit 1
+          fi
+          git apply "$patch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- packaging/chocolatey/agent-loadout
+          git commit -m "packaging(chocolatey): agent-loadout ${VERSION} [skip ci]"
+          git push origin "HEAD:${DEFAULT_BRANCH}"
