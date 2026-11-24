@@ -40,7 +40,7 @@ source=(
   "$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
   'agent-loadout.desktop'
 )
-sha256sums=('SKIP'
+sha256sums=('2d2113d646a5e46fb1b3088ed031492ef9f4e019b418e4e410e8e51c7aa80d54'
             'dd9b38cdfe479ced09da8b37aa2638c1377b661d4413f40b96f815fcb3e4c044')
 
 prepare() {
