@@ -69,6 +69,16 @@ enum ScannerCommand {
 }
 
 pub fn run(ctx: &Context, args: &ScannerArgs) -> Result<u8, CoreError> {
+    // Disabled in this build: only cleaning up a 0.7.0 install and
+    // saying so work; nothing is downloaded or run.
+    if !external::AVAILABLE
+        && !matches!(
+            args.command,
+            ScannerCommand::Remove | ScannerCommand::Status
+        )
+    {
+        return Err(external::unavailable());
+    }
     match &args.command {
         ScannerCommand::Ls => list(ctx),
         ScannerCommand::Status => status(ctx),
@@ -187,8 +197,19 @@ fn status(ctx: &Context) -> Result<u8, CoreError> {
     if ctx.json {
         let mut doc = status_json(&status);
         doc["schema"] = json!(JSON_SCHEMA);
-        doc["sends"] = json!(DISCLOSURE);
+        doc["available"] = json!(external::AVAILABLE);
+        if external::AVAILABLE {
+            doc["sends"] = json!(DISCLOSURE);
+        }
         print_json(&doc);
+        return Ok(0);
+    }
+    if !external::AVAILABLE {
+        println!("Snyk Agent Scan is disabled in this build; it never runs.");
+        println!("  Installed: {}", yes_no(status.installed));
+        if status.installed {
+            println!("Run `loadout scanner remove` to delete it.");
+        }
         return Ok(0);
     }
     println!("Snyk Agent Scan {} (optional)", status.version);
@@ -369,8 +390,12 @@ fn off_error() -> CoreError {
     )
 }
 
-/// `--external` / `--no-external` as a [`Choice`].
+/// `--external` / `--no-external` as a [`Choice`]. With the scanner
+/// disabled in this build `--external` is ignored, with a note.
 pub(super) fn choice(on: bool, off: bool) -> Choice {
+    if on && !external::AVAILABLE {
+        eprintln!("note: --external is ignored: Snyk Agent Scan is disabled in this build");
+    }
     match (on, off) {
         (true, _) => Choice::On,
         (_, true) => Choice::Off,

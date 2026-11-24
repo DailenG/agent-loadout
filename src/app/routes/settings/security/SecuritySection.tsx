@@ -8,7 +8,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { AppSelect } from "@/app/components/AppSelect";
-import { notScannedReason, scannerStatusKey, useScannerStatus } from "@/app/components/ExternalScan";
+import { EXTERNAL_SCANNER_AVAILABLE, notScannedReason, scannerStatusKey, useScannerStatus } from "@/app/components/ExternalScan";
 import { SettingsGroup, SettingsItem } from "@/app/components/SettingsGroup";
 import { useNotifications } from "@/app/components/notifications";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -90,7 +90,12 @@ function Disclosure() {
   );
 }
 
+/** Nothing while the external scanner is disabled in this build (0.7.1: Snyk dropped). */
 export function SecuritySection() {
+  return EXTERNAL_SCANNER_AVAILABLE ? <SnykSection /> : null;
+}
+
+function SnykSection() {
   const { commands, events } = useTransport();
   const { notify } = useNotifications();
   const queryClient = useQueryClient();

@@ -263,7 +263,6 @@ main:focus { outline: none; }
 
 /* Safety */
 .mods { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.sources .mods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mod { background: var(--panel); border-radius: 16px; padding: 20px; box-shadow: inset 0 0 0 1px var(--rule), var(--shadow); }
 .mod h3 { font-size: 20px; font-weight: 700; font-stretch: 88%; margin: 14px 0 6px; line-height: 1.2; }
 .mod p { color: var(--muted); font-size: 15.5px; line-height: 1.55; }
@@ -357,7 +356,7 @@ main:focus { outline: none; }
   .bay__rack { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 72px auto; padding: 14px; }
   .jacks .jack { display: none; }
   .bay__gap { min-height: 72px; }
-  .path, .files, .mods, .sources .mods, .gallery, .tiers, .links { grid-template-columns: minmax(0, 1fr); }
+  .path, .files, .mods, .gallery, .tiers, .links { grid-template-columns: minmax(0, 1fr); }
   .unit + .unit::before { content: ""; position: absolute; left: 44px; top: -23px; width: 4px; height: 23px; background: var(--accent); border-radius: 2px; }
   .tabs [role="tab"] { padding: 12px 10px; font-size: 14px; }
   .panel { padding: 18px; }

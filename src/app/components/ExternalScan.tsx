@@ -16,12 +16,21 @@ import { SEVERITY_LABELS, SEVERITY_TONES, VERDICT_LABELS, VERDICT_TONES } from "
 
 export const scannerStatusKey = ["scanner_status"] as const;
 
-/** Settings > Security's scanner state (no network, no secret resolution). */
+/**
+ * Whether this build offers the external scanner (mirrors the core's
+ * `scan::external::AVAILABLE`). `false` since 0.7.1: Snyk's free tier
+ * refuses new accounts, so the Snyk Agent Scan integration is hidden and
+ * disabled; nothing here calls the scanner commands. Flip to re-enable.
+ */
+export const EXTERNAL_SCANNER_AVAILABLE = false;
+
+/** Settings > Security's scanner state (no network, no secret resolution); never asked while unavailable. */
 export function useScannerStatus() {
   const { commands } = useTransport();
   return useQuery({
     queryKey: scannerStatusKey,
     queryFn: async () => unwrap(await commands.scannerStatus()),
+    enabled: EXTERNAL_SCANNER_AVAILABLE,
   });
 }
 
@@ -100,6 +109,9 @@ export type ScannerPhase = "checking" | "unknown" | "off" | "on";
 
 /** "On" means switched on and installed: after Remove nothing can run, so nothing is offered. */
 export function scannerPhase(status: UseQueryResult<ExternalScannerStatus>): ScannerPhase {
+  if (!EXTERNAL_SCANNER_AVAILABLE) {
+    return "off";
+  }
   if (status.isPending) {
     return "checking";
   }

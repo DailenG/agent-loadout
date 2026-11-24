@@ -183,35 +183,6 @@ folder](user-guide.md#servers-from-a-git-repository-or-folder),
 [The built-in scan](user-guide.md#the-built-in-scan) and
 [Source trust](user-guide.md#source-trust).
 
-**Optional: a second opinion from Snyk Agent Scan.** For skills, you can
-add [Snyk Agent Scan](https://github.com/snyk/agent-scan) beside the
-built-in scan. It is off by default, and unlike the built-in scan it
-**sends the skill to Snyk's cloud** (its files, with secrets Snyk detects
-redacted, plus its name, the scanned folder's path, your user name, the
-scanner version and, where the scanner's platform reports one, the host
-name). It needs your own Snyk API token; the free tier has a daily limit.
-
-- **In the app:** Settings > Security > **Snyk Agent Scan (optional)**:
-  **Install** (a pinned version, checked against the SHA-256 built into
-  Loadout), **Set token...** (where the token is: a secret alias, an
-  environment variable, 1Password or the OS keyring, never the token
-  itself), then **Use Snyk Agent Scan**.
-- **On the command line:**
-
-  ```sh
-  loadout scanner install
-  loadout secrets set SNYK_TOKEN --keyring   # paste the token on stdin; it goes to the OS keyring
-  loadout scanner token SNYK_TOKEN           # a reference to that secret (or env:NAME, keyring://..., op://...)
-  loadout scanner enable
-  ```
-
-From then on, install and update reviews of skills from Git, a catalog or
-an update show an **External scan** section as soon as they open (a folder
-from this computer only when you choose **Scan with Snyk**). A dangerous
-Snyk verdict needs the same **Install anyway**; a skill Snyk couldn't scan
-(daily limit, offline, timeout) says "Not scanned" and is never blocked.
-Details: [user guide, Snyk Agent Scan](user-guide.md#snyk-agent-scan-optional).
-
 ## 6. Browse a catalog
 
 Catalogs list MCP servers and skills: the Official MCP Registry,

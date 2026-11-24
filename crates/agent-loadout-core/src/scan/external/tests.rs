@@ -371,15 +371,35 @@ fn settings_are_machine_local_and_off_by_default() {
     let saved = settings(&fs, &home).unwrap();
     assert_eq!(saved.token, None);
     assert!(!saved.enabled);
-    assert!(!wanted(&saved, Choice::Default));
-    assert!(wanted(&saved, Choice::On));
-    assert!(!wanted(
+    assert!(!wanted_by(&saved, Choice::Default));
+    assert!(wanted_by(&saved, Choice::On));
+    assert!(!wanted_by(
         &Settings {
             enabled: true,
             ..Settings::default()
         },
         Choice::Off
     ));
+}
+
+/// With the scanner disabled in this build nothing asks for a run, even
+/// when a 0.7.0 setting turned it on.
+#[test]
+fn disabled_build_never_wants_or_requires_a_run() {
+    if AVAILABLE {
+        return;
+    }
+    let (_dir, home) = temp_home();
+    let fs = crate::fs::RealFs;
+    set_enabled(&fs, &home, true).unwrap();
+    set_token(&fs, &home, None, Some("keyring://loadout/snyk")).unwrap();
+    let saved = settings(&fs, &home).unwrap();
+    assert!(saved.enabled);
+    for choice in [Choice::Default, Choice::On, Choice::Off] {
+        assert!(!wanted(&saved, choice));
+    }
+    assert!(!required(&fs, &home).unwrap());
+    assert_eq!(unavailable().code(), ErrorCode::ScannerUnavailable);
 }
 
 #[test]

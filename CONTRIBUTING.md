@@ -107,6 +107,10 @@ In PowerShell, set the variable first: `$env:LOADOUT_UPDATE_DOCS = "1"`.
 
 ### Bumping the Snyk Agent Scan pin
 
+The integration is disabled since 0.7.1 (`scan::external::AVAILABLE =
+false`: Snyk's free tier refuses new accounts). The pin and this procedure
+stay for when it, or another scanner, is turned back on.
+
 The optional external scanner (#27) runs one pinned release of
 [snyk/agent-scan](https://github.com/snyk/agent-scan), verified against
 SHA-256 values compiled into Loadout. Moving to a new release is a normal

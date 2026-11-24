@@ -78,10 +78,10 @@ enum SkillsCommand {
         allow_dangerous: bool,
         /// Also run Snyk Agent Scan on it this time (sends the skill to
         /// Snyk), even when it is turned off.
-        #[arg(long, conflicts_with = "no_external")]
+        #[arg(long, conflicts_with = "no_external", hide = true)]
         external: bool,
         /// Do not run Snyk Agent Scan this time, even when it is turned on.
-        #[arg(long)]
+        #[arg(long, hide = true)]
         no_external: bool,
         /// Trust the git source without the prompt: once (this install
         /// only), or always for the repo, its owner or its host
@@ -130,10 +130,10 @@ enum SkillsCommand {
         allow_dangerous: bool,
         /// Also run Snyk Agent Scan on each available update this time
         /// (sends the new content to Snyk), even when it is turned off.
-        #[arg(long, conflicts_with_all = ["no_external", "agents"])]
+        #[arg(long, conflicts_with_all = ["no_external", "agents"], hide = true)]
         external: bool,
         /// Do not run Snyk Agent Scan this time, even when it is turned on.
-        #[arg(long, conflicts_with = "agents")]
+        #[arg(long, conflicts_with = "agents", hide = true)]
         no_external: bool,
         /// Trust the git sources without the prompt: once (this update
         /// only), or always for the repo, its owner or its host

@@ -316,6 +316,9 @@ pub fn install(
     progress: &mut dyn FnMut(u64, u64),
     cancel: &AtomicBool,
 ) -> CmdResult<ExternalScannerStatus> {
+    if !external::AVAILABLE {
+        return Err(ipc(core, &external::unavailable()));
+    }
     let tool = Tool::pinned(&core.home).map_err(|err| ipc(core, &err))?;
     tool.install(&UreqDownload::new(&core.env), progress, Some(cancel))
         .map_err(|err| ipc(core, &err))?;
@@ -376,8 +379,15 @@ pub fn check_token(core: &Core) -> CmdResult<ScannerTokenCheck> {
     })
 }
 
-/// `scanner_unavailable` unless the scanner is turned on.
+/// `scanner_unavailable` unless the scanner is available in this build
+/// ([`external::AVAILABLE`]) and turned on.
 fn require_enabled(core: &Core) -> CmdResult<()> {
+    if !external::AVAILABLE {
+        return Err(IpcError {
+            code: ErrorCode::ScannerUnavailable,
+            message: "Snyk Agent Scan is disabled in this version of Loadout".to_owned(),
+        });
+    }
     let settings =
         external::settings(core.fs.as_ref(), &core.home).map_err(|err| ipc(core, &err))?;
     if settings.enabled {

@@ -1,9 +1,9 @@
-//! M47: Snyk Agent Scan in the app (#27): settings round-trip without a
-//! token value, runs refused while the scanner is off and not scanned
-//! while it is not installed, an external dangerous verdict gating
-//! "Install anyway" like the built-in scan, cancel flags. Hermetic: the
-//! scanner itself runs against its stub in the core's tests; here a report
-//! comes from a recorded output.
+//! M47: Snyk Agent Scan in the app (#27), disabled in this build since
+//! 0.7.1 (`external::AVAILABLE`): settings round-trip without a token
+//! value, every run and the install refused with `scanner_unavailable`
+//! even when a 0.7.0 setting turned it on, no `external_scan_required`,
+//! Remove still cleaning up, cancel flags. Hermetic: nothing is
+//! downloaded or run; a report comes from a recorded output.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,32 +59,24 @@ fn settings_round_trip_with_a_reference_only() {
     assert_eq!(check.reason, Some(ExternalNotScanned::NoToken));
 }
 
+/// Disabled in this build: a 0.7.0 setting that turned an installed
+/// scanner on runs nothing, and nothing is downloaded.
 #[test]
-fn runs_need_the_switch_and_report_what_is_missing() {
+fn runs_and_installs_are_refused_in_this_build() {
     let fx = Fx::new();
+    turn_on_installed(&fx);
     let (mut prepared, _) = skills::review_local(&fx.core, &folder(&fx, "tidy")).unwrap();
     let cancel = AtomicBool::new(false);
     let err = scanner::scan_review(&fx.core, &mut prepared, &cancel).unwrap_err();
     assert_eq!(err.code, ErrorCode::ScannerUnavailable);
     assert!(prepared.external().is_none());
-
-    scanner::set_enabled(&fx.core, true).unwrap();
-    let result = scanner::scan_review(&fx.core, &mut prepared, &cancel).unwrap();
-    assert_eq!(result.status, ExternalScanStatus::NotScanned);
-    let expected = if external::pinned_asset().is_some() {
-        ExternalNotScanned::NotInstalled
-    } else {
-        ExternalNotScanned::UnsupportedPlatform
-    };
-    assert_eq!(result.reason, Some(expected));
-    // Not scanned never blocks.
     let installed =
         skills::install_reviewed(&fx.core, &mut prepared, None, false, false, None, None).unwrap();
-    assert_eq!(installed.id, "tidy");
-    assert_eq!(
-        installed.external.map(|external| external.status),
-        Some(ExternalScanStatus::NotScanned)
-    );
+    assert!(installed.external.is_none());
+    let err = scanner::scan_library(&fx.core, "tidy", &cancel).unwrap_err();
+    assert_eq!(err.code, ErrorCode::ScannerUnavailable);
+    let err = scanner::install(&fx.core, &mut |_, _| {}, &cancel).unwrap_err();
+    assert_eq!(err.code, ErrorCode::ScannerUnavailable);
 }
 
 #[test]
@@ -163,11 +155,13 @@ fn dangerous(root: &Path) -> external::ExternalReport {
 }
 
 /// The pinned scanner as `status` sees it installed (the marker and a file
-/// of the pinned size; never run here), turned on with a token reference.
-/// `false` where Snyk has no build.
-fn turn_on_installed(fx: &Fx) -> bool {
+/// of the pinned size; never run here), turned on with a token reference,
+/// as 0.7.0 left it; not installed where Snyk has no build.
+fn turn_on_installed(fx: &Fx) {
+    scanner::set_token(&fx.core, Some("keyring://loadout/snyk".to_owned())).unwrap();
+    scanner::set_enabled(&fx.core, true).unwrap();
     let Some(asset) = external::pinned_asset() else {
-        return false;
+        return;
     };
     let tool = Tool::pinned(&fx.core.home).unwrap();
     std::fs::create_dir_all(tool.dir()).unwrap();
@@ -182,10 +176,8 @@ fn turn_on_installed(fx: &Fx) -> bool {
         "size": asset.size,
     });
     std::fs::write(tool.dir().join("installed.json"), marker.to_string()).unwrap();
-    scanner::set_token(&fx.core, Some("keyring://loadout/snyk".to_owned())).unwrap();
-    let status = scanner::set_enabled(&fx.core, true).unwrap();
+    let status = scanner::status(&fx.core).unwrap();
     assert!(status.installed && status.enabled, "{status:?}");
-    true
 }
 
 /// Review F7: turning the scanner off cancels every run, not the install.
@@ -205,20 +197,18 @@ fn turning_the_scanner_off_cancels_runs_and_forgets_update_reports() {
     assert!(state.take_update("tidy").is_none());
 }
 
-/// Review F7: a run after the switch went off attaches nothing.
+/// Off, or on but disabled in this build: a review scan attaches nothing.
 #[test]
-fn a_review_scan_while_off_attaches_nothing() {
+fn a_review_scan_attaches_nothing() {
     let fx = Fx::new();
     let (mut prepared, _) = skills::review_local(&fx.core, &folder(&fx, "tidy")).unwrap();
-    scanner::set_enabled(&fx.core, true).unwrap();
     let cancel = AtomicBool::new(false);
-    scanner::scan_review(&fx.core, &mut prepared, &cancel).unwrap();
-    assert!(prepared.external().is_some());
-    prepared.set_external(None);
-    scanner::set_enabled(&fx.core, false).unwrap();
-    let err = scanner::scan_review(&fx.core, &mut prepared, &cancel).unwrap_err();
-    assert_eq!(err.code, ErrorCode::ScannerUnavailable);
-    assert!(prepared.external().is_none());
+    for on in [false, true] {
+        scanner::set_enabled(&fx.core, on).unwrap();
+        let err = scanner::scan_review(&fx.core, &mut prepared, &cancel).unwrap_err();
+        assert_eq!(err.code, ErrorCode::ScannerUnavailable);
+        assert!(prepared.external().is_none());
+    }
 }
 
 /// Review F1: a pasted token is refused, never echoed, never stored.
@@ -236,24 +226,23 @@ fn a_pasted_token_is_refused_without_echo() {
     }
 }
 
-/// Review M49 F8: Remove turns the scanner off.
+/// Remove deletes a 0.7.0 install and, in this build, its settings too.
 #[test]
-fn removing_the_scanner_turns_it_off() {
+fn removing_the_scanner_cleans_up() {
     let fx = Fx::new();
-    scanner::set_enabled(&fx.core, true).unwrap();
+    turn_on_installed(&fx);
     let status = scanner::remove(&fx.core).unwrap();
     assert!(!status.enabled && !status.installed);
+    assert_eq!(status.token_ref, None);
 }
 
-/// Review F10: with the scanner on, an install from a review of a git or
-/// catalog source, a review-less git install and an update need their
-/// external report; a local folder does not (scanned on request only).
+/// Review F10, inverted for this build: with a 0.7.0 setting that turned
+/// an installed scanner on, no install or update waits for an external
+/// report (`external_scan_required` never fires).
 #[test]
-fn installs_need_the_external_report_while_the_scanner_is_on() {
+fn installs_never_need_an_external_report_in_this_build() {
     let fx = Fx::new();
-    if !turn_on_installed(&fx) {
-        return;
-    }
+    turn_on_installed(&fx);
     let (mut prepared, _) = skills::review_local(&fx.core, &folder(&fx, "tidy")).unwrap();
     skills::install_reviewed(&fx.core, &mut prepared, None, false, false, None, None).unwrap();
     let err = skills::install_git(
@@ -266,9 +255,9 @@ fn installs_need_the_external_report_while_the_scanner_is_on() {
         None,
     )
     .unwrap_err();
-    assert_eq!(err.code, ErrorCode::ExternalScanRequired);
+    assert_ne!(err.code, ErrorCode::ExternalScanRequired);
     let err = skills::update(&fx.core, "tidy", "0123abc", false, None, None, None).unwrap_err();
-    assert_eq!(err.code, ErrorCode::ExternalScanRequired);
+    assert_ne!(err.code, ErrorCode::ExternalScanRequired);
 }
 
 fn git_run(fx: &Fx, git: &Path, cwd: &Path, args: &[&str]) {
@@ -286,9 +275,9 @@ fn git_run(fx: &Fx, git: &Path, cwd: &Path, args: &[&str]) {
 /// Test gap and review M49 F1: `update_skill` with a remembered report,
 /// driven as the command does (take, update, restore on failure): a
 /// dangerous report blocks until allowed and is kept for the retry, a
-/// report of other content is `entry_changed`, and once the scanner is
-/// turned off (after a review was closed) the old report is gone and the
-/// update goes through.
+/// report of other content is `entry_changed`, no report is needed in
+/// this build, and once the scanner is turned off (after a review was
+/// closed) the old report is gone and the update goes through.
 #[test]
 fn update_skill_gates_on_the_remembered_report() {
     let Some(git) = system_git_or_skip("update_skill_gates_on_the_remembered_report") else {
@@ -366,8 +355,9 @@ fn update_skill_gates_on_the_remembered_report() {
         result
     };
 
-    // The scanner is on; the review's scan found the update dangerous.
-    let on = turn_on_installed(&fx);
+    // A 0.7.0 setting turned it on; a remembered report found the update
+    // dangerous.
+    turn_on_installed(&fx);
     state.remember_update("alpha", scanned(content_hash(&files)));
     let err = update_skill(false).unwrap_err();
     assert_eq!(err.code, ErrorCode::ScanBlocked);
@@ -379,14 +369,6 @@ fn update_skill_gates_on_the_remembered_report() {
         update_skill(false).unwrap_err().code,
         ErrorCode::EntryChanged
     );
-    if on {
-        // No report while on: the scan must run first.
-        state.take_update("alpha");
-        assert_eq!(
-            update_skill(false).unwrap_err().code,
-            ErrorCode::ExternalScanRequired
-        );
-    }
 
     // Dangerous again, the review closed, the scanner turned off: the old
     // report is gone and the update goes through.

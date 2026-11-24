@@ -2136,7 +2136,7 @@ const errorMessages: Record<ErrorCode, string> = {
   folder_on_other_machine: "This server was added from a folder on another machine; it does not run here.",
   catalogs_off: "Online catalogs are off, so nothing was contacted. Turn them on in Settings > Catalogs.",
   catalog_unreachable: "A catalog could not be reached or answered with an error.",
-  scanner_unavailable: "Snyk Agent Scan is off. Turn it on in Settings > Security.",
+  scanner_unavailable: "Snyk Agent Scan is disabled in this version of Loadout.",
   scanner_download_failed: "Snyk Agent Scan could not be downloaded. Nothing was installed; try again later.",
   scanner_verification_failed:
     "The downloaded scanner didn't match the build pinned in Loadout, so it was deleted. Nothing was installed.",

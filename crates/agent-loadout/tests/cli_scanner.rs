@@ -1,18 +1,20 @@
 //! `loadout scanner ...` and `skills add|update --external/--no-external`
-//! (#27) against a temp `LOADOUT_HOME`: the token reference is never a
-//! value (a pasted token is refused and never echoed), Remove turns the
-//! scanner off, the switch decides the default and the flags override it,
-//! and an untrusted source is never sent to Snyk. Debug builds of
-//! `loadout` run `agent-scan-stub` through `LOADOUT_TEST_AGENT_SCAN`.
+//! (#27) against a temp `LOADOUT_HOME`, with the scanner disabled in this
+//! build (`scan::external::AVAILABLE`, since 0.7.1): it is hidden from
+//! help, never runs (not even with `--external` or a 0.7.0 setting that
+//! turned it on), every subcommand but `status` and `remove` refuses, and
+//! `remove` still cleans up a 0.7.0 install. Debug builds of `loadout`
+//! would run `agent-scan-stub` through `LOADOUT_TEST_AGENT_SCAN`; the
+//! tests count its calls (none).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Output;
 
 use agent_loadout_core::brand;
 use agent_loadout_core::paths::{HomeSource, LoadoutHome};
+use agent_loadout_core::scan::external;
 use agent_loadout_testkit::TempHome;
 use agent_loadout_testkit::agent_scan_stub::{self, AgentScanStub, output};
-use agent_loadout_testkit::git_env::{git_vars, init_bare, system_git_or_skip};
 use serde_json::Value;
 
 const TOKEN: &str = "snyk-cli-test-token-9d2e";
@@ -21,31 +23,32 @@ const SKILL: &str = "---\nname: tidy\ndescription: Tidies.\n---\n\n# Tidy\n\nSor
 struct Cli {
     th: TempHome,
     home: PathBuf,
-    git: Option<PathBuf>,
     stub: Option<AgentScanStub>,
 }
 
 impl Cli {
-    fn new(git: Option<PathBuf>) -> Self {
+    fn new() -> Self {
         let th = TempHome::new();
         let home = th.root().join("lh");
         Self {
             th,
             home,
-            git,
             stub: None,
         }
     }
 
-    /// Installs the stub as the scanner and stores the token in the test
-    /// keyring, referenced as `keyring://loadout/snyk`.
-    fn with_stub(mut self) -> Self {
-        let home = LoadoutHome {
+    fn loadout_home(&self) -> LoadoutHome {
+        LoadoutHome {
             path: self.home.clone(),
             source: HomeSource::Flag,
             sync_root: None,
-        };
-        let stub = AgentScanStub::install(&home);
+        }
+    }
+
+    /// Installs the stub where 0.7.0 installed the scanner and stores the
+    /// token in the test keyring, as a 0.7.0 user would have.
+    fn with_stub_files(mut self) -> Self {
+        let stub = AgentScanStub::install(&self.loadout_home());
         stub.answer(&output("clean.json"));
         std::fs::write(
             self.th.keyring_file(),
@@ -53,8 +56,20 @@ impl Cli {
         )
         .unwrap();
         self.stub = Some(stub);
-        self.ok(&["scanner", "token", "keyring://loadout/snyk"]);
         self
+    }
+
+    /// What a 0.7.0 user who turned the scanner on left behind.
+    fn turned_on_in_0_7_0(&self) {
+        let fs = agent_loadout_core::fs::RealFs;
+        let home = self.loadout_home();
+        external::set_enabled(&fs, &home, true).unwrap();
+        external::set_token(&fs, &home, None, Some("keyring://loadout/snyk")).unwrap();
+    }
+
+    fn settings_text(&self) -> String {
+        std::fs::read_to_string(self.home.join("state").join("local-settings.toml"))
+            .unwrap_or_default()
     }
 
     fn calls(&self) -> usize {
@@ -63,9 +78,6 @@ impl Cli {
 
     fn run(&self, args: &[&str]) -> Output {
         let mut command = self.th.command(env!("CARGO_BIN_EXE_loadout"));
-        if let Some(git) = &self.git {
-            command.envs(git_vars(&self.th, git));
-        }
         if self.stub.is_some() {
             // The built stub: the same bytes as the installed copy, and
             // the asset name its marker records.
@@ -97,24 +109,10 @@ impl Cli {
         doc
     }
 
-    fn fails(&self, args: &[&str], code: &str) -> (Value, String) {
-        let (exit, doc, stderr) = self.json(args);
+    fn fails(&self, args: &[&str], code: &str) {
+        let (exit, doc, _) = self.json(args);
         assert_eq!(exit, 1, "{args:?}: {doc:#}");
         assert_eq!(doc["error"]["code"], code, "{args:?}: {doc:#}");
-        (doc, stderr)
-    }
-
-    fn git(&self, cwd: &Path, args: &[&str]) {
-        let git = self.git.as_ref().unwrap();
-        let status = self
-            .th
-            .command(git)
-            .envs(git_vars(&self.th, git))
-            .current_dir(cwd)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
     }
 
     fn folder(&self, name: &str) -> String {
@@ -126,146 +124,68 @@ impl Cli {
 }
 
 #[test]
-fn scanner_commands_keep_references_only() {
-    let cli = Cli::new(None);
-    let doc = cli.ok(&["scanner", "ls"]);
-    assert_eq!(doc["scanners"][1]["name"], "snyk-agent-scan");
-    assert_eq!(doc["scanners"][1]["enabled"], false);
-    let doc = cli.ok(&["scanner", "status"]);
-    assert_eq!(doc["enabled"], false);
-    assert_eq!(doc["installed"], false);
-    assert!(doc["sends"].as_str().unwrap().contains("api.snyk.io"));
-
-    // Review F1: a pasted token is refused and never echoed or stored.
-    for pasted in [
-        "3f2a9c1e-7b4d-4e8a-9c0f-1a2b3c4d5e6f",
-        "deadbeef0123456789abcdef01234567",
-    ] {
-        let (doc, stderr) = cli.fails(&["scanner", "token", pasted], "invalid_ref");
-        assert!(!doc.to_string().contains(pasted), "{doc:#}");
-        assert!(!stderr.contains(pasted), "{stderr}");
-        let doc = cli.ok(&["scanner", "token"]);
-        assert_eq!(doc["token"], Value::Null, "{doc:#}");
+fn the_scanner_is_hidden_from_help() {
+    let cli = Cli::new();
+    let help = String::from_utf8_lossy(&cli.run(&["--help"]).stdout).into_owned();
+    assert!(!help.contains("scanner"), "{help}");
+    for command in ["add", "update"] {
+        let output = cli.run(&["skills", command, "--help"]);
+        let help = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(!help.contains("--external"), "{help}");
+        assert!(!help.contains("Snyk"), "{help}");
     }
-    let settings = cli.home.join("state").join("local-settings.toml");
-    let text = std::fs::read_to_string(&settings).unwrap_or_default();
-    assert!(!text.contains("deadbeef"), "{text}");
-
-    let doc = cli.ok(&["scanner", "token", "keyring://loadout/snyk"]);
-    assert_eq!(doc["token"], "keyring://loadout/snyk");
-    assert_eq!(doc["kind"], "keyring");
-    assert_eq!(cli.ok(&["scanner", "enable"])["enabled"], true);
-    assert_eq!(cli.ok(&["scanner", "disable"])["enabled"], false);
-    let doc = cli.ok(&["scanner", "token", "--clear"]);
-    assert_eq!(doc["token"], Value::Null);
 }
 
-/// Review M49 F8: Remove turns the scanner off with it.
 #[test]
-fn removing_the_scanner_turns_it_off() {
-    let cli = Cli::new(None).with_stub();
-    assert_eq!(cli.ok(&["scanner", "enable"])["enabled"], true);
+fn scanner_subcommands_refuse_except_status_and_remove() {
+    let cli = Cli::new().with_stub_files();
+    for args in [
+        &["scanner", "ls"][..],
+        &["scanner", "install"],
+        &["scanner", "enable"],
+        &["scanner", "disable"],
+        &["scanner", "token", "keyring://loadout/snyk"],
+        &["scanner", "run", "one"],
+    ] {
+        cli.fails(args, "scanner_unavailable");
+    }
+    let doc = cli.ok(&["scanner", "status"]);
+    assert_eq!(doc["available"], false, "{doc:#}");
+    assert!(doc.get("sends").is_none(), "{doc:#}");
+    let text = String::from_utf8_lossy(&cli.run(&["scanner", "status"]).stdout).into_owned();
+    assert!(text.contains("disabled in this build"), "{text}");
+    assert_eq!(cli.calls(), 0);
+}
+
+/// A 0.7.0 setting that turned it on, an installed scanner and
+/// `--external`: nothing runs, `--external` gets a one-line note.
+#[test]
+fn nothing_runs_even_when_turned_on_or_asked_for() {
+    let cli = Cli::new().with_stub_files();
+    cli.turned_on_in_0_7_0();
+    let doc = cli.ok(&["skills", "add", &cli.folder("one")]);
+    assert!(doc.get("external").is_none(), "{doc:#}");
+    let (code, doc, stderr) = cli.json(&["skills", "add", &cli.folder("two"), "--external"]);
+    assert_eq!(code, 0, "{doc:#}\n{stderr}");
+    assert!(doc.get("external").is_none(), "{doc:#}");
+    assert!(stderr.contains("--external is ignored"), "{stderr}");
+    cli.ok(&["skills", "add", &cli.folder("three"), "--no-external"]);
+    assert_eq!(cli.calls(), 0, "the disabled scanner ran");
+}
+
+/// `scanner remove` deletes a 0.7.0 install and its settings entry.
+#[test]
+fn remove_cleans_up_a_0_7_0_install() {
+    let cli = Cli::new().with_stub_files();
+    cli.turned_on_in_0_7_0();
+    assert_eq!(cli.ok(&["scanner", "status"])["installed"], true);
     let doc = cli.ok(&["scanner", "remove"]);
     assert_eq!(doc["removed"], true);
     let doc = cli.ok(&["scanner", "status"]);
-    assert_eq!(doc["enabled"], false, "{doc:#}");
     assert_eq!(doc["installed"], false, "{doc:#}");
-}
-
-#[test]
-fn the_switch_is_the_default_and_the_flags_override_it() {
-    let cli = Cli::new(None).with_stub();
-    // Off: nothing runs by default.
-    let doc = cli.ok(&["skills", "add", &cli.folder("one")]);
-    assert!(doc.get("external").is_none(), "{doc:#}");
+    assert_eq!(doc["enabled"], false, "{doc:#}");
+    let text = cli.settings_text();
+    assert!(!text.contains("snyk_agent_scan"), "{text}");
+    assert_eq!(cli.ok(&["scanner", "remove"])["removed"], false);
     assert_eq!(cli.calls(), 0);
-    // --external runs it once, while off.
-    let doc = cli.ok(&["skills", "add", &cli.folder("two"), "--external"]);
-    assert_eq!(doc["external"]["status"], "scanned", "{doc:#}");
-    assert_eq!(cli.calls(), 1);
-    // On: it runs by default, and --no-external wins.
-    cli.ok(&["scanner", "enable"]);
-    let doc = cli.ok(&["skills", "add", &cli.folder("three"), "--no-external"]);
-    assert!(doc.get("external").is_none(), "{doc:#}");
-    assert_eq!(cli.calls(), 1);
-    let doc = cli.ok(&["skills", "add", &cli.folder("four")]);
-    assert_eq!(doc["external"]["status"], "scanned", "{doc:#}");
-    assert_eq!(cli.calls(), 2);
-    // A dangerous verdict blocks (exit 8) until --allow-dangerous.
-    cli.stub.as_ref().unwrap().answer(&output("dangerous.json"));
-    let (code, doc, _) = cli.json(&["skills", "add", &cli.folder("five")]);
-    assert_eq!(code, 8, "{doc:#}");
-    assert_eq!(doc["external"]["verdict"], "dangerous", "{doc:#}");
-    cli.ok(&["skills", "add", &cli.folder("five"), "--allow-dangerous"]);
-    // `scanner run` scans a library skill.
-    cli.stub.as_ref().unwrap().answer(&output("clean.json"));
-    let doc = cli.ok(&["scanner", "run", "one"]);
-    assert_eq!(doc["external"]["status"], "scanned", "{doc:#}");
-    assert_eq!(doc["external"]["verdict"], "clean", "{doc:#}");
-    // Not scanned (Snyk's daily limit): no verdict at all, never "clean".
-    cli.stub.as_ref().unwrap().answer(&output("limit.json"));
-    let (_, doc, _) = cli.json(&["scanner", "run", "one"]);
-    assert_eq!(doc["external"]["status"], "not_scanned", "{doc:#}");
-    assert_eq!(doc["external"]["reason"], "limit_reached", "{doc:#}");
-    assert!(doc["external"]["verdict"].is_null(), "{doc:#}");
-}
-
-/// Review F9: an untrusted source is never sent to Snyk: not by `update
-/// --check`, and not before the trust answer of an update.
-#[test]
-fn an_untrusted_update_is_not_sent_to_snyk() {
-    let Some(git) = system_git_or_skip("an_untrusted_update_is_not_sent_to_snyk") else {
-        return;
-    };
-    let cli = Cli::new(Some(git.clone())).with_stub();
-    let bare = cli.th.root().join("up.git");
-    init_bare(&cli.th, &git, &bare);
-    let root = cli.th.root();
-    cli.git(root, &["init", "--quiet", "--initial-branch=main", "work"]);
-    let work = root.join("work");
-    cli.git(&work, &["remote", "add", "origin", "../up.git"]);
-    let skill = work.join("skills").join("alpha");
-    std::fs::create_dir_all(&skill).unwrap();
-    let push = |text: &str, message: &str| {
-        std::fs::write(skill.join("SKILL.md"), SKILL.replace("tidy", text)).unwrap();
-        cli.git(&work, &["add", "-A"]);
-        cli.git(&work, &["commit", "--quiet", "-m", message]);
-        cli.git(&work, &["push", "--quiet", "origin", "HEAD:main"]);
-    };
-    push("alpha", "initial");
-    let url = format!(
-        "file:///{}",
-        bare.to_string_lossy()
-            .replace('\\', "/")
-            .trim_start_matches('/')
-    );
-    // Trusted this time only: the source stays untrusted.
-    cli.ok(&[
-        "skills",
-        "add",
-        &url,
-        "--path",
-        "skills/alpha",
-        "--trust-source",
-        "--no-external",
-    ]);
-    push("alpha v2", "v2");
-    cli.ok(&["scanner", "enable"]);
-
-    let doc = cli.ok(&["skills", "update", "--check"]);
-    assert_eq!(doc["skills"][0]["status"], "available", "{doc:#}");
-    assert!(doc["skills"][0].get("external").is_none(), "{doc:#}");
-    let (_, doc, _) = cli.json(&["skills", "update", "alpha"]);
-    assert_eq!(doc["skills"][0]["status"], "failed", "{doc:#}");
-    assert_eq!(
-        doc["skills"][0]["error"]["code"], "source_trust_required",
-        "{doc:#}"
-    );
-    assert_eq!(cli.calls(), 0, "an untrusted source was sent to Snyk");
-
-    // Trusted: the update is scanned once, then written.
-    let doc = cli.ok(&["skills", "update", "alpha", "--trust-source"]);
-    assert_eq!(doc["skills"][0]["status"], "updated", "{doc:#}");
-    assert_eq!(doc["skills"][0]["external"]["status"], "scanned", "{doc:#}");
-    assert_eq!(cli.calls(), 1);
 }

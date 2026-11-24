@@ -60,6 +60,24 @@ pub const SCANNER: &str = "snyk-agent-scan";
 /// Seconds per run unless `[snyk_agent_scan] timeout_secs` says otherwise.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Whether this build offers the external scanner at all. `false` since
+/// 0.7.1 (2026-11-24): Snyk's free tier refuses new accounts by every
+/// path, so the maintainer dropped Snyk. While `false` the scanner never
+/// runs (whatever `[snyk_agent_scan] enabled` says), is never downloaded
+/// or executed, and its CLI and GUI surfaces are hidden; only `scanner
+/// remove` (cleaning up a 0.7.0 install) and `scanner status` work. The
+/// code stays for a possible future scanner: flip this to re-enable.
+pub const AVAILABLE: bool = false;
+
+/// `scanner_unavailable`: the external scanner is disabled in this build.
+pub fn unavailable() -> CoreError {
+    CoreError::new(
+        ErrorCode::ScannerUnavailable,
+        "the optional external scanner (Snyk Agent Scan) is disabled in this build; run \
+         `loadout scanner remove` to delete a 0.7.0 install",
+    )
+}
+
 /// Whether the run happened and was understood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -348,11 +366,19 @@ pub fn set_enabled(fs: &dyn Fs, home: &LoadoutHome, enabled: bool) -> Result<(),
 }
 
 /// Deletes the installed scanner and turns it off (nothing could run);
-/// the token reference and timeout are kept. `false` when nothing was
-/// installed.
+/// the token reference and timeout are kept, unless the scanner is
+/// disabled in this build ([`AVAILABLE`]): then the whole
+/// `[snyk_agent_scan]` entry goes too, cleaning up a 0.7.0 install.
+/// `false` when nothing was installed.
 pub fn remove(fs: &dyn Fs, home: &LoadoutHome, tool: &Tool) -> Result<bool, CoreError> {
     let removed = tool.remove()?;
-    set_enabled(fs, home, false)?;
+    if AVAILABLE {
+        set_enabled(fs, home, false)?;
+    } else {
+        update(fs, home, |scanner| {
+            *scanner = SnykAgentScanSettings::default()
+        })?;
+    }
     Ok(removed)
 }
 
@@ -447,6 +473,9 @@ pub fn status_of(fs: &dyn Fs, home: &LoadoutHome, tool: Option<Tool>) -> Result<
 /// scanner is on, installed and has a token reference (whether the token
 /// resolves is the run's business: a not-scanned report is a report).
 pub fn required(fs: &dyn Fs, home: &LoadoutHome) -> Result<bool, CoreError> {
+    if !AVAILABLE {
+        return Ok(false);
+    }
     let status = status(fs, home)?;
     Ok(status.enabled && status.installed && status.token.is_some())
 }
@@ -461,9 +490,14 @@ pub enum Choice {
     Off,
 }
 
-/// Whether to run: [`Choice::On`], or [`Choice::Default`] with the scanner
-/// turned on.
+/// Whether to run: never unless [`AVAILABLE`]; then [`wanted_by`].
 pub fn wanted(settings: &Settings, choice: Choice) -> bool {
+    AVAILABLE && wanted_by(settings, choice)
+}
+
+/// What the setting and `choice` ask for: [`Choice::On`], or
+/// [`Choice::Default`] with the scanner turned on.
+pub fn wanted_by(settings: &Settings, choice: Choice) -> bool {
     match choice {
         Choice::On => true,
         Choice::Off => false,

@@ -451,108 +451,11 @@ plugins in a tap's folder or a Git repository (`github`, `url`,
 installed either. Ask the publisher for a Git source, or install its MCP
 server or skill from its repository with **From Git or folder**.
 
-## Snyk Agent Scan
+## Snyk Agent Scan (0.7.0 only)
 
-### `scanner_unavailable`: "Snyk Agent Scan is off"
-
-A Snyk scan was asked for while the scanner is off. Turn it on in
-Settings > Security (**Use Snyk Agent Scan**) or with `loadout scanner enable`; the
-switch stays unavailable until the scanner is installed and a token
-reference is set. On the command line, `--external` runs it once without
-turning it on. Turning the scanner off while a scan runs stops that scan
-with this error, and nothing is attached to the review.
-
-### `scanner_download_failed`
-
-The pinned build could not be downloaded from Snyk's GitHub releases:
-no network, an HTTP error, a redirect to a host other than GitHub's
-release storage, or a file over 64 MiB. Nothing was installed. The
-download uses `HTTPS_PROXY` (or `ALL_PROXY`) and `NO_PROXY` like
-catalogs; a SOCKS proxy isn't supported. Try again later. A download you
-canceled says "Install canceled; nothing was installed." instead
-(`canceled`).
-
-### `scanner_verification_failed`
-
-The downloaded file's size or SHA-256 isn't the one built into this
-version of Loadout, so it was deleted and nothing was installed. That
-points to a damaged download or something between you and GitHub (a
-proxy rewriting downloads, for example). Try again on another network;
-if it persists, report it.
-
-**"The installed scanner is not the pinned build" / Not scanned (not
-installed).** Before each run Loadout hashes the installed scanner
-again. If the file changed after it was installed (disk corruption, a
-sync tool or another program replacing it), it isn't run: the scanner
-shows as not installed, and **Install** (or `loadout scanner install`)
-downloads and verifies it again. If it keeps changing, find what writes
-to `tools/snyk-agent-scan/` in your data folder; keep the data folder out
-of file-sync folders.
-
-### "Snyk did not accept the token" (Not scanned: token rejected)
-
-Snyk refused the token: it is wrong, expired or revoked, or belongs to an
-account without access. Create a new API token in your Snyk account,
-store it where your token reference points (for a secret alias:
-`loadout secrets set SNYK_TOKEN --keyring`, piping the token in), and
-scan again (**Scan again**, or `loadout scanner run <SKILL>`). **Check**
-in Settings > Security only confirms that Loadout can read the reference;
-it doesn't contact Snyk. Loadout never shows or logs the token.
-
-**Setting the token is refused.** `loadout scanner token` and the Set
-token dialog take only a reference: an alias you defined with `loadout
-secrets` (or on the Secrets page), `env:NAME`, `keyring://service/account`
-or `op://vault/item/field`. A pasted token, or an alias that isn't one of
-your secrets, is refused, and the error never repeats what you typed.
-1Password Environment references (`op-env://`) aren't accepted, because
-Loadout never reads those values and so couldn't hand one to the scanner;
-map the token to an `op://` item or the keyring instead.
-
-### A skill says "Not scanned (...)"
-
-A Snyk scan that didn't happen never blocks the install or update, and
-never counts as clean; the built-in scan still applies. **Scan again**
-(app) or running the command again retries. By reason:
-
-- **no token** / **the token could not be read**: no token reference is
-  set, or it doesn't resolve on this machine (an unset environment
-  variable, a locked keyring, 1Password not signed in). **Check** in
-  Settings > Security says which.
-- **Snyk limit reached**: Snyk refused the scan with its free tier's
-  daily limit (HTTP 429). Snyk doesn't publish the limit, and a new
-  account can be refused from its first scan even with a valid token;
-  higher limits are only available by contacting Snyk. Skills aren't
-  scanned by Snyk until it lets scans through again; nothing is blocked.
-  A token Snyk doesn't accept shows **Snyk rejected the token** instead.
-- **too large**: Snyk refused the skill's size.
-- **Snyk could not be reached**: offline, a firewall, or a proxy problem
-  (the scanner uses the same proxy variables).
-- **timed out**: the run took longer than the timeout (60 seconds by
-  default; `timeout_secs` under `[snyk_agent_scan]` in
-  `state/local-settings.toml` changes it on this machine).
-- **canceled**: you chose **Cancel scan**, closed the review, turned the
-  scanner off or pressed Ctrl+C.
-- **the scanner failed**: it stopped with an error; the review shows the
-  last line of its error output (token masked). On Windows, a scanner that
-  can't be placed in a job object that would end it with Loadout is
-  stopped at once and reported this way.
-- **not installed** / **no build for this platform**: install it, or
-  there is no pinned build for this operating system and processor (builds
-  exist for Windows x64, Linux x64 and arm64, and macOS on Apple silicon
-  and Intel).
-
-"Scanner output not understood (version 0.7.1)" means the scanner printed
-something Loadout can't read; it is not treated as clean.
-
-### `external_scan_required`
-
-Snyk Agent Scan is on, installed and has a token, but the review you
-installed or updated from has no Snyk result yet, so Loadout installed or
-updated nothing. Content from a Git repository, a catalog or an update
-needs that result first (a canceled or not-scanned result counts). Wait
-for the scan in the review, or choose **Scan again**, then **Install** or
-**Update** again. A folder or archive from this computer is exempt: it is
-scanned only when you choose **Scan with Snyk**.
+Loadout 0.7.0 shipped an optional Snyk Agent Scan; it is disabled from
+0.7.1 because Snyk's free tier refuses new accounts. If you installed it,
+run `loadout scanner remove`.
 
 ## The Loadout skill for agents
 
