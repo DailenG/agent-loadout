@@ -123,7 +123,67 @@ loadout apply           # write it (one commit; every file backed up first)
 Then restart the client (Claude Desktop in particular reads servers only at
 launch) and check that the server appears in its own MCP view.
 
-## 5. Undo
+## 5. Install a skill or MCP server from Git or a folder
+
+Skills and MCP servers can come from any Git repository (https, ssh or a
+local repository) or a folder on this machine.
+
+**In the app:**
+
+- **Install > Skill**, **Git** (a repository URL, optionally a branch or
+  tag and a folder in it) or **Local** (a folder or a `.zip`/`.skill`
+  archive), then **Review and install**. Loadout fetches and scans first
+  and shows a review: the source, whether you trust it, the files and the
+  scan's findings. Nothing is installed until you press **Install**.
+- **Install > MCP > From Git or folder**: a repository URL (with an
+  optional folder and branch, tag or commit) or a folder you pick, then
+  **Find servers**. Loadout reads the repository's `server.json` (MCP
+  Registry), MCPB `manifest.json`, committed client configs such as
+  `.mcp.json`, or treats the repository itself as the server, and
+  proposes servers. Nothing runs and nothing is saved yet: tick the ones
+  you want, check the exact command each one runs (**Review and edit**
+  opens it in the usual server form), choose **Enable for**, then
+  **Save**.
+
+**On the command line:**
+
+```sh
+loadout skills add https://github.com/acme/skills --path skills/release-notes
+loadout server add --from https://github.com/acme/weather --dry-run   # list proposed servers and findings
+loadout server add --from https://github.com/acme/weather --pick weather --client omp
+```
+
+Two checks run before anything from the source is saved:
+
+- **Do you trust this source?** The first install, update or save from a
+  Git source asks: **Trust this time only** (nothing recorded),
+  **Always trust** the repository (or everything from its owner, or on a
+  self-hosted host), or **Cancel**. In a terminal it is a prompt; in a
+  script or with `--json` the command stops with `source_trust_required`
+  unless you pass `--trust-source` (once) or `--trust-source=repo`
+  (always). `--yes` never answers it. A folder you pick for an MCP server
+  is asked about too; a skill folder or archive you pick is not.
+  **Settings > Sources** and `loadout source ls` list your decisions. Only trust a
+  source whose author you know: skills instruct your agents, and MCP
+  servers run programs on your computer.
+- **The built-in scan.** Loadout scans the fetched files (and an MCP
+  server's command lines) offline with its own rules: download-and-run
+  commands, credential theft, hidden text, prompt injection, native
+  binaries, unpinned packages. Warnings are shown and never block. A
+  `dangerous` finding blocks the install (exit code 8 on the command line)
+  until you read the findings and choose **Install anyway**
+  (`--allow-dangerous`). Trusting a source never skips the scan, and a
+  clean scan is not a guarantee: still read what you install.
+
+Commands are pinned to the commit or package version Loadout reviewed. A
+server that runs code from the repository's own files keeps a copy of
+it on this machine; a server added from a folder runs only on this
+machine. Details: [user guide, Servers from a Git repository or
+folder](user-guide.md#servers-from-a-git-repository-or-folder),
+[The built-in scan](user-guide.md#the-built-in-scan) and
+[Source trust](user-guide.md#source-trust).
+
+## 6. Undo
 
 - App: the notification's undo, or **History**, pick the apply, **Undo this
   apply**.
@@ -137,6 +197,7 @@ a client file back exactly as it was, byte for byte:
 ## Next steps
 
 - Per-project servers and trust: [user guide, Projects and trust](user-guide.md#projects-and-trust).
+- Install from anywhere, safely: [concepts, Sources, trust and the scan](concepts.md#sources-trust-and-the-scan).
 - Secrets from the keyring or 1Password: [user guide, Secrets](user-guide.md#secrets).
 - Backups and other machines: [user guide, History, restore and remotes](user-guide.md#history-restore-and-remotes).
 - Something wrong? [troubleshooting.md](troubleshooting.md) and [faq.md](faq.md).

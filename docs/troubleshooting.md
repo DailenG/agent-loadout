@@ -162,7 +162,8 @@ more, and it checks the permissions again. Details:
 - A slow server never starts in omp: omp's `timeout` (milliseconds) also
   limits startup; raise or remove it.
 - Run `loadout status --client <id>`: a **blocked** entry says why (for
-  example `missing_secret`).
+  example `missing_secret`, `checkout_out_of_date` or
+  `folder_on_other_machine`, below).
 
 ### Drift after editing a client file by hand
 
@@ -240,7 +241,9 @@ Several accounts are signed in to the 1Password app. Set the one to use:
 That machine cannot resolve an alias (for example no 1Password CLI, or no
 keyring entry). `loadout secrets check` shows the status per alias. Point
 the alias at something available there:
-`loadout secrets set ALIAS --ref ... --this-machine`.
+`loadout secrets set ALIAS --ref ... --this-machine`. A server added from
+a Git repository or folder can also be blocked on one machine only; see
+[Sources and the scan](#sources-and-the-scan).
 
 ### Secrets on Linux
 
@@ -251,6 +254,113 @@ keyring collection is locked and no unlock prompt can appear (SSH, WSL, a
 service), Loadout reports `locked` instead of waiting; unlock the keyring
 in your desktop session and try again. Loadout never asks for an unlock
 itself.
+
+## Sources and the scan
+
+### `source_trust_required`
+
+You have not trusted the source, and nothing answered the trust question.
+Nothing was fetched into the store or installed. In a terminal, Loadout
+prompts (`[o]nce / [a]lways / [c]ancel`); in a script, an agent session or
+with `--json` there is no prompt, so the command fails. Decide first:
+
+- run the command again in a terminal and answer the prompt;
+- pass `--trust-source` (this time only) or `--trust-source=repo`,
+  `=owner` or `=host` (always; write it with `=`) to `skills add`,
+  `skills update`, `server add --from`, `server update` or
+  `server checkout`;
+- or record the decision first: `loadout source trust <URL>
+  [--scope repo|owner|host]`.
+
+`--yes` never answers it. When the host redirected the repository (renamed
+or transferred), the new location is a separate question: the CLI prints
+`note: X moved to Y` and asks again, and `--trust-source` does not carry
+over to it. In the app, **Update all** on the Skills page sends no trust
+answer, so updates from sources that need one fail with a message and stay
+for you to review one by one.
+
+### `source_blocked`
+
+A block in `store/sources.toml` matches the repository, its owner or its
+host. Loadout does not contact the source and changes nothing. A block wins
+over any trust and over `--trust-source`. To unblock it: Settings >
+Sources, **Unblock**, or `loadout source ls` and `loadout source untrust
+<KEY>`. Blocks sync with your remotes, so a block made on another machine
+applies here too.
+
+### The trust question comes back for a source I trusted
+
+Trust lapses when the repository changes under you: its history was
+rewritten (a force-push removed the commit you have) or the host redirects
+it to another repository (renamed or transferred). Settings > Sources shows
+**Asks again** with the reason and date, and `loadout source ls` shows
+`lapsed`. Check what happened to the repository, then answer the question
+again. An `http://` or `git://` address of the same repository is a
+separate source: HTTPS or SSH trust never covers it.
+
+### `scan_blocked`, or exit code 8
+
+Loadout's built-in scan found something `dangerous` in what you were
+installing, updating or saving (the files, or an MCP server's command
+line). Nothing was saved. The command printed the findings (severity,
+rule, `file:line`, message and a masked excerpt); `--json` has them under
+`scan`. Read them. If you trust the content and its author, run the
+command again with `--allow-dangerous`, or tick "I read the findings and
+want to go ahead anyway" and choose **Install anyway**, **Update anyway**,
+**Save anyway** or **Restore anyway** in the app. `loadout skills update`
+leaves a blocked skill as it is (`blocked`), applies the other updates and
+still exits 8. In the app's MCP review, editing a server's command after
+the review means it is scanned again when you save; a dangerous edit turns
+the gate on for that server.
+
+A finding is not always malice: an installer command in a script, or an
+instruction in an HTML comment, matches the rules on purpose. Trusting a
+source never skips the scan, and custom rules in `state/scan-rules.toml`
+can add rules or raise severities but never lower or remove one.
+
+### A finding says `not-fully-scanned` or `not-content-scanned`
+
+- `not-fully-scanned` (warning): a file is larger than 4 MiB, and only its
+  first 4 MiB were scanned. Look at the rest yourself, or leave the file
+  out of the source.
+- `not-content-scanned` (info): files Loadout does not read as text
+  (images, fonts, archives, media, native binaries) are listed once. A
+  native binary also gets a `native-binary` warning: it cannot be reviewed
+  by reading it.
+
+Dependency and build folders of an MCP source (`node_modules`, `.venv`,
+`venv`, `__pycache__`, `target`, `dist`, `build`) are not read or scanned
+at all; the review names them. A server that runs from `dist/` relies on
+the repository you trusted.
+
+### `checkout_out_of_date`: the server's local copy is out of date
+
+The server runs from a copy of its repository that Loadout keeps on each
+machine in `LOADOUT_HOME/servers/<id>` (never synced), and this machine's
+copy is missing or at another commit than the server file names. That
+happens after another machine updated the server and you pulled the store,
+on a new machine, or when the folder was deleted. Its client entries stay
+blocked until the copy matches. Restore it: **Restore copy** in the
+server's details on the MCP page (a review with the trust state and scan,
+then **Restore**), or `loadout server checkout <ID>` (`--trust-source`,
+`--allow-dangerous` as for adding it). Run the server's setup steps again
+afterwards if it has any.
+
+### `folder_on_other_machine`
+
+The server was added from a local folder on another machine. It runs from
+that folder, which does not exist here, so its entries are blocked on this
+machine, and **Check for update** or `loadout server update` reports it.
+Nothing is wrong on the machine that added it. To use the server
+everywhere, add it from a Git repository instead (`loadout server add
+--from <GIT-URL>`).
+
+### `loadout server update` or **Check for update** says `source_unreachable`
+
+The repository could not be fetched (offline, removed, or private without
+credentials), or the folder is gone or belongs to another machine. The
+server and its checkout are left as they are; other servers are still
+checked.
 
 ## Data directory
 

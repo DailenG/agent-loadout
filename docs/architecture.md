@@ -57,14 +57,16 @@ Rules every layer follows:
 
 | Module | Owns |
 |---|---|
-| `model/` | Store file schemas (`server.rs`, `secrets.rs`, `clients.rs`, `project.rs`, `machine.rs`, `applied.rs`, `settings.rs`, `skill_meta.rs`), id rules (`ids.rs`), validation. JSON Schemas in `docs/schema` are generated from these types. |
+| `model/` | Store file schemas (`server.rs` with `[meta.source]`, `secrets.rs`, `sources.rs`, `clients.rs`, `project.rs`, `machine.rs`, `applied.rs`, `settings.rs`, `skill_meta.rs`), id rules (`ids.rs`), validation. JSON Schemas in `docs/schema` are generated from these types. |
+| `sources/` | Source trust: keys and scopes built from a git URL or local path, canonical and credential-free, with their own keys for `http://` and `git://` (`key.rs`); force-push and redirect detection on fetch (`detect.rs`); the read-only `check` the trust dialog shows, the gate `admit` (and `would_admit`, `refuse_blocked`, which run before any clone or fetch), `trust`, `block`, `untrust` and `lapse`, each one store commit to `store/sources.toml` (`mod.rs`). `store/merge.rs` merges that file record by record on pull. |
 | `store/` | The git-backed store (libgit2, vendored, no network features): `bootstrap.rs` (init), `transaction.rs`, commit `trailers.rs`, `log.rs`, `diff.rs`, `tags.rs`, `restore.rs`, `revision.rs`, `merge.rs` (per-entity merge for pulls), `lock.rs`. |
 | `formats/` | Format-preserving editors: `jsonc.rs` (JSON and JSONC), `toml.rs`, `yaml.rs`, `json5.rs`, `text.rs`. Unowned bytes stay identical. |
 | `adapters/` | The adapter table (`spec.rs`), per-client mappers (`omp.rs`, `claude_code.rs`, `codex.rs`, `pi.rs`, `claude_desktop.rs`, `copilot.rs`, `cursor.rs`, `vscode_legacy.rs`, `gemini.rs`, `antigravity.rs`, `opencode.rs`, `grok.rs`, `windsurf.rs`, `devin.rs`, `ported.rs`), capabilities (`caps.rs`), detection (`detect.rs`), path templates (`location.rs`), shared mapping (`mapper.rs`). |
+| `mcp_source/` | MCP servers from a Git repository or folder: `resolve` clones shallow (no hooks, no submodules) into `cache/mcp-sources/.tmp-*` or reads a folder in place, skipping dependency and build folders, and turns `server.json`, MCPB/DXT manifests, committed client configs or the repository itself into drafts (`convert.rs`; paste detection shared with the app in `snippet.rs`); `save` runs the trust gate, then the scan of the files and every launch line, and commits; checkouts in `LOADOUT_HOME/servers/<id>` (placed, replaced and removed inside the store transaction, marked with `.git/loadout-checkout`); `runnable` blocks a server's entries at render time (`checkout_out_of_date`, `folder_on_other_machine`); `check_update`, `update`, `prepare_checkout`, `restore_checkout`; `sweep_temp_clones` (`mod.rs`). |
 | `layering/` | Project manifests (`manifest.rs`), merge rules (`merge.rs`), effective config with provenance (`effective.rs`), known projects (`projects.rs`), project servers edited from the app (`project_servers.rs`), trust by content hash (`trust.rs`), `.git/info/exclude` handling (`git.rs`), Discover projects from client files (`discover.rs`). |
 | `apply/` | Rendering desired entries (`render.rs`), planning (`plan.rs`), execution (`exec.rs`), the pending-plan cache the app shares (`cache.rs`), the ownership ledger (`ledger.rs`), backups (`backup.rs`), journals (`journal.rs`), rollback (`rollback.rs`), Discard pending (`discard.rs`), import and adopt of foreign entries across user and project files, with conflicts, secret extraction and removal of backups holding old values (`import.rs`), the not-managed findings and acknowledged entries behind the app's lists and notice (`unmanaged.rs`), the drift resolver (`resolve.rs`). |
 | `secrets/` | Reference grammar (`grammar.rs`), catalog (`catalog.rs`), providers (`providers/`: env, keyring, 1Password), statuses (`status.rs`), delivery selection and rendering (`delivery.rs`, `render.rs`), secret classification (`classify.rs`), secret extraction shared by import and the SkillDock migration (`extract.rs`), the leak scanner (`scanner.rs`). |
-| `skills/` | Skill store (`store.rs`), installs from git, folders and archives with the review step and the gates before the commit (`install.rs`: `prepare`, `install_prepared`), links, junctions and copies (`link.rs`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), content summaries of skill folders cached by their file listing (`hash_cache.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
+| `skills/` | Skill store (`store.rs`; listings read only `SKILL.md` and file metadata through `summarize_folder`), installs from git, folders and archives with the review step and the gates before the commit (`install.rs`: `prepare`, `install_prepared`, `Decisions { allow_dangerous, trust, moved_trust, via }`, update checks with force-push and move detection, `sweep_temp_clones`), links, junctions and copies, with client detection probed once per operation (`link.rs`, `DetectedClients`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), content summaries of skill folders cached by their file listing (`hash_cache.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
 | `scan/` | The built-in offline scanner: rules as data (`rules.toml`, parsed and checked in `rules.rs`), matching, line numbers and masked excerpts (`engine.rs`), results cached by content hash in `cache/scan` (`cache.rs`), the findings model, `Scanner` and the `scan_blocked` gate (`mod.rs`). Used by skill installs and updates and by MCP drafts from a repository. |
 | `remote/` | Remote config (`config.rs`), folder remotes (`folder.rs`), git remotes through the system git (`git.rs`), GitHub CLI helpers (`gh.rs`), token credentials (`credential.rs`), push and pull (`sync.rs`), sync-tool artifact filtering (`sync_artifacts.rs`), restore on a new machine (`restore.rs`), the remote manifest (`manifest.rs`), UNC paths (`unc.rs`). |
 | `migrate/` | SkillDock import (`skilldock.rs`) and the client scan (`scan.rs`). |
@@ -114,6 +116,29 @@ entries that would write a read-only file into `blocked` /
 `read_only_target`; the executor maps a refused write the same way and
 goes on with the other files.
 
+**Installing from a source** (skills and MCP servers). Every path that
+saves content from a source runs the same steps, in this order:
+
+1. `sources::refuse_blocked`: a blocked source is refused before git is
+   started.
+2. Fetch and read: a shallow clone into a temporary folder (or a picked
+   folder read in place). Nothing from the source runs.
+3. The scan (`scan::Scanner`): the files, plus every launch line for MCP
+   drafts. The app shows the result in a review; the CLI prints it.
+4. Before the store commit: `sources::admit` (with the user's grant, for the
+   typed source and a redirect target separately), then `scan::gate`
+   (`scan_blocked` unless allow-dangerous). One commit, then the instant
+   apply.
+
+The app keeps reviews between steps 3 and 4 by token: skill reviews in
+`AppState.reviews` and MCP source reviews in `commands/mcp_source.rs`, at
+most 8 of each, the oldest dropped with its temporary clone; a review
+survives a failed save (trust, scan, id taken) so the dialog can retry
+with the user's answer, and is spent by a successful one. Temporary clones
+(`.tmp-*`) and replaced checkouts (`servers/.old-*`) left by an
+interrupted run are swept once they are an hour old: at app start, and
+when a CLI server command starts.
+
 ## CLI
 
 `crates/agent-loadout/src/main.rs` defines the clap tree and the global
@@ -131,9 +156,13 @@ command reference is [cli.md](cli.md), generated from the clap help by
 
 - `src/main.rs` builds the `tauri-specta` builder with every command and
   event, and registers the drift watcher.
-- `src/commands/*.rs` group commands by page (`servers.rs`, `apply.rs`,
-  `tools.rs`, `projects.rs`, `project_servers.rs`, `effective.rs`,
-  `resolve.rs`, `history.rs`, `remotes.rs`, `secrets.rs`, `skills.rs`,
+- `src/commands/*.rs` group commands by page (`servers.rs`, `apply.rs`
+  (with `recheck_targets`, which drops the cached plan and the permission
+  probes), `tools.rs`, `projects.rs`, `project_servers.rs`, `effective.rs`,
+  `resolve.rs`, `history.rs` (pages of 200 with a `before` cursor),
+  `remotes.rs`, `secrets.rs`, `skills.rs` (installs through a review),
+  `scan.rs` (the scan DTOs), `sources.rs` (Settings > Sources and the trust
+  dialog), `mcp_source.rs` (MCP servers from a Git repository or folder),
   `import.rs` (scan and apply an import, not-managed summaries and the
   notice), `discover.rs`, `migrate.rs`, `updates.rs`). Each one calls core on a
   blocking thread and returns
@@ -165,11 +194,11 @@ fallback: outside Tauri without the mock, calls fail.
 | Path | Contents |
 |---|---|
 | `src/main.tsx`, `src/app/App.tsx` | Shell: sidebar with the scope switcher and nav, header slots, window chrome, route error boundary |
-| `src/app/routes/<page>/` | One folder per page: `skills`, `mcp`, `projects`, `tools`, `install`, `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `updates`), `migrate` |
+| `src/app/routes/<page>/` | One folder per page: `skills` (with the update review), `mcp` (with `McpSourceUpdate.tsx`: Check for update, Restore copy), `projects`, `tools`, `install` (skill review, `McpSourcePanel.tsx`: MCP From Git or folder), `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `sources`, `updates`), `migrate` |
 | `src/app/apply/` | Pending changes pill and drawer, change notices, query keys, drift triggers, Refresh |
 | `src/app/resolver/` | The drift resolver dialog |
 | `src/app/scope/` | `ActiveScope.tsx` (User or one project; not persisted) and `ScopeSwitcher.tsx` |
-| `src/app/components/` | Shared controls ported from SkillDock, the shared `Modal` (focus trap, inert page, Escape, focus restore) and `ReadOnlyBadge` (lock, reason text and note) |
+| `src/app/components/` | Shared controls ported from SkillDock, the shared `Modal` (focus trap, inert page, Escape, focus restore), `ReadOnlyBadge` (lock, reason text and note), `TrustDialog.tsx` (the trust question and `useTrustPrompt`), `ScanFindings.tsx` (findings and the "anyway" gate) and `useVirtualSlots.tsx` (long Skills and MCP lists render only the cards near the viewport; each card keeps a named slot) |
 | `src/i18n/en.ts` | Every display string, keyed by message key, enum or error code (English only) |
 | `src/styles/tokens.css` | Design tokens |
 
@@ -185,8 +214,10 @@ invalidates `driftQueryKeys` (pending plan, servers, project servers,
 pending store changes, projects, effective matrices, tools, skills, skill
 tool folders, and the not-managed summaries and notice checks, which
 focus and watcher events refetch at most once a minute). The
-Refresh buttons do the same. Drift is found by the planner and never
-reverted on its own.
+Refresh buttons do the same, and first call `recheck_targets` so a change
+of only file permissions shows; a window focus does that too when the last
+recheck is five minutes old or more. Drift is found by the planner and
+never reverted on its own.
 
 **Active scope** (`src/app/scope/ActiveScope.tsx`): `useActiveScope()`
 returns `{ kind: "user" }` or `{ kind: "project", id }`; Skills, MCP and

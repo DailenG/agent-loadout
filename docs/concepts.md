@@ -15,6 +15,7 @@ holding plain TOML files:
 |---|---|
 | `servers/<id>.toml` | One MCP server: command or URL, args, env, headers, which clients get it, secret delivery |
 | `secrets.toml` | Secret aliases and the provider reference each one points at (never values) |
+| `sources.toml` | Your trust and block decisions for skill and MCP server sources |
 | `clients.toml` | Per-client preferences (turn a client off, native disable, omp profiles, VS Code variants) |
 | `settings.toml` | Portable settings, such as `apply_mode` |
 | `skills/<id>/`, `skill-meta/<id>.toml` | Installed skills and their source and enablement |
@@ -28,9 +29,10 @@ edit with `loadout backup`. JSON Schemas for editor completion are in
 [schema/](schema).
 
 Next to the store, `state/` holds facts about this machine only (the
-ownership ledger, trusted projects, remotes, apply records), and `backups/`
-holds copies of client files taken before each write. Neither is versioned
-or pushed.
+ownership ledger, trusted projects, remotes, apply records), `backups/`
+holds copies of client files taken before each write, and `servers/<id>`
+holds the local copies (checkouts) of MCP servers that run from their
+repository's files. None of these is versioned or pushed.
 
 ## Clients and adapters
 
@@ -236,7 +238,9 @@ only in the app.
 ## Skills
 
 A **skill** is a folder with a `SKILL.md`. Loadout installs skills into the
-store (from git, a folder, or a `.zip`/`.skill` archive) and makes them
+store (from git, a folder, or a `.zip`/`.skill` archive; each install and
+update is scanned, and a git source is asked about first, see
+[Sources, trust and the scan](#sources-trust-and-the-scan)) and makes them
 available to each client by **linking** the store folder into the client's
 skill folder: a directory junction on Windows (no administrator rights
 needed), a symbolic link elsewhere, or a copy if you ask. Project-scope
@@ -253,6 +257,79 @@ executable file on Linux and macOS) or that the project's repository
 tracks is kept, with the reason. Unmanaged folders can also be imported
 one by one or moved to the trash.
 
+## Sources, trust and the scan
+
+Skills and MCP servers can come from anywhere: a Git repository (https,
+ssh, a local repository) or a folder on this machine. What they bring runs
+with your permissions (a skill instructs your agents and can ship scripts;
+an MCP server is a program a client starts), so everything from a source
+passes two checks before it is saved to the store.
+
+**Source trust.** A **source** is a repository, named by a key such as
+`github.com/acme/skills`. Trusting one is a decision you make and Loadout
+records, like trusting a project:
+
+- The first install, update or save from a source you have not trusted
+  asks: **this time only** (nothing recorded), **always** for the
+  repository, for every repository of its owner (`github.com/acme/*`), or,
+  on a self-hosted server, for the whole host (`git.example.com/*`), or
+  **cancel**. Public services such as github.com never offer the host
+  scope. Sources under `github.com/anthropics` and
+  `github.com/modelcontextprotocol` are marked official, but they are asked
+  about like any other.
+- Decisions live in `store/sources.toml`, so they are versioned and sync
+  with your remotes. A **block** wins over any trust, and a blocked source
+  is never contacted.
+- Trust is never implicit. `--yes` never answers the question; a run
+  without a terminal (a script, an agent, `--json`) fails with
+  `source_trust_required` unless it passes the explicit
+  `--trust-source[=once|repo|owner|host]` or you run `loadout source
+  trust`.
+- Trust **lapses** when the repository changes under you: a force-push
+  that drops the commit you have, or a rename or transfer (the host
+  redirects it). The next update asks again. A redirect only ever adds a
+  question about the new location. An unencrypted address (`http://`,
+  `git://`) has its own key, so trusting the HTTPS or SSH address does not
+  cover it.
+- A skill folder or archive you pick on this machine is not asked about;
+  a folder you pick for an MCP server is, at the repository scope only.
+
+**The built-in scan.** Every skill install and update, and every MCP
+server saved or updated from a source (its files and every command line it
+launches with), is scanned offline with Loadout's own rules: download-and-run
+commands, encoded payloads, reverse shells, credential reads next to
+network calls, hidden Unicode and HTML-comment instructions, prompt
+injection, turned-off safety prompts, edits of agent configuration,
+native binaries, and unpinned packages, Git URLs and images in server
+commands. Each finding has a severity (`info`, `warning`, `dangerous`), and
+the verdict is the worst one. A `dangerous` verdict blocks the save
+(`scan_blocked`, exit code 8) until you review the findings and choose to
+go ahead anyway; warnings never block. Trusting a source never skips the
+scan, and a clean verdict means no rule matched, not that the content is
+safe. Nothing is sent anywhere; results are cached by content.
+
+**MCP servers from a source.** `loadout server add --from` and **Install >
+MCP > From Git or folder** read a repository or folder and propose
+**drafts**: from an MCP Registry `server.json`, an MCPB `manifest.json`,
+committed client configs, or the repository itself as the server. Nothing
+runs while proposing. Commands are pinned to the reviewed commit or
+package version (a registry package without a version is marked **Not
+pinned**), secret values are never copied (declared secrets become
+`${secret:ALIAS}` references), and the saved server file records only
+where it came from (`[meta.source]`), so `loadout server update` can read
+the source again and show what changes.
+
+- A server that runs from its repository's files keeps a **checkout** in
+  `LOADOUT_HOME/servers/<id>`, on this machine only. The server file names
+  the commit; while this machine's copy is missing or at another commit
+  (for example after another machine updated the server and you pulled
+  the store), its entries are blocked (`checkout_out_of_date`) until you
+  restore the copy (`loadout server checkout <ID>`, or **Restore copy** in
+  the app), behind the same trust question and scan.
+- A server added from a **folder** runs from that folder and belongs to
+  the machine that added it. On your other machines its entries are
+  blocked (`folder_on_other_machine`).
+
 ## Remotes
 
 The store works fully offline. **Remotes** are optional backups and a way
@@ -266,6 +343,7 @@ to share the store between machines:
 
 `push` sends your commits; `pull` merges other machines' changes per entity
 and reports conflicts. `loadout restore --from` sets up a new machine from
-a folder remote, a bare repository or a zip. The ledger, trust, backups and
-secret values never leave the
-machine.
+a folder remote, a bare repository or a zip. The ledger, project trust,
+backups, MCP server checkouts and secret values never leave the machine;
+source trust decisions (`store/sources.toml`) are part of the store and
+sync.

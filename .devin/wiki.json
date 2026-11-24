@@ -75,7 +75,7 @@
     {
       "title": "Read-only contexts",
       "parent": "Apply engine",
-      "purpose": "Client files and folders this account can read but not write (since 0.4.0). The write probe (access.rs, Fs::write_probe) never writes, runs under a two-second budget and is cached per path and content fingerprint; kinds acl, attribute, owner, share; entries that would write a read-only file are blocked with read_only_target, a refused write at execution maps to the same code, and the exit code ignores it. CLI `read-only (<kind>)` and JSON `read_only`; IPC readOnly fields and the app's ReadOnlyBadge (src/app/components/ReadOnlyBadge.tsx). Sources: crates/agent-loadout-core/src/access.rs, apply/plan.rs, apply/exec.rs, docs/milestones/M37.md (IPC contract), M38.md, SPEC.md section 8.2."
+      "purpose": "Client files and folders this account can read but not write (since 0.4.0). The write probe (access.rs, Fs::write_probe) never writes, runs under a two-second budget and is cached per path and content fingerprint; kinds acl, attribute, owner, share; entries that would write a read-only file are blocked with read_only_target, a refused write at execution maps to the same code, and the exit code ignores it. Refresh in the app calls `recheck_targets` (apply::recheck, PlanCache::invalidate) so a permissions-only change shows; so does a window focus after five minutes. CLI `read-only (<kind>)` and JSON `read_only`; IPC readOnly fields and the app's ReadOnlyBadge (src/app/components/ReadOnlyBadge.tsx). Sources: crates/agent-loadout-core/src/access.rs, apply/plan.rs, apply/exec.rs, src/app/apply/driftTriggers.ts, docs/milestones/M37.md (IPC contract), M38.md, M43.md, SPEC.md section 8.2."
     },
     {
       "title": "Ownership ledger, backups and rollback",
@@ -92,7 +92,22 @@
     },
     {
       "title": "Skills",
-      "purpose": "Skill store (store/skills, store/skill-meta), installs from git, folders and .zip/.skill archives, frontmatter, links (Windows junctions, symlinks, copies), project links hidden via .git/info/exclude, scanning client skill folders, the agents CLI folder. Sources: crates/agent-loadout-core/src/skills/ (store.rs, install.rs, link.rs, classify.rs, frontmatter.rs, agents_cli.rs), SPEC.md section 12."
+      "purpose": "Skill store (store/skills, store/skill-meta), installs from git, folders and .zip/.skill archives through a review (fetch and scan first, then `install_prepared` behind the trust gate and the scan gate), updates with change detection and the script marker, frontmatter, links (Windows junctions, symlinks, copies), project links hidden via .git/info/exclude, scanning client skill folders, the agents CLI folder, listings that read only SKILL.md and metadata (summarize_folder, DetectedClients). Sources: crates/agent-loadout-core/src/skills/ (store.rs, install.rs, link.rs, classify.rs, frontmatter.rs, agents_cli.rs), src/app/routes/install, src/app/routes/skills (SkillUpdateDialog), SPEC.md section 12."
+    },
+    {
+      "title": "Source trust",
+      "parent": "Skills",
+      "purpose": "Trust in a skill or MCP server source as an explicit, recorded decision (store/sources.toml, synced): repo keys and owner/host scopes (github.com/acme/skills, github.com/acme/*, git.example.com/*; no host scope on public aggregators; separate keys for http:// and git://), once versus always, blocks win, lapses on force-push (ancestry check) or a redirect (renamed or transferred; a redirect only adds a question), official marker. Never implicit: --yes never answers; without a terminal `source_trust_required` unless `--trust-source[=once|repo|owner|host]` or `loadout source trust` (recorded as cli-flag or cli-command; #8 tracks keeping agents out). `loadout source ls|trust|block|untrust`, the app's TrustDialog and Settings > Sources. Sources: crates/agent-loadout-core/src/sources/ (mod.rs, key.rs, detect.rs), model/sources.rs, store/merge.rs, crates/agent-loadout/src/cmd/source.rs, src-tauri/src/commands/sources.rs, src/app/components/TrustDialog.tsx, src/app/routes/settings/sources, docs/milestones/M39.md, SPEC.md section 17."
+    },
+    {
+      "title": "Built-in scan",
+      "parent": "Skills",
+      "purpose": "The offline scanner run on every skill install and update and every MCP server saved, updated or restored from a source: rules as data (scan/rules.toml, versioned; state/scan-rules.toml can add rules or raise severities, never remove or lower, \"custom rules in use\"), Markdown prose versus code (prose warnings, code and scripts dangerous), byte-typed files, UTF-16 decoding, 4 MiB per file (not-fully-scanned), not-content-scanned, masked excerpts, verdict = worst finding, the scan_blocked gate (exit 8, --allow-dangerous, Install/Update/Save/Restore anyway), cache by content hash in cache/scan. Trust never skips it. Sources: crates/agent-loadout-core/src/scan/ (mod.rs, rules.rs, engine.rs, cache.rs, rules.toml), src-tauri/src/commands/scan.rs, src/app/components/ScanFindings.tsx, docs/milestones/M40.md, docs/user-guide.md (The built-in scan), SPEC.md section 17."
+    },
+    {
+      "title": "MCP servers from Git or a folder",
+      "parent": "Skills",
+      "purpose": "`loadout server add --from <GIT-URL|PATH>` and Install > MCP > From Git or folder: drafts from server.json (MCP Registry packages and remotes), MCPB/DXT manifest.json, committed client configs, or the repository itself (package.json bin, pyproject scripts, Dockerfile), pinned to the version or commit (unversioned packages marked not pinned); nothing runs while proposing; dependency and build folders skipped; secrets become references and literal values are dropped; save behind source trust and the scan of files and every launch line; [meta.source] provenance; machine-local checkouts in LOADOUT_HOME/servers/<id> (checkout_out_of_date until `loadout server checkout` or Restore copy); folder sources bound to their machine (folder_on_other_machine); `loadout server update [--check]` and Check for update; review stores and the sweep of temporary clones. Sources: crates/agent-loadout-core/src/mcp_source/ (mod.rs, convert.rs, snippet.rs), crates/agent-loadout/src/cmd/server.rs, src-tauri/src/commands/mcp_source.rs, src/app/routes/install/McpSourcePanel.tsx, src/app/routes/mcp/McpSourceUpdate.tsx, docs/milestones/M41.md, M42.md, SPEC.md sections 5.2, 14 and 17."
     },
     {
       "title": "Remotes and sync",
@@ -109,11 +124,11 @@
     {
       "title": "Desktop pages",
       "parent": "Desktop app",
-      "purpose": "Each page and what it does: src/app/routes/skills (source tabs with Adopt), mcp (including project scope ProjectServers.tsx and the Not managed by Loadout section), projects (effective matrix, trust review, Discover projects), tools (ToolManageDialog, not-managed counts), install, import (MCP import, skills adopt, Discover projects, the SkillDock migration, the sidebar notice UnmanagedNotice.tsx), history, settings (versioning, secrets, updates, the not-managed notice switch), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
+      "purpose": "Each page and what it does: src/app/routes/skills (source tabs with Adopt, the update review with trust and findings, long lists rendered near the viewport via useVirtualSlots), mcp (including project scope ProjectServers.tsx, the Not managed by Loadout section, McpSourceUpdate.tsx with Check for update and Restore copy), projects (effective matrix, trust review, Discover projects), tools (ToolManageDialog, not-managed counts), install (skill review with trust and scan, MCP Form or paste and From Git or folder), import (MCP import, skills adopt, Discover projects, the SkillDock migration, the sidebar notice UnmanagedNotice.tsx), history (200 commits a page, Load more), settings (versioning, secrets, sources, updates, the not-managed notice switch), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
     },
     {
       "title": "Command line interface",
-      "purpose": "Using `loadout`: command groups, global options, exit codes (0 to 7, exec 77 and 78), JSON output, commands that commit and apply at once. Sources: docs/cli.md (generated), docs/user-guide.md, crates/agent-loadout/src/main.rs and src/cmd/, SPEC.md section 14."
+      "purpose": "Using `loadout`: command groups (including `server add --from`, `server update`, `server checkout`, `source ls|trust|block|untrust`), global options, exit codes (0 to 8, with 8 for a scan block; exec 77 and 78), the trust prompt and `--trust-source`, JSON output, commands that commit and apply at once. Sources: docs/cli.md (generated), docs/user-guide.md, crates/agent-loadout/src/main.rs and src/cmd/, SPEC.md section 14."
     },
     {
       "title": "Packaging and release",
@@ -125,7 +140,7 @@
     },
     {
       "title": "Security model",
-      "purpose": "Threat model and invariants: no secret values in the store, logs or IPC; leak scanner; foreign entries untouched; ledger ownership; project trust; atomic writes and backups; backups never pushed; Tauri CSP and path validation; skill archive limits. Sources: docs/security.md, SECURITY.md, SPEC.md sections 11 and 17."
+      "purpose": "Threat model and invariants: no secret values in the store, logs or IPC; leak scanner; foreign entries untouched; ledger ownership; project trust; source trust (never implicit, blocks win, lapses, credential-free keys) and the built-in offline scan before anything from a source is saved; MCP drafts that run nothing while proposing, pinned commands, machine-local checkouts and folder sources bound to their machine; atomic writes and backups; backups never pushed; Tauri CSP and path validation; skill archive limits. Sources: docs/security.md, SECURITY.md, SPEC.md sections 11 and 17."
     },
     {
       "title": "Contributing",

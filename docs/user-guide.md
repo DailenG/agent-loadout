@@ -204,15 +204,19 @@ with `loadout --home <PATH>`. `loadout doctor --paths` prints the folder in
 use and where it came from. Inside it:
 
 - `store/`: the git repository with your servers (`servers/<id>.toml`),
-  secret references (`secrets.toml`), client preferences (`clients.toml`),
-  portable settings (`settings.toml`), skills, and project and machine
-  files. It never contains secret values.
+  secret references (`secrets.toml`), source trust decisions
+  (`sources.toml`), client preferences (`clients.toml`), portable settings
+  (`settings.toml`), skills, and project and machine files. It never
+  contains secret values.
 - `state/`: this machine only (ownership ledger, remotes, trusted projects,
-  `local-settings.toml`, apply records).
+  `local-settings.toml`, apply records, an optional `scan-rules.toml`).
+- `servers/<id>/`: local copies (checkouts) of MCP servers that run from
+  their repository's files; this machine only, never synced.
 - `backups/`: copies of client files taken before each write, and the
   trash. These can contain secrets from your client files and are never
   pushed.
-- `cache/`, `imports/`, `logs/`.
+- `cache/` (git clones of skill and server sources, scan results),
+  `imports/`, `logs/`.
 
 Do not put the data directory inside a file-sync folder (OneDrive,
 Dropbox, Google Drive, Syncthing, Resilio Sync): sync tools corrupt live
@@ -245,7 +249,12 @@ always starts at User. The pages:
   masked. Below the list, **Not managed by Loadout** shows the entries
   the client files of the scope hold that Loadout leaves alone, per client
   and file, with **Import...** on each; the line above the list counts
-  both ("7 managed, 3 not managed by Loadout").
+  both ("7 managed, 3 not managed by Loadout"). A server added from a Git
+  repository or folder has **Check for update** in its details, and
+  **Restore copy** when its local copy is missing or out of date (see
+  [Servers from a Git repository or folder in the app](#servers-from-a-git-repository-or-folder-in-the-app)).
+  Long lists render only the cards near the visible area; every card
+  stays in the list for search, screen readers and find-in-page.
 - **Projects**: Add folder, Init manifest..., **Discover projects**, and
   per project Open, Effective config (which server each client loads in
   that folder and from which file), Apply, Remove from list, and Review
@@ -273,7 +282,8 @@ always starts at User. The pages:
   (History covers every scope and does not follow the switcher), with Show
   diff, Undo this apply, Restore this version, Restore entity..., Tag and
   Download zip; a Client file backups tab; and the remotes strip with sync
-  state and conflicts.
+  state and conflicts. It loads 200 commits at a time; **Load more**
+  fetches the next 200.
 - **Settings**: App Preferences (Appearance, the not-managed notice),
   Versioning & Backup (remotes), Migration (a link to the Import page),
   Secrets, Sources (see [Source trust](#source-trust)) and Updates (see
@@ -375,7 +385,8 @@ Commands:
 | Command | What it does |
 |---|---|
 | `doctor [--paths] [--scan-history]` | Check the installation: data directory, sync-folder warning, optional secret scan of every store commit |
-| `server ls\|show\|add\|rm` | Manage MCP servers in the store |
+| `server ls\|show\|add\|rm\|update\|checkout` | Manage MCP servers in the store; `add --from <GIT-URL\|PATH>` proposes servers from a repository or folder, `update` reads a server's source again, `checkout` restores its local copy |
+| `source ls\|trust\|block\|untrust` | Trusted and blocked sources of skills and MCP servers |
 | `skills ls\|add\|rm\|enable\|disable\|update\|scan\|import\|adopt\|trash\|vendor` | Install skills, enable them for clients and projects, update, scan and adopt client folders |
 | `project init\|add\|discover\|ls\|rm\|trust\|share` | Project manifests, and the folders your clients already know |
 | `status [PATH] [--client C] [--scope system\|project\|all] [--check]` | State of every owned and desired entry |
@@ -414,9 +425,10 @@ Exit codes:
 | 5 | Blocked by missing secrets |
 | 6 | Timed out waiting for the store lock |
 | 7 | A project manifest needs `loadout project trust` |
-| 8 | The built-in scan blocked an install or update (`--allow-dangerous` overrides it) |
+| 8 | The built-in scan blocked an install, update, save or checkout (`--allow-dangerous` overrides it) |
 
 Commands that edit the store and apply at once (`server add`, `server rm`,
+`server update`, `server checkout`,
 `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`,
 `project rm`, `project trust`, `project share`) commit the edit and then
 exit the way `loadout apply` would. `loadout exec` has its own codes: 77
@@ -938,7 +950,9 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
   `loadout skills rm ID` removes a skill and the links and copies Loadout
   made.
 - Every install and update is scanned first by Loadout's built-in
-  scanner (see [below](#the-built-in-scan)).
+  scanner (see [below](#the-built-in-scan)). In the app, **Update all**
+  sends no trust answer and no override, so an update that needs one
+  fails with a message and stays for you to review on its own card.
 - `loadout skills scan` classifies each client skill folder: managed,
   unmanaged (a real folder), or mismatch (a link to something else).
   `loadout skills import CLIENT NAME` brings an unmanaged folder into the
@@ -1059,7 +1073,8 @@ Only install from sources you trust. Skills and MCP servers can run
 commands and read your files. Loadout treats trust in a source as a
 decision you make and it records, like trusting a project.
 
-- **The first install from a git source asks.** A terminal prompt shows
+- **The first install from a git source asks** (for a skill, and for an
+  MCP server added or updated from a source). A terminal prompt shows
   the source (`github.com/example-org/skills`), whether it is official
   (`github.com/anthropics`, `github.com/modelcontextprotocol`), and which
   skills you already installed from it, then offers **Trust this time
@@ -1086,6 +1101,14 @@ decision you make and it records, like trusting a project.
   renamed or transferred (the host redirects it elsewhere), its trust
   lapses and the next update asks again. A source you never trusted asks
   on every install and update, including skills installed before 0.5.0.
+  A redirect only adds a question: the CLI prints `note: X moved to Y`
+  and asks about the new location separately (`--trust-source` does not
+  carry over), and an update of a moved repository then records its new
+  URL.
+- **Unencrypted sources are separate.** An `http://` or `git://` address
+  has its own key (`http://host/path`), so trusting the HTTPS or SSH
+  address never admits it; a block on either does block it. The prompt
+  and the dialog say the connection is unencrypted.
 - **Managing trust:** `loadout source ls` lists trusted and blocked
   sources with when, where and how each decision was made;
   `loadout source trust <URL|KEY> [--scope repo|owner|host]`,
@@ -1095,18 +1118,24 @@ decision you make and it records, like trusting a project.
   or `git.example.com/*` (a host). Untrusting never uninstalls anything;
   the next install or update from that source asks again. Decisions live
   in `store/sources.toml` and sync with your remotes.
-- Local folders and archives you pick aren't asked about (they're already
+- Skill folders and archives you pick aren't asked about (they're already
   on this machine; the scan still runs). A git repository given by a local
-  path or `file://` URL is asked about like any other source.
+  path or `file://` URL is asked about like any other source, and so is a
+  folder you pick for an MCP server.
 - **In the app** the same question is a dialog, asked when you press
-  **Install**, **Update** or **Save** in a review: **Trust this time
-  only** (the default; nothing is recorded), **Always trust**
-  *repository*, **Always trust everything from** *owner* (or, on a
-  self-hosted server, everything on it), or **Cancel** (nothing happens).
-  It says why it asks (first time, not trusted, or trust lapsed after a
-  force-push or move) and marks official sources without skipping the
-  question. MCP servers from a picked folder are asked about too, at the
-  repository scope only.
+  **Install**, **Update**, **Save** or **Restore** in a review: **Trust
+  this time only** (selected by default; nothing is recorded), **Always
+  trust** *repository*, **Always trust everything from** *owner* (or, on a
+  self-hosted server, everything on it), then **Cancel** (nothing happens)
+  or the confirm button (**Trust once and continue** or **Always trust and
+  continue**). Focus starts on **Cancel**, so a held or doubled Enter
+  grants nothing. It says why it asks (first time, not trusted, or trust
+  lapsed after a force-push or move), names both addresses when the host
+  redirects to another repository (asked separately), warns about an
+  unencrypted connection, lists the skills you already installed from the
+  source, and marks official sources without skipping the question. A
+  folder picked for an MCP server is asked about at the repository scope
+  only.
 - **Settings > Sources** lists every decision: trusted or blocked, for a
   repository, an owner or a host, when, how (the app, a prompt,
   `--trust-source` or `loadout source`) and on which machine, with a note
@@ -1150,8 +1179,8 @@ updates": this build has no in-app updater).
 
 AUR, `.deb`, `.rpm`, source and `cargo install` builds have no updater:
 update them with your package manager (or rerun `cargo install
-agent-loadout`). Loadout is fully usable offline; only remotes, git skill
-sources and update checks use the network.
+agent-loadout`). Loadout is fully usable offline; only remotes, git
+sources of skills and MCP servers, and update checks use the network.
 
 ## Troubleshooting
 

@@ -9,6 +9,7 @@ The design is in [SPEC.md](../SPEC.md) sections 11 and 17.
 Loadout reads and writes:
 
 - its own data directory (`LOADOUT_HOME`): the store, `state/`,
+  `servers/` (local copies of MCP servers that run from their repository),
   `backups/`, `cache/`, `logs/`;
 - the MCP config files and skill folders of the clients listed in
   [adapters.md](adapters.md), at user scope and in the project folders you
@@ -16,8 +17,9 @@ Loadout reads and writes:
 - your OS keyring (entries under the service `loadout`) and, when you use
   it, the 1Password CLI `op`.
 
-It uses the network only for remotes you add, git skill sources, and the
-optional update check. Everything else works offline.
+It uses the network only for remotes you add, git sources of skills and
+MCP servers, and the optional update check. Everything else, the built-in
+scan included, works offline.
 
 ## Secrets
 
@@ -141,8 +143,9 @@ Trust in a git source is an explicit, recorded decision
 update from a source asks, `--yes` never answers that question, and a run
 without a terminal (a script, `--json`) fails with `source_trust_required`
 instead of trusting. Two explicit opt-ins do work without a terminal:
-`loadout source trust <URL|KEY>` and `--trust-source` on `skills add` and
-`skills update`. A coding agent that can run shell commands can run them
+`loadout source trust <URL|KEY>` and `--trust-source` on `skills add`,
+`skills update`, `server add --from`, `server update` and `server
+checkout`. A coding agent that can run shell commands can run them
 too, so they don't stop an agent you've given a shell; they make the
 decision deliberate and recorded (`via = "cli-command"` or `"cli-flag"` in
 `sources.toml`). Keeping agents from approving trust on their own is the
@@ -151,7 +154,12 @@ A block wins over any trust. Trust lapses, and the next update asks again,
 when the repository's history is rewritten (the installed commit is no
 longer in the followed branch) or the host redirects it to another
 repository (renamed or transferred). A redirect can only add a question,
-never answer one. Trust never skips the scan.
+never answer one. Sources over plain `http://` or `git://` have their own
+keys: HTTPS or SSH trust never admits them, a block on either form does,
+and they are never marked official. Credentials in a URL are used only for
+the fetch: they are not stored in `sources.toml`, a server file or a
+checkout's git config, and messages show them as `***`. A blocked source
+is never contacted. Trust never skips the scan.
 
 ## MCP servers from a Git repository or folder
 

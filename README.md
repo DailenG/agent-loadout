@@ -24,6 +24,11 @@ GitHub Copilot, Cursor and 31 more.
   servers, skill folders and project folders your clients already have,
   moving literal secrets to the keyring, 1Password or an environment
   variable on the way.
+- **Install from anywhere, safely.** Skills and MCP servers come from any
+  Git repository or folder (`loadout server add --from`, **Install > MCP >
+  From Git or folder**). Loadout asks before it trusts a new source,
+  scans everything it fetched offline with its own rules before anything
+  is saved, and pins commands to the commit or version it checked.
 - **Per-project servers**, applied only after you trust the project's
   manifest; **skills** linked into each client's skill folder; optional
   **remotes** to back up and sync between machines.
@@ -33,9 +38,9 @@ GitHub Copilot, Cursor and 31 more.
 A desktop app (Windows, Linux) and a command-line tool, `loadout`, work on
 the same data.
 
-| MCP servers | Import | Pending changes |
+| MCP servers | Import | Install from Git |
 |---|---|---|
-| ![MCP page](site/img/screens/mcp.png) | ![Import page](site/img/screens/import.png) | ![Pending changes drawer](site/img/screens/apply-drawer.png) |
+| ![MCP page](site/img/screens/mcp.png) | ![Import page](site/img/screens/import.png) | ![Trust dialog over a skill install review with scan findings](site/img/screens/trust-dialog.png) |
 
 Screenshots use demo data.
 
@@ -73,10 +78,11 @@ Per-OS details, checksums and uninstalling: [user guide, Install](docs/user-guid
 **Desktop app:** start Loadout, open **Tools** to see the detected clients,
 then **Import** to bring in the MCP servers, skills and projects your
 clients already have. To add a server, open **MCP**, **Add** (or **Paste
-config** with an entry from any client), and turn it on for the clients
-you want. Each change is applied at once and can be undone from the
-notification or **History**. The **Scope** switcher at the top of the
-sidebar picks User or one of your projects.
+config** with an entry from any client), or **Install > MCP > From Git or
+folder** for a repository, and turn it on for the clients you want. Each
+change is applied at once and can be undone from the notification or
+**History**. The **Scope** switcher at the top of the sidebar picks User
+or one of your projects.
 
 **Command line:**
 
@@ -86,10 +92,17 @@ loadout import               # bring them under Loadout
 loadout server add github --client omp --client claude-code \
   --env 'GITHUB_PERSONAL_ACCESS_TOKEN=${secret:GITHUB_PAT}' \
   -- npx -y @modelcontextprotocol/server-github
+loadout server add --from https://github.com/acme/weather --dry-run   # propose servers, scan, save nothing
+loadout skills add https://github.com/acme/skills   # asks whether you trust the source, then scans
 loadout secrets set GITHUB_PAT --ref 'op://Developer/GitHub PAT/credential'
 loadout status               # what is in sync, pending or drifted
 loadout rollback last        # undo the last apply
 ```
+
+The first install from a Git source asks whether you trust it (this time
+only, always, or cancel; `loadout source ls` lists your decisions), and a
+dangerous finding of the built-in scan blocks the install (exit code 8)
+until you review it and pass `--allow-dangerous`.
 
 The full walk-through is [Getting started](docs/getting-started.md).
 
@@ -116,7 +129,7 @@ Questions about the code: [Ask DeepWiki](https://deepwiki.com/DailenG/agent-load
 
 ## Status and roadmap
 
-Loadout is in early development (0.3.x). What changed in each release is in
+Loadout is in early development (0.5.x). What changed in each release is in
 the [changelog](CHANGELOG.md); how it was built is in
 [docs/history.md](docs/history.md). Planned work and known issues are
 tracked in [GitHub issues](https://github.com/DailenG/agent-loadout/issues).

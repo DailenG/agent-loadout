@@ -4,14 +4,14 @@
 
 | Page | What it covers |
 |---|---|
-| [Getting started](getting-started.md) | Install, first run, bringing in what you have (Import page, CLI), first apply, undo |
-| [Concepts](concepts.md) | Store, scopes, clients and adapters, apply and drift, read-only files, ownership (managed and not managed entries, import, adopt), secrets, projects and trust, skills, remotes |
-| [User guide](user-guide.md) | Every task in the app and on the command line, including importing, skill adopt, Discover projects and the not-managed notice |
+| [Getting started](getting-started.md) | Install, first run, bringing in what you have (Import page, CLI), first apply, installing a skill or MCP server from Git or a folder (the trust question and the scan), undo |
+| [Concepts](concepts.md) | Store, scopes, clients and adapters, apply and drift, read-only files, ownership (managed and not managed entries, import, adopt), secrets, projects and trust, skills, sources, trust and the built-in scan, MCP servers from a source (checkouts, folders bound to a machine), remotes |
+| [User guide](user-guide.md) | Every task in the app and on the command line, including importing, skill adopt, Discover projects, the not-managed notice, servers from a Git repository or folder, the built-in scan and source trust |
 | [CLI reference](cli.md) | Every `loadout` command and option (generated from `--help`) |
 | [Supported clients](adapters.md) | All 38 client adapters: files, formats, capabilities, verification |
-| [Troubleshooting](troubleshooting.md) | Known problems and fixes |
+| [Troubleshooting](troubleshooting.md) | Known problems and fixes, including trust, scan and checkout errors |
 | [FAQ](faq.md) | Short answers to common questions |
-| [Security model](security.md) | What Loadout guarantees about secrets and client files |
+| [Security model](security.md) | What Loadout guarantees about secrets, client files, sources and the scan |
 
 ## Working on Loadout
 

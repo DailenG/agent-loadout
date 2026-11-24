@@ -65,6 +65,56 @@ Loadout replaces a folder with its link only when the store copy holds
 everything the folder does; the result gives each kept folder's reason.
 See [troubleshooting](troubleshooting.md#adopt-kept-some-skill-folders).
 
+**Why does Loadout ask whether I trust a source?**
+Skills instruct your agents and MCP servers run programs with your
+permissions, so installing from a repository is like running its code.
+Loadout asks the first time you install, update or save from a Git source
+(or a folder for an MCP server) and records your answer in
+`store/sources.toml`: **Trust this time only**, **Always trust** the
+repository (or its owner, or a self-hosted host), or **Cancel**. See
+[concepts](concepts.md#sources-trust-and-the-scan).
+
+**How do I revoke or block a source?**
+Settings > Sources: **Revoke** removes a trust (the next install or update
+asks again), **Block** turns it into a block, **Block a source...** blocks a
+URL you never decided on, and **Unblock** removes a block. On the command
+line: `loadout source ls`, `loadout source untrust <KEY>`, `loadout source
+block <URL|KEY> [--scope repo|owner|host]`. None of these uninstalls
+anything. A block wins over any trust, and a blocked source is never
+contacted.
+
+**What does "Install anyway" mean?**
+The built-in scan found something `dangerous` (for example `curl ... | sh`
+in a script, hidden instructions, a credential upload), so Loadout stopped
+before saving anything. **Install anyway** (or **Update anyway**, **Save
+anyway**, `--allow-dangerous`) installs exactly the content you reviewed
+despite the findings; it is offered only after you tick that you read
+them. Use it only for content whose author you trust. Warnings never
+block.
+
+**Can a coding agent approve a source for me?**
+Not by accident: `--yes` never answers the trust question, and a run
+without a terminal fails with `source_trust_required`. But
+`--trust-source[=once|repo|owner|host]` and `loadout source trust` are
+explicit opt-ins that need no terminal, so an agent with shell access can
+run them. They are recorded (`via = "cli-flag"` or `"cli-command"`); keep
+them for sources you trust yourself. Keeping agents out of trust approval
+is tracked in [#8](https://github.com/DailenG/agent-loadout/issues/8).
+
+**Why is a server blocked as "checkout out of date"?**
+It runs from a copy of its repository that Loadout keeps on each machine
+(`LOADOUT_HOME/servers/<id>`), and this machine's copy is missing or at
+another commit than the server file names (another machine updated the
+server, for example). Restore it with **Restore copy** in the server's
+details on the MCP page, or `loadout server checkout <ID>`. See
+[troubleshooting](troubleshooting.md#checkout_out_of_date-the-servers-local-copy-is-out-of-date).
+
+**Why is a server blocked as "added from a folder on another machine"?**
+A server added from a local folder runs from that folder, which exists only
+on the machine that added it, so its entries are blocked on your other
+machines (`folder_on_other_machine`). To use the server on several
+machines, add it from a Git repository instead.
+
 **What is the difference between instant and review mode?**
 Instant (default) applies each edit at once. Review collects edits in
 Pending changes for you to apply or discard. Set
@@ -79,16 +129,19 @@ first, so it is listed first and badged. It is presentation only: Loadout
 never enables anything in omp, or any client, on its own.
 
 **Does Loadout need the network?**
-No. Only remotes, git skill sources and the optional update check use it.
+No. Only remotes, git sources of skills and MCP servers, and the optional
+update check use it. The built-in scan runs offline.
 
 **Does Loadout need git installed?**
-No for the store (it has git built in). Git remotes use your system `git`,
-so they need it.
+No for the store (it has git built in). Git remotes and installing skills
+or MCP servers from Git repositories use your system `git`, so they need
+it.
 
 **Can I share my setup between machines?**
 Yes, with a remote: a folder (USB drive, network share, synced folder) or a
-git repository. Each machine keeps its own ledger, trust and secret
-values. On a new machine, `loadout restore --from <folder|zip|bare-repo>`.
+git repository. Each machine keeps its own ledger, project trust, MCP
+server checkouts and secret values; source trust decisions sync with the
+store. On a new machine, `loadout restore --from <folder|zip|bare-repo>`.
 
 **Can I keep the data directory in OneDrive or Dropbox?**
 No; sync tools corrupt live git repositories. Use a remote instead.
