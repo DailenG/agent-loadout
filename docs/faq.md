@@ -116,11 +116,14 @@ be used, because Loadout never reads those values.
 Skills show "Not scanned (Snyk limit reached)" and install as usual: a
 skill Snyk didn't scan is never blocked and never counts as clean, and the
 built-in scan still runs. Snyk doesn't publish the free tier's limit, and
-its console shows no Agent Scan usage. In our own testing a new account's
-valid token (accepted by Snyk's account API) was refused with "Daily usage
-limit reached" from the first scan. Higher limits are only available by
-contacting Snyk (Snyk Evo); there is no self-serve plan or billing for
-Agent Scan.
+its console shows no Agent Scan usage. In our own testing a new free
+account was refused with "Daily usage limit reached" (HTTP 429) from the
+first scan, both with a valid API token (accepted by Snyk's account API)
+and through a logged-in Snyk CLI (`snyk agent-scan --experimental
+--no-upload`); enabling Snyk Code didn't change it. The CLI's other mode
+registers the machine with a Snyk Evo tenant and needs Evo or
+tenant-admin rights. Higher limits are only available by contacting Snyk;
+there is no self-serve plan or billing for Agent Scan.
 
 **Why doesn't Snyk Agent Scan check MCP servers?**
 In this version it scans skills only. Snyk's scanner sends an MCP
