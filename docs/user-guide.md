@@ -66,8 +66,8 @@ To check a download against `SHA256SUMS`:
 
 ### Windows
 
-**winget** (once the package is accepted; the submission, now at 0.3.1,
-is waiting for a moderator's review in winget-pkgs):
+**winget** (once the package is accepted; the submission, kept at the latest
+release, is waiting for a moderator's review in winget-pkgs):
 
 ```
 winget install --id DailenG.AgentLoadout
