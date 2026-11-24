@@ -8,6 +8,8 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-23
+
 ### Added
 
 - Read-only contexts: client files and folders your account can read but
@@ -263,7 +265,8 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/DailenG/agent-loadout/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.1...v0.3.1
 [0.2.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/DailenG/agent-loadout/compare/v0.1.3...v0.2.0
