@@ -8,6 +8,8 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-24
+
 ### Added
 
 - Built-in offline scanner: every skill install and update is scanned
@@ -386,7 +388,8 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/DailenG/agent-loadout/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/DailenG/agent-loadout/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.1...v0.3.1
 [0.2.1]: https://github.com/DailenG/agent-loadout/compare/v0.2.0...v0.2.1
