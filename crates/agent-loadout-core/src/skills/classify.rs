@@ -205,6 +205,7 @@ pub fn import(
         path: None,
         git_ref: None,
         commit: None,
+        catalog: None,
         extra: toml::Table::new(),
     };
     install_files(store, sx, naming, files, name.to_owned(), source)

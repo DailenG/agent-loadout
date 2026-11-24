@@ -5,10 +5,12 @@
 // steps) and the built-in scan; a draft that runs code from the repository
 // says so plainly. The user picks drafts, edits them in the server editor,
 // picks clients and saves: the source's trust question first (M39), then the
-// scan gate (M40), one store commit.
+// scan gate (M40), one store commit. The review part (`McpSourceReviewView`)
+// is shared with Install > Browse (M45), where a catalog entry hands off
+// into exactly this review.
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
 import { Modal } from "@/app/components/Modal";
 import { DangerousGate, isDangerous, ScanFindings } from "@/app/components/ScanFindings";
@@ -25,6 +27,7 @@ import type {
   McpSourceReview,
   PickedSkillSource,
   ServerDraft,
+  TrustGrantArg,
 } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 import { ClientGrid, normalizeDraft, ServerForm } from "../mcp/ServerEditDialog";
@@ -105,8 +108,6 @@ function launchOf(draft: ServerDraft): string {
 export function McpSourcePanel() {
   const { commands } = useTransport();
   const { notify } = useNotifications();
-  const changeNotice = useChangeNotice();
-  const { resolveTrust, dialog: trustDialog } = useTrustPrompt();
   const servers = useQuery({
     queryKey: storeQueryKeys.servers,
     queryFn: async () => unwrap(await commands.listServers()),
@@ -117,50 +118,16 @@ export function McpSourcePanel() {
   const [gitRef, setGitRef] = useState("");
   const [folder, setFolder] = useState<PickedSkillSource | null>(null);
   const [review, setReview] = useState<McpSourceReview | null>(null);
-  const [edits, setEdits] = useState<Edits>({});
-  const [picked, setPicked] = useState<string[]>([]);
-  const [clients, setClients] = useState<ClientChoice>({ allDetected: false, clients: [] });
-  const [editing, setEditing] = useState<McpDraft | null>(null);
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [scanBlocked, setScanBlocked] = useState<ScanBlockedSave | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState("");
   const kindGroup = useId();
-
-  // A review left open when the page goes away is dropped with its temporary clone.
-  const tokenRef = useRef<string | null>(null);
-  tokenRef.current = review?.token ?? null;
-  useEffect(
-    () => () => {
-      if (tokenRef.current) {
-        void commands.discardMcpSourceReview(tokenRef.current);
-      }
-    },
-    [commands],
-  );
-
-  const pickedDrafts = review?.drafts.filter((draft) => picked.includes(draft.key)) ?? [];
-  const isEdited = (draft: McpDraft) => launchOf(edits[draft.key]) !== launchOf(draft.draft);
-  const dangerous = scanBlocked !== null || isDangerous(review?.scan, ...pickedDrafts.map((draft) => draft.scan));
-  const blocked = review?.trust?.state.kind === "blocked" || review?.movedTrust?.state.kind === "blocked";
-  const clientList = servers.data?.clients ?? [];
-
-  function reset() {
-    setReview(null);
-    setEdits({});
-    setPicked([]);
-    setClients({ allDetected: false, clients: [] });
-    setAcknowledged(false);
-    setScanBlocked(null);
-    setError("");
-  }
+  const tokenRef = useDiscardOnLeave(review);
 
   function discard() {
     if (review) {
       void commands.discardMcpSourceReview(review.token);
     }
-    reset();
+    setReview(null);
   }
 
   async function pickFolder() {
@@ -176,88 +143,20 @@ export function McpSourcePanel() {
 
   async function handleReview(event: FormEvent) {
     event.preventDefault();
-    if (review) {
-      void commands.discardMcpSourceReview(review.token);
-    }
-    reset();
+    discard();
     setIsLoading(true);
     try {
-      const result = unwrap(
-        kind === "git"
-          ? await commands.reviewMcpGitSource(url.trim(), optional(path), optional(gitRef))
-          : await commands.reviewMcpLocalSource(folder?.token ?? ""),
+      setReview(
+        unwrap(
+          kind === "git"
+            ? await commands.reviewMcpGitSource(url.trim(), optional(path), optional(gitRef))
+            : await commands.reviewMcpLocalSource(folder?.token ?? ""),
+        ),
       );
-      setReview(result);
-      setEdits(Object.fromEntries(result.drafts.map((draft) => [draft.key, draft.draft])));
-      // One draft is the obvious pick; several are the user's choice (as `--pick` in the CLI).
-      setPicked(result.drafts.length === 1 ? [result.drafts[0].key] : []);
     } catch (failure) {
       notify({ tone: "error", message: failureText(failure) });
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  /**
-   * Any change to what would be saved: the "Save anyway" a refused save
-   * offered, and the acknowledgement, were for the content before it.
-   */
-  function clearGate() {
-    setScanBlocked(null);
-    setAcknowledged(false);
-    setError("");
-  }
-
-  function chooseClients(choice: ClientChoice) {
-    clearGate();
-    setClients(choice);
-    setEdits((current) =>
-      Object.fromEntries(Object.entries(current).map(([key, draft]) => [key, { ...draft, clients: choice }])),
-    );
-  }
-
-  function togglePick(key: string, on: boolean) {
-    clearGate();
-    setPicked((current) => (on ? [...current, key] : current.filter((entry) => entry !== key)));
-  }
-
-  async function handleSave() {
-    if (!review || pickedDrafts.length === 0) {
-      return;
-    }
-    setError("");
-    const answer = await resolveTrust(review, () => setError(errorMessage("source_blocked")));
-    if (!answer) {
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const picks = pickedDrafts.map((draft) => ({ key: draft.key, draft: normalizeDraft(edits[draft.key]) }));
-      const saved = unwrap(
-        await commands.saveMcpSourceDrafts(review.token, picks, answer.trust, answer.movedTrust, dangerous),
-      );
-      // Saved: the backend consumed the review.
-      tokenRef.current = null;
-      changeNotice(saved.change, t("install.mcpSource.saved", { ids: saved.ids.join(", ") }));
-      reset();
-      setUrl("");
-      setPath("");
-      setGitRef("");
-      setFolder(null);
-    } catch (failure) {
-      if (failure instanceof IpcFailure && failure.code === "scan_blocked") {
-        // The edited command lines scan dangerous. No re-review exists for an edited draft, so the
-        // refusal names the edited servers and shows the findings the backend reported; then the gate.
-        const edited = pickedDrafts.filter(isEdited);
-        const named = (edited.length > 0 ? edited : pickedDrafts).map((draft) => edits[draft.key].id).join(", ");
-        setScanBlocked({ servers: named, detail: failure.message });
-        setAcknowledged(false);
-        setError("");
-      } else {
-        setError(failureText(failure));
-      }
-    } finally {
-      setIsSaving(false);
     }
   }
 
@@ -336,8 +235,177 @@ export function McpSourcePanel() {
         </div>
       </form>
       {review ? (
-        <div className="mcp-source-review" aria-label={t("install.mcpSource.reviewAria")} role="region">
-          <SourceFacts review={review} />
+        <McpSourceReviewView
+          key={review.token}
+          review={review}
+          clients={servers.data?.clients ?? []}
+          onDiscard={discard}
+          onSavingChange={setIsSaving}
+          onSaved={() => {
+            setIsSaving(false);
+            // Saved: the backend consumed the review.
+            tokenRef.current = null;
+            setReview(null);
+            setUrl("");
+            setPath("");
+            setGitRef("");
+            setFolder(null);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * A review left open when the page goes away is dropped with its temporary
+ * clone. The returned ref holds the open review's token; set it to null once
+ * the backend consumed the review (saved).
+ */
+export function useDiscardOnLeave(review: McpSourceReview | null) {
+  const { commands } = useTransport();
+  const tokenRef = useRef<string | null>(null);
+  tokenRef.current = review?.token ?? null;
+  useEffect(
+    () => () => {
+      if (tokenRef.current) {
+        void commands.discardMcpSourceReview(tokenRef.current);
+      }
+    },
+    [commands],
+  );
+  return tokenRef;
+}
+
+export type McpSourceReviewViewProps = {
+  review: McpSourceReview;
+  clients: readonly ClientInfo[];
+  /** Where the review came from, above the source facts (a catalog entry, M45). */
+  origin?: ReactNode;
+  /** Discard: the parent drops the review (and its token). */
+  onDiscard: () => void;
+  /** Saved: the backend consumed the review. */
+  onSaved: () => void;
+  /** Saving started or ended: the parent keeps its own actions off meanwhile. */
+  onSavingChange?: (saving: boolean) => void;
+};
+
+/**
+ * The drafts of one review: pick, edit, choose clients and save through the
+ * trust question (M39) and the scan gate (M40). Give it `key={review.token}`
+ * so a new review starts with fresh picks.
+ */
+export function McpSourceReviewView({
+  review,
+  clients: clientList,
+  origin,
+  onDiscard,
+  onSaved,
+  onSavingChange,
+}: McpSourceReviewViewProps) {
+  const { commands } = useTransport();
+  const changeNotice = useChangeNotice();
+  const { resolveTrust, dialog: trustDialog } = useTrustPrompt();
+  const [edits, setEdits] = useState<Edits>(() => Object.fromEntries(review.drafts.map((draft) => [draft.key, draft.draft])));
+  // One draft is the obvious pick; several are the user's choice (as `--pick` in the CLI).
+  const [picked, setPicked] = useState<string[]>(() => (review.drafts.length === 1 ? [review.drafts[0].key] : []));
+  const [clients, setClients] = useState<ClientChoice>({ allDetected: false, clients: [] });
+  const [editing, setEditing] = useState<McpDraft | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [scanBlocked, setScanBlocked] = useState<ScanBlockedSave | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  useEffect(() => onSavingChange?.(isSaving), [isSaving, onSavingChange]);
+  const [error, setError] = useState("");
+
+  const pickedDrafts = review.drafts.filter((draft) => picked.includes(draft.key));
+  const isEdited = (draft: McpDraft) => launchOf(edits[draft.key]) !== launchOf(draft.draft);
+  const dangerous = scanBlocked !== null || isDangerous(review.scan, ...pickedDrafts.map((draft) => draft.scan));
+  // A registry entry's drafts each run from their own source (a package, a remote host): a picked one that is
+  // blocked refuses the save too.
+  const blocked =
+    review.trust?.state.kind === "blocked" ||
+    review.movedTrust?.state.kind === "blocked" ||
+    pickedDrafts.some((draft) => draft.trust?.state.kind === "blocked");
+
+  /**
+   * Any change to what would be saved: the "Save anyway" a refused save
+   * offered, and the acknowledgement, were for the content before it.
+   */
+  function clearGate() {
+    setScanBlocked(null);
+    setAcknowledged(false);
+    setError("");
+  }
+
+  function chooseClients(choice: ClientChoice) {
+    clearGate();
+    setClients(choice);
+    setEdits((current) =>
+      Object.fromEntries(Object.entries(current).map(([key, draft]) => [key, { ...draft, clients: choice }])),
+    );
+  }
+
+  function togglePick(key: string, on: boolean) {
+    clearGate();
+    setPicked((current) => (on ? [...current, key] : current.filter((entry) => entry !== key)));
+  }
+
+  async function handleSave() {
+    if (pickedDrafts.length === 0) {
+      return;
+    }
+    setError("");
+    const onBlocked = () => setError(errorMessage("source_blocked"));
+    const answer = await resolveTrust(review, onBlocked);
+    if (!answer) {
+      return;
+    }
+    // Then what each picked draft runs from, once per source.
+    const ownGrants = new Map<string, TrustGrantArg | null>();
+    for (const draft of pickedDrafts) {
+      if (!draft.trust || ownGrants.has(draft.trust.display)) {
+        continue;
+      }
+      const own = await resolveTrust({ trust: draft.trust }, onBlocked);
+      if (!own) {
+        return;
+      }
+      ownGrants.set(draft.trust.display, own.trust);
+    }
+    setIsSaving(true);
+    try {
+      const picks = pickedDrafts.map((draft) => ({
+        key: draft.key,
+        draft: normalizeDraft(edits[draft.key]),
+        trust: draft.trust ? (ownGrants.get(draft.trust.display) ?? null) : null,
+      }));
+      const saved = unwrap(
+        await commands.saveMcpSourceDrafts(review.token, picks, answer.trust, answer.movedTrust, dangerous),
+      );
+      changeNotice(saved.change, t("install.mcpSource.saved", { ids: saved.ids.join(", ") }));
+      onSaved();
+    } catch (failure) {
+      if (failure instanceof IpcFailure && failure.code === "scan_blocked") {
+        // The edited command lines scan dangerous. No re-review exists for an edited draft, so the
+        // refusal names the edited servers and shows the findings the backend reported; then the gate.
+        const edited = pickedDrafts.filter(isEdited);
+        const named = (edited.length > 0 ? edited : pickedDrafts).map((draft) => edits[draft.key].id).join(", ");
+        setScanBlocked({ servers: named, detail: failure.message });
+        setAcknowledged(false);
+        setError("");
+      } else {
+        setError(failureText(failure));
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="mcp-source-review" aria-label={t("install.mcpSource.reviewAria")} role="region">
+        {origin}
+        <SourceFacts review={review} />
           {review.trust ? <TrustSummary info={review.trust} /> : null}
           {review.movedTrust ? <TrustSummary info={review.movedTrust} label={t("trust.summary.moved")} /> : null}
           <ScanFindings scan={review.scan} title={t("install.mcpSource.filesScan")} />
@@ -401,7 +469,7 @@ export function McpSourcePanel() {
           ) : null}
           {error ? <div className="dialog-error" role="alert">{error}</div> : null}
           <div className="repo-form__actions mcp-source-review__actions">
-            <button className="secondary-button" type="button" disabled={isSaving} onClick={discard}>
+            <button className="secondary-button" type="button" disabled={isSaving} onClick={onDiscard}>
               {t("install.mcpSource.discard")}
             </button>
             {dangerous ? (
@@ -428,8 +496,7 @@ export function McpSourcePanel() {
               </button>
             )}
           </div>
-        </div>
-      ) : null}
+      </div>
       {editing ? (
         <DraftEditDialog
           draft={editing}
@@ -447,7 +514,7 @@ export function McpSourcePanel() {
         />
       ) : null}
       {trustDialog}
-    </section>
+    </>
   );
 }
 
@@ -456,9 +523,29 @@ function SourceFacts({ review }: { review: McpSourceReview }) {
   return (
     <dl className="source-review__facts">
       <div>
-        <dt>{t(source.kind === "git" ? "install.mcpSource.kind.git" : "install.mcpSource.kind.folder")}</dt>
+        <dt>
+          {t(
+            source.kind === "git"
+              ? "install.mcpSource.kind.git"
+              : source.kind === "registry"
+                ? "install.mcpSource.kind.registrySource"
+                : "install.mcpSource.kind.folder",
+          )}
+        </dt>
         <dd><code>{source.url ?? source.folder}</code></dd>
       </div>
+      {source.catalog ? (
+        <div>
+          <dt>{t("install.review.catalog")}</dt>
+          <dd><code>{source.catalog}</code></dd>
+        </div>
+      ) : null}
+      {source.version ? (
+        <div>
+          <dt>{t("install.review.version")}</dt>
+          <dd><code>{source.version}</code></dd>
+        </div>
+      ) : null}
       {source.path ? (
         <div>
           <dt>{t("install.review.path")}</dt>
@@ -512,6 +599,7 @@ function DraftRow({ draft, edited, isEdited, picked, onPick, onEdit }: DraftRowP
         </button>
       </div>
       <p className="mcp-draft__provenance">{provenance(draft)}</p>
+      {draft.trust ? <TrustSummary info={draft.trust} label={t("trust.summary.runsFrom")} /> : null}
       <LaunchLines
         lines={
           isEdited

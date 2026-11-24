@@ -105,6 +105,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sources::revoke_source,
             commands::sources::block_source,
             commands::sources::block_source_url,
+            commands::catalogs::catalogs_overview,
+            commands::catalogs::set_online_catalogs,
+            commands::catalogs::add_catalog,
+            commands::catalogs::remove_catalog,
+            commands::catalogs::set_catalog_enabled,
+            commands::catalogs::search_catalog,
+            commands::catalogs::show_catalog_entry,
+            commands::catalogs::refresh_catalog,
+            commands::catalogs::review_catalog_mcp,
+            commands::catalogs::review_catalog_skill,
+            commands::catalogs::open_catalog_link,
             commands::skills::list_skills,
             commands::skills::list_skill_tool_dirs,
             commands::skills::pick_skill_source,
@@ -137,6 +148,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::updates::set_check_for_updates,
             commands::updates::check_for_update,
             commands::updates::install_update,
+            commands::agent::agent_skill_status,
+            commands::agent::set_agent_skill_client,
+            commands::agent::remove_agent_skill,
+            commands::agent::reset_agent_skill,
+            commands::agent::refresh_agent_skill,
+            commands::agent::reveal_agent_skill,
             commands::skills::scan_unmanaged_skills,
             commands::skills::adopt_skills,
             commands::discover::discover_projects,
@@ -296,6 +313,27 @@ mod tests {
             .expect("CSP is set (SPEC 4.3)");
         assert!(csp.contains("default-src 'self'"), "{csp}");
         assert!(!csp.contains("unsafe-eval"), "{csp}");
+    }
+
+    /// The Loadout skill for agents ships as a resource (#8): the folder
+    /// the core crate embeds, under `agent-skill/loadout`, with the same
+    /// files.
+    #[test]
+    fn the_agent_skill_is_a_bundled_resource() {
+        let config = read_config("tauri.conf.json");
+        let resources = config["bundle"]["resources"]
+            .as_object()
+            .expect("bundle.resources is a map");
+        let source = "../crates/agent-loadout-core/agent-skill/loadout/";
+        assert_eq!(
+            resources.get(source).and_then(serde_json::Value::as_str),
+            Some(format!("{}/", agent_loadout_core::agent::RESOURCE_DIR).as_str())
+        );
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(source);
+        assert!(agent_loadout_core::agent::is_bundled_copy(
+            &agent_loadout_core::RealFs,
+            &dir
+        ));
     }
 
     /// Setting `additionalBrowserArgs` replaces Tauri's default WebView2

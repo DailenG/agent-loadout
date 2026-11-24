@@ -35,8 +35,10 @@ import { useThemePreference, type ThemePreference } from "@/app/components/theme
 import type { ImportTarget } from "@/app/routes/import/model";
 import { UnmanagedNotice, UnmanagedNoticeSetting } from "@/app/routes/import/UnmanagedNotice";
 import { MigrateSection } from "@/app/routes/migrate/MigrateSection";
+import { AgentSection, useAgentSkillStartup } from "@/app/routes/settings/agent/AgentSection";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
 import { SourcesSection } from "@/app/routes/settings/sources/SourcesSection";
+import { CatalogsSection } from "@/app/routes/settings/catalogs/CatalogsSection";
 import { SkillsPage } from "@/app/routes/skills/SkillsPage";
 import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRemoteStep";
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
@@ -201,8 +203,12 @@ export function createQueryClient() {
     defaultOptions: {
       // IPC is local: a retry only delays the error the user should see.
       // Window focus rechecks only the views drift shows up in
-      // (`useDriftTriggers`), not every query.
-      queries: { retry: false, refetchOnWindowFocus: false },
+      // (`useDriftTriggers`), not every query. `networkMode: "always"`: every
+      // command is local IPC, and the backend decides what needs the network
+      // (online catalogs answer from the cache), so the webview going offline
+      // must never pause a query or mutation before it reaches the backend.
+      queries: { retry: false, refetchOnWindowFocus: false, networkMode: "always" },
+      mutations: { networkMode: "always" },
     },
   });
   // The plan and the server pills cost a whole plan run each. The watcher,
@@ -667,6 +673,8 @@ function SettingsPage(props: {
       <MigrateSection onOpenImport={props.onOpenImport} />
       <SecretsSection onOpenPending={props.onOpenPending} />
       <SourcesSection />
+      <CatalogsSection />
+      <AgentSection />
       <UpdatesSection />
     </div>
   );
@@ -761,7 +769,7 @@ function RoutePage(props: {
     return <SkillsPage onOpenInstall={() => props.onNavigate("install")} />;
   }
   if (route.key === "install") {
-    return <InstallPage onOpenSkills={() => props.onNavigate("skills")} />;
+    return <InstallPage onOpenSkills={() => props.onNavigate("skills")} onOpenSettings={() => props.onNavigate("settings")} />;
   }
   if (route.key === "import") {
     return <ImportPage target={props.importTarget} onOpenPending={props.onOpenPending} />;
@@ -818,6 +826,7 @@ function AppContent(props: { features: FeatureFlags }) {
   useQueryErrorToasts();
   useDriftTriggers();
   useStartupUpdateCheck();
+  useAgentSkillStartup();
 
   const visibleRoutes = routes.filter((route) => !route.flag || props.features[route.flag]);
   const activeDefinition =

@@ -185,6 +185,62 @@ checkout runs only at the commit its server file names: a stale copy
 `loadout server checkout` restores it behind the same gates, and a
 folder's server never runs on another machine.
 
+## Catalogs (network use)
+
+Catalogs are the only part of Loadout that makes HTTP requests of its own
+(besides the optional updater and the git your remotes and sources use).
+
+- **Off until you turn it on.** "Online catalogs" (`online_catalogs` in
+  `state/local-settings.toml`, per machine) is off by default. While it is
+  off, nothing contacts any catalog: searches answer from saved results,
+  and refreshes and installs from a catalog fail with `catalogs_off`.
+- **Only on your request**, never in the background: a search, opening an
+  entry, a refresh, an install from a catalog, or `server update` of a
+  server added from a registry. Requests go only to the catalogs you turned
+  on (a registry server's update check needs its catalog turned on at the
+  same address), carry only your search words, and send no telemetry or
+  identifiers besides a `Loadout/<version>` user agent.
+- **Git installs are git sources.** Skills and plugin servers installed
+  from a tap, and skills.sh addresses, are git sources like any other:
+  installing, updating and checking them for updates contacts the git host
+  even with online catalogs off.
+- **HTTP client:** `ureq` with rustls and the operating system's
+  certificate verifier (no OpenSSL); `GET` only, a 10 s connect and 20 s
+  overall limit, an 8 MiB body cap (after decompression), at most 3
+  redirects, each of them https (a loopback registry follows none).
+  Registry addresses must be https (http only for `localhost`) and carry
+  no credentials. Proxies come from `HTTPS_PROXY` (then `ALL_PROXY`) for
+  https and `HTTP_PROXY` (then `ALL_PROXY`) for a loopback registry, and
+  `NO_PROXY`; a SOCKS or unreadable proxy is an error, never a direct
+  connection. Git taps use the system git (shallow, sparse, metadata only;
+  symbolic links in a tap are never read); no GitHub API is called. A tap
+  address with a user name, password or token is refused (it would be
+  saved in your synced store): use your git credential helper instead.
+  Commit pins are full 40-character commits.
+- **Catalog data is untrusted.** Names, descriptions, publisher metadata
+  and SKILL.md text are shown as plain text; icons and images are never
+  fetched or rendered. "Official" is shown only for `github.com/anthropics`
+  taps, and there only for plugins in the tap itself or from an Anthropic
+  repository; registry entries show what the registry checks (namespace
+  ownership), not a safety claim. A registry entry's repository is the
+  publisher's claim and is labeled so. A marketplace that uses a name
+  reserved for Anthropic elsewhere is flagged. Deleted registry entries are
+  hidden and refused; deprecated ones are marked. The app opens an entry's
+  links only when they are https.
+- **Installing never bypasses the gates.** A registry entry's
+  `server.json` and a plugin's `.mcp.json` and `mcpServers` go through the
+  review of servers from Git (secret extraction, source trust, the scan);
+  skills go through the git skill install review. A registry draft's trust
+  is keyed on what it runs (its package on its package registry, or a
+  remote's host), never on the repository the publisher names. Plugin
+  hooks, commands, agents, `bin`, monitors and workflows are never
+  imported, and plugins from npm, archive or command sources are refused.
+  Unpinned packages (no version, an npm tag, an OCI image without a digest)
+  are marked "not pinned".
+- **Cache:** results are saved in `LOADOUT_HOME/cache/catalogs` (this
+  machine only, keyed on the catalog's address) for 24 hours; stale
+  results are labeled with their age, and a failed refresh keeps them.
+
 ## Desktop app
 
 - A strict Content Security Policy; no remote content is loaded.

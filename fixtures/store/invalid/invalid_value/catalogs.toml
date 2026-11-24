@@ -1,0 +1,6 @@
+schema = 1
+
+# A registry over plain http that is not this machine.
+[catalogs.acme]
+kind = "mcp_registry"
+url = "http://registry.acme.example"

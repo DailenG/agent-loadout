@@ -4,33 +4,34 @@
 // (Git form) and LocalInstallPanel.tsx (manual install form). SPEC 13.7: Skill: Git | Local and
 // MCP: Manual form | Paste config; the marketplace and plugin tabs are hidden in v1. The data
 // layer is new: a local source is picked in the OS dialog (the path stays in the backend under a
-// token, SPEC 17), and a taken id installs as `<id>-2` only after confirmation (SPEC 12.1).
+// token, SPEC 17), and a taken id installs as `<id>-2` only after confirmation
+// (SPEC 12.1). Browse (M45) searches the online catalogs and hands an entry
+// to the same reviews.
 
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
-import { useTrustPrompt } from "@/app/components/TrustDialog";
 import { useNotifications } from "@/app/components/notifications";
-import { errorMessage, t, type MessageKey } from "@/i18n/en";
-import type { PickedSkillSource, SkillInstallReview, SkillSourcePick } from "@/ipc/bindings";
-import { IpcFailure, unwrap, useTransport, type CommandResult } from "@/ipc/transport";
+import { t, type MessageKey } from "@/i18n/en";
+import type { PickedSkillSource, SkillSourcePick } from "@/ipc/bindings";
+import { unwrap, useTransport } from "@/ipc/transport";
 import { AddIcon, PasteIcon } from "../mcp/icons";
 import { ServerEditDialog } from "../mcp/ServerEditDialog";
-import { useSkillActions } from "../skills/actions";
 import { failureText } from "../skills/labels";
-import { useRenameConfirm } from "../skills/useRenameConfirm";
+import { BrowsePanel } from "./catalog/BrowsePanel";
 import { McpSourcePanel } from "./McpSourcePanel";
-import { SkillReviewDialog } from "./SkillReviewDialog";
+import { useReviewInstall } from "./useReviewInstall";
 
-export type InstallCategory = "skill" | "mcp";
+export type InstallCategory = "skill" | "mcp" | "browse";
 export type InstallTab = "git" | "local";
 /** MCP: the form or paste box, or drafts from a Git repository or folder (M42). */
 export type McpInstallTab = "manual" | "source";
 
-const CATEGORIES: { key: InstallCategory; label: "install.category.skill" | "install.category.mcp" }[] = [
+const CATEGORIES: { key: InstallCategory; label: MessageKey }[] = [
   { key: "skill", label: "install.category.skill" },
   { key: "mcp", label: "install.category.mcp" },
+  { key: "browse", label: "install.category.browse" },
 ];
 
 const TABS: { key: InstallTab; label: MessageKey }[] = [
@@ -44,6 +45,14 @@ const MCP_TABS: { key: McpInstallTab; label: MessageKey }[] = [
 ];
 
 function CategoryIcon({ category }: { category: InstallCategory }) {
+  if (category === "browse") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+        <path d="m15 15 4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
   if (category === "skill") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -87,94 +96,6 @@ function TabIcon({ tab }: { tab: InstallTab | McpInstallTab }) {
 /** Empty text is "not given". */
 function optional(value: string): string | null {
   return value.trim() || null;
-}
-
-type ReviewLoader = () => Promise<CommandResult<SkillInstallReview>>;
-
-/**
- * Install through the review (M40, M42): fetch and scan, show the review,
- * then install exactly that content. Install asks the trust question first
- * when the source needs it; a taken id asks, then installs as `<id>-2`
- * (SPEC 12.1). Closing the review without installing discards it.
- */
-function useReviewInstall(onView: () => void) {
-  const { commands } = useTransport();
-  const { notify } = useNotifications();
-  const actions = useSkillActions();
-  const { confirmRename, dialog: renameDialog } = useRenameConfirm();
-  const { resolveTrust, dialog: trustDialog } = useTrustPrompt();
-  const [open, setOpen] = useState<{ review: SkillInstallReview; id: string | null; onDone: () => void } | null>(null);
-  const [isInstalling, setIsInstalling] = useState(false);
-
-  /** Fetches and scans; resolves once the review is shown (or failed, with a toast). */
-  async function review(load: ReviewLoader, id: string | null, onDone: () => void) {
-    try {
-      setOpen({ review: unwrap(await load()), id, onDone });
-    } catch (error) {
-      notify({ tone: "error", message: failureText(error) });
-    }
-  }
-
-  function close() {
-    // An install in flight completes in the backend: closing now would discard a review that still installs.
-    if (isInstalling) {
-      return;
-    }
-    if (open) {
-      void commands.discardSkillReview(open.review.token);
-    }
-    setOpen(null);
-  }
-
-  async function install(allowDangerous: boolean) {
-    if (!open) {
-      return;
-    }
-    const { review: current, id, onDone } = open;
-    const answer = await resolveTrust(current, () =>
-      notify({ tone: "error", message: errorMessage("source_blocked") }),
-    );
-    if (!answer) {
-      return;
-    }
-    setIsInstalling(true);
-    const run = (renameIfTaken: boolean) =>
-      actions.installReviewed(current.token, id, renameIfTaken, allowDangerous, answer, onView);
-    try {
-      try {
-        await run(false);
-      } catch (error) {
-        if (!(error instanceof IpcFailure) || error.code !== "already_exists" || !(await confirmRename())) {
-          return;
-        }
-        await run(true);
-      }
-      // Installed: the backend consumed the review.
-      setOpen(null);
-      onDone();
-    } catch {
-      // Reported by the action; the review stays for a retry.
-    } finally {
-      setIsInstalling(false);
-    }
-  }
-
-  const dialog = (
-    <>
-      {open ? (
-        <SkillReviewDialog
-          review={open.review}
-          isInstalling={isInstalling}
-          onInstall={(allowDangerous) => void install(allowDangerous)}
-          onClose={close}
-        />
-      ) : null}
-      {trustDialog}
-      {renameDialog}
-    </>
-  );
-
-  return { review, dialog };
 }
 
 type PanelProps = {
@@ -428,9 +349,11 @@ function McpInstallPanel() {
 export type InstallPageProps = {
   /** Opens the Skills page after an install. */
   onOpenSkills: () => void;
+  /** Opens Settings (Browse links to Settings > Catalogs). */
+  onOpenSettings?: () => void;
 };
 
-export function InstallPage({ onOpenSkills }: InstallPageProps) {
+export function InstallPage({ onOpenSkills, onOpenSettings }: InstallPageProps) {
   const [category, setCategory] = useState<InstallCategory>("skill");
   const [tab, setTab] = useState<InstallTab>("git");
   const [mcpTab, setMcpTab] = useState<McpInstallTab>("manual");
@@ -464,38 +387,44 @@ export function InstallPage({ onOpenSkills }: InstallPageProps) {
         </div>
       </HeaderToolbar>
       <section className="market-shell">
-        <div className="market-tab-row" role="tablist" aria-label={t("install.tabs.aria")}>
-          {tabs.map((entry) => {
-            const selected = entry.key === selectedTab;
-            return (
-              <button
-                key={entry.key}
-                className={`market-tab${selected ? " is-selected" : ""}`}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() =>
-                  category === "skill" ? setTab(entry.key as InstallTab) : setMcpTab(entry.key as McpInstallTab)
-                }
-              >
-                <span className="market-tab__icon">
-                  <TabIcon tab={entry.key} />
-                </span>
-                <span>{t(entry.label)}</span>
-              </button>
-            );
-          })}
-        </div>
-        {category === "skill" ? (
-          tab === "git" ? (
-            <GitInstallPanel onView={onOpenSkills} />
-          ) : (
-            <LocalInstallPanel onView={onOpenSkills} />
-          )
-        ) : mcpTab === "manual" ? (
-          <McpInstallPanel />
+        {category === "browse" ? (
+          <BrowsePanel onOpenSkills={onOpenSkills} onOpenSettings={onOpenSettings} />
         ) : (
-          <McpSourcePanel />
+          <>
+            <div className="market-tab-row" role="tablist" aria-label={t("install.tabs.aria")}>
+              {tabs.map((entry) => {
+                const selected = entry.key === selectedTab;
+                return (
+                  <button
+                    key={entry.key}
+                    className={`market-tab${selected ? " is-selected" : ""}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    onClick={() =>
+                      category === "skill" ? setTab(entry.key as InstallTab) : setMcpTab(entry.key as McpInstallTab)
+                    }
+                  >
+                    <span className="market-tab__icon">
+                      <TabIcon tab={entry.key} />
+                    </span>
+                    <span>{t(entry.label)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {category === "skill" ? (
+              tab === "git" ? (
+                <GitInstallPanel onView={onOpenSkills} />
+              ) : (
+                <LocalInstallPanel onView={onOpenSkills} />
+              )
+            ) : mcpTab === "manual" ? (
+              <McpInstallPanel />
+            ) : (
+              <McpSourcePanel />
+            )}
+          </>
         )}
       </section>
     </div>

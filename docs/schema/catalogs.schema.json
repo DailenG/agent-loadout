@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout catalogs (store/catalogs.toml)",
+  "type": "object",
+  "properties": {
+    "catalogs": {
+      "description": "Catalogs by id.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/CatalogRecord"
+      }
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "CatalogRecord": {
+      "description": "One catalog: a user-added one (`kind` and `url`), or a built-in's\nswitch (`enabled` only).",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Searched and browsed; default true.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "`mcp_registry` or `git_tap` (user-added catalogs only).",
+          "$ref": "#/$defs/CatalogSourceKind"
+        },
+        "ref": {
+          "description": "Branch, tag or commit of a git tap; a commit pins it.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Display name.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The registry's base URL (https; http only for localhost), or the\ntap's git URL (user-added catalogs only).",
+          "type": "string"
+        }
+      }
+    },
+    "CatalogSourceKind": {
+      "description": "What a user-added catalog is.",
+      "oneOf": [
+        {
+          "description": "A server of the MCP Registry API (`/v0.1/servers`).",
+          "type": "string",
+          "const": "mcp_registry"
+        },
+        {
+          "description": "A git repository of skill folders and/or a Claude Code plugin\nmarketplace (`.claude-plugin/marketplace.json`).",
+          "type": "string",
+          "const": "git_tap"
+        }
+      ]
+    }
+  }
+}

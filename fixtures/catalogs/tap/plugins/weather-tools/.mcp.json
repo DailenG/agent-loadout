@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "forecast": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"] },
+    "notion": { "type": "http", "url": "https://mcp.notion.com/mcp" },
+    "broken": { "type": "http", "url": "" }
+  }
+}

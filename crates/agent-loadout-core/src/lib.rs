@@ -7,8 +7,10 @@
 
 pub mod access;
 pub mod adapters;
+pub mod agent;
 pub mod apply;
 pub mod brand;
+pub mod catalog;
 pub mod env;
 pub mod error;
 pub mod formats;

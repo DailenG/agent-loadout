@@ -1,0 +1,17 @@
+schema = 1
+
+# Catalogs the user browses and searches (#26). Built-ins are always there;
+# a table for one may only turn it off.
+[catalogs.skills-sh]
+enabled = false
+
+[catalogs.acme]
+kind = "mcp_registry"
+url = "https://registry.acme.example"
+title = "Acme registry"
+
+[catalogs.team-skills]
+kind = "git_tap"
+url = "https://github.com/acme/skills"
+ref = "main"
+enabled = false

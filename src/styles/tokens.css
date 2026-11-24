@@ -20191,6 +20191,22 @@ button.settings-form-item:disabled {
   color: var(--warning-text);
 }
 
+/* Settings > Agent integration (M46): one checkbox per client. */
+.agent-clients {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-clients label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--heading);
+}
+
 .sources-list__actions {
   display: flex;
   gap: 8px;
@@ -20211,3 +20227,337 @@ button.settings-form-item:disabled {
   margin: 0;
 }
 /* end M42 */
+
+/* M45: Install > Browse and Settings > Catalogs. Theme tokens only (WCAG AA pairs in
+   tokens.contrast.test.ts); no remote image is ever shown. */
+.catalog-browse {
+  display: grid;
+  gap: 16px;
+}
+
+.market-panel .panel-header.catalog-browse__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.catalog-muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.catalog-opt-in {
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.catalog-opt-in h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.catalog-opt-in p {
+  margin: 0;
+  color: var(--heading);
+  font-size: 0.85rem;
+}
+
+.catalog-opt-in__actions,
+.catalog-result__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.catalog-opt-in__actions {
+  justify-content: flex-end;
+}
+
+.catalog-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--warning-soft);
+}
+
+.catalog-notice p {
+  margin: 0;
+  color: var(--heading);
+  font-size: 0.8rem;
+}
+
+.catalog-search {
+  display: grid;
+  gap: 6px;
+}
+
+.catalog-search__row {
+  display: flex;
+  gap: 8px;
+}
+
+.catalog-search__row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.catalog-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.catalog-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.catalog-section__head h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--heading);
+}
+
+.catalog-section__more {
+  justify-self: start;
+}
+
+.catalog-link-card > p {
+  margin: 0;
+  color: var(--heading);
+  font-size: 0.8rem;
+}
+
+.catalog-status {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.catalog-status--neutral {
+  color: var(--muted);
+}
+
+.catalog-status--positive {
+  color: var(--success-text);
+}
+
+.catalog-status--warning {
+  color: var(--warning-text);
+}
+
+.catalog-status--danger {
+  color: var(--danger-text);
+}
+
+.catalog-attribution {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.catalog-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.catalog-result {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.catalog-result__head,
+.catalog-detail__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.catalog-result__head strong {
+  color: var(--heading);
+  overflow-wrap: anywhere;
+}
+
+.catalog-result__id {
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog-result__description,
+.catalog-detail__description {
+  margin: 0;
+  color: var(--heading);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog-result__description {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.catalog-result__meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.catalog-detail__back {
+  justify-self: start;
+}
+
+.catalog-detail__head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--heading);
+  overflow-wrap: anywhere;
+}
+
+.catalog-detail__head h3:focus-visible,
+.catalog-install h4:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.catalog-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.catalog-facts dt {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.catalog-facts dd {
+  margin: 2px 0 0;
+  color: var(--heading);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog-chips,
+.catalog-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.catalog-detail__list h4,
+.catalog-install h4 {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  color: var(--heading);
+}
+
+.catalog-detail__list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--heading);
+  font-size: 0.78rem;
+}
+
+.catalog-detail__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.catalog-detail__list li span {
+  color: var(--muted);
+}
+
+.catalog-install {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.catalog-skill-pick {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.catalog-skill-pick legend {
+  margin-bottom: 4px;
+  color: var(--heading);
+  font-size: 0.8rem;
+}
+
+.catalog-origin {
+  margin: 0;
+  color: var(--heading);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--heading);
+  font-size: 0.8rem;
+}
+
+/* The publisher's own words (a deprecation message): quoted body text, not a Loadout warning. */
+.catalog-publisher-says {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog-section__more-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* end M45 */

@@ -92,6 +92,8 @@ impl From<DraftKind> for McpDraftKind {
 pub enum McpSourceKind {
     Git,
     Local,
+    /// An MCP registry catalog entry (#26).
+    Registry,
 }
 
 /// Where the drafts come from.
@@ -108,6 +110,10 @@ pub struct McpSourceInfo {
     pub path: Option<String>,
     pub git_ref: Option<String>,
     pub commit: Option<String>,
+    /// The catalog entry it comes from, `<catalog>/<entry id>` (#26).
+    pub catalog: Option<String>,
+    /// A registry entry's version.
+    pub version: Option<String>,
 }
 
 /// A value the user provides after saving.
@@ -181,6 +187,11 @@ pub struct McpDraft {
     pub also_in: Vec<String>,
     /// The folder's files and every launch line.
     pub scan: ScanResult,
+    /// What this draft runs, when it is gated on its own (a registry
+    /// entry's package or remote host): the trust dialog asks per key, and
+    /// the answer goes back in its `McpDraftPick.trust`. Null: the
+    /// review's `trust` gates it.
+    pub trust: Option<SourceTrustInfo>,
 }
 
 /// A definition the source holds that cannot be drafted.
@@ -219,6 +230,8 @@ pub struct McpSourceReview {
 pub struct McpDraftPick {
     pub key: String,
     pub draft: ServerDraft,
+    /// The answer for the draft's own `trust`, when it asks.
+    pub trust: Option<TrustGrantArg>,
 }
 
 /// What a save did.
@@ -447,6 +460,7 @@ fn source_info(core: &Core, source: &ServerSource) -> McpSourceInfo {
         kind: match source.kind {
             ServerSourceKind::Git => McpSourceKind::Git,
             ServerSourceKind::Local => McpSourceKind::Local,
+            ServerSourceKind::Registry => McpSourceKind::Registry,
         },
         url: source
             .url
@@ -456,6 +470,8 @@ fn source_info(core: &Core, source: &ServerSource) -> McpSourceInfo {
         path: source.path.clone(),
         git_ref: source.git_ref.clone(),
         commit: source.commit.clone(),
+        catalog: source.catalog.clone(),
+        version: source.version.clone(),
     }
 }
 
@@ -539,11 +555,16 @@ fn launch_lines(core: &Core, folder: Option<&str>, server: &Server) -> Vec<McpLa
         .collect()
 }
 
-fn draft_info(core: &Core, draft: &Draft) -> McpDraft {
+fn draft_info(core: &Core, draft: &Draft) -> CmdResult<McpDraft> {
     let source = draft.provenance();
     let folder = local_folder(source);
     let lines = launch_lines(core, folder, &draft.server);
-    McpDraft {
+    let trust = draft
+        .trust_source
+        .as_ref()
+        .map(|source| sources::check_source(core, source, None))
+        .transpose()?;
+    Ok(McpDraft {
         key: draft.key.clone(),
         kind: draft.kind.into(),
         file: source.file.clone(),
@@ -566,7 +587,8 @@ fn draft_info(core: &Core, draft: &Draft) -> McpDraft {
             .collect(),
         also_in: draft.also_in.clone(),
         scan: ScanResult::from(&draft.scan),
-    }
+        trust,
+    })
 }
 
 fn skipped_info(core: &Core, skipped: &Skipped) -> McpSkipped {
@@ -593,7 +615,7 @@ fn review_of(core: &Core, resolved: &Resolved) -> CmdResult<McpSourceReview> {
             .drafts()
             .iter()
             .map(|draft| draft_info(core, draft))
-            .collect(),
+            .collect::<CmdResult<_>>()?,
         skipped: resolved
             .skipped()
             .iter()
@@ -652,6 +674,21 @@ pub fn review_local(core: &Core, folder: &Path) -> CmdResult<(Resolved, McpSourc
     )
 }
 
+/// The review of drafts a catalog entry resolved into (#26): saved with
+/// `save_mcp_source_drafts` like any other.
+pub(super) fn review_resolved(
+    core: &Core,
+    resolved: Resolved,
+) -> CmdResult<(Resolved, McpSourceReview)> {
+    let review = review_of(core, &resolved)?;
+    Ok((resolved, review))
+}
+
+/// Keeps a resolved review under a new token.
+pub(super) fn remember_resolved(resolved: Resolved) -> String {
+    remember(Review::Source(Box::new(resolved)))
+}
+
 fn decisions(
     trust: Option<TrustGrantArg>,
     moved_trust: Option<TrustGrantArg>,
@@ -694,6 +731,7 @@ pub fn save(
         chosen.push(Pick {
             key: pick.key.clone(),
             server,
+            trust: pick.trust.map(TrustGrantArg::grant),
         });
     }
     let store = core.open_store_for_change()?;

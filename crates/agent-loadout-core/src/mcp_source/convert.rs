@@ -75,6 +75,8 @@ pub(crate) struct Ctx<'a> {
     pub os: Os,
     /// The repository or folder name (fallback names).
     pub name: String,
+    /// A Claude Code marketplace entry's `mcpServers` as JSON (#26).
+    pub plugin_servers: Option<&'a str>,
     /// `skills::content_hash` of `files` (local image tags).
     pub content_hash: String,
 }
@@ -161,6 +163,13 @@ pub(crate) fn all(ctx: &Ctx<'_>) -> (Vec<RawDraft>, Vec<Skipped>) {
                 &mut skipped,
             );
         }
+    }
+    for (file, bytes) in plugin_configs(ctx) {
+        run(
+            client_config(ctx, &file, Some("claude-code"), &bytes),
+            &mut drafts,
+            &mut skipped,
+        );
     }
     if drafts.is_empty() {
         if let Some(bytes) = ctx.files.get("package.json") {
@@ -514,7 +523,13 @@ fn registry(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<(Vec<RawDraft>, Vec<Skipped>)
 
 /// A registry other than the package type's default, as written.
 fn custom_registry(package: &Package) -> Option<&str> {
-    let url = package.registry_base_url.as_deref()?.trim();
+    custom_registry_url(package.registry_base_url.as_deref())
+}
+
+/// `registryBaseUrl` when it is not a package type's default registry:
+/// where the package really comes from (the trust key's host, #26).
+pub(crate) fn custom_registry_url(url: Option<&str>) -> Option<&str> {
+    let url = url?.trim();
     let bare = url.trim_end_matches('/');
     (!bare.is_empty() && !DEFAULT_REGISTRIES.contains(&bare)).then_some(url)
 }
@@ -995,6 +1010,45 @@ fn scrub_passthrough(table: &mut toml::Table, path: &str, inputs: &mut Vec<Draft
     }
 }
 
+/// A Claude Code plugin's `mcpServers` beyond its `.mcp.json` (#26): in
+/// `.claude-plugin/plugin.json` and in its marketplace entry
+/// ([`Ctx::plugin_servers`]), each an object of definitions or a path to
+/// a config file in the folder. Returns each as a `.mcp.json`-shaped
+/// config with the file it came from; a path to a client file already
+/// read, or outside the folder's files, adds nothing.
+fn plugin_configs(ctx: &Ctx<'_>) -> Vec<(String, Vec<u8>)> {
+    let manifest = ctx
+        .files
+        .get(".claude-plugin/plugin.json")
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .and_then(|manifest| manifest.get("mcpServers").cloned());
+    let listed = ctx
+        .plugin_servers
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+    let mut configs: Vec<(String, Vec<u8>)> = Vec::new();
+    for (file, value) in [
+        (".claude-plugin/plugin.json", manifest),
+        ("marketplace.json", listed),
+    ] {
+        match value {
+            Some(serde_json::Value::Object(servers)) => {
+                let config = serde_json::json!({ "mcpServers": servers });
+                configs.push((file.to_owned(), config.to_string().into_bytes()));
+            }
+            Some(serde_json::Value::String(path)) => {
+                let path = path.trim().trim_start_matches("./");
+                let read = CLIENT_FILES.iter().any(|(client, _)| *client == path)
+                    || configs.iter().any(|(seen, _)| seen == path);
+                if let Some(bytes) = ctx.files.get(path).filter(|_| !read) {
+                    configs.push((path.to_owned(), bytes.clone()));
+                }
+            }
+            _ => {}
+        }
+    }
+    configs
+}
+
 fn client_config(
     ctx: &Ctx<'_>,
     file: &str,
@@ -1022,6 +1076,20 @@ fn client_config(
                 continue;
             }
         };
+        // An entry with an empty URL and no command (a Claude Code plugin
+        // leaves URLs for the user to fill in) has nothing to run.
+        let blank = |text: &Option<String>| text.as_deref().is_none_or(|t| t.trim().is_empty());
+        if blank(&def.fields.url) && blank(&def.fields.command) {
+            skipped.push(skip(
+                file,
+                Some(name.clone()),
+                CoreError::new(
+                    ErrorCode::UnsupportedField,
+                    "this entry has no URL or command to run",
+                ),
+            ));
+            continue;
+        }
         let mut draft = RawDraft::new(DraftKind::ClientConfig, file, &converter, name.clone());
         draft.entry = Some(name.clone());
         draft.fields = def.fields;
@@ -1040,15 +1108,22 @@ fn client_config(
     Ok((drafts, skipped))
 }
 
-/// A committed config runs in its project: `${project}` is the folder, and
-/// a relative path that exists in the folder (or below a dependency or
+/// A committed config runs in its project: `${project}` is the folder (and
+/// so is a Claude Code plugin's `${CLAUDE_PLUGIN_ROOT}`, #26), and a
+/// relative path that exists in the folder (or below a dependency or
 /// build folder left out of the read) makes the folder the working
 /// directory (as the client would run it).
 fn in_folder(ctx: &Ctx<'_>, fields: &mut ServerFields) {
     let root = ctx.root.as_str();
     let replace = |value: &mut String| {
-        if value.contains("${project}") {
-            *value = value.replace("${project}", root);
+        for token in [
+            "${project}",
+            "${CLAUDE_PLUGIN_ROOT}",
+            "${env:CLAUDE_PLUGIN_ROOT}",
+        ] {
+            if value.contains(token) {
+                *value = value.replace(token, root);
+            }
         }
     };
     fields.command.iter_mut().for_each(replace);

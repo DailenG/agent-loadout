@@ -57,7 +57,7 @@ const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
 /// What skill operations run against: the app's environment, junctions on
 /// Windows (no Developer Mode or admin needed, SPEC 12.2).
-fn sx(core: &Core) -> SkillsEnv<'_> {
+pub(super) fn sx(core: &Core) -> SkillsEnv<'_> {
     SkillsEnv {
         env: &core.env,
         fs: core.fs.as_ref(),
@@ -86,6 +86,8 @@ pub enum SkillOrigin {
     AgentsCli,
     Catalog,
     Authored,
+    /// Shipped with Loadout (the Loadout skill for agents).
+    Bundled,
 }
 
 impl From<SkillSourceKind> for SkillOrigin {
@@ -612,7 +614,7 @@ fn sync_of(env: &Env, report: &SyncReport) -> SkillSync {
     }
 }
 
-fn change_of(env: &Env, commit: Option<&CommitId>, report: &SyncReport) -> SkillChange {
+pub(super) fn change_of(env: &Env, commit: Option<&CommitId>, report: &SyncReport) -> SkillChange {
     SkillChange {
         commit: commit_text(commit),
         links: sync_of(env, report),
@@ -764,15 +766,25 @@ fn skill_info(
             })
             .unwrap_or_default(),
         tags: meta.and_then(|meta| meta.tags.clone()).unwrap_or_default(),
-        source: meta
-            .and_then(|meta| meta.source.as_ref())
-            .map(|source| SkillSourceInfo {
-                kind: source.kind.into(),
-                url: source.url.as_deref().map(|url| source_url(env, url)),
-                path: source.path.clone(),
-                git_ref: source.git_ref.clone(),
-                commit: source.commit.clone(),
+        source: match meta {
+            // The Loadout skill is marked by `[bundled]` alone (no `[source]`).
+            Some(meta) if agent_loadout_core::agent::is_bundled(meta) => Some(SkillSourceInfo {
+                kind: SkillOrigin::Bundled,
+                url: None,
+                path: None,
+                git_ref: None,
+                commit: None,
             }),
+            _ => meta
+                .and_then(|meta| meta.source.as_ref())
+                .map(|source| SkillSourceInfo {
+                    kind: source.kind.into(),
+                    url: source.url.as_deref().map(|url| source_url(env, url)),
+                    path: source.path.clone(),
+                    git_ref: source.git_ref.clone(),
+                    commit: source.commit.clone(),
+                }),
+        },
         all_detected: matches!(selection, Some(ClientSelection::AllDetected)),
         clients: selection
             .map(|selection| {
@@ -1062,6 +1074,14 @@ fn git_request(
     git_ref: Option<String>,
 ) -> CmdResult<InstallRequest> {
     let url = url.trim();
+    // A skills.sh address is the git install of its GitHub repository,
+    // with its skill picked (#26); skills.sh itself is not contacted.
+    if let Some(mapped) = agent_loadout_core::catalog::skills_sh_request(url) {
+        let mut request = mapped?;
+        request.path = trimmed(path);
+        request.git_ref = trimmed(git_ref);
+        return Ok(request);
+    }
     let source = Source::parse(url, core.fs.as_ref());
     let is_url = matches!(source, Source::Git { .. }) && !Path::new(url).is_absolute();
     if !is_url {
@@ -1086,11 +1106,20 @@ pub fn review_git(
     git_ref: Option<String>,
 ) -> CmdResult<(Prepared, SkillInstallReview)> {
     let request = git_request(core, url, path, git_ref)?;
+    review_request(core, &request)
+}
+
+/// The install review of a git `request` (a catalog entry's too, #26); a
+/// blocked source is refused before it is contacted.
+pub(super) fn review_request(
+    core: &Core,
+    request: &InstallRequest,
+) -> CmdResult<(Prepared, SkillInstallReview)> {
     if let Source::Git { url, .. } = &request.source {
         let source = SourceRef::from_git_url(url).map_err(|err| scrubbed(&core.env, &err, None))?;
         sources::refuse_blocked(core, &source)?;
     }
-    review_with(core, &request)
+    review_with(core, request)
 }
 
 /// Reads and scans the picked folder or archive for the install review.
@@ -1587,6 +1616,18 @@ pub async fn review_git_skill(
     drop_off_thread(evicted);
     review.token = token;
     Ok(review)
+}
+
+/// Keeps a review for `install_reviewed_skill` and gives it its token.
+pub(super) fn remember_review(
+    state: &AppState,
+    prepared: Prepared,
+    mut review: SkillInstallReview,
+) -> SkillInstallReview {
+    let (token, evicted) = state.remember_review(prepared);
+    drop_off_thread(evicted);
+    review.token = token;
+    review
 }
 
 /// Reads and scans the folder or archive picked under `token` (from

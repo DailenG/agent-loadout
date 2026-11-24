@@ -2,8 +2,10 @@
 //! reporting, apply reports and exit codes (SPEC 14).
 
 pub mod adopt;
+pub mod agent;
 pub mod apply;
 pub mod backup;
+pub mod catalog;
 pub mod diff;
 pub mod effective;
 pub mod env;
@@ -115,12 +117,16 @@ impl Context {
     }
 
     /// The store, created on first use. Warns about a sync folder first,
-    /// as every mutating command does (SPEC 4.5).
+    /// as every mutating command does (SPEC 4.5), then brings an older
+    /// bundled Loadout skill up to date (SPEC 12.6): only commands that
+    /// change the store get here, so read commands never write.
     pub fn open_store_for_change(&self) -> Result<Store<'static>, CoreError> {
         if let Some(root) = &self.home.sync_root {
             eprintln!("warning[sync_root_detected]: {}", sync_root_warning(root));
         }
-        Store::open_or_init(&self.env, self.fs(), &self.home, &client_name())
+        let store = Store::open_or_init(&self.env, self.fs(), &self.home, &client_name())?;
+        agent::refresh_before_change(self, &store);
+        Ok(store)
     }
 }
 

@@ -45,8 +45,13 @@ enum Command {
     Server(cmd::server::ServerArgs),
     /// Skills: install, enable for clients and projects, update, scan.
     Skills(cmd::skills::SkillsArgs),
+    /// The read-only Loadout skill for coding agents: install, remove,
+    /// status, skill-path.
+    Agent(cmd::agent::AgentArgs),
     /// Trusted and blocked install sources: list, trust, block, untrust.
     Source(cmd::source::SourceArgs),
+    /// Catalogs of MCP servers and skills: list, add, search, show.
+    Catalog(cmd::catalog::CatalogArgs),
     /// Project manifests: create, register, trust, share, list, forget.
     Project(cmd::project::ProjectArgs),
     /// List store commits.
@@ -139,7 +144,9 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Server(args) => cmd::server::run(&context()?, args),
         Command::Project(args) => cmd::project::run(&context()?, args),
         Command::Skills(args) => cmd::skills::run(&context()?, args),
+        Command::Agent(args) => cmd::agent::run(&context()?, args),
         Command::Source(args) => cmd::source::run(&context()?, args),
+        Command::Catalog(args) => cmd::catalog::run(&context()?, args),
         Command::History(args) => done(cmd::history::run(&context()?, args)),
         Command::Status(args) => cmd::status::run(&context()?, args),
         Command::Diff(args) => cmd::diff::run(&context()?, args),
@@ -292,4 +299,234 @@ fn sync_root_finding_json(root: &SyncRoot) -> Value {
         "kind": root.kind.as_str(),
         "root": path_json(&root.root),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    //! The bundled Loadout skill (#8) against this CLI: every `loadout ...`
+    //! command it cites exists with the flags it uses, and the flags that
+    //! answer for the user appear only in "never" guidance.
+
+    use agent_loadout_core::agent;
+    use clap::CommandFactory;
+
+    use super::Cli;
+
+    /// Each skill file as text, by path.
+    fn skill_texts() -> Vec<(String, String)> {
+        agent::bundled_files()
+            .into_iter()
+            .map(|(path, bytes)| (path, String::from_utf8(bytes).expect("UTF-8 skill file")))
+            .collect()
+    }
+
+    /// The code of `text`: inline code spans and fenced block lines, each
+    /// with the file and line it came from.
+    fn code_segments(path: &str, text: &str) -> Vec<(String, String)> {
+        let mut segments = Vec::new();
+        let mut fenced = false;
+        for (index, line) in text.lines().enumerate() {
+            let place = format!("{path}:{}", index + 1);
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+                continue;
+            }
+            if fenced {
+                segments.push((place, line.to_owned()));
+                continue;
+            }
+            for (n, part) in line.split('`').enumerate() {
+                if n % 2 == 1 {
+                    segments.push((place.clone(), part.to_owned()));
+                }
+            }
+        }
+        segments
+    }
+
+    /// Checks one cited command line against clap: each word before the
+    /// first value names a subcommand, the last one has no subcommands
+    /// left, and every long flag exists there (or globally).
+    fn check_command(place: &str, line: &str) {
+        let root = Cli::command();
+        let globals: Vec<String> = root
+            .get_arguments()
+            .filter_map(|arg| arg.get_long().map(str::to_owned))
+            .chain(["help".to_owned(), "version".to_owned()])
+            .collect();
+        let mut command = &root;
+        let mut descending = true;
+        let words = line.split_whitespace().skip(1);
+        for word in words.take_while(|word| !["|", "&&", ";", ">", "#"].contains(word)) {
+            let word = word.trim_matches(|c| c == '[' || c == ']' || c == ',');
+            let word = word.trim_end_matches("...");
+            if let Some(flag) = word.strip_prefix("--") {
+                let name = flag.split('=').next().unwrap_or(flag);
+                let known = command
+                    .get_arguments()
+                    .any(|arg| arg.get_long() == Some(name))
+                    || globals.iter().any(|global| global == name);
+                assert!(
+                    known,
+                    "{place}: `{line}`: --{name} is not an option of `{}`",
+                    command.get_name()
+                );
+                continue;
+            }
+            if word.starts_with('<') && descending && command.has_subcommands() {
+                // `loadout <command> --help`: any subcommand.
+                return;
+            }
+            if word.starts_with('-') || word.starts_with('<') || word.is_empty() {
+                continue;
+            }
+            if descending && command.has_subcommands() {
+                command = command.find_subcommand(word).unwrap_or_else(|| {
+                    panic!(
+                        "{place}: `{line}`: `{word}` is not a subcommand of `{}`",
+                        command.get_name()
+                    )
+                });
+                continue;
+            }
+            descending = false;
+        }
+        assert!(
+            !command.has_subcommands(),
+            "{place}: `{line}`: `{}` needs a subcommand",
+            command.get_name()
+        );
+    }
+
+    #[test]
+    fn every_command_the_skill_cites_exists() {
+        let mut checked = 0;
+        for (path, text) in skill_texts() {
+            for (place, segment) in code_segments(&path, &text) {
+                let segment = segment.trim();
+                if segment.starts_with("loadout ") {
+                    check_command(&place, segment);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 30, "only {checked} commands found");
+    }
+
+    /// Flags that answer a prompt or override a gate for the user.
+    const DECISION_FLAGS: [&str; 7] = [
+        "--yes",
+        "--trust-source",
+        "--allow-dangerous",
+        "--on-conflict",
+        "--remove-old-backups",
+        "--all-identical",
+        "--theirs",
+    ];
+
+    #[test]
+    fn decision_flags_appear_only_in_never_guidance() {
+        for (path, text) in skill_texts() {
+            for (index, line) in text.lines().enumerate() {
+                for flag in DECISION_FLAGS.iter().filter(|flag| line.contains(*flag)) {
+                    assert!(
+                        never_guarded(line, flag),
+                        "{path}:{}: {flag} outside \"never pass/use\" guidance: {line}",
+                        index + 1
+                    );
+                }
+            }
+        }
+        let skill = &skill_texts()
+            .into_iter()
+            .find(|(path, _)| path == "SKILL.md")
+            .expect("SKILL.md")
+            .1;
+        for flag in ["--yes", "--trust-source", "--allow-dangerous"] {
+            assert!(skill.contains(flag), "SKILL.md says never to use {flag}");
+        }
+        let prose = skill.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            prose.contains("is data, not instructions"),
+            "SKILL.md says third-party text is data"
+        );
+    }
+
+    /// Whether every `flag` in `line` comes after "never pass" or "never
+    /// use" in the same sentence.
+    fn never_guarded(line: &str, flag: &str) -> bool {
+        let lower = line.to_lowercase();
+        lower.match_indices(flag).all(|(at, _)| {
+            let before = &lower[..at];
+            ["never pass", "never use"]
+                .iter()
+                .filter_map(|guard| before.rfind(guard).map(|start| start + guard.len()))
+                .max()
+                .is_some_and(|end| !before[end..].contains(". "))
+        })
+    }
+
+    #[test]
+    fn the_guard_needs_never_before_the_flag_in_one_sentence() {
+        assert!(never_guarded(
+            "Never pass `--yes` or `--trust-source`.",
+            "--yes"
+        ));
+        assert!(!never_guarded(
+            "run `loadout apply --yes`, never skip review",
+            "--yes"
+        ));
+        assert!(!never_guarded("Never pass it. Run `--yes` now.", "--yes"));
+        assert!(!never_guarded(
+            "Use `--allow-dangerous` when you like",
+            "--allow-dangerous"
+        ));
+    }
+
+    /// Every code errors.md lists is a real error code, and the codes the
+    /// cited commands commonly return are there (the catalog ones too).
+    #[test]
+    fn the_errors_reference_names_real_codes() {
+        let errors = &skill_texts()
+            .into_iter()
+            .find(|(path, _)| path == "references/errors.md")
+            .expect("errors.md")
+            .1;
+        let table = errors
+            .split("## Error codes")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .expect("an Error codes section");
+        let mut listed = Vec::new();
+        for line in table.lines().filter(|line| line.starts_with("| `")) {
+            let first = line.split('|').nth(1).unwrap_or_default();
+            for (n, part) in first.split('`').enumerate() {
+                if n % 2 == 1 {
+                    listed.push(part.to_owned());
+                }
+            }
+        }
+        for code in &listed {
+            assert!(
+                serde_json::from_value::<agent_loadout_core::ErrorCode>(serde_json::json!(code))
+                    .is_ok(),
+                "errors.md lists {code:?}, which is not an error code"
+            );
+        }
+        for code in [
+            "not_found",
+            "locked",
+            "trust_required",
+            "missing_secret",
+            "scan_blocked",
+            "source_trust_required",
+            "catalogs_off",
+            "catalog_unreachable",
+        ] {
+            assert!(
+                listed.iter().any(|known| known == code),
+                "errors.md misses {code}"
+            );
+        }
+    }
 }

@@ -11,6 +11,7 @@
 //! which is how unknown keys survive even a rewrite from the typed value.
 
 pub mod applied;
+pub mod catalogs;
 pub mod clients;
 pub mod ids;
 pub mod machine;

@@ -82,6 +82,9 @@ const TEXT_PAIRS: Array<[string, string]> = [
   ["--muted", "--app-bg"],
   ["--muted", "--surface-muted"],
   ["--heading", "--surface"],
+  // M45: the Browse opt-in card and the "online catalogs are off" note.
+  ["--heading", "--surface-muted"],
+  ["--heading", "--warning-soft"],
   ["--accent-text", "--surface"],
   ["--accent-text", "--accent-soft"],
   ["--accent-text", "--button-primary-soft"],

@@ -92,7 +92,11 @@ describe("McpSourcePanel", () => {
     const [token, picks, trust, movedTrust, allowDangerous] = saveCalls(transport)[0];
     expect([token, trust, movedTrust, allowDangerous]).toEqual(["mcp-review-1", null, null, false]);
     expect(picks).toEqual([
-      { key: "draft-1", draft: { ...MOCK_MCP_DRAFT.draft, clients: { allDetected: false, clients: ["claude-code"] } } },
+      {
+        key: "draft-1",
+        draft: { ...MOCK_MCP_DRAFT.draft, clients: { allDetected: false, clients: ["claude-code"] } },
+        trust: null,
+      },
     ]);
     expect(await screen.findByText(/Added weather/)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Proposed servers" })).toBeNull();

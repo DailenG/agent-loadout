@@ -835,6 +835,7 @@ fn stage(
                 path: None,
                 git_ref: None,
                 commit: None,
+                catalog: None,
                 extra: toml::Table::new(),
             });
             meta

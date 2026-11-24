@@ -141,6 +141,35 @@ export const commands = {
 	revokeSource: (id: string, options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("revoke_source", { id }, options)),
 	blockSource: (id: string, options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("block_source", { id }, options)),
 	blockSourceUrl: (url: string, scope: SourceScope, options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("block_source_url", { url, scope }, options)),
+	catalogsOverview: (options?: InvokeOptions) => typedError<CatalogsOverview, IpcError>(__TAURI_INVOKE("catalogs_overview", undefined, options)),
+	setOnlineCatalogs: (on: boolean, options?: InvokeOptions) => typedError<CatalogsOverview, IpcError>(__TAURI_INVOKE("set_online_catalogs", { on }, options)),
+	addCatalog: (kind: NewCatalogKind, url: string, id: string | null, gitRef: string | null, title: string | null, options?: InvokeOptions) => typedError<CatalogsOverview, IpcError>(__TAURI_INVOKE("add_catalog", { kind, url, id, gitRef, title }, options)),
+	removeCatalog: (id: string, options?: InvokeOptions) => typedError<CatalogsOverview, IpcError>(__TAURI_INVOKE("remove_catalog", { id }, options)),
+	setCatalogEnabled: (id: string, enabled: boolean, options?: InvokeOptions) => typedError<CatalogsOverview, IpcError>(__TAURI_INVOKE("set_catalog_enabled", { id, enabled }, options)),
+	/**
+	 *  Searches one catalog: call once per catalog so each renders when it
+	 *  answers.
+	 */
+	searchCatalog: (catalog: string, query: string, cursor: string | null, options?: InvokeOptions) => typedError<CatalogResults, IpcError>(__TAURI_INVOKE("search_catalog", { catalog, query, cursor }, options)),
+	showCatalogEntry: (catalog: string, entry: string, options?: InvokeOptions) => typedError<CatalogEntryDetail, IpcError>(__TAURI_INVOKE("show_catalog_entry", { catalog, entry }, options)),
+	refreshCatalog: (catalog: string, options?: InvokeOptions) => typedError<CatalogResults, IpcError>(__TAURI_INVOKE("refresh_catalog", { catalog }, options)),
+	/**
+	 *  The M41 review of a catalog's MCP entry; save it with
+	 *  `save_mcp_source_drafts`, drop it with `discard_mcp_source_review`.
+	 */
+	reviewCatalogMcp: (catalog: string, entry: string, version: string | null, options?: InvokeOptions) => typedError<McpSourceReview, IpcError>(__TAURI_INVOKE("review_catalog_mcp", { catalog, entry, version }, options)),
+	/**
+	 *  The git skill install review of a catalog's skill entry (or one skill
+	 *  of a plugin); install with `install_reviewed_skill`, drop with
+	 *  `discard_skill_review`.
+	 */
+	reviewCatalogSkill: (catalog: string, entry: string, skill: string | null, options?: InvokeOptions) => typedError<SkillInstallReview, IpcError>(__TAURI_INVOKE("review_catalog_skill", { catalog, entry, skill }, options)),
+	/**
+	 *  Opens an entry's repository or website, or the catalog's own page, in
+	 *  the browser. The address is looked up here, never taken from the
+	 *  caller; only https addresses open; nothing is fetched.
+	 */
+	openCatalogLink: (catalog: string, entry: string | null, link: CatalogLink, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("open_catalog_link", { catalog, entry, link }, options)),
 	listSkills: (scope: SkillScope, options?: InvokeOptions) => typedError<SkillList, IpcError>(__TAURI_INVOKE("list_skills", { scope }, options)),
 	listSkillToolDirs: (scope: SkillScope, options?: InvokeOptions) => typedError<ToolSkillDir[], IpcError>(__TAURI_INVOKE("list_skill_tool_dirs", { scope }, options)),
 	/**
@@ -205,6 +234,17 @@ export const commands = {
 	 *  Windows the NSIS installer closes the app itself.
 	 */
 	installUpdate: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("install_update", undefined, options)),
+	agentSkillStatus: (options?: InvokeOptions) => typedError<AgentSkillStatus, IpcError>(__TAURI_INVOKE("agent_skill_status", undefined, options)),
+	setAgentSkillClient: (client: string, enabled: boolean, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_agent_skill_client", { client, enabled }, options)),
+	removeAgentSkill: (options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("remove_agent_skill", undefined, options)),
+	resetAgentSkill: (options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("reset_agent_skill", undefined, options)),
+	/**  Runs the startup refresh once per app start; later calls answer `None`. */
+	refreshAgentSkill: (options?: InvokeOptions) => typedError<AgentSkillNotice | null, IpcError>(__TAURI_INVOKE("refresh_agent_skill", undefined, options)),
+	/**
+	 *  Opens the folder of the bundled skill: the app's resource folder, or
+	 *  (in a build without it) a copy in the data directory's cache.
+	 */
+	revealAgentSkill: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_agent_skill", undefined, options)),
 	scanUnmanagedSkills: (scope: SkillScope, client: string | null, options?: InvokeOptions) => typedError<UnmanagedSkills, IpcError>(__TAURI_INVOKE("scan_unmanaged_skills", { scope, client }, options)),
 	adoptSkills: (scope: SkillScope, client: string | null, choices: SkillAdoptChoice[], options?: InvokeOptions) => typedError<SkillAdoptResult, IpcError>(__TAURI_INVOKE("adopt_skills", { scope, client, choices }, options)),
 	discoverProjects: (options?: InvokeOptions) => typedError<ProjectDiscovery, IpcError>(__TAURI_INVOKE("discover_projects", undefined, options)),
@@ -254,6 +294,48 @@ export type AddedRemote = {
 	remote: RemoteEntry,
 	/**  `tool_not_found` (git or gh missing), `remote_unreachable`. */
 	warnings: IpcError[],
+};
+
+/**  One client with a skill folder. */
+export type AgentSkillClient = {
+	id: string,
+	name: string,
+	detected: boolean,
+	enabled: boolean,
+};
+
+/**  The Loadout skill in the store. */
+export type AgentSkillCopy = {
+	version: string,
+	state: AgentSkillState,
+};
+
+/**  What the startup refresh did, for a notification. */
+export type AgentSkillNotice = 
+/**
+ *  `needs_attention`: a client folder needs a decision after the
+ *  update (a changed copy, a collision); the Skills page shows it.
+ */
+{ kind: "updated"; from: string; to: string; needsAttention: boolean } | { kind: "customized"; version: string; bundled: string };
+
+/**  How the store copy compares with the bundled one. */
+export type AgentSkillState = "current" | 
+/**  Updated at the next start. */
+"outdated" | 
+/**  Edited by the user: never updated. */
+"customized" | 
+/**  From a newer Loadout (a synced store): never replaced. */
+"newer";
+
+/**  Settings > Agent integration. */
+export type AgentSkillStatus = {
+	bundledVersion: string,
+	/**  `None` when the skill is not in the store. */
+	copy: AgentSkillCopy | null,
+	/**  Another store skill uses the id `loadout`. */
+	taken: boolean,
+	/**  Every client with a skill folder, omp first. */
+	clients: AgentSkillClient[],
 };
 
 /**  The agents `skills` CLI actions (SPEC 12.4: only through the CLI). */
@@ -435,6 +517,131 @@ export type BackupRunEntry = {
 	undoOfRestore: boolean,
 	/**  Under their placeholder roots. */
 	files: string[],
+};
+
+/**
+ *  One catalog entry. Text from the catalog is untrusted: render it as
+ *  plain text; icons are never sent.
+ */
+export type CatalogEntry = {
+	catalog: string,
+	id: string,
+	/**  `catalog:<catalog>/<id>`. */
+	ref: string,
+	kind: CatalogEntryKind,
+	name: string,
+	description: string | null,
+	version: string | null,
+	updatedAt: string | null,
+	deprecated: boolean,
+	statusMessage: string | null,
+	publisher: CatalogPublisher | null,
+	official: boolean,
+	warning: string | null,
+	repository: string | null,
+	website: string | null,
+	license: string | null,
+	transports: string[],
+	packages: CatalogPackage[],
+	remotes: CatalogRemote[],
+	requiredSecrets: string[],
+	pinned: boolean,
+	gitRef: string | null,
+	commit: string | null,
+	path: string | null,
+	skills: string[],
+	servers: string[],
+	notImported: string[],
+	source: CatalogPluginSource | null,
+	installMcp: boolean,
+	installSkill: boolean,
+	problem: string | null,
+};
+
+export type CatalogEntryDetail = {
+	entry: CatalogEntry,
+	status: CatalogResultStatus,
+	ageSecs: number | null,
+	error: IpcError | null,
+};
+
+export type CatalogEntryKind = "server" | "skill" | "plugin";
+
+export type CatalogInfo = {
+	id: string,
+	kind: CatalogKind,
+	title: string,
+	url: string,
+	gitRef: string | null,
+	enabled: boolean,
+	builtin: boolean,
+	official: boolean,
+	attribution: string | null,
+};
+
+export type CatalogKind = "mcp_registry" | "git_tap" | "link";
+
+/**  Which link `open_catalog_link` opens. */
+export type CatalogLink = "repository" | "website" | "catalog";
+
+export type CatalogPackage = {
+	registryType: string,
+	identifier: string,
+	version: string | null,
+	transport: string | null,
+	pinned: boolean,
+};
+
+export type CatalogPluginSource = {
+	kind: CatalogPluginSourceKind,
+	url: string | null,
+	path: string | null,
+	gitRef: string | null,
+	sha: string | null,
+};
+
+export type CatalogPluginSourceKind = "relative" | "github" | "url" | "git_subdir" | "npm" | "archive" | "command" | "unknown";
+
+export type CatalogPublisher = {
+	name: string,
+	/**
+	 *  What the catalog checked ("namespace ownership checked by the
+	 *  registry"); null when it checks nothing.
+	 */
+	checked: string | null,
+};
+
+export type CatalogRemote = {
+	transport: string,
+	url: string,
+};
+
+export type CatalogResultStatus = "fresh" | "cached" | "stale" | "off" | "disabled" | "query_too_short" | "link" | "error";
+
+export type CatalogResults = {
+	catalog: string,
+	status: CatalogResultStatus,
+	ageSecs: number | null,
+	/**  RFC 3339 (UTC). */
+	fetchedAt: string | null,
+	error: IpcError | null,
+	entries: CatalogEntry[],
+	nextCursor: string | null,
+	link: string | null,
+	attribution: string | null,
+};
+
+export type CatalogsOverview = {
+	/**  The "Online catalogs" switch of this machine. */
+	online: boolean,
+	/**  The user answered once (on or off): Browse does not ask again. */
+	decided: boolean,
+	/**
+	 *  Hosts the enabled catalogs contact (the sentence before turning
+	 *  catalogs on).
+	 */
+	contacts: string[],
+	catalogs: CatalogInfo[],
 };
 
 /**
@@ -992,7 +1199,18 @@ export type ErrorCode =
  *  A server added from a local folder on another machine (#5): the
  *  folder is that machine's, so the entry is blocked here.
  */
-"folder_on_other_machine";
+"folder_on_other_machine" | 
+/**
+ *  Online catalogs are off on this machine (#26): nothing was
+ *  contacted. The user turns them on (Install > Browse, or
+ *  `loadout catalog online on`).
+ */
+"catalogs_off" | 
+/**
+ *  A catalog could not be reached or answered with an error (timeout,
+ *  HTTP status, rate limit, a body too large or not JSON).
+ */
+"catalog_unreachable";
 
 /**
  *  `env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`; refs stay refs,
@@ -1429,6 +1647,13 @@ export type McpDraft = {
 	alsoIn: string[],
 	/**  The folder's files and every launch line. */
 	scan: ScanResult,
+	/**
+	 *  What this draft runs, when it is gated on its own (a registry
+	 *  entry's package or remote host): the trust dialog asks per key, and
+	 *  the answer goes back in its `McpDraftPick.trust`. Null: the
+	 *  review's `trust` gates it.
+	 */
+	trust: SourceTrustInfo | null,
 };
 
 /**  A value the user provides after saving. */
@@ -1456,6 +1681,8 @@ export type McpDraftKind = "registry" | "bundle" | "client_config" | "package";
 export type McpDraftPick = {
 	key: string,
 	draft: ServerDraft,
+	/**  The answer for the draft's own `trust`, when it asks. */
+	trust: TrustGrantArg | null,
 };
 
 /**  A launch field an update changes (values as stored: references only). */
@@ -1497,9 +1724,15 @@ export type McpSourceInfo = {
 	path: string | null,
 	gitRef: string | null,
 	commit: string | null,
+	/**  The catalog entry it comes from, `<catalog>/<entry id>` (#26). */
+	catalog: string | null,
+	/**  A registry entry's version. */
+	version: string | null,
 };
 
-export type McpSourceKind = "git" | "local";
+export type McpSourceKind = "git" | "local" | 
+/**  An MCP registry catalog entry (#26). */
+"registry";
 
 /**  The review of a source. */
 export type McpSourceReview = {
@@ -1690,6 +1923,9 @@ export type NeededBy = {
 	 */
 	clients: string[],
 };
+
+/**  What `add_catalog` adds. */
+export type NewCatalogKind = "mcp_registry" | "git_tap";
 
 /**  A folder that could not be added. */
 export type NotAddedProject = {
@@ -2691,7 +2927,9 @@ export type SkillList = {
 export type SkillMethod = "link" | "copy";
 
 /**  Where a store skill came from (SPEC 12.1 `[source] kind`). */
-export type SkillOrigin = "git" | "local" | "agents_cli" | "catalog" | "authored";
+export type SkillOrigin = "git" | "local" | "agents_cli" | "catalog" | "authored" | 
+/**  Shipped with Loadout (the Loadout skill for agents). */
+"bundled";
 
 /**  The project the Skills page is scoped to. */
 export type SkillProject = {

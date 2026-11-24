@@ -201,6 +201,8 @@ pub struct Meta {
 pub enum ServerSourceKind {
     Git,
     Local,
+    /// An entry of an MCP registry catalog (#26): its `server.json`.
+    Registry,
 }
 
 impl ServerSourceKind {
@@ -208,6 +210,7 @@ impl ServerSourceKind {
         match self {
             ServerSourceKind::Git => "git",
             ServerSourceKind::Local => "local",
+            ServerSourceKind::Registry => "registry",
         }
     }
 }
@@ -216,9 +219,10 @@ impl ServerSourceKind {
 /// so an update check can read it again (#5).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ServerSource {
-    /// `git` or `local`.
+    /// `git`, `local` or `registry`.
     pub kind: ServerSourceKind,
-    /// Git URL, userinfo removed (git).
+    /// Git URL, userinfo removed (git); the registry's base URL
+    /// (registry).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// The folder, `${home}` for the home folder (local).
@@ -227,7 +231,7 @@ pub struct ServerSource {
     /// Folder inside the repository, `/`-separated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// Branch or tag followed.
+    /// Branch or tag followed (git); the version pinned (registry).
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub git_ref: Option<String>,
     /// The resolved commit (git).
@@ -249,6 +253,13 @@ pub struct ServerSource {
     /// runs only there (local sources).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// The catalog entry it was installed from, `<catalog>/<entry id>`
+    /// (#26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
+    /// The registry entry's version (registry).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -271,7 +282,47 @@ impl ServerSource {
                 join(path, "folder"),
                 "a local source needs its folder",
             ),
+            ServerSourceKind::Registry if self.url.as_deref().is_none_or(str::is_empty) => d.error(
+                ErrorCode::MissingField,
+                join(path, "url"),
+                "a registry source needs the registry's url",
+            ),
+            ServerSourceKind::Registry if self.catalog.as_deref().is_none_or(str::is_empty) => d
+                .error(
+                    ErrorCode::MissingField,
+                    join(path, "catalog"),
+                    "a registry source needs its catalog entry",
+                ),
+            ServerSourceKind::Registry if self.version.as_deref().is_none_or(str::is_empty) => d
+                .error(
+                    ErrorCode::MissingField,
+                    join(path, "version"),
+                    "a registry source needs its version",
+                ),
             _ => {}
+        }
+        if self.kind == ServerSourceKind::Registry
+            && let Some(problem) = self
+                .url
+                .as_deref()
+                .filter(|url| !url.is_empty())
+                .and_then(crate::model::catalogs::registry_url_problem)
+        {
+            d.error(ErrorCode::InvalidValue, join(path, "url"), problem);
+        }
+        if self.commit.is_some() && self.kind == ServerSourceKind::Registry {
+            d.error(
+                ErrorCode::InvalidValue,
+                join(path, "commit"),
+                "a registry source has a version, not a commit",
+            );
+        }
+        if self.version.is_some() && self.kind != ServerSourceKind::Registry {
+            d.error(
+                ErrorCode::InvalidValue,
+                join(path, "version"),
+                "only a registry source has a version",
+            );
         }
         if let Some(commit) = &self.commit
             && !crate::model::ids::is_commit_id(commit)

@@ -8,7 +8,9 @@
 //! Each command is a thin `#[tauri::command]` over a plain function taking
 //! a [`Core`], so the same functions run against a temp home in tests.
 
+pub mod agent;
 pub mod apply;
+pub mod catalogs;
 pub mod discover;
 pub mod effective;
 pub mod history;
@@ -26,6 +28,8 @@ pub mod skills;
 pub mod sources;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_agent;
 #[cfg(test)]
 mod tests_discover;
 #[cfg(test)]

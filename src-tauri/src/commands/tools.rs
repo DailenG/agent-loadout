@@ -258,7 +258,7 @@ pub(super) fn open_folder(folder: &Path) -> Result<(), CoreError> {
 }
 
 /// Hands `target` (a folder or a URL) to the OS opener.
-fn os_open(target: &OsStr) -> Result<(), CoreError> {
+pub(super) fn os_open(target: &OsStr) -> Result<(), CoreError> {
     let program = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {

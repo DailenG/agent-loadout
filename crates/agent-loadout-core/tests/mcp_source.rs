@@ -121,6 +121,7 @@ fn pick(resolved: &Resolved, key: &str) -> Pick {
     Pick {
         key: key.to_owned(),
         server: draft.server.clone(),
+        trust: None,
     }
 }
 
@@ -346,11 +347,15 @@ fn a_bare_node_repository_is_pinned_to_its_commit() {
         ["-y".to_owned(), format!("git+{key}#{commit}")]
     );
 
-    // A ref that names an older commit resolves to it.
+    // A ref that names an older commit resolves to it; a short commit is
+    // refused (a shallow remote clone cannot fetch one).
     fx.write(&work.join("README.md"), "later\n");
     push(&fx, &git, &work, "later");
     let mut request = ResolveRequest::new(Source::parse(&url, &fx.fs));
     request.git_ref = Some(commit[..10].to_owned());
+    let err = mcp_source::resolve(Some(&fx.store()), &sx, &request).unwrap_err();
+    assert!(err.message().contains("full 40-character commit"), "{err}");
+    request.git_ref = Some(commit.clone());
     let pinned = mcp_source::resolve(Some(&fx.store()), &sx, &request).unwrap();
     assert_eq!(pinned.source().commit.as_deref(), Some(commit.as_str()));
 }

@@ -69,6 +69,10 @@ tempfile = "3"
 rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
 toml = "1"
 toml_edit = "0.25"
+# Catalogs (#26): HTTP to MCP registries. rustls with ring (no OpenSSL,
+# SPEC 4), the platform's certificate verifier (as the app's updater), and
+# gzip through flate2's pure Rust backend.
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip", "platform-verifier"] }
 # Git source URLs (#24): parsed as git/curl parse them (WHATWG), so a source
 # key names the host and path git contacts. The version the app already
 # pulls in through Tauri.

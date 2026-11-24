@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use agent_loadout_core::ErrorCode;
 use agent_loadout_core::model::applied::AppliedRecord;
+use agent_loadout_core::model::catalogs::CatalogsFile;
 use agent_loadout_core::model::clients::{ClientPrefsFile, ClientSelection};
 use agent_loadout_core::model::ids::{self, IdKind};
 use agent_loadout_core::model::machine::MachineOverlay;
@@ -198,6 +199,7 @@ fn typed_rewrite_without_the_original_document_keeps_every_value() {
             StoreFile::Clients => check::<ClientPrefsFile>(&text, &relative),
             StoreFile::Settings => check::<Settings>(&text, &relative),
             StoreFile::Sources => check::<SourcesFile>(&text, &relative),
+            StoreFile::Catalogs => check::<CatalogsFile>(&text, &relative),
             StoreFile::SkillMeta { .. } => check::<SkillMeta>(&text, &relative),
             StoreFile::Project { .. } => check::<ProjectManifest>(&text, &relative),
             StoreFile::Machine { .. } => check::<MachineOverlay>(&text, &relative),
@@ -472,6 +474,7 @@ fn json_schemas_match_docs() {
         ),
         (Settings::SCHEMA_NAME, json_schema::<Settings>()),
         (SourcesFile::SCHEMA_NAME, json_schema::<SourcesFile>()),
+        (CatalogsFile::SCHEMA_NAME, json_schema::<CatalogsFile>()),
         (SkillMeta::SCHEMA_NAME, json_schema::<SkillMeta>()),
         (
             ProjectManifest::SCHEMA_NAME,
@@ -510,6 +513,7 @@ fn json_schemas_match_docs() {
         ClientPrefsFile::SCHEMA_NAME,
         Settings::SCHEMA_NAME,
         SourcesFile::SCHEMA_NAME,
+        CatalogsFile::SCHEMA_NAME,
         SkillMeta::SCHEMA_NAME,
         ProjectManifest::SCHEMA_NAME,
         MachineOverlay::SCHEMA_NAME,

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout skill metadata (store/skill-meta/<id>.toml)",
+  "type": "object",
+  "properties": {
+    "enable": {
+      "$ref": "#/$defs/SkillEnable"
+    },
+    "id": {
+      "description": "Skill id; equals the file name. Identity, not the name.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "name": {
+      "description": "Name from the SKILL.md frontmatter.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "source": {
+      "$ref": "#/$defs/SkillSource"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "id"
+  ],
+  "$defs": {
+    "ClientSelection": {
+      "description": "\"all-detected\" or a list of client ids",
+      "oneOf": [
+        {
+          "const": "all-detected"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "DistributionMethod": {
+      "description": "How a skill reaches client skill directories (SPEC 12.2).",
+      "type": "string",
+      "enum": [
+        "link",
+        "copy"
+      ]
+    },
+    "SkillEnable": {
+      "type": "object",
+      "properties": {
+        "clients": {
+          "description": "Client ids, or \"all-detected\". Unknown ids are a warning and are kept.",
+          "$ref": "#/$defs/ClientSelection"
+        },
+        "method": {
+          "$ref": "#/$defs/DistributionMethod"
+        }
+      }
+    },
+    "SkillSource": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "description": "Commit the store copy came from (git).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SkillSourceKind"
+        },
+        "path": {
+          "description": "Skill directory inside the source.",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Branch or tag followed for updates (git).",
+          "type": "string"
+        },
+        "url": {
+          "description": "Repository URL (git).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "SkillSourceKind": {
+      "type": "string",
+      "enum": [
+        "git",
+        "local",
+        "agents-cli",
+        "catalog",
+        "authored"
+      ]
+    }
+  }
+}

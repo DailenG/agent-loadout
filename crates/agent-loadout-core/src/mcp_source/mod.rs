@@ -44,13 +44,14 @@ use crate::scan::{self, ScanReport, Scanner};
 use crate::secrets::catalog::Catalog;
 use crate::secrets::extract::{Aliases, Extractor};
 use crate::skills::install::{
-    self, ChangeKind, Decisions, FileChange, Source, UpdateStatus, check_ref, check_repo_path,
-    git_path, is_remote_url, join_rel, looks_executable, remove_dir, rev_parse, run_git,
+    self, ChangeKind, Decisions, FileChange, Source, UpdateStatus, check_repo_path, git_path,
+    is_commit_ref, join_rel, looks_executable, remove_dir, run_git,
 };
 use crate::skills::{SkillFiles, SkillsEnv, confine, content_hash, io_error, read_folder_skipping};
-use crate::sources::{self, SourceChange, SourceChangeKind, SourceRef, TrustCheck};
+use crate::sources::{self, SourceChange, SourceChangeKind, SourceRef, TrustCheck, TrustGrant};
 use crate::store::{CommitId, Machine, Operation, Store, server_path};
 
+pub(crate) use convert::custom_registry_url;
 use convert::{CHECKOUT_TOKEN, Ctx, GitPin, ID_TOKEN, IMAGE_PREFIX, RawDraft};
 
 /// Machine-local clones servers run from: `<LOADOUT_HOME>/servers/<id>`.
@@ -181,6 +182,9 @@ pub struct Draft {
     pub also_in: Vec<String>,
     /// The folder's files and every launch line of this draft.
     pub scan: ScanReport,
+    /// What this draft runs, gated on its own (a registry entry's package
+    /// or remote host, #26); `None`: [`Resolved::trust_source`] gates it.
+    pub trust_source: Option<SourceRef>,
 }
 
 impl Draft {
@@ -212,6 +216,13 @@ pub struct ResolveRequest {
     pub git_ref: Option<String>,
     /// The folder inside a git source (overrides the URL's).
     pub path: Option<String>,
+    /// The catalog entry the source comes from, `<catalog>/<entry id>`
+    /// (#26): recorded as `meta.source.catalog`.
+    pub catalog: Option<String>,
+    /// A Claude Code marketplace entry's `mcpServers` (#26), as JSON: an
+    /// object of server definitions, or a path to a config file in the
+    /// folder. Drafted with the folder's own configs.
+    pub mcp_servers: Option<String>,
 }
 
 impl ResolveRequest {
@@ -220,8 +231,28 @@ impl ResolveRequest {
             source,
             git_ref: None,
             path: None,
+            catalog: None,
+            mcp_servers: None,
         }
     }
+}
+
+/// An MCP registry entry to draft from (#26): its `server.json` as the
+/// registry served it (the `server` object of the entry).
+#[derive(Debug, Clone)]
+pub struct RegistryRequest {
+    /// `<catalog>/<server name>`.
+    pub catalog: String,
+    /// The registry's base URL.
+    pub registry: String,
+    /// The server name (`io.github.acme/weather`).
+    pub name: String,
+    /// The entry's version.
+    pub version: String,
+    /// The version was asked for (`--ref`): updates do not follow the
+    /// latest one.
+    pub pinned: bool,
+    pub server_json: String,
 }
 
 /// A resolved source waiting for the user's picks ([`resolve`], then
@@ -269,7 +300,9 @@ impl Resolved {
     }
 
     /// The source the trust gate admits with [`Decisions::trust`]: the
-    /// repository the URL names, or the local folder.
+    /// repository the URL names, or the local folder. `None` for a
+    /// registry entry: each draft carries its own
+    /// ([`Draft::trust_source`]).
     pub fn trust_source(&self) -> Option<&SourceRef> {
         self.trust_source.as_ref()
     }
@@ -287,13 +320,44 @@ impl Resolved {
 
     /// The trust gate (#24): the requested source with the user's answer
     /// for it, and a redirect target with the answer for that one. A
-    /// redirect only ever adds a question.
-    fn admit(&self, store: &Store<'_>, decisions: &Decisions) -> Result<(), CoreError> {
+    /// redirect only ever adds a question. Each of `drafts` that runs from
+    /// its own source (a registry entry) is gated on it, with the answer
+    /// given with it (a [`Pick::trust`]), or [`Decisions::trust`] when the
+    /// drafts run from one source.
+    fn admit(
+        &self,
+        store: &Store<'_>,
+        decisions: &Decisions,
+        drafts: &[(&Draft, Option<TrustGrant>)],
+    ) -> Result<(), CoreError> {
         if let Some(source) = &self.trust_source {
             sources::admit(store, source, decisions.trust, decisions.via)?;
         }
         if let Some(moved) = &self.moved_source {
             sources::admit(store, moved, decisions.moved_trust, decisions.via)?;
+        }
+        let mut own: Vec<(&SourceRef, Option<TrustGrant>)> = Vec::new();
+        for (draft, grant) in drafts {
+            let Some(source) = draft.trust_source.as_ref() else {
+                continue;
+            };
+            match own
+                .iter_mut()
+                .find(|(known, _)| known.key() == source.key())
+            {
+                Some((_, known)) => *known = known.or(*grant),
+                None => own.push((source, *grant)),
+            }
+        }
+        // Blocks first: no "always trust" is recorded for a save that a
+        // block refuses anyway.
+        for (source, _) in &own {
+            sources::refuse_blocked(store, source)?;
+        }
+        let single = own.len() == 1 && self.trust_source.is_none();
+        for (source, grant) in own {
+            let grant = grant.or(if single { decisions.trust } else { None });
+            sources::admit(store, source, grant, decisions.via)?;
         }
         Ok(())
     }
@@ -318,19 +382,17 @@ struct Fetched {
     pin: Option<GitPin>,
     name: String,
     clone: Option<PathBuf>,
-    trust_source: SourceRef,
+    /// `None`: a registry entry (each draft is gated on what it runs).
+    trust_source: Option<SourceRef>,
     moved_source: Option<SourceRef>,
     source_change: Option<SourceChange>,
+    /// [`ResolveRequest::mcp_servers`].
+    plugin_servers: Option<String>,
 }
 
 /// `<LOADOUT_HOME>/servers/<id>`.
 pub fn checkout_dir(sx: &SkillsEnv<'_>, id: &str) -> PathBuf {
     sx.home.path.join(CHECKOUTS_DIR).join(id)
-}
-
-/// A ref that names a commit (7 to 40 hex characters).
-fn is_commit_ref(git_ref: &str) -> bool {
-    (7..=40).contains(&git_ref.len()) && git_ref.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// The URL kept in the store (and in a checkout's `.git/config`): a
@@ -434,13 +496,7 @@ fn clone_at(
         ".tmp-{}",
         ids::new_ulid(sx.env.now())?.to_ascii_lowercase()
     ));
-    let commit_ref = git_ref.filter(|r| is_commit_ref(r));
-    let branch_ref = git_ref.filter(|r| !is_commit_ref(r));
-    let cloned = install::clone(sx, &git, url, branch_ref, path, &temp)?;
-    let run = |args: &[&str]| {
-        let args: Vec<&OsStr> = args.iter().map(OsStr::new).collect();
-        run_git(sx, &git, &temp, &args)
-    };
+    let cloned = install::clone(sx, &git, url, git_ref, path, &temp)?;
     let fail = |err: CoreError| {
         let _ = remove_dir(sx.fs, &temp);
         err
@@ -448,37 +504,18 @@ fn clone_at(
     // A token in the URL never stays in the clone's `.git/config`, which
     // a checkout keeps for good.
     let clean = provenance_url(url);
-    let output = run(&["remote", "set-url", "origin", &clean]).map_err(fail)?;
+    let args: Vec<&OsStr> = ["remote", "set-url", "origin", clean.as_str()]
+        .into_iter()
+        .map(OsStr::new)
+        .collect();
+    let output = run_git(sx, &git, &temp, &args).map_err(fail)?;
     if !output.success {
         return Err(fail(CoreError::new(
             ErrorCode::GitError,
             "cannot set the clone's remote URL",
         )));
     }
-    let mut commit = cloned.commit;
-    if let Some(wanted) = commit_ref {
-        check_ref(wanted).map_err(fail)?;
-        let mut output = run(&["checkout", "--quiet", "--detach", wanted]).map_err(fail)?;
-        if !output.success && is_remote_url(url) {
-            let fetched = run(&["fetch", "--quiet", "--depth", "1", url, wanted]).map_err(fail)?;
-            if fetched.success {
-                output = run(&["checkout", "--quiet", "--detach", "FETCH_HEAD"]).map_err(fail)?;
-            }
-        }
-        if !output.success {
-            return Err(fail(CoreError::new(
-                ErrorCode::NotFound,
-                format!("the repository has no commit {wanted}"),
-            )));
-        }
-        commit = rev_parse(sx, &git, &temp, "HEAD").map_err(fail)?;
-    }
-    let branch = if commit_ref.is_some() {
-        None
-    } else {
-        cloned.branch
-    };
-    Ok((temp, commit, branch, cloned.redirect))
+    Ok((temp, cloned.commit, cloned.branch, cloned.redirect))
 }
 
 fn fetch(sx: &SkillsEnv<'_>, request: &ResolveRequest) -> Result<Fetched, CoreError> {
@@ -511,6 +548,8 @@ fn fetch(sx: &SkillsEnv<'_>, request: &ResolveRequest) -> Result<Fetched, CoreEr
                     entry: None,
                     checkout: None,
                     machine: None,
+                    catalog: request.catalog.clone(),
+                    version: None,
                     extra: toml::Table::new(),
                 },
                 files,
@@ -519,9 +558,10 @@ fn fetch(sx: &SkillsEnv<'_>, request: &ResolveRequest) -> Result<Fetched, CoreEr
                 pin: None,
                 name: name_of(&folder.to_string_lossy()),
                 clone: None,
-                trust_source: SourceRef::from_local_path(folder)?,
+                trust_source: Some(SourceRef::from_local_path(folder)?),
                 moved_source: None,
                 source_change: None,
+                plugin_servers: request.mcp_servers.clone(),
             })
         }
         Source::Git { url, git_ref, path } => {
@@ -588,6 +628,8 @@ fn fetch(sx: &SkillsEnv<'_>, request: &ResolveRequest) -> Result<Fetched, CoreEr
                     entry: None,
                     checkout: None,
                     machine: None,
+                    catalog: request.catalog.clone(),
+                    version: None,
                     extra: toml::Table::new(),
                 },
                 files,
@@ -596,9 +638,10 @@ fn fetch(sx: &SkillsEnv<'_>, request: &ResolveRequest) -> Result<Fetched, CoreEr
                 pin: Some(GitPin { url, commit, path }),
                 name,
                 clone: Some(clone),
-                trust_source: requested,
+                trust_source: Some(requested),
                 moved_source: moved_to,
                 source_change,
+                plugin_servers: request.mcp_servers.clone(),
             })
         }
     }
@@ -878,6 +921,103 @@ pub fn resolve(
     build(store, sx, fetched)
 }
 
+/// The `meta.origin` of a catalog install: `catalog:<catalog id>`.
+pub fn catalog_origin(catalog: &str) -> String {
+    let id = catalog.split_once('/').map_or(catalog, |(id, _)| id);
+    format!("catalog:{id}")
+}
+
+/// Resolves an MCP registry entry (#26) into drafts: its `server.json`
+/// goes through the `registry` converter as a `registry` source. Nothing
+/// is fetched here (the catalog already read the entry); `store` keeps
+/// ids and aliases free. Each draft is gated on what it runs
+/// ([`crate::catalog::registry::trust_keys`]): a draft without a usable
+/// key is skipped, and an entry whose every draft is blocked is refused.
+pub fn resolve_registry(
+    store: Option<&Store<'_>>,
+    sx: &SkillsEnv<'_>,
+    request: &RegistryRequest,
+) -> Result<Resolved, CoreError> {
+    let keys = crate::catalog::registry::trust_keys(&request.server_json)?;
+    let files = SkillFiles::from([(
+        "server.json".to_owned(),
+        request.server_json.as_bytes().to_vec(),
+    )]);
+    let fetched = Fetched {
+        base: ServerSource {
+            kind: ServerSourceKind::Registry,
+            url: Some(request.registry.clone()),
+            folder: None,
+            path: None,
+            git_ref: request.pinned.then(|| request.version.clone()),
+            commit: None,
+            file: String::new(),
+            converter: String::new(),
+            entry: None,
+            checkout: None,
+            machine: None,
+            catalog: Some(request.catalog.clone()),
+            version: Some(request.version.clone()),
+            extra: toml::Table::new(),
+        },
+        files,
+        skipped_folders: Vec::new(),
+        root: String::new(),
+        pin: None,
+        name: name_of(&request.name),
+        clone: None,
+        trust_source: None,
+        moved_source: None,
+        source_change: None,
+        plugin_servers: None,
+    };
+    let mut resolved = build(store, sx, fetched)?;
+    let drafts = std::mem::take(&mut resolved.drafts);
+    for mut draft in drafts {
+        let entry = draft.provenance().entry.clone();
+        match keys
+            .iter()
+            .find(|(name, _)| Some(name) == entry.as_ref())
+            .map(|(_, key)| key.clone())
+        {
+            Some(Ok(source)) => {
+                draft.trust_source = Some(source);
+                resolved.drafts.push(draft);
+            }
+            Some(Err(error)) => resolved.skipped.push(Skipped {
+                file: draft.provenance().file.clone(),
+                entry,
+                error,
+            }),
+            None => resolved.skipped.push(Skipped {
+                file: draft.provenance().file.clone(),
+                entry,
+                error: CoreError::new(
+                    ErrorCode::InvalidValue,
+                    "Loadout cannot tell what this definition runs from",
+                ),
+            }),
+        }
+    }
+    if let Some(store) = store {
+        let mut blocked = None;
+        for draft in &resolved.drafts {
+            let source = draft.trust_source.as_ref().expect("set above");
+            match sources::refuse_blocked(store, source) {
+                Ok(_) => {
+                    blocked = None;
+                    break;
+                }
+                Err(err) => blocked = blocked.or(Some(err)),
+            }
+        }
+        if let Some(err) = blocked {
+            return Err(err);
+        }
+    }
+    Ok(resolved)
+}
+
 fn build(
     store: Option<&Store<'_>>,
     sx: &SkillsEnv<'_>,
@@ -894,6 +1034,7 @@ fn build(
         trust_source,
         moved_source,
         source_change,
+        plugin_servers,
     } = fetched;
     let ctx = Ctx {
         files: &files,
@@ -903,6 +1044,7 @@ fn build(
         os: sx.env.os(),
         name,
         content_hash: content_hash(&files),
+        plugin_servers: plugin_servers.as_deref(),
     };
     let (raws, mut skipped) = convert::all(&ctx);
     // Identical definitions collapse into the first.
@@ -954,13 +1096,12 @@ fn build(
         source.checkout = checkout.then_some(true);
         body.meta = Some(Meta {
             homepage: raw.homepage.clone(),
-            origin: Some(
-                match base.kind {
-                    ServerSourceKind::Git => ORIGIN_GIT,
-                    ServerSourceKind::Local => ORIGIN_LOCAL,
-                }
-                .to_owned(),
-            ),
+            origin: Some(match (&base.catalog, base.kind) {
+                (Some(catalog), _) => catalog_origin(catalog),
+                (None, ServerSourceKind::Git) => ORIGIN_GIT.to_owned(),
+                (None, ServerSourceKind::Local) => ORIGIN_LOCAL.to_owned(),
+                (None, ServerSourceKind::Registry) => "catalog".to_owned(),
+            }),
             source: Some(source),
             ..Meta::default()
         });
@@ -997,6 +1138,7 @@ fn build(
             setup,
             also_in,
             scan,
+            trust_source: None,
         });
     }
     Ok(Resolved {
@@ -1006,7 +1148,7 @@ fn build(
         skipped_folders,
         files,
         files_scan,
-        trust_source: Some(trust_source),
+        trust_source,
         moved_source,
         source_change,
         clone,
@@ -1082,7 +1224,7 @@ pub fn runnable(fs: &dyn Fs, loadout_home: &Path, server: &Server) -> Result<(),
             }
             None => Ok(()),
         },
-        ServerSourceKind::Git => Ok(()),
+        ServerSourceKind::Git | ServerSourceKind::Registry => Ok(()),
     }
 }
 
@@ -1283,6 +1425,11 @@ pub struct Pick {
     /// The server to store: its id, launch fields, enablement and names as
     /// edited; `meta.origin` and `meta.source` are set from the draft.
     pub server: Server,
+    /// The user's answer for what this draft runs, when it is gated on
+    /// its own source ([`Draft::trust_source`]: registry entries, which
+    /// can name several). `None` leaves it to [`Decisions::trust`] when
+    /// the picks run from one source.
+    pub trust: Option<TrustGrant>,
 }
 
 /// What [`save`] did.
@@ -1322,6 +1469,13 @@ fn picked_server(draft: &Draft, pick: &Pick) -> Result<Server, CoreError> {
 /// folder (`${home}/...`, or only its name when it is outside the home
 /// folder: no absolute path goes into history).
 fn from_text(source: &ServerSource) -> String {
+    if source.kind == ServerSourceKind::Registry {
+        let entry = source.catalog.as_deref().unwrap_or_default();
+        return match &source.version {
+            Some(version) => format!("catalog {entry}@{version}"),
+            None => format!("catalog {entry}"),
+        };
+    }
     let place = match (&source.url, &source.folder) {
         (Some(url), _) => url.clone(),
         (None, Some(folder)) if folder.starts_with("${home}") => folder.clone(),
@@ -1364,6 +1518,7 @@ pub fn save(
         ));
     }
     let mut servers: Vec<(Server, bool)> = Vec::new();
+    let mut gated: Vec<(&Draft, Option<TrustGrant>)> = Vec::new();
     for pick in picks {
         let draft = resolved
             .drafts
@@ -1382,8 +1537,10 @@ pub fn save(
             ));
         }
         servers.push((server, draft.checkout));
+        gated.push((draft, pick.trust));
     }
-    resolved.admit(store, decisions)?;
+    resolved.admit(store, decisions, &gated)?;
+    drop(gated);
     let scanner = Scanner::new(sx.fs, sx.home);
     let mut report = resolved.files_scan.clone();
     for (server, _) in &servers {
@@ -1486,6 +1643,9 @@ pub struct UpdateCheck {
     /// The source's commit now; for a local folder, the content hash of
     /// what was read (pass it to [`update`] as `expected`).
     pub latest: Option<String>,
+    /// A registry entry's version now (its `latest` is the content hash
+    /// of its `server.json`, so other content under one version is seen).
+    pub version: Option<String>,
     pub changes: Vec<FieldChange>,
     /// Changed files of a checkout ([`SKIP_DIRS`] left out).
     pub files: Vec<FileChange>,
@@ -1518,6 +1678,7 @@ impl UpdateCheck {
             status,
             current,
             latest: None,
+            version: None,
             changes: Vec::new(),
             files: Vec::new(),
             server: None,
@@ -1548,7 +1709,21 @@ fn stored(store: &Store<'_>, id: &str) -> Result<(Server, Option<ServerSource>),
     Ok((server, source))
 }
 
-fn request_of(sx: &SkillsEnv<'_>, source: &ServerSource) -> Result<ResolveRequest, CoreError> {
+/// The `mcpServers` of the marketplace entry a catalog install came from,
+/// read again from the catalog's cached index (no network): an update
+/// drafts what the install drafted.
+fn catalog_servers(store: &Store<'_>, sx: &SkillsEnv<'_>, catalog: Option<&str>) -> Option<String> {
+    let (catalog, entry) = catalog?.split_once('/')?;
+    crate::catalog::cached_entry(sx, Some(store), catalog, entry)
+        .ok()?
+        .mcp_servers
+}
+
+fn request_of(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    source: &ServerSource,
+) -> Result<ResolveRequest, CoreError> {
     match source.kind {
         ServerSourceKind::Git => {
             let url = source.url.clone().ok_or_else(|| {
@@ -1562,6 +1737,8 @@ fn request_of(sx: &SkillsEnv<'_>, source: &ServerSource) -> Result<ResolveReques
                 },
                 git_ref: source.git_ref.clone(),
                 path: source.path.clone(),
+                catalog: source.catalog.clone(),
+                mcp_servers: catalog_servers(store, sx, source.catalog.as_deref()),
             })
         }
         ServerSourceKind::Local => {
@@ -1570,6 +1747,10 @@ fn request_of(sx: &SkillsEnv<'_>, source: &ServerSource) -> Result<ResolveReques
             })?;
             Ok(ResolveRequest::new(Source::Local(folder_of(sx, folder))))
         }
+        ServerSourceKind::Registry => Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            "a registry source is read through its catalog",
+        )),
     }
 }
 
@@ -1813,7 +1994,12 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
             resolved: None,
         });
     };
-    let current = source.commit.clone();
+    let registry = source.kind == ServerSourceKind::Registry;
+    let current = if registry {
+        source.version.clone()
+    } else {
+        source.commit.clone()
+    };
     let mut check = UpdateCheck::new(id, UpdateStatus::UpToDate, current.clone());
     check.checkout_out_of_date =
         source.uses_checkout() && !checkout_current(sx.fs, &sx.home.path, id, &source);
@@ -1827,6 +2013,8 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
             .as_deref()
             .map(|f| folder_of(sx, f))
             .and_then(|folder| SourceRef::from_local_path(&folder).ok()),
+        // Its trust source is in the entry, read below.
+        ServerSourceKind::Registry => None,
     };
     let not_fetched = |mut check: UpdateCheck,
                        status: UpdateStatus,
@@ -1853,17 +2041,26 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
         );
         return not_fetched(check, UpdateStatus::Unreachable, err);
     }
-    if source.kind == ServerSourceKind::Git && source.git_ref.as_deref().is_some_and(is_commit_ref)
-    {
-        // Pinned to a commit: nothing to follow.
+    let pinned = match source.kind {
+        ServerSourceKind::Git => source.git_ref.as_deref().is_some_and(is_commit_ref),
+        ServerSourceKind::Registry => source.git_ref.is_some(),
+        ServerSourceKind::Local => false,
+    };
+    if pinned {
+        // Pinned to a commit or a registry version: nothing to follow.
         check.latest = current;
         return Ok(Latest {
             check,
             resolved: None,
         });
     }
-    let request = request_of(sx, &source)?;
-    let resolved = match resolve(Some(store), sx, &request) {
+    let resolved = if registry {
+        crate::catalog::registry_latest(store, sx, &source)
+            .and_then(|request| resolve_registry(Some(store), sx, &request))
+    } else {
+        request_of(store, sx, &source).and_then(|request| resolve(Some(store), sx, &request))
+    };
+    let resolved = match resolved {
         Ok(resolved) => resolved,
         Err(err) if err.code() == ErrorCode::SourceBlocked => {
             return not_fetched(check, UpdateStatus::Blocked, err);
@@ -1875,6 +2072,9 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
     let latest_commit = match source.kind {
         ServerSourceKind::Git => resolved.base.commit.clone(),
         ServerSourceKind::Local => Some(content_hash(&resolved.files)),
+        // The content, not the version string: a registry serving other
+        // content under the same version is another update to review.
+        ServerSourceKind::Registry => Some(content_hash(&resolved.files)),
     };
     let mut change = resolved.source_change.clone();
     if change.is_none()
@@ -1908,6 +2108,9 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
         .transpose()?;
     check.source_change = change;
     check.latest.clone_from(&latest_commit);
+    if registry {
+        check.version.clone_from(&resolved.base.version);
+    }
     let Some(draft) = resolved.drafts.iter().find(|draft| {
         let p = draft.provenance();
         p.file == source.file && p.converter == source.converter && p.entry == source.entry
@@ -1926,6 +2129,17 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
         );
         return not_fetched(check, UpdateStatus::Unreachable, err);
     };
+    if let Some(own) = &draft.trust_source {
+        check.trust = Some(sources::check(store, own)?);
+        if let Err(err) = sources::refuse_blocked(store, own) {
+            check.status = UpdateStatus::Blocked;
+            check.error = Some(err);
+            return Ok(Latest {
+                check,
+                resolved: None,
+            });
+        }
+    }
     let proposed = updated_server(&server, draft);
     check.changes = field_changes(&server, &proposed);
     check.setup = rename_steps(&draft.setup, &draft.server.id, id);
@@ -1938,9 +2152,11 @@ fn latest(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Latest, Cor
             }
         }
     }
-    let moved_on = source.kind == ServerSourceKind::Git
-        && current.is_some()
-        && resolved.base.commit != current;
+    let moved_on = match source.kind {
+        ServerSourceKind::Git => current.is_some() && resolved.base.commit != current,
+        ServerSourceKind::Registry => current.is_some() && resolved.base.version != current,
+        ServerSourceKind::Local => false,
+    };
     if !check.changes.is_empty() || moved_on || !check.files.is_empty() {
         check.status = UpdateStatus::Available;
         check.setup_again = draft.checkout && !check.setup.is_empty();
@@ -2006,7 +2222,7 @@ pub fn update(
         UpdateStatus::NotTracked => {
             return Err(CoreError::new(
                 ErrorCode::InvalidValue,
-                format!("server {id:?} does not come from a git repository or folder"),
+                format!("server {id:?} does not come from a git repository, folder or catalog"),
             ));
         }
         UpdateStatus::Unreachable | UpdateStatus::Blocked => {
@@ -2030,29 +2246,42 @@ pub fn update(
         return Ok(Updated {
             id: id.to_owned(),
             from: check.current.clone(),
-            to: check.latest.clone(),
+            to: check.version.clone().or_else(|| check.latest.clone()),
             changes: Vec::new(),
             commit: None,
             apply: None,
             scan: check.scan,
         });
     };
-    resolved.admit(store, decisions)?;
-    let scan = check.scan.clone().expect("an available update is scanned");
-    scan::gate(&scan, decisions.allow_dangerous)?;
     let source = server
         .body
         .meta
         .as_ref()
         .and_then(|meta| meta.source.clone())
         .expect("a source server");
-    let to = match source.kind {
-        ServerSourceKind::Git => source.commit.clone(),
-        ServerSourceKind::Local => None,
-    };
-    let summary = match &to {
-        Some(commit) => format!("server: update {id} to {}", &commit[..commit.len().min(7)]),
-        None => format!("server: update {id} from its folder"),
+    let gated: Vec<(&Draft, Option<TrustGrant>)> = resolved
+        .drafts
+        .iter()
+        .filter(|draft| {
+            let p = draft.provenance();
+            p.file == source.file && p.converter == source.converter && p.entry == source.entry
+        })
+        .map(|draft| (draft, None))
+        .collect();
+    resolved.admit(store, decisions, &gated)?;
+    drop(gated);
+    let scan = check.scan.clone().expect("an available update is scanned");
+    scan::gate(&scan, decisions.allow_dangerous)?;
+    let summary = match source.kind {
+        ServerSourceKind::Git => {
+            let commit = source.commit.as_deref().unwrap_or_default();
+            format!("server: update {id} to {}", &commit[..commit.len().min(7)])
+        }
+        ServerSourceKind::Registry => format!(
+            "server: update {id} to {}",
+            source.version.as_deref().unwrap_or_default()
+        ),
+        ServerSourceKind::Local => format!("server: update {id} from its folder"),
     };
     let mut doc = store.server(id)?.ok_or_else(|| {
         CoreError::new(ErrorCode::NotFound, format!("server {id:?} does not exist"))
@@ -2089,7 +2318,7 @@ pub fn update(
     Ok(Updated {
         id: id.to_owned(),
         from: check.current,
-        to: check.latest,
+        to: check.version.or(check.latest),
         changes: check.changes,
         commit: committed.commit,
         apply: committed.value,
@@ -2171,6 +2400,8 @@ pub fn prepare_checkout(
         },
         git_ref: Some(commit.clone()),
         path: source.path.clone(),
+        catalog: source.catalog.clone(),
+        mcp_servers: catalog_servers(store, sx, source.catalog.as_deref()),
     };
     let resolved = resolve(Some(store), sx, &request)?;
     let scanner = Scanner::new(sx.fs, sx.home);
@@ -2197,7 +2428,7 @@ pub fn restore_checkout(
     mut prepared: PreparedCheckout,
     decisions: &Decisions,
 ) -> Result<Option<ApplyReport>, CoreError> {
-    prepared.resolved.admit(store, decisions)?;
+    prepared.resolved.admit(store, decisions, &[])?;
     scan::gate(&prepared.scan, decisions.allow_dangerous)?;
     let clone = prepared.resolved.clone.clone().ok_or_else(|| {
         CoreError::new(ErrorCode::InvalidValue, "the clone of this source is gone")

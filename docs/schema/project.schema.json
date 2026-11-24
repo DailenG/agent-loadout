@@ -249,6 +249,10 @@
       "description": "`[meta.source]`: the repository or folder a server was drafted from,\nso an update check can read it again (#5).",
       "type": "object",
       "properties": {
+        "catalog": {
+          "description": "The catalog entry it was installed from, `<catalog>/<entry id>`\n(#26).",
+          "type": "string"
+        },
         "checkout": {
           "description": "The server runs from the machine-local clone\n`<LOADOUT_HOME>/servers/<id>`.",
           "type": "boolean"
@@ -275,7 +279,7 @@
           "type": "string"
         },
         "kind": {
-          "description": "`git` or `local`.",
+          "description": "`git`, `local` or `registry`.",
           "$ref": "#/$defs/ServerSourceKind"
         },
         "machine": {
@@ -287,11 +291,15 @@
           "type": "string"
         },
         "ref": {
-          "description": "Branch or tag followed.",
+          "description": "Branch or tag followed (git); the version pinned (registry).",
           "type": "string"
         },
         "url": {
-          "description": "Git URL, userinfo removed (git).",
+          "description": "Git URL, userinfo removed (git); the registry's base URL\n(registry).",
+          "type": "string"
+        },
+        "version": {
+          "description": "The registry entry's version (registry).",
           "type": "string"
         }
       },
@@ -303,10 +311,19 @@
     },
     "ServerSourceKind": {
       "description": "What a source server came from.",
-      "type": "string",
-      "enum": [
-        "git",
-        "local"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "git",
+            "local"
+          ]
+        },
+        {
+          "description": "An entry of an MCP registry catalog (#26): its `server.json`.",
+          "type": "string",
+          "const": "registry"
+        }
       ]
     },
     "ToolFilter": {

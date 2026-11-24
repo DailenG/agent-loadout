@@ -23,6 +23,7 @@ fn local<'a>(files: &'a SkillFiles) -> Ctx<'a> {
         os: Os::Linux,
         name: "weather".to_owned(),
         content_hash: crate::skills::content_hash(files),
+        plugin_servers: None,
     }
 }
 
@@ -35,6 +36,7 @@ fn git<'a>(files: &'a SkillFiles, pin: &'a GitPin) -> Ctx<'a> {
         os: Os::Linux,
         name: "weather".to_owned(),
         content_hash: crate::skills::content_hash(files),
+        plugin_servers: None,
     }
 }
 
@@ -567,8 +569,14 @@ fn ids_and_urls() {
         provenance_url("git@github.com:acme/w.git"),
         "git@github.com:acme/w.git"
     );
-    assert!(is_commit_ref("0123abc"));
+    assert!(is_commit_ref("0123456789abcdef0123456789abcdef01234567"));
+    assert!(!is_commit_ref("0123abc"));
     assert!(!is_commit_ref("main"));
+    let short = crate::skills::install::check_ref("0123abc").unwrap_err();
+    assert!(
+        short.message().contains("full 40-character commit"),
+        "{short}"
+    );
     let taken = BTreeSet::from(["w".to_owned(), "w-2".to_owned()]);
     assert_eq!(free_id("w", &taken), "w-3");
 }

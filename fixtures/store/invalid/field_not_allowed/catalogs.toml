@@ -1,0 +1,5 @@
+schema = 1
+
+# A built-in catalog can only be turned off.
+[catalogs.mcp-registry]
+url = "https://registry.example"

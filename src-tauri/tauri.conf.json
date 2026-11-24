@@ -43,6 +43,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../crates/agent-loadout-core/agent-skill/loadout/": "agent-skill/loadout/"
+    },
     "windows": {
       "signCommand": {
         "cmd": "pwsh",

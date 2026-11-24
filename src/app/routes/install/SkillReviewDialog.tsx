@@ -4,7 +4,7 @@
 // asks the trust question when the source needs it (M39), and a dangerous
 // verdict is installed only through "Install anyway" (M40).
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { DangerousGate, isDangerous, ScanFindings } from "@/app/components/ScanFindings";
 import { TrustSummary } from "@/app/components/TrustDialog";
 import { SettingsDialog } from "@/app/routes/settings/SettingsDialog";
@@ -14,13 +14,15 @@ import { formatSize } from "../skills/labels";
 
 export type SkillReviewDialogProps = {
   review: SkillInstallReview;
+  /** Where the review came from, above the source facts (a catalog entry, M45). */
+  origin?: ReactNode;
   isInstalling: boolean;
   /** `allowDangerous` is true only through "Install anyway". */
   onInstall: (allowDangerous: boolean) => void;
   onClose: () => void;
 };
 
-export function SkillReviewDialog({ review, isInstalling, onInstall, onClose }: SkillReviewDialogProps) {
+export function SkillReviewDialog({ review, origin = null, isInstalling, onInstall, onClose }: SkillReviewDialogProps) {
   const [acknowledged, setAcknowledged] = useState(false);
   const dangerous = isDangerous(review.scan);
   const blocked = review.trust?.state.kind === "blocked" || review.movedTrust?.state.kind === "blocked";
@@ -69,6 +71,7 @@ export function SkillReviewDialog({ review, isInstalling, onInstall, onClose }: 
       }
     >
       <div className="source-review">
+        {origin}
         <dl className="source-review__facts">
           {source.path ? (
             <div>

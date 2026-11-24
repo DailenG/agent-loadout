@@ -110,6 +110,7 @@ fn a_registry_repository_is_reviewed_and_saved_with_the_dialogs_answer() {
     let picks = vec![McpDraftPick {
         key: npm.key.clone(),
         draft,
+        trust: None,
     }];
     let err = mcp_source::save(&fx.core, &mut resolved, &picks, None, None, false).unwrap_err();
     assert_eq!(err.code, ErrorCode::SourceTrustRequired);
@@ -155,6 +156,7 @@ fn a_local_folder_is_shown_under_its_placeholder_and_gated() {
     let picks = vec![McpDraftPick {
         key: draft.key.clone(),
         draft: draft.draft.clone(),
+        trust: None,
     }];
     let err = mcp_source::save(&fx.core, &mut resolved, &picks, None, None, false).unwrap_err();
     assert_eq!(err.code, ErrorCode::SourceTrustRequired);
@@ -229,6 +231,7 @@ fn launch_lines_cross_ipc_under_placeholders_and_save_the_real_paths() {
     let picks = vec![McpDraftPick {
         key: draft.key.clone(),
         draft: draft.draft.clone(),
+        trust: None,
     }];
     mcp_source::save(
         &fx.core,

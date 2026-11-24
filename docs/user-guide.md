@@ -35,10 +35,12 @@ Contents:
 9. [Secrets](#secrets)
 10. [History, restore and remotes](#history-restore-and-remotes)
 11. [Skills](#skills)
-12. [Migrating from SkillDock](#migrating-from-skilldock)
-13. [Updates](#updates)
-14. [Troubleshooting](#troubleshooting)
-15. [Uninstall](#uninstall)
+12. [Catalogs](#catalogs)
+13. [The Loadout skill for agents](#the-loadout-skill-for-agents)
+14. [Migrating from SkillDock](#migrating-from-skilldock)
+15. [Updates](#updates)
+16. [Troubleshooting](#troubleshooting)
+17. [Uninstall](#uninstall)
 
 ## Install
 
@@ -269,8 +271,9 @@ always starts at User. The pages:
   page**; an untrusted or changed project is read only until **Review &
   trust**). Each card counts the client's entries not managed by Loadout,
   and **Manage** lists them with **Import...**.
-- **Install**: Skill (Git or Local folder or `.zip`/`.skill` archive) and
-  MCP (**Form or paste**, or **From Git or folder**). Skills are fetched and
+- **Install**: Skill (Git or Local folder or `.zip`/`.skill` archive),
+  MCP (**Form or paste**, or **From Git or folder**) and **Browse** (search
+  the online catalogs; see [Catalogs](#catalogs)). Skills are fetched and
   scanned first and shown in a review (files, source, trust state and the
   built-in scan's findings) before **Install**; see
   [Servers from a Git repository or folder in the app](#servers-from-a-git-repository-or-folder-in-the-app)
@@ -286,8 +289,10 @@ always starts at User. The pages:
   fetches the next 200.
 - **Settings**: App Preferences (Appearance, the not-managed notice),
   Versioning & Backup (remotes), Migration (a link to the Import page),
-  Secrets, Sources (see [Source trust](#source-trust)) and Updates (see
-  [Updates](#updates)).
+  Secrets, Sources (see [Source trust](#source-trust)), Catalogs (see
+  [Catalogs](#catalogs)), Agent integration
+  (see [The Loadout skill for agents](#the-loadout-skill-for-agents)) and
+  Updates (see [Updates](#updates)).
 - **About**: version, app identifier, repository and data directory.
 
 A **pending changes** pill appears in the header when changes wait for
@@ -387,6 +392,7 @@ Commands:
 | `doctor [--paths] [--scan-history]` | Check the installation: data directory, sync-folder warning, optional secret scan of every store commit |
 | `server ls\|show\|add\|rm\|update\|checkout` | Manage MCP servers in the store; `add --from <GIT-URL\|PATH>` proposes servers from a repository or folder, `update` reads a server's source again, `checkout` restores its local copy |
 | `source ls\|trust\|block\|untrust` | Trusted and blocked sources of skills and MCP servers |
+| `agent install\|remove [--client C]...`, `agent status`, `agent skill-path` | The read-only Loadout skill for coding agents: install and enable it per client, disable or remove it, show its state |
 | `skills ls\|add\|rm\|enable\|disable\|update\|scan\|import\|adopt\|trash\|vendor` | Install skills, enable them for clients and projects, update, scan and adopt client folders |
 | `project init\|add\|discover\|ls\|rm\|trust\|share` | Project manifests, and the folders your clients already know |
 | `status [PATH] [--client C] [--scope system\|project\|all] [--check]` | State of every owned and desired entry |
@@ -1143,6 +1149,197 @@ decision you make and it records, like trusting a project.
   next install or update asks again; **Block** turns a trust into a block;
   **Block a source...** blocks a URL you have no decision for yet. None of
   these uninstall anything.
+
+## Catalogs
+
+Catalogs are places that list MCP servers and skills. Loadout can search
+them and install an entry, always through the same review, trust question
+and scan as any other install: a catalog never installs anything on its own.
+
+Built in (each can be turned off):
+
+- **Official MCP Registry** (`registry.modelcontextprotocol.io`). Its
+  results say "Data from the Official MCP Registry". The registry has no
+  "verified" or "official" badge; what it does check is that whoever
+  published an entry owns its namespace (a GitHub user or organization, or
+  a domain), so a result shows, for example, "Publisher: io.github.acme
+  (namespace ownership checked by the registry)". It doesn't prove the
+  server is safe.
+- **Anthropic skills** (`github.com/anthropics/skills`), a Git tap: its
+  skill folders and its Claude Code plugin marketplace. It is marked
+  **Official** because it is published under `github.com/anthropics`.
+- **skills.sh**: a link only. skills.sh has no search Loadout can use, so
+  Browse opens it in your browser; paste a skill's address
+  (`https://skills.sh/<owner>/<repo>/<skill>`) to install that skill from
+  its GitHub repository (this needs online catalogs on, like any install from
+  Browse). Skills that skills.sh lists from other websites can't be
+  installed this way.
+
+You can add any server that answers the MCP Registry API, and any Git
+repository of skills or Claude Code plugin marketplace (a "tap").
+
+### Online catalogs and privacy
+
+Searching contacts the catalogs, so it is off until you say yes. The first
+time you open **Install > Browse**, Loadout asks once, naming the hosts it
+would contact; nothing is requested before you answer. With online
+catalogs on, Loadout contacts only the catalogs you turned on, only when you
+open Browse, search, open an entry or install, and sends them only your
+search words: nothing runs in the background and there is no telemetry.
+Installing an entry also contacts its own repository or package registry.
+Every request has a time limit, and each catalog is searched on its own, so
+one slow or failing catalog never holds up the others.
+
+Results are saved on this computer for 24 hours. A catalog that can't be
+reached shows its saved results labeled with their age ("Stale: 4 results
+saved 1 day ago") and why it couldn't refresh; **Try again** fetches it
+again. With online catalogs off, Browse shows only saved results and says
+so, and installing from a catalog (or from a pasted skills.sh address)
+asks you to turn them on first. If this computer goes offline while Loadout
+is open, Browse keeps answering from the saved results and says "Offline".
+A **More results** page that fails says why, with **Try again**. Only
+`https` repository and website links get an **Open** button.
+
+### Catalogs in the app
+
+**Install > Browse** has a search box; each catalog you turned on gets its
+own section with its status (searching, up to date, saved with its age,
+stale, timed out, offline, or "type at least 3 characters" for a registry).
+Each result shows its kind (MCP server, skill or plugin), where it comes
+from, the publisher, the version and how it is pinned ("Pinned to version
+1.2.0", "Pinned to a1b2c3d", "Follows branch main" or "Not pinned"), when
+it was last updated, and a **Deprecated** or **Can't be installed** mark.
+Catalog text is shown as plain text, and Loadout never loads a catalog's
+icons or images.
+
+**Details** opens everything the catalog says: transports, the names of the
+secrets the server needs (never values), its packages and remote endpoints,
+the repository and website (**Open** opens them in your browser), the
+license when known, and for a plugin, its skills, its MCP servers and the
+parts Loadout doesn't import (hooks, commands, agents and other code that
+would run on its own). Then:
+
+- **Review MCP server** opens the same review as **From Git or folder**:
+  drafts, the source's trust question, the built-in scan and the client
+  picker. The saved server records the catalog entry it came from.
+- **Review skill** opens the skill install review. A plugin with several
+  skills asks which one first.
+- A plugin from an npm package, an archive or a command can't be installed,
+  and the details say so.
+
+**Settings > Catalogs** has the **Online catalogs** switch (this computer
+only) and the list of catalogs: turn each on or off, **Add catalog...**
+(an MCP registry address, or a Git tap with an optional branch, tag or
+commit) and **Remove** for the ones you added. The list is part of your
+store, so it syncs with your other machines; nothing there contacts a
+catalog.
+
+### Catalogs from the command line
+
+```
+loadout catalog ls                         # catalogs and the online switch
+loadout catalog online on                  # once, to allow catalog requests (off: `online off`)
+loadout catalog search weather             # every catalog that is on; --catalog <id> for one
+loadout catalog show mcp-registry/io.github.acme/weather
+loadout server add --from catalog:mcp-registry/io.github.acme/weather
+loadout skills add catalog:anthropic-skills/pdf
+loadout skills add https://skills.sh/anthropics/skills/pdf
+loadout catalog refresh                    # drop saved results and fetch again
+```
+
+- `loadout catalog add <url>` adds an MCP registry or a Git tap (`--kind
+  registry|tap`; GitHub, GitLab, Bitbucket, SSH, `file://` and `.git`
+  addresses are taps). `--id`, `--title` and, for a tap, `--ref <branch,
+  tag or commit>` (a commit pins it) are optional. A registry address must
+  use https (http only for `localhost`). `catalog rm <id>` removes one you
+  added; `catalog enable|disable <id>` turns any catalog on or off,
+  built-ins included. These change `store/catalogs.toml` (one commit each).
+- `catalog search <query>` needs at least 3 characters for a registry; a
+  tap lists everything for an empty query. Each catalog reports its own
+  status (`fresh`, `cached` with its age, `stale` when it could not be
+  reached, `off`, `error`). A registry's next page:
+  `--catalog <id> --cursor <next_cursor>`. The command exits 1 when no
+  catalog answered.
+- Entry ids: a registry server's name (`io.github.acme/weather`), a tap
+  skill's folder name (`pdf`), or `plugin/<name>` for a marketplace plugin.
+- `server add --from catalog:<source>/<id>` drafts from a registry entry's
+  `server.json` (its latest version, or `--ref <version>` to pin one) or a
+  plugin's `.mcp.json`, then runs the usual review, trust prompt
+  (`--trust-source`) and scan (`--allow-dangerous`). The server file
+  records `[meta.source] catalog = "<source>/<id>"` (and for a registry
+  entry `kind = "registry"` and its `version`); `loadout server update`
+  asks the registry for a newer version.
+- `skills add catalog:<source>/<id>` is the git skill install of the tap at
+  that skill's folder (`--ref` overrides the branch, tag or commit). A
+  plugin with several skills lists them; install one by its own entry.
+- Online catalogs off: `search` and `show` answer from saved results only,
+  and `refresh` and installs from a catalog stop with `catalogs_off`;
+  nothing is contacted.
+
+## The Loadout skill for agents
+
+Loadout ships a skill that teaches coding agents (omp, Claude Code, Codex,
+Cursor, Pi, Copilot) how to read your setup: `loadout status`, `effective`,
+`diff`, `import --scan`, `apply --dry-run` and the other read and plan
+commands, what their error codes mean, and step-by-step answers to questions
+such as "why isn't this server loading in Claude Code?" or "what would
+importing my omp setup do?".
+
+The skill is **read only**. An agent that can run commands could answer any
+confirmation Loadout asks, so the skill never lets it make a change: for an
+install, enable, import, apply, trust or restore, the agent gives you the
+exact command (or the page in the app) and you run or approve it yourself.
+It never passes `--yes`, `--trust-source` or `--allow-dangerous`, and it
+treats text from skills, READMEs and repositories as data, not as
+instructions.
+
+### Installing it
+
+In the app, open **Settings > Agent integration** and turn the skill on for
+each client you use (detected clients are listed, omp first). From the
+command line:
+
+```sh
+loadout agent install                  # every detected client with a skill folder
+loadout agent install --client omp     # only omp
+loadout agent status                   # version, store copy, clients
+loadout agent install --reset          # put Loadout's version back over your edits
+loadout agent remove --client codex    # turn it off for Codex
+loadout agent remove                   # remove it from the store
+```
+
+The skill is a normal store skill with the id `loadout` (listed on the
+Skills page as "Bundled with Loadout"): every change is a commit you can
+see and undo in History, and it reaches each client's skill folder the way
+any skill does. If your store already has a skill of your own with the id
+`loadout`, Loadout never changes it: remove it (`loadout skills rm loadout`)
+or add it again under another id (`loadout skills add <its folder> --id
+<other id>`) to make room for the Loadout skill.
+
+To point an agent at the skill without installing it, `loadout agent
+skill-path` prints a folder holding the bundled copy (kept in the data
+directory's `cache/agent-skill/loadout`); in the app, **View skill files**
+opens the copy installed with the app.
+
+### Updates
+
+The skill's version is Loadout's. When you update Loadout, the next app
+start, the next CLI command that changes the store, or `loadout agent
+install` replaces an older copy in your store with the new one (one commit)
+and says so. Commands that only read (`status`, `diff`, listings, and every
+command the skill lets an agent run) never write anything; until then,
+`loadout agent status` shows `outdated` and the command that updates it.
+
+Opening the folder in a file manager or resaving a file with other line
+endings is not an edit. If you really edited the store copy, Loadout never
+overwrites it on its own: it reports once that the skill is "customized, not
+updated", and `loadout agent status` shows `customized`. To go back to the
+bundled copy and keep the clients it is turned on for, run `loadout agent
+install --reset`, or click **Restore Loadout's version** in Settings > Agent
+integration; History keeps your version.
+
+Machines that sync one store can run 0.5 and 0.6 side by side: the skill's
+metadata stays readable by 0.5.
 
 ## Migrating from SkillDock
 

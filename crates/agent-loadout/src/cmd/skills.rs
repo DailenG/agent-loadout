@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use agent_loadout_core::catalog;
 use agent_loadout_core::model::applied::Scope;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
@@ -22,7 +23,7 @@ use agent_loadout_core::skills::install::{
 use agent_loadout_core::skills::link::{self, LinkResult, SkillLedger};
 use agent_loadout_core::skills::{self, LinkKind, Naming, StoreSkill, SyncReport, store};
 use agent_loadout_core::sources::{self, SourceChange, SourceRef, TrustCheck, TrustState};
-use agent_loadout_core::store::{CommitId, Store};
+use agent_loadout_core::store::{CommitId, Store, StoreRead};
 use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
@@ -54,13 +55,16 @@ enum SkillsCommand {
     /// The built-in scan runs first; a dangerous verdict installs nothing
     /// (exit 8) unless --allow-dangerous.
     Add {
-        /// Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), or
-        /// a local folder or archive.
+        /// Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), a
+        /// local folder or archive, a catalog entry
+        /// (catalog:<SOURCE>/<ID>), or a skills.sh address
+        /// (https://skills.sh/<owner>/<repo>/<skill>).
         source: String,
         /// Skill folder inside a git repository.
         #[arg(long)]
         path: Option<String>,
-        /// Branch or tag of a git repository.
+        /// Branch, tag or commit of a git repository (a commit pins the
+        /// skill).
         #[arg(long = "ref", value_name = "REF")]
         git_ref: Option<String>,
         /// Skill id [default: from the SKILL.md name].
@@ -233,6 +237,18 @@ impl Env<'_> {
     }
 }
 
+/// The skills environment of `ctx`, with junctions on Windows.
+pub(super) fn skills_env(ctx: &Context) -> skills::SkillsEnv<'_> {
+    skills::SkillsEnv {
+        env: &ctx.env,
+        fs: ctx.fs(),
+        home: &ctx.home,
+        registry: ctx.apply_env().registry,
+        runner: &RUNNER,
+        link_kind: LinkKind::Junction,
+    }
+}
+
 pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
     let link_kind = match &args.command {
         SkillsCommand::Enable(enable) | SkillsCommand::Disable(enable) if enable.symlink => {
@@ -388,20 +404,47 @@ fn add(
     allow_dangerous: bool,
     trust_source: Option<TrustSourceArg>,
 ) -> Result<u8, CoreError> {
-    let mut source = Source::parse(source, sx.fs);
-    if let Source::Local(local) = &source {
-        source = Source::parse(&absolute(local)?.to_string_lossy(), sx.fs);
-    }
-    if matches!(source, Source::Local(_)) && (path.is_some() || git_ref.is_some()) {
-        return Err(CoreError::new(
-            ErrorCode::InvalidValue,
-            "--path and --ref apply to git sources only",
-        ));
-    }
+    let text = source;
+    let mut request = if text.trim_start().starts_with(catalog::REF_PREFIX) {
+        let store = ctx.open_store()?;
+        let http = super::catalog::http(ctx);
+        let cx = catalog::CatalogEnv { sx, http: &http };
+        let read = store.as_ref().map(|s| s as &dyn StoreRead);
+        let (request, entry) =
+            catalog::skill_request(&cx, read, text.trim(), git_ref.as_deref(), path.as_deref())?;
+        if !ctx.json {
+            eprintln!(
+                "note: {} from the catalog {}; its text is the publisher's, not Loadout's.",
+                super::catalog::plain(&entry.reference(), 300),
+                super::catalog::plain(&entry.catalog, 100)
+            );
+            if let Some(warning) = &entry.warning {
+                eprintln!("warning: {}", super::catalog::plain(warning, 300));
+            }
+        }
+        request
+    } else if let Some(mapped) = catalog::skills_sh_request(text) {
+        let mut request = mapped?;
+        request.path.clone_from(path);
+        request.git_ref.clone_from(git_ref);
+        request
+    } else {
+        let mut source = Source::parse(text, sx.fs);
+        if let Source::Local(local) = &source {
+            source = Source::parse(&absolute(local)?.to_string_lossy(), sx.fs);
+        }
+        if matches!(source, Source::Local(_)) && (path.is_some() || git_ref.is_some()) {
+            return Err(CoreError::new(
+                ErrorCode::InvalidValue,
+                "--path and --ref apply to git sources only",
+            ));
+        }
+        let mut request = InstallRequest::new(source);
+        request.path.clone_from(path);
+        request.git_ref.clone_from(git_ref);
+        request
+    };
     let store = ctx.open_store_for_change()?;
-    let mut request = InstallRequest::new(source);
-    request.path.clone_from(path);
-    request.git_ref.clone_from(git_ref);
     request.naming = naming(ctx, id);
     let mut answers = Answers::default();
     let asked = match &request.source {
@@ -690,7 +733,7 @@ fn done(
     Ok(exit_for(report))
 }
 
-fn exit_for(report: &SyncReport) -> u8 {
+pub(super) fn exit_for(report: &SyncReport) -> u8 {
     if report.needs_attention() {
         EXIT_UNRESOLVED
     } else {
@@ -720,14 +763,14 @@ fn result_json(result: &LinkResult) -> Value {
     })
 }
 
-fn report_json(report: &SyncReport) -> Value {
+pub(super) fn report_json(report: &SyncReport) -> Value {
     json!({
         "results": report.results.iter().map(result_json).collect::<Vec<_>>(),
         "warnings": report.warnings.iter().map(error_json).collect::<Vec<_>>(),
     })
 }
 
-fn print_links(report: &SyncReport) {
+pub(super) fn print_links(report: &SyncReport) {
     for result in report.notable() {
         let detail = match (&result.error, &result.found_target) {
             (Some(err), _) => format!(" [{}] {}", err.code(), err.message()),
@@ -766,6 +809,8 @@ fn source_kind(kind: SkillSourceKind) -> &'static str {
 fn skill_json(skill: &StoreSkill, ledger: &SkillLedger) -> Value {
     let meta = skill.meta.as_ref();
     let source = meta.and_then(|meta| meta.source.as_ref());
+    // The Loadout skill is marked by `[bundled]` alone (no `[source]`).
+    let bundled = meta.and_then(|meta| meta.bundled.as_ref());
     let enable = meta.and_then(|meta| meta.enable.as_ref());
     json!({
         "id": skill.id,
@@ -774,13 +819,24 @@ fn skill_json(skill: &StoreSkill, ledger: &SkillLedger) -> Value {
         "frontmatter": skill.frontmatter.as_ref().map(|fm| fm.to_json()),
         "bytes": skill.bytes,
         "tags": meta.and_then(|meta| meta.tags.clone()),
-        "source": source.map(|source| json!({
-            "kind": source_kind(source.kind),
-            "url": source.url,
-            "path": source.path,
-            "ref": source.git_ref,
-            "commit": source.commit,
-        })),
+        "source": match (source, bundled) {
+            (_, Some(bundled)) => json!({
+                "kind": "bundled",
+                "url": null,
+                "path": null,
+                "ref": null,
+                "commit": null,
+                "version": bundled.version,
+            }),
+            (Some(source), None) => json!({
+                "kind": source_kind(source.kind),
+                "url": source.url,
+                "path": source.path,
+                "ref": source.git_ref,
+                "commit": source.commit,
+            }),
+            (None, None) => Value::Null,
+        },
         "enable": {
             "clients": enable.and_then(|enable| enable.clients.as_ref()).map(selection_json),
             "method": enable.and_then(|enable| enable.method).map(|method| match method {

@@ -4,3 +4,6 @@
 packaging/aur/** text eol=lf
 src-tauri/linux/** text eol=lf
 *.sh text eol=lf
+# The bundled Loadout skill (#8): its content hash decides whether a store
+# copy was edited, so every checkout embeds the same bytes.
+crates/agent-loadout-core/agent-skill/** text eol=lf

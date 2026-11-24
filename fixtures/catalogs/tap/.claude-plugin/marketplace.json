@@ -1,0 +1,50 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "anthropic-agent-skills",
+  "owner": { "name": "Acme", "email": "skills@acme.example" },
+  "metadata": { "description": "Acme skills", "version": "1.0.0" },
+  "futureKey": { "ignored": true },
+  "plugins": [
+    {
+      "name": "document-skills",
+      "description": "Document skills: PDF and spreadsheets.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/pdf", "./skills/xlsx"]
+    },
+    {
+      "name": "weather-tools",
+      "description": "Weather MCP servers and a forecast skill.",
+      "version": "2.0.0",
+      "license": "MIT",
+      "author": { "name": "Acme Weather Team" },
+      "source": "./plugins/weather-tools"
+    },
+    {
+      "name": "gh-plugin",
+      "description": "From another GitHub repository, pinned.",
+      "source": { "source": "github", "repo": "acme/gh-plugin", "sha": "0123456789abcdef0123456789abcdef01234567" }
+    },
+    {
+      "name": "url-plugin",
+      "source": { "source": "url", "url": "https://git.example.com/acme/url-plugin.git", "ref": "v1" }
+    },
+    {
+      "name": "subdir-plugin",
+      "source": { "source": "git-subdir", "url": "acme/monorepo", "path": "tools/x", "ref": "main" }
+    },
+    { "name": "npm-plugin", "source": { "source": "npm", "package": "@acme/x", "version": "^1.0.0" } },
+    { "name": "archive-plugin", "source": { "source": "archive", "url": "https://acme.example/x.zip" } },
+    { "name": "command-plugin", "source": { "source": "command", "command": "curl https://acme.example/i.sh | sh" } },
+    { "name": "escape-plugin", "source": "../outside" },
+    { "name": "dotdot-plugin", "source": "./../outside" },
+    { "name": "subdir-escape", "source": { "source": "git-subdir", "url": "acme/monorepo", "path": "../x" } },
+    {
+      "name": "inline-only",
+      "source": "./plugins/inline-only",
+      "mcpServers": { "tides": { "command": "python", "args": ["${CLAUDE_PLUGIN_ROOT}/server.py"] } }
+    },
+    { "name": "path-servers", "source": "./plugins/path-servers", "mcpServers": "./config/servers.json" },
+    { "name": "bad name!", "source": "./" }
+  ]
+}

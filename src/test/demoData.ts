@@ -60,6 +60,7 @@ import type {
   ScanResult,
 } from "@/ipc/bindings";
 import { MOCK_CHANGE, mockAdoptResult, mockIpcError, ok, type MockTransportOptions } from "@/test/mockTransport";
+import { DEMO_USER_CATALOGS, MOCK_CATALOGS } from "@/test/catalogData";
 
 const problem = (code: IpcError["code"], message: string): IpcError => ({ code, message });
 
@@ -1558,10 +1559,13 @@ const MCP_REVIEW: McpSourceReview = {
     path: null,
     gitRef: "main",
     commit: "b41d0c2e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c",
+    catalog: null,
+    version: null,
   },
   drafts: [
     {
       key: "draft-1",
+      trust: null,
       kind: "registry",
       file: "server.json",
       converter: "registry",
@@ -1597,6 +1601,7 @@ const MCP_REVIEW: McpSourceReview = {
     },
     {
       key: "draft-2",
+      trust: null,
       kind: "registry",
       file: "server.json",
       converter: "registry",
@@ -1628,6 +1633,7 @@ const MCP_REVIEW: McpSourceReview = {
     },
     {
       key: "draft-3",
+      trust: null,
       kind: "package",
       file: "package.json",
       converter: "npm",
@@ -1752,6 +1758,17 @@ const notMocked = (what: string) => mockIpcError({ code: "not_found", message: `
 export function buildDemoDataset(): MockTransportOptions {
   return {
     projects: PROJECTS,
+    // Browse (M45): the one-time question first; once on, every status shows: the registry
+    // fresh, the Anthropic tap saved 2 hours ago, the team tap stale (its refresh failed),
+    // the Acme registry timed out.
+    catalogs: {
+      catalogs: [...MOCK_CATALOGS, ...DEMO_USER_CATALOGS],
+      behavior: {
+        "anthropic-skills": { kind: "cached", ageSecs: 2 * 3_600 },
+        "team-skills": { kind: "stale", ageSecs: 26 * 3_600, message: "could not resolve host github.com" },
+        acme: { kind: "error", message: "timed out after 20 s" },
+      },
+    },
     commands: {
       listServers: async () => ok({ servers: SERVERS, clients: CLIENTS, warnings: [] }),
       getServer: async (id) => {
@@ -1874,12 +1891,24 @@ export function buildDemoDataset(): MockTransportOptions {
       reviewMcpLocalSource: async () =>
         ok({
           ...MCP_REVIEW,
-          source: { kind: "local", url: null, folder: "~/code/weather-mcp", path: null, gitRef: null, commit: null },
+          source: { kind: "local", url: null, folder: "~/code/weather-mcp", path: null, gitRef: null, commit: null, catalog: null, version: null },
           trust: { ...MCP_TRUST, display: "~/code/weather-mcp", scopes: [{ scope: "repo", display: "~/code/weather-mcp" }] },
         }),
       saveMcpSourceDrafts: async (_token, picks) =>
         ok({ ids: picks.map((pick) => pick.draft.id), change: MOCK_CHANGE, scan: MCP_REVIEW.scan }),
       checkMcpSourceUpdate: async (id) => ok({ ...MCP_UPDATE, id }),
+      agentSkillStatus: async () =>
+        ok({
+          bundledVersion: "0.6.0",
+          copy: { version: "0.6.0", state: "current" },
+          taken: false,
+          clients: [
+            { id: "omp", name: "oh-my-pi", detected: true, enabled: true },
+            { id: "claude-code", name: "Claude Code", detected: true, enabled: false },
+            { id: "codex", name: "Codex", detected: true, enabled: false },
+            { id: "pi", name: "Pi", detected: false, enabled: false },
+          ],
+        }),
       listSources: async () =>
         ok([
           {

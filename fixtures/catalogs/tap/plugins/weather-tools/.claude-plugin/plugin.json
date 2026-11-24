@@ -1,0 +1,1 @@
+{ "name": "weather-tools", "description": "Weather tools", "hooks": "./hooks/hooks.json" }

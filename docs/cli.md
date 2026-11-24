@@ -30,11 +30,26 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout skills trash`](#loadout-skills-trash)
   - [`loadout skills vendor`](#loadout-skills-vendor)
   - [`loadout skills adopt`](#loadout-skills-adopt)
+- [`loadout agent`](#loadout-agent)
+  - [`loadout agent install`](#loadout-agent-install)
+  - [`loadout agent remove`](#loadout-agent-remove)
+  - [`loadout agent status`](#loadout-agent-status)
+  - [`loadout agent skill-path`](#loadout-agent-skill-path)
 - [`loadout source`](#loadout-source)
   - [`loadout source ls`](#loadout-source-ls)
   - [`loadout source trust`](#loadout-source-trust)
   - [`loadout source block`](#loadout-source-block)
   - [`loadout source untrust`](#loadout-source-untrust)
+- [`loadout catalog`](#loadout-catalog)
+  - [`loadout catalog ls`](#loadout-catalog-ls)
+  - [`loadout catalog add`](#loadout-catalog-add)
+  - [`loadout catalog rm`](#loadout-catalog-rm)
+  - [`loadout catalog enable`](#loadout-catalog-enable)
+  - [`loadout catalog disable`](#loadout-catalog-disable)
+  - [`loadout catalog online`](#loadout-catalog-online)
+  - [`loadout catalog search`](#loadout-catalog-search)
+  - [`loadout catalog show`](#loadout-catalog-show)
+  - [`loadout catalog refresh`](#loadout-catalog-refresh)
 - [`loadout project`](#loadout-project)
   - [`loadout project init`](#loadout-project-init)
   - [`loadout project add`](#loadout-project-add)
@@ -96,7 +111,9 @@ Commands:
   doctor         Check the installation and report problems
   server         Manage MCP servers in the store
   skills         Skills: install, enable for clients and projects, update, scan
+  agent          The read-only Loadout skill for coding agents: install, remove, status, skill-path
   source         Trusted and blocked install sources: list, trust, block, untrust
+  catalog        Catalogs of MCP servers and skills: list, add, search, show
   project        Project manifests: create, register, trust, share, list, forget
   history        List store commits
   status         Show the state of every owned and desired entry
@@ -253,14 +270,14 @@ Options:
       --all-detected
           Enable at system scope for every detected client
 
-      --from <GIT-URL|PATH>
-          Draft servers from a git repository (https, ssh, file://, a bare repository) or a local folder: server.json, an MCPB manifest.json, committed client configs, or the repository as a package
+      --from <GIT-URL|PATH|catalog:SOURCE/ID>
+          Draft servers from a git repository (https, ssh, file://, a bare repository) or a local folder: server.json, an MCPB manifest.json, committed client configs, or the repository as a package. Or from a catalog entry: catalog:<SOURCE>/<ID> (`loadout catalog search`)
 
       --path <PATH>
           Folder inside the git repository
 
       --ref <REF>
-          Branch, tag or commit of the git repository
+          Branch, tag or commit of the git repository; for a registry catalog entry, the version (pins it: updates do not follow)
 
       --pick <KEY|ID>
           The draft to save, by key or id (repeatable) [default: the only draft]
@@ -432,7 +449,7 @@ Usage: loadout skills add [OPTIONS] <SOURCE>
 
 Arguments:
   <SOURCE>
-          Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), or a local folder or archive
+          Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), a local folder or archive, a catalog entry (catalog:<SOURCE>/<ID>), or a skills.sh address (https://skills.sh/<owner>/<repo>/<skill>)
 
 Options:
       --home <PATH>
@@ -445,7 +462,7 @@ Options:
           Print machine-readable JSON to stdout
 
       --ref <REF>
-          Branch or tag of a git repository
+          Branch, tag or commit of a git repository (a commit pins the skill)
 
       --id <ID>
           Skill id [default: from the SKILL.md name]
@@ -668,6 +685,86 @@ Options:
   -h, --help                Print help
 ```
 
+## `loadout agent`
+
+```text
+The read-only Loadout skill for coding agents: install, remove, status, skill-path
+
+Usage: loadout agent [OPTIONS] <COMMAND>
+
+Commands:
+  install     Install the Loadout skill (read-only; bundled with Loadout) as the store skill `loadout` and enable it for clients. An older store copy you did not edit is updated first
+  remove      Disable the Loadout skill for clients; without --client, remove it from the store with its links and copies
+  status      Show the bundled version, the store copy and the clients it is enabled for
+  skill-path  Print a folder holding the bundled skill (kept in the data directory's cache), to point an agent at by hand
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout agent install`
+
+```text
+Install the Loadout skill (read-only; bundled with Loadout) as the store skill `loadout` and enable it for clients. An older store copy you did not edit is updated first
+
+Usage: loadout agent install [OPTIONS]
+
+Options:
+      --client <CLIENT>  Client id (repeatable) [default: every detected client with a skill folder; with --reset, the clients it is enabled for stay as they are]
+      --home <PATH>      Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json             Print machine-readable JSON to stdout
+      --reset            Replace the store copy with the bundled one even if you edited it (your edits stay in History)
+      --yes              Answer yes to confirmations (rolling back an older apply run)
+  -h, --help             Print help
+```
+
+## `loadout agent remove`
+
+```text
+Disable the Loadout skill for clients; without --client, remove it from the store with its links and copies
+
+Usage: loadout agent remove [OPTIONS]
+
+Options:
+      --client <CLIENT>  Client id (repeatable)
+      --home <PATH>      Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json             Print machine-readable JSON to stdout
+      --yes              Answer yes to confirmations (rolling back an older apply run)
+  -h, --help             Print help
+```
+
+## `loadout agent status`
+
+```text
+Show the bundled version, the store copy and the clients it is enabled for
+
+Usage: loadout agent status [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout agent skill-path`
+
+```text
+Print a folder holding the bundled skill (kept in the data directory's cache), to point an agent at by hand
+
+Usage: loadout agent skill-path [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
 ## `loadout source`
 
 ```text
@@ -748,6 +845,188 @@ Usage: loadout source untrust [OPTIONS] <KEY>
 
 Arguments:
   <KEY>  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog`
+
+```text
+Catalogs of MCP servers and skills: list, add, search, show
+
+Usage: loadout catalog [OPTIONS] <COMMAND>
+
+Commands:
+  ls       List catalogs (built-in and added) and the online catalogs setting
+  add      Add an MCP registry (any server of the MCP Registry API) or a git tap (skill folders and/or a Claude Code plugin marketplace)
+  rm       Remove an added catalog (built-ins are turned off instead)
+  enable   Turn a catalog on
+  disable  Turn a catalog off: it is not searched or contacted
+  online   Show or set the online catalogs setting of this machine (off until turned on: nothing contacts a catalog before that)
+  search   Search every enabled catalog (or one). An MCP registry needs at least 3 characters; a tap lists everything for an empty query
+  show     Show one entry: <SOURCE>/<ID> (or catalog:<SOURCE>/<ID>)
+  refresh  Drop the cache and fetch again (every enabled catalog, or one)
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog ls`
+
+```text
+List catalogs (built-in and added) and the online catalogs setting
+
+Usage: loadout catalog ls [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog add`
+
+```text
+Add an MCP registry (any server of the MCP Registry API) or a git tap (skill folders and/or a Claude Code plugin marketplace)
+
+Usage: loadout catalog add [OPTIONS] <URL>
+
+Arguments:
+  <URL>  The registry's base URL, or the tap's git URL
+
+Options:
+      --home <PATH>    Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --kind <KIND>    What the URL is [default: tap for git URLs (ssh, file://, .git, github.com, gitlab.com, bitbucket.org), else registry] [possible values: registry, tap]
+      --id <ID>        Catalog id [default: from the URL]
+      --json           Print machine-readable JSON to stdout
+      --ref <REF>      A tap's branch, tag or commit (a commit pins it)
+      --yes            Answer yes to confirmations (rolling back an older apply run)
+      --title <TITLE>  Display name
+  -h, --help           Print help
+```
+
+## `loadout catalog rm`
+
+```text
+Remove an added catalog (built-ins are turned off instead)
+
+Usage: loadout catalog rm [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog enable`
+
+```text
+Turn a catalog on
+
+Usage: loadout catalog enable [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog disable`
+
+```text
+Turn a catalog off: it is not searched or contacted
+
+Usage: loadout catalog disable [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog online`
+
+```text
+Show or set the online catalogs setting of this machine (off until turned on: nothing contacts a catalog before that)
+
+Usage: loadout catalog online [OPTIONS] [STATE]
+
+Arguments:
+  [STATE]  [possible values: on, off]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog search`
+
+```text
+Search every enabled catalog (or one). An MCP registry needs at least 3 characters; a tap lists everything for an empty query
+
+Usage: loadout catalog search [OPTIONS] <QUERY>
+
+Arguments:
+  <QUERY>  
+
+Options:
+      --catalog <ID>     Search only this catalog
+      --home <PATH>      Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --cursor <CURSOR>  The next page of a registry's results (the `next_cursor` of the last search)
+      --json             Print machine-readable JSON to stdout
+      --yes              Answer yes to confirmations (rolling back an older apply run)
+  -h, --help             Print help
+```
+
+## `loadout catalog show`
+
+```text
+Show one entry: <SOURCE>/<ID> (or catalog:<SOURCE>/<ID>)
+
+Usage: loadout catalog show [OPTIONS] <SOURCE/ID>
+
+Arguments:
+  <SOURCE/ID>  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout catalog refresh`
+
+```text
+Drop the cache and fetch again (every enabled catalog, or one)
+
+Usage: loadout catalog refresh [OPTIONS] [ID]
+
+Arguments:
+  [ID]  
 
 Options:
       --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default

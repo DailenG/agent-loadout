@@ -5,6 +5,7 @@
 // `commands`.
 
 import type {
+  AgentSkillStatus,
   AppInfo,
   ApplyRun,
   ChangeResult,
@@ -36,6 +37,7 @@ import type {
   McpCheckoutReview,
 } from "@/ipc/bindings";
 import type { CommandResult, Commands, Transport } from "@/ipc/transport";
+import { catalogCommands, defaultCatalogState, type CatalogMockState } from "@/test/catalogData";
 
 export type MockTransportOptions = {
   appInfo?: AppInfo;
@@ -45,6 +47,8 @@ export type MockTransportOptions = {
   isMaximized?: boolean;
   /** Replaces the default answer of these commands. */
   commands?: Partial<Commands>;
+  /** Seeds the catalog mock (M45): online setting, catalogs, how each answers. */
+  catalogs?: Partial<CatalogMockState>;
 };
 
 export type MockInvocation = {
@@ -178,6 +182,18 @@ export const MOCK_SKILL_CHANGE: SkillChange = {
   links: { notes: [], warnings: [], needsAttention: false },
 };
 
+/** Settings > Agent integration (M46): not installed, omp and Claude Code detected. */
+export const MOCK_AGENT_SKILL_STATUS: AgentSkillStatus = {
+  bundledVersion: "0.0.0-mock",
+  copy: null,
+  taken: false,
+  clients: [
+    { id: "omp", name: "oh-my-pi", detected: true, enabled: false },
+    { id: "claude-code", name: "Claude Code", detected: true, enabled: false },
+    { id: "codex", name: "Codex", detected: false, enabled: false },
+  ],
+};
+
 /** A scan without findings (M40). */
 export const MOCK_SCAN_CLEAN: ScanResult = {
   verdict: "clean",
@@ -227,6 +243,7 @@ export const MOCK_TRUST_ASK: SourceTrustInfo = {
 /** One stdio server drafted from a registry `server.json` (M41, M42). */
 export const MOCK_MCP_DRAFT: McpDraft = {
   key: "draft-1",
+  trust: null,
   kind: "registry",
   file: "server.json",
   converter: "registry",
@@ -263,7 +280,7 @@ export const MOCK_MCP_DRAFT: McpDraft = {
 /** What `review_mcp_git_source` / `review_mcp_local_source` answer by default. */
 export const MOCK_MCP_REVIEW: McpSourceReview = {
   token: "mcp-review-1",
-  source: { kind: "git", url: "https://github.com/acme/weather-mcp", folder: null, path: null, gitRef: null, commit: "3f2a9c1" },
+  source: { kind: "git", url: "https://github.com/acme/weather-mcp", folder: null, path: null, gitRef: null, commit: "3f2a9c1", catalog: null, version: null },
   drafts: [MOCK_MCP_DRAFT],
   skipped: [],
   trust: null,
@@ -329,6 +346,8 @@ const RECORDED: Record<string, true> = {
   reviewLocalSkill: true,
   reviewMcpGitSource: true,
   reviewMcpLocalSource: true,
+  reviewCatalogSkill: true,
+  reviewCatalogMcp: true,
   checkSkillUpdates: true,
   checkMcpSourceUpdate: true,
   reviewMcpCheckout: true,
@@ -387,8 +406,10 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
   const skillChecks = new Map<string, MockGate>();
   const mcpChecks = new Map<string, MockGate>();
   const mcpCheckouts = new Map<string, MockGate>();
+  const catalogState: CatalogMockState = { ...defaultCatalogState(), ...options.catalogs };
 
   const defaults: Commands = {
+    ...catalogCommands(catalogState, { mcp: MOCK_MCP_REVIEW, skill: MOCK_SKILL_REVIEW }),
     appInfo: async () => options.appInfo ?? MOCK_APP_INFO,
     dataHome: async () => options.dataHome ?? ok(MOCK_DATA_HOME),
     listServers: async () => ok(MOCK_SERVER_LIST),
@@ -521,7 +542,7 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     blockSourceUrl: async () => ok(MOCK_CHANGE.commit),
     reviewMcpGitSource: async () => ok(MOCK_MCP_REVIEW),
     reviewMcpLocalSource: async () =>
-      ok({ ...MOCK_MCP_REVIEW, source: { kind: "local", url: null, folder: "~/code/weather", path: null, gitRef: null, commit: null } }),
+      ok({ ...MOCK_MCP_REVIEW, source: { kind: "local", url: null, folder: "~/code/weather", path: null, gitRef: null, commit: null, catalog: null, version: null } }),
     saveMcpSourceDrafts: async (token, picks, trust, movedTrust, allowDangerous) => {
       const review = mcpReviews.get(token);
       const gate = review && {
@@ -586,6 +607,12 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     setCheckForUpdates: async (enabled) => ok({ available: false, enabled }),
     checkForUpdate: async () => mockIpcError({ code: "update_failed", message: "no updater in the mock" }),
     installUpdate: async () => mockIpcError({ code: "update_failed", message: "no updater in the mock" }),
+    agentSkillStatus: async () => ok(MOCK_AGENT_SKILL_STATUS),
+    setAgentSkillClient: async () => ok(MOCK_SKILL_CHANGE),
+    removeAgentSkill: async () => ok(MOCK_SKILL_CHANGE),
+    resetAgentSkill: async () => ok(MOCK_SKILL_CHANGE),
+    refreshAgentSkill: async () => ok(null),
+    revealAgentSkill: async () => ok(null),
   };
   const merged = { ...defaults, ...options.commands } as Commands;
 
@@ -608,10 +635,10 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     if (answered.status !== "ok") {
       return result;
     }
-    if (name === "reviewGitSkill" || name === "reviewLocalSkill") {
+    if (name === "reviewGitSkill" || name === "reviewLocalSkill" || name === "reviewCatalogSkill") {
       const review = answered.data as SkillInstallReview;
       skillReviews.set(review.token, { trust: review.trust, movedTrust: review.movedTrust, scans: [review.scan] });
-    } else if (name === "reviewMcpGitSource" || name === "reviewMcpLocalSource") {
+    } else if (name === "reviewMcpGitSource" || name === "reviewMcpLocalSource" || name === "reviewCatalogMcp") {
       const review = answered.data as McpSourceReview;
       mcpReviews.set(review.token, review);
     } else if (name === "checkSkillUpdates") {

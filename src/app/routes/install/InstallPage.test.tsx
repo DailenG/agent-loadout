@@ -51,10 +51,10 @@ async function openGitReview(user: UserEvent) {
 }
 
 describe("InstallPage", () => {
-  it("offers Skill (Git, Local) and MCP; no marketplace or plugin tabs", async () => {
+  it("offers Skill (Git, Local), MCP and Browse; no marketplace or plugin tabs", async () => {
     const { user } = renderPage();
     const toolbar = screen.getByTestId("header-toolbar");
-    expect(within(toolbar).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Skill", "MCP"]);
+    expect(within(toolbar).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Skill", "MCP", "Browse"]);
     expect(screen.getAllByRole("tab", { name: /Git|Local/ }).map((tab) => tab.textContent)).toEqual(["Git", "Local"]);
     expect(screen.queryByText(/Marketplace|Plugin/)).toBeNull();
     await user.click(within(toolbar).getByRole("tab", { name: "MCP" }));
@@ -62,6 +62,13 @@ describe("InstallPage", () => {
       "Form or paste",
       "From Git or folder",
     ]);
+  });
+
+  it("opens Browse on the online-catalogs question without searching", async () => {
+    const { user, transport } = renderPage();
+    await user.click(within(screen.getByTestId("header-toolbar")).getByRole("tab", { name: "Browse" }));
+    expect(await screen.findByRole("heading", { name: "Turn on online catalogs?" })).toBeInTheDocument();
+    expect(transport.calls).not.toContain("searchCatalog");
   });
 
   it("reviews a git URL with the optional folder and ref, then installs exactly that review", async () => {

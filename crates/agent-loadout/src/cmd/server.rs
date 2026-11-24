@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use agent_loadout_core::apply::Touched;
+use agent_loadout_core::catalog;
 use agent_loadout_core::mcp_source::{self, Draft, Pick, ResolveRequest, Resolved};
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::ids::{self, IdKind};
@@ -19,7 +20,7 @@ use agent_loadout_core::scan::ScanReport;
 use agent_loadout_core::skills::install::{Decisions, FileChange, Source, UpdateStatus};
 use agent_loadout_core::skills::{LinkKind, SkillsEnv};
 use agent_loadout_core::sources::SourceRef;
-use agent_loadout_core::store::{Operation, ServerEntry, Store};
+use agent_loadout_core::store::{Operation, ServerEntry, Store, StoreRead};
 use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
@@ -145,17 +146,19 @@ struct AddArgs {
     command: Vec<String>,
     /// Draft servers from a git repository (https, ssh, file://, a bare
     /// repository) or a local folder: server.json, an MCPB manifest.json,
-    /// committed client configs, or the repository as a package.
+    /// committed client configs, or the repository as a package. Or from
+    /// a catalog entry: catalog:<SOURCE>/<ID> (`loadout catalog search`).
     #[arg(
         long,
-        value_name = "GIT-URL|PATH",
+        value_name = "GIT-URL|PATH|catalog:SOURCE/ID",
         conflicts_with_all = ["url", "transport", "env", "headers", "cwd", "command"]
     )]
     from: Option<String>,
     /// Folder inside the git repository.
     #[arg(long, requires = "from")]
     path: Option<String>,
-    /// Branch, tag or commit of the git repository.
+    /// Branch, tag or commit of the git repository; for a registry
+    /// catalog entry, the version (pins it: updates do not follow).
     #[arg(long = "ref", value_name = "REF", requires = "from")]
     git_ref: Option<String>,
     /// The draft to save, by key or id (repeatable) [default: the only
@@ -546,6 +549,8 @@ fn source_json(source: &ServerSource) -> Value {
         "path": source.path,
         "ref": source.git_ref,
         "commit": source.commit,
+        "catalog": source.catalog,
+        "version": source.version,
     })
 }
 
@@ -616,9 +621,17 @@ fn print_drafts(ctx: &Context, resolved: &Resolved) {
         .as_deref()
         .or(source.folder.as_deref())
         .unwrap_or_default();
-    match &source.commit {
-        Some(commit) => println!("Source: {place} at {}", &commit[..commit.len().min(12)]),
-        None => println!("Source: {place}"),
+    match (&source.commit, &source.version) {
+        (Some(commit), _) => println!("Source: {place} at {}", &commit[..commit.len().min(12)]),
+        (None, Some(version)) => println!("Source: {place}, version {version}"),
+        (None, None) => println!("Source: {place}"),
+    }
+    if let Some(entry) = &source.catalog {
+        println!(
+            "Catalog entry: {}{}",
+            catalog::REF_PREFIX,
+            super::catalog::plain(entry, 200)
+        );
     }
     if !resolved.skipped_folders().is_empty() {
         println!(
@@ -634,6 +647,12 @@ fn print_drafts(ctx: &Context, resolved: &Resolved) {
             draft.server.id,
             draft.kind.as_str()
         );
+        if let Some(own) = &draft.trust_source {
+            println!(
+                "  Runs from {} (asked about before it is saved).",
+                own.key()
+            );
+        }
         for line in mcp_source::launch_lines(&draft.server) {
             match &line.os {
                 None => println!("  {}", line.line),
@@ -753,32 +772,107 @@ fn chosen<'a>(resolved: &'a Resolved, args: &AddArgs) -> Result<Vec<&'a Draft>, 
         .collect()
 }
 
+/// What `--from` drafts from: a git repository or folder, or a catalog
+/// entry (`catalog:<source>/<id>`, #26).
+enum Drafting {
+    Plain(ResolveRequest),
+    Catalog(Box<catalog::McpHandoff>),
+}
+
+impl Drafting {
+    /// The source asked about before anything is fetched; `None` for a
+    /// registry entry (each draft is asked about what it runs).
+    fn asked(&self) -> Result<Option<SourceRef>, CoreError> {
+        match self {
+            Drafting::Plain(request) => match &request.source {
+                Source::Git { url, .. } => SourceRef::from_git_url(url).map(Some),
+                Source::Local(folder) => SourceRef::from_local_path(folder).map(Some),
+            },
+            Drafting::Catalog(handoff) => handoff.trust_source(),
+        }
+    }
+
+    fn resolve(
+        &self,
+        store: Option<&Store<'_>>,
+        sx: &SkillsEnv<'_>,
+    ) -> Result<Resolved, CoreError> {
+        match self {
+            Drafting::Plain(request) => mcp_source::resolve(store, sx, request),
+            Drafting::Catalog(handoff) => handoff.resolve(store, sx),
+        }
+    }
+}
+
+/// The catalog entry `text` names, read for the review (needs online
+/// catalogs); its notes (deprecated, a look-alike name) go to stderr.
+fn catalog_drafting(
+    ctx: &Context,
+    sx: &SkillsEnv<'_>,
+    text: &str,
+    args: &AddArgs,
+) -> Result<Drafting, CoreError> {
+    if args.path.is_some() {
+        return Err(super::catalog::not_here("--path"));
+    }
+    let store = ctx.open_store()?;
+    let http = super::catalog::http(ctx);
+    let cx = catalog::CatalogEnv { sx, http: &http };
+    let read = store.as_ref().map(|s| s as &dyn StoreRead);
+    let handoff = catalog::mcp_handoff(&cx, read, text, args.git_ref.as_deref())?;
+    let entry = &handoff.entry;
+    if !ctx.json {
+        let plain = |text: &str| super::catalog::plain(text, 300);
+        eprintln!(
+            "note: {} from the catalog {}; its text is the publisher's, not Loadout's.",
+            plain(&entry.reference()),
+            plain(&entry.catalog)
+        );
+        if entry.deprecated {
+            eprintln!(
+                "warning: this entry is deprecated{}",
+                entry
+                    .status_message
+                    .as_deref()
+                    .map(|m| format!(": {}", plain(m)))
+                    .unwrap_or_default()
+            );
+        }
+        if let Some(warning) = &entry.warning {
+            eprintln!("warning: {}", plain(warning));
+        }
+    }
+    Ok(Drafting::Catalog(Box::new(handoff)))
+}
+
 /// `loadout server add --from`: drafts, the trust prompt, the save.
 fn add_from(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
     let text = args.from.as_deref().unwrap_or_default();
     let sx = sx(ctx);
-    let mut source = Source::parse(text, sx.fs);
-    if let Source::Local(local) = &source {
-        let absolute = std::path::absolute(local).map_err(|err| {
-            CoreError::new(
-                ErrorCode::InvalidPath,
-                format!("cannot resolve path: {err}"),
-            )
-            .with_path(local)
-        })?;
-        source = Source::parse(&absolute.to_string_lossy(), sx.fs);
-    }
-    let asked = match &source {
-        Source::Git { url, .. } => SourceRef::from_git_url(url)?,
-        Source::Local(folder) => SourceRef::from_local_path(folder)?,
+    let drafting = if text.trim_start().starts_with(catalog::REF_PREFIX) {
+        catalog_drafting(ctx, &sx, text.trim(), args)?
+    } else {
+        let mut source = Source::parse(text, sx.fs);
+        if let Source::Local(local) = &source {
+            let absolute = std::path::absolute(local).map_err(|err| {
+                CoreError::new(
+                    ErrorCode::InvalidPath,
+                    format!("cannot resolve path: {err}"),
+                )
+                .with_path(local)
+            })?;
+            source = Source::parse(&absolute.to_string_lossy(), sx.fs);
+        }
+        let mut request = ResolveRequest::new(source);
+        request.path.clone_from(&args.path);
+        request.git_ref.clone_from(&args.git_ref);
+        Drafting::Plain(request)
     };
-    let mut request = ResolveRequest::new(source);
-    request.path.clone_from(&args.path);
-    request.git_ref.clone_from(&args.git_ref);
+    let asked = drafting.asked()?;
 
     if args.dry_run {
         let store = ctx.open_store()?;
-        let resolved = mcp_source::resolve(store.as_ref(), &sx, &request)?;
+        let resolved = drafting.resolve(store.as_ref(), &sx)?;
         if ctx.json {
             let mut doc = resolved_json(&resolved);
             doc["schema"] = json!(JSON_SCHEMA);
@@ -793,14 +887,24 @@ fn add_from(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
     let store = ctx.open_store_for_change()?;
     // Asked before anything is fetched, like `skills add`.
     let mut answers = Answers::default();
-    let answer = trust_answer(ctx, &mut answers, &store, &asked, args.trust_source)?;
-    let mut resolved = mcp_source::resolve(Some(&store), &sx, &request)?;
+    let answer = match &asked {
+        Some(asked) => Some(trust_answer(
+            ctx,
+            &mut answers,
+            &store,
+            asked,
+            args.trust_source,
+        )?),
+        None => None,
+    };
+    let mut resolved = drafting.resolve(Some(&store), &sx)?;
     // The host redirected a moved repository: where the content really
     // comes from is asked about too.
     let moved = match resolved.moved_source() {
         Some(real) => {
             if !ctx.json {
-                eprintln!("note: {} moved to {}", asked.key(), real.key());
+                let from = asked.as_ref().map_or("", SourceRef::key);
+                eprintln!("note: {from} moved to {}", real.key());
             }
             Some(trust_answer(
                 ctx,
@@ -828,9 +932,24 @@ fn add_from(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
         ));
     }
     let selection = clients(args);
+    // A registry entry's drafts run from their own sources (a package, a
+    // remote host): each picked one is asked about.
+    let mut own_answer = None;
+    let mut grants = Vec::with_capacity(drafts.len());
+    for draft in &drafts {
+        grants.push(match &draft.trust_source {
+            Some(own) => {
+                let answer = trust_answer(ctx, &mut answers, &store, own, args.trust_source)?;
+                own_answer = own_answer.or(Some(answer));
+                answer.grant().0
+            }
+            None => None,
+        });
+    }
     let picks: Vec<Pick> = drafts
         .iter()
-        .map(|draft| {
+        .zip(grants)
+        .map(|(draft, trust)| {
             let mut server = draft.server.clone();
             if let Some(id) = &args.id {
                 server.id.clone_from(id);
@@ -852,9 +971,11 @@ fn add_from(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
             Pick {
                 key: draft.key.clone(),
                 server,
+                trust,
             }
         })
         .collect();
+    let answer = answer.or(own_answer).unwrap_or(Answer::NotNeeded);
     let decisions = decisions(answer, moved, args.allow_dangerous);
     let saved = match mcp_source::save(
         &store,
@@ -978,6 +1099,7 @@ fn update(
             "status": check.status.as_str(),
             "current": check.current,
             "latest": check.latest,
+            "version": check.version,
             "changes": check.changes.iter().map(|c| json!({"field": c.field, "old": c.old, "new": c.new})).collect::<Vec<_>>(),
             "files": check.files.iter().map(file_json).collect::<Vec<_>>(),
             "launch_lines": check.server.as_ref().map(lines_json),

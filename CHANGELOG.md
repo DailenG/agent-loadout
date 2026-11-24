@@ -8,6 +8,88 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Added
+
+- The Loadout skill for agents (#8): a read-only skill, bundled with
+  Loadout, that teaches coding agents the read and plan commands
+  (`status`, `effective`, `diff`, `import --scan`, `apply --dry-run`,
+  `skills ls|scan`, `server ls|show`, `secrets ls|check` and more, with
+  `--json`), the error and exit codes, and playbooks such as "why isn't
+  server X loading in client Y". For any change it hands you the exact
+  command or app page; it never passes `--yes`, `--trust-source` or
+  `--allow-dangerous`, and treats third-party text as data. Install it
+  per client in Settings > Agent integration or with `loadout agent
+  install [--client C]`; `loadout agent remove`, `agent status` and
+  `agent skill-path` complete the set. It is a normal store skill (id
+  `loadout`, origin "Bundled with Loadout"), so every change is a commit.
+  When Loadout is updated, the next app start, CLI command that changes
+  the store, or `loadout agent install` updates the store copy and says
+  so (read commands never write and take no lock; `agent status` shows
+  `outdated` with the command to run). A copy you edited is never
+  overwritten on its own and is reported once as "customized, not
+  updated"; junk files such as `.DS_Store` and line-ending resaves do not
+  count as edits. `loadout agent install --reset` (Settings: "Restore
+  Loadout's version") puts the bundled copy back and keeps its clients.
+  Store schema: skill metadata gains a `[bundled]` table (no new
+  `[source] kind`, so 0.5.x machines syncing the store keep working).
+- Install > Browse (#26): search the online catalogs from the app. The
+  first visit asks once, naming the hosts it would contact, and nothing is
+  requested before you answer. Each catalog is searched on its own with
+  its status shown (searching, up to date, saved with its age, stale,
+  timed out, offline, query too short), so a slow one never holds up the
+  rest. Results show source, publisher ("namespace ownership checked by
+  the registry" for the MCP Registry, with its "Data from the Official
+  MCP Registry" attribution), the Official mark only for
+  `github.com/anthropics` taps, transports, the names of required
+  secrets, version and pinning ("Pinned to ...", "Follows branch ...",
+  "Not pinned"), deprecation, last update, repository and license; no
+  catalog icon or image is ever loaded. Details hands an entry to the
+  existing reviews: an MCP server to the From Git or folder review
+  (drafts, trust, scan, client picker), a skill to the skill install
+  review (a plugin with several skills asks which one); plugins from
+  npm, archive or command sources say why they can't be installed.
+  skills.sh is a link-out card that also takes a pasted
+  `https://skills.sh/<owner>/<repo>/<skill>` address.
+- Settings > Catalogs: the Online catalogs switch, and the catalog list
+  (turn each on or off, add an MCP registry address or a Git tap, remove
+  the ones you added).
+- Catalogs from the command line (#26): `loadout catalog
+  ls|add|rm|enable|disable|online|search|show|refresh`. Built in: the
+  Official MCP Registry (`/v0.1`), the `anthropics/skills` Git tap and a
+  skills.sh link; add any MCP Registry API server or Git tap (skill
+  folders and Claude Code plugin marketplaces). Catalogs live in
+  `store/catalogs.toml` (synced; new JSON Schema `catalogs.schema.json`).
+  Nothing is contacted until you run `loadout catalog online on` (a
+  per-machine setting, off by default), and only when you search, show,
+  refresh or install. Each catalog is searched on its own with timeouts;
+  results are saved for 24 hours and shown labeled with their age when a
+  catalog can't be reached. Install an entry with `loadout server add
+  --from catalog:<source>/<id>` (a registry entry's `server.json` or a
+  plugin's `.mcp.json` and `mcpServers`, through the same review, trust
+  prompt and scan as servers from Git; a registry server's trust prompt
+  names what it runs, its package or its remote's host, never the
+  repository the publisher claims; `--ref` pins a registry version) or `loadout skills add
+  catalog:<source>/<id>`; `skills add` also takes a
+  `https://skills.sh/<owner>/<repo>/<skill>` address. Servers and skills
+  record `catalog = "<source>/<id>"` in `[meta.source]`/`[source]`; a
+  registry server is the new `kind = "registry"` and `loadout server
+  update` asks the registry for a newer version (only while that catalog
+  is turned on at the same address). Deleted registry entries
+  are refused, deprecated ones marked; plugins from npm, archive or command
+  sources are refused, and plugin hooks, commands and agents are never
+  imported. New error codes `catalogs_off` and `catalog_unreachable`. App
+  commands for the Browse page: `catalogs_overview`,
+  `set_online_catalogs`, `add_catalog`, `remove_catalog`,
+  `set_catalog_enabled`, `search_catalog`, `show_catalog_entry`,
+  `refresh_catalog`, `review_catalog_mcp`, `review_catalog_skill`,
+  `open_catalog_link` (https links only). A tap address with a user name,
+  password or token is refused: use your git credential helper.
+- `loadout skills add --ref` takes a full 40-character commit, which pins
+  the skill (updates fetch that commit); a short commit is refused. MCP
+  drafts from a committed `.mcp.json` read a Claude
+  Code plugin's `${CLAUDE_PLUGIN_ROOT}` as the folder, and skip entries
+  with neither a URL nor a command instead of drafting them.
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

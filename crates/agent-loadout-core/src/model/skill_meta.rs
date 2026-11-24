@@ -46,6 +46,11 @@ pub struct SkillMeta {
     pub source: Option<SkillSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable: Option<SkillEnable>,
+    /// The bundled copy Loadout wrote (the Loadout skill for agents, #8).
+    /// Marks the skill as bundled on its own, without `[source]`: 0.5.x
+    /// reads an unknown `[source] kind` as an error but keeps this table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundled: Option<BundledCopy>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -64,12 +69,16 @@ pub struct SkillSource {
     /// Skill directory inside the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// Branch or tag followed for updates (git).
+    /// Branch, tag or commit followed for updates (git); a commit pins it.
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub git_ref: Option<String>,
     /// Commit the store copy came from (git).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
+    /// The catalog entry it was installed from, `<catalog>/<entry id>`
+    /// (#26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
@@ -87,6 +96,19 @@ pub struct SkillEnable {
     pub extra: toml::Table,
 }
 
+/// The copy of a bundled skill Loadout last wrote into the store: content
+/// with another hash was edited by the user and is never updated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BundledCopy {
+    /// The Loadout version the content shipped with.
+    pub version: String,
+    /// `sha256:<hex>` of the content as written (paths and bytes, sorted).
+    pub hash: String,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub extra: toml::Table,
+}
+
 impl SkillMeta {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
@@ -96,6 +118,7 @@ impl SkillMeta {
             tags: None,
             source: None,
             enable: None,
+            bundled: None,
             extra: toml::Table::new(),
         }
     }

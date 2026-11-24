@@ -111,6 +111,9 @@ pub struct SourceRef {
     /// Remote sources whose path has two or more segments: the first.
     owner: Option<String>,
     transport: Transport,
+    /// A host as a whole ([`SourceRef::whole_host`]): the key is
+    /// `host/*`, the only scope the host.
+    whole_host: bool,
 }
 
 /// A remote URL in canonical parts. The userinfo is only carried to
@@ -444,6 +447,46 @@ impl SourceRef {
         Self::local(&text, &text)
     }
 
+    /// The host of an `https://` (or `http://`) endpoint as a whole: the
+    /// key `host/*` (`http://host/*` without encryption), trusted or
+    /// blocked only at the host scope. A registry entry's remote server is
+    /// gated on it (#26): every path of that host is one operator's.
+    pub fn whole_host(url: &str) -> Result<Self, CoreError> {
+        let text = url.trim();
+        let parsed = Url::parse(text).map_err(|_| invalid(text, "it is not a valid URL"))?;
+        let transport = match parsed.scheme() {
+            "https" => Transport::Https,
+            "http" => Transport::Http,
+            _ => return Err(invalid(text, "unsupported URL scheme")),
+        };
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(invalid(text, "it carries a user name or password"));
+        }
+        let host = canonical_host(
+            parsed
+                .host_str()
+                .ok_or_else(|| invalid(text, "it has no host"))?,
+        )
+        .map_err(|why| invalid(text, why))?;
+        let host = match parsed.port() {
+            Some(port) if Some(port) != transport.default_port() => format!("{host}:{port}"),
+            _ => host,
+        };
+        let key = format!("{}{host}/*", transport.marker());
+        if key_shape(&key) != Some(SourceScope::Host) {
+            return Err(invalid(text, "its host cannot be a source key"));
+        }
+        Ok(Self {
+            url: format!("{}://{host}", transport.scheme()),
+            address: host.clone(),
+            key,
+            host: Some(host),
+            owner: None,
+            transport,
+            whole_host: true,
+        })
+    }
+
     fn local(path: &str, original: &str) -> Result<Self, CoreError> {
         let mut path = path.replace('\\', "/");
         while path.len() > 1 && path.ends_with('/') {
@@ -468,6 +511,7 @@ impl SourceRef {
             host: None,
             owner: None,
             transport: Transport::Local,
+            whole_host: false,
         })
     }
 
@@ -532,6 +576,7 @@ impl SourceRef {
             owner: (segments.len() >= 2).then(|| segments[0].clone()),
             host: Some(host),
             transport,
+            whole_host: false,
         };
         Ok((source, userinfo))
     }
@@ -619,10 +664,12 @@ impl SourceRef {
 
     /// Every key whose trust applies, most specific first.
     pub fn matching_keys(&self) -> Vec<String> {
-        [SourceScope::Repo, SourceScope::Owner, SourceScope::Host]
+        let mut keys: Vec<String> = [SourceScope::Repo, SourceScope::Owner, SourceScope::Host]
             .into_iter()
             .filter_map(|scope| self.scope_key(scope))
-            .collect()
+            .collect();
+        keys.dedup();
+        keys
     }
 
     /// Every key whose block applies, most specific first: the
@@ -645,6 +692,14 @@ impl SourceRef {
     /// The scopes "always trust" offers, narrowest first: a host only
     /// when it is not an [`AGGREGATOR_HOSTS`] host.
     pub fn scopes(&self) -> Vec<SourceScope> {
+        if self.whole_host {
+            return match &self.host {
+                Some(host) if !AGGREGATOR_HOSTS.contains(&host.as_str()) => {
+                    vec![SourceScope::Host]
+                }
+                _ => Vec::new(),
+            };
+        }
         let mut scopes = vec![SourceScope::Repo];
         if self.owner.is_some() {
             scopes.push(SourceScope::Owner);

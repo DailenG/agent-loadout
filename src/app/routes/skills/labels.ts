@@ -18,6 +18,7 @@ export const ORIGIN_KEYS = {
   agents_cli: "skill.card.sourceMethod.agents_cli",
   catalog: "skill.card.sourceMethod.catalog",
   authored: "skill.card.sourceMethod.authored",
+  bundled: "skill.card.sourceMethod.bundled",
 } as const satisfies Record<SkillOrigin, MessageKey>;
 
 export const ENTRY_CLASS_KEYS = {

@@ -254,6 +254,13 @@ pub enum ErrorCode {
     /// A server added from a local folder on another machine (#5): the
     /// folder is that machine's, so the entry is blocked here.
     FolderOnOtherMachine,
+    /// Online catalogs are off on this machine (#26): nothing was
+    /// contacted. The user turns them on (Install > Browse, or
+    /// `loadout catalog online on`).
+    CatalogsOff,
+    /// A catalog could not be reached or answered with an error (timeout,
+    /// HTTP status, rate limit, a body too large or not JSON).
+    CatalogUnreachable,
 }
 
 impl ErrorCode {
@@ -335,6 +342,8 @@ impl ErrorCode {
             ErrorCode::ScanBlocked => "scan_blocked",
             ErrorCode::CheckoutOutOfDate => "checkout_out_of_date",
             ErrorCode::FolderOnOtherMachine => "folder_on_other_machine",
+            ErrorCode::CatalogsOff => "catalogs_off",
+            ErrorCode::CatalogUnreachable => "catalog_unreachable",
         }
     }
 }

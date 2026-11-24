@@ -39,6 +39,10 @@ export const storeQueryKeys = {
   skillFile: ["read_skill_file"],
   /** Settings > Sources: installs and updates can record trust (M42). */
   sources: ["list_sources"],
+  /** Settings > Catalogs and Browse: the catalog list is in the store (`catalogs.toml`, M44/M45). */
+  catalogs: ["catalogs_overview"],
+  /** Settings > Agent integration: skill removes, restores and syncs change it (M46). */
+  agentSkill: ["agent_skill_status"],
 } as const;
 
 /**

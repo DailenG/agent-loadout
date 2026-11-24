@@ -158,8 +158,16 @@ pub struct InstallRequest {
     pub source: Source,
     /// The skill folder inside a git source (overrides the URL's).
     pub path: Option<String>,
-    /// Branch or tag of a git source (overrides the URL's).
+    /// Branch, tag or commit of a git source (overrides the URL's); a
+    /// commit pins the skill.
     pub git_ref: Option<String>,
+    /// The skill to pick when a git source without a path holds several:
+    /// the folder with this name (a skills.sh link names the skill, not
+    /// its folder).
+    pub skill: Option<String>,
+    /// The catalog entry this install comes from, `<catalog>/<entry id>`
+    /// (#26): recorded as `source.catalog`.
+    pub catalog: Option<String>,
     pub naming: Naming,
     pub decisions: Decisions,
 }
@@ -170,6 +178,8 @@ impl InstallRequest {
             source,
             path: None,
             git_ref: None,
+            skill: None,
+            catalog: None,
             naming: Naming::default(),
             decisions: Decisions::default(),
         }
@@ -294,7 +304,9 @@ pub fn prepare(sx: &SkillsEnv<'_>, request: &InstallRequest) -> Result<Prepared,
         Source::Git { url, git_ref, path } => {
             let git_ref = request.git_ref.clone().or_else(|| git_ref.clone());
             let path = request.path.clone().or_else(|| path.clone());
-            fetch_git(sx, url, git_ref, path)?
+            let mut fetched = fetch_git(sx, url, git_ref, path, request.skill.as_deref())?;
+            fetched.source.catalog.clone_from(&request.catalog);
+            fetched
         }
     };
     let moved_to = requested.as_ref().and_then(|requested| {
@@ -594,6 +606,7 @@ fn fetch_local(fs: &dyn Fs, path: &Path) -> Result<Fetched, CoreError> {
             path: None,
             git_ref: None,
             commit: None,
+            catalog: None,
             extra: toml::Table::new(),
         },
         clone: None,
@@ -902,6 +915,8 @@ pub(crate) fn check_repo_path(path: &str) -> Result<String, CoreError> {
     }
 }
 
+/// A branch, tag or full commit. A short commit (7 to 39 hex characters)
+/// is refused: a shallow clone cannot fetch one by an abbreviated name.
 pub(crate) fn check_ref(git_ref: &str) -> Result<(), CoreError> {
     let valid = !git_ref.is_empty()
         && !git_ref.starts_with('-')
@@ -909,14 +924,22 @@ pub(crate) fn check_ref(git_ref: &str) -> Result<(), CoreError> {
         && git_ref
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b));
-    if valid {
-        Ok(())
-    } else {
-        Err(CoreError::new(
+    if !valid {
+        return Err(CoreError::new(
             ErrorCode::InvalidValue,
             format!("{git_ref:?} is not a branch or tag name"),
-        ))
+        ));
     }
+    if (7..40).contains(&git_ref.len()) && git_ref.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            format!(
+                "{git_ref:?} looks like a short commit: pin the full 40-character commit \
+                 (git rev-parse {git_ref})"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn check_url(url: &str) -> Result<(), CoreError> {
@@ -985,8 +1008,11 @@ pub(crate) fn clone(
     if is_remote_url(url) {
         args.extend([OsStr::new("--depth"), OsStr::new("1")]);
     }
-    if let Some(git_ref) = git_ref {
-        args.extend([OsStr::new("--branch"), OsStr::new(git_ref)]);
+    // `--branch` takes a branch or tag; a commit is checked out after the
+    // clone (fetched when the shallow clone does not hold it).
+    let commit_ref = git_ref.filter(|r| is_commit_ref(r));
+    if let Some(branch) = git_ref.filter(|r| !is_commit_ref(r)) {
+        args.extend([OsStr::new("--branch"), OsStr::new(branch)]);
     }
     args.extend([OsStr::new("--"), OsStr::new(&fetch), dir.as_os_str()]);
     let output = run_git(sx, git, parent, &args)?;
@@ -1010,8 +1036,33 @@ pub(crate) fn clone(
             }
         }
     }
+    if let Some(wanted) = commit_ref {
+        let run = |args: &[&str]| {
+            let args: Vec<&OsStr> = args.iter().map(OsStr::new).collect();
+            run_git(sx, git, dir, &args)
+        };
+        let fail = |err: CoreError| {
+            let _ = remove_dir(sx.fs, dir);
+            err
+        };
+        let mut output = run(&["checkout", "--quiet", "--detach", wanted]).map_err(fail)?;
+        if !output.success && is_remote_url(url) {
+            let fetched =
+                run(&["fetch", "--quiet", "--depth", "1", &fetch, wanted]).map_err(fail)?;
+            if fetched.success {
+                output = run(&["checkout", "--quiet", "--detach", "FETCH_HEAD"]).map_err(fail)?;
+            }
+        }
+        if !output.success {
+            return Err(fail(CoreError::new(
+                ErrorCode::NotFound,
+                format!("the repository has no commit {wanted}"),
+            )));
+        }
+    }
     let commit = rev_parse(sx, git, dir, "HEAD")?;
     let branch = match git_ref {
+        Some(_) if commit_ref.is_some() => None,
         Some(git_ref) => Some(git_ref.to_owned()),
         None => {
             let output = run_git(
@@ -1036,6 +1087,12 @@ pub(crate) fn clone(
         branch,
         redirect,
     })
+}
+
+/// A ref that names a commit (40 hex characters; [`check_ref`] refuses a
+/// short one).
+pub(crate) fn is_commit_ref(git_ref: &str) -> bool {
+    git_ref.len() == 40 && git_ref.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 pub(crate) fn rev_parse(
@@ -1066,6 +1123,7 @@ fn fetch_git(
     url: &str,
     git_ref: Option<String>,
     path: Option<String>,
+    skill: Option<&str>,
 ) -> Result<Fetched, CoreError> {
     let git = git_path(sx)?;
     let path = path.as_deref().map(check_repo_path).transpose()?;
@@ -1093,14 +1151,30 @@ fn fetch_git(
             None if sx.fs.exists(&temp.join(SKILL_FILE)) => {
                 Ok((read_in_clone(sx.fs, &temp, &temp)?, None))
             }
-            None => match find_skill_dirs(sx.fs, &temp)?.as_slice() {
-                [] => Err(missing_skill_file(&temp)),
-                [one] => Ok((
-                    read_in_clone(sx.fs, &temp, &join_rel(&temp, one))?,
-                    Some(one.clone()),
-                )),
-                many => Err(several(many)),
-            },
+            None => {
+                let found = find_skill_dirs(sx.fs, &temp)?;
+                let named = |dir: &&String| {
+                    skill.is_some_and(|skill| {
+                        dir.rsplit('/')
+                            .next()
+                            .is_some_and(|name| name.eq_ignore_ascii_case(skill))
+                    })
+                };
+                let picked: Vec<&String> = found.iter().filter(named).collect();
+                let chosen = match picked.as_slice() {
+                    [one] => Some(*one),
+                    _ if found.len() == 1 => found.first(),
+                    _ => None,
+                };
+                match chosen {
+                    Some(one) => Ok((
+                        read_in_clone(sx.fs, &temp, &join_rel(&temp, one))?,
+                        Some(one.clone()),
+                    )),
+                    None if found.is_empty() => Err(missing_skill_file(&temp)),
+                    None => Err(several(&found)),
+                }
+            }
         }
     };
     let (files, path) = match read() {
@@ -1129,8 +1203,10 @@ fn fetch_git(
             kind: SkillSourceKind::Git,
             url: Some(url.to_owned()),
             path,
-            git_ref: branch,
+            // A commit pins the skill: its updates fetch that commit.
+            git_ref: branch.or_else(|| git_ref.filter(|r| is_commit_ref(r))),
             commit: Some(commit),
+            catalog: None,
             extra: toml::Table::new(),
         },
         clone: Some(temp),

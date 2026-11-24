@@ -1293,6 +1293,7 @@ fn skill_source(
         path: None,
         git_ref: None,
         commit: None,
+        catalog: None,
         extra: toml::Table::new(),
     };
     let mut url = None;

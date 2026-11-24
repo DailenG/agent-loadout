@@ -1,0 +1,5 @@
+{
+  "server": { "name": "io.github.acme/weather-gone", "description": "Removed.", "version": "0.1.0",
+              "packages": [ { "registryType": "npm", "identifier": "weather-gone", "version": "0.1.0" } ] },
+  "_meta": { "io.modelcontextprotocol.registry/official": { "status": "deleted", "isLatest": true } }
+}

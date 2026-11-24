@@ -3,6 +3,10 @@
   "title": "Loadout skill metadata (store/skill-meta/<id>.toml)",
   "type": "object",
   "properties": {
+    "bundled": {
+      "description": "The bundled copy Loadout wrote (the Loadout skill for agents, #8).\nMarks the skill as bundled on its own, without `[source]`: 0.5.x\nreads an unknown `[source] kind` as an error but keeps this table.",
+      "$ref": "#/$defs/BundledCopy"
+    },
     "enable": {
       "$ref": "#/$defs/SkillEnable"
     },
@@ -36,6 +40,24 @@
     "id"
   ],
   "$defs": {
+    "BundledCopy": {
+      "description": "The copy of a bundled skill Loadout last wrote into the store: content\nwith another hash was edited by the user and is never updated.",
+      "type": "object",
+      "properties": {
+        "hash": {
+          "description": "`sha256:<hex>` of the content as written (paths and bytes, sorted).",
+          "type": "string"
+        },
+        "version": {
+          "description": "The Loadout version the content shipped with.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "hash"
+      ]
+    },
     "ClientSelection": {
       "description": "\"all-detected\" or a list of client ids",
       "oneOf": [
@@ -73,6 +95,10 @@
     "SkillSource": {
       "type": "object",
       "properties": {
+        "catalog": {
+          "description": "The catalog entry it was installed from, `<catalog>/<entry id>`\n(#26).",
+          "type": "string"
+        },
         "commit": {
           "description": "Commit the store copy came from (git).",
           "type": "string"
@@ -85,7 +111,7 @@
           "type": "string"
         },
         "ref": {
-          "description": "Branch or tag followed for updates (git).",
+          "description": "Branch, tag or commit followed for updates (git); a commit pins it.",
           "type": "string"
         },
         "url": {

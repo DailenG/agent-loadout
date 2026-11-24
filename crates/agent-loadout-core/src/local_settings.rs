@@ -33,6 +33,16 @@ pub struct LocalSettings {
     /// by builds that carry the updater.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_for_updates: Option<bool>,
+    /// The bundled Loadout skill version this machine already reported as
+    /// "customized, not updated" (#8), so the note is shown once per
+    /// version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_skill_notice: Option<String>,
+    /// The "Online catalogs" switch (#26). Absent means off: nothing
+    /// contacts a catalog until the user turns it on (the first time they
+    /// open Install > Browse, or `loadout catalog online on`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub online_catalogs: Option<bool>,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -43,6 +53,8 @@ impl Default for LocalSettings {
             schema: SCHEMA_VERSION,
             backup_remote_offer: None,
             check_for_updates: None,
+            agent_skill_notice: None,
+            online_catalogs: None,
             extra: toml::Table::new(),
         }
     }
