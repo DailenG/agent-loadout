@@ -66,8 +66,8 @@ To check a download against `SHA256SUMS`:
 
 ### Windows
 
-**winget** (once the package is accepted; the first submission is waiting
-for a moderator's review in winget-pkgs):
+**winget** (once the package is accepted; the submission, now at 0.3.1,
+is waiting for a moderator's review in winget-pkgs):
 
 ```
 winget install --id DailenG.AgentLoadout
@@ -249,7 +249,8 @@ always starts at User. The pages:
 - **Projects**: Add folder, Init manifest..., **Discover projects**, and
   per project Open, Effective config (which server each client loads in
   that folder and from which file), Apply, Remove from list, and Review
-  change & trust.
+  change & trust. A project your account cannot write is marked **Read
+  only** (see [Read-only files and folders](#read-only-files-and-folders)).
 - **Tools**: every client with its tier, whether it is installed, its user
   and project config files (with Open folder), and a capability summary.
   At project scope the project files are named under that project's
@@ -339,12 +340,17 @@ marked for removal: delete that apply's folder under `backups/files` in
 Loadout's data folder, or let retention remove it (50 runs or 30 days).
 
 After the file watcher, window focus or **Refresh** find something new, a
-notice at the bottom of the sidebar says so, for example "omp has 5 MCP
-servers not managed by Loadout." (skill folders are counted too). Focus
-and watcher events rescan at most once a minute; **Refresh** always does.
-**Review** opens the Import page; **Review** and **Dismiss** both mark
-what was shown as seen on this machine, so it does not come back. Turn
-the notice off in Settings, Preferences, **Not-managed notice**.
+one-line notice at the bottom of the sidebar counts it, for example
+"7 not managed" (MCP entries plus skill folders). Click it, or press
+Enter or Space, to open the message, such as "omp has 2 MCP servers not
+managed by Loadout. 5 skill folders are not managed by Loadout.", with
+**Review** and **Dismiss** above the line; Escape or a click elsewhere
+closes it. With the sidebar collapsed, only the count shows; a click on
+it reviews. Focus and watcher events rescan at most once a minute;
+**Refresh** always does. **Review** opens the Import page; **Review** and
+**Dismiss** both mark what was shown as seen on this machine, so it does
+not come back (opening and closing the message marks nothing). Turn the
+notice off in Settings, Preferences, **Not-managed notice**.
 
 ## The command line
 
@@ -365,8 +371,8 @@ Commands:
 |---|---|
 | `doctor [--paths] [--scan-history]` | Check the installation: data directory, sync-folder warning, optional secret scan of every store commit |
 | `server ls\|show\|add\|rm` | Manage MCP servers in the store |
-| `skills ls\|add\|rm\|enable\|disable\|update\|scan\|import\|trash\|vendor` | Install skills, enable them for clients and projects, update, scan client folders |
-| `project init\|add\|ls\|rm\|trust\|share` | Project manifests |
+| `skills ls\|add\|rm\|enable\|disable\|update\|scan\|import\|adopt\|trash\|vendor` | Install skills, enable them for clients and projects, update, scan and adopt client folders |
+| `project init\|add\|discover\|ls\|rm\|trust\|share` | Project manifests, and the folders your clients already know |
 | `status [PATH] [--client C] [--scope system\|project\|all] [--check]` | State of every owned and desired entry |
 | `diff [PATH] [--client C] [--exit-code]`, `diff --rev A..B [--raw]` | The apply plan as file diffs, or a store diff between revisions |
 | `effective [PATH] [--client C]` | What each client loads in a folder, and from where |
@@ -379,7 +385,7 @@ Commands:
 | `restore --from <DIR\|ZIP\|BARE-REPO> [--machine ID\|LABEL]` | Set up this machine from a folder remote, zip or repository |
 | `backup [-m MSG] [--tag NAME] [--remote NAME\|--all\|--no-push]` | Commit hand edits of the store, optionally tag and push |
 | `remote add folder\|add git\|ls\|rm\|push\|pull\|machines\|token\|create-github` | Backup and sync remotes (none by default) |
-| `import [NAME]... [--scan] [--client C] [--only]` | Import client entries Loadout does not manage into the store |
+| `import [NAME]... [--scan] [--client C] [--scope ...] [--project ID] [--only] [--pick\|--as NAME=CLIENT] [--skip NAME] [--extract NAME[:FIELD]=DEST] [--remove-old-backups[=APPLY-ID]]` | Import client entries Loadout does not manage into the store, extracting literal secrets |
 | `adopt [CLIENT/NAME]... [--all-identical] [--theirs]` | Take ownership of foreign or changed client entries |
 | `migrate skilldock [--apply]` | Migrate from SkillDock |
 | `secrets ls\|check\|providers\|set\|clear\|map-op-env\|op-account\|service-account` | Secret aliases, providers and their status |
@@ -396,7 +402,7 @@ Exit codes:
 | Code | Meaning |
 |---|---|
 | 0 | OK |
-| 1 | Error (or a client file could not be written) |
+| 1 | Error (or a client file could not be written; since 0.4.0 a read-only file is blocked instead and does not change the exit code) |
 | 2 | Usage error |
 | 3 | Pending changes or drift (`status --check`, `diff --exit-code`) |
 | 4 | Entries need a decision (conflicts, collisions, drift) |
@@ -495,6 +501,80 @@ pending** for all of them, after a confirmation. No client file is
 touched. It is one commit with an `auto/pre-restore/...` tag, so History
 can bring the discarded version back. Settings, secrets, skills, project
 manifests and this machine's known projects are not changed by it.
+
+### Read-only files and folders
+
+A client file, skill folder or project folder can be readable but not
+writable for your account, for example a project managed by a separate,
+security-focused installer, a file marked read only, or a read-only
+network share. Loadout shows these, says why, and never plans a write
+into them; the idea is in
+[concepts](concepts.md#read-only-files-and-folders).
+
+On the command line, `loadout status`, `loadout apply --dry-run`, the
+`loadout apply` report, `loadout effective` (after the winning file) and
+`loadout import --scan` print `read-only (<kind>)` after the file, where
+the kind is `acl`, `attribute`, `owner` or `share`. With `--json`, each
+target, apply result, import source and effective entry has
+`"read_only": {"kind": "..."}` (or `null`). The entries Loadout would write
+there are **blocked** with `read_only_target`; the rest of the run
+applies, and the exit code does not count them.
+
+In the app, a lock and **Read only** mark the file, folder or project, and
+the tooltip says why in plain words:
+
+| Kind | The app says |
+|---|---|
+| `acl` | its permissions do not let your account write it |
+| `attribute` | it is marked read only |
+| `owner` | another user owns it and your account has no write permission |
+| `share` | the network share or drive it is on does not allow writing |
+
+Controls that would write such a file are turned off (never hidden), with
+the reason next to them; viewing, diffs, copying a definition and
+importing it into the store stay available:
+
+- **Projects**: a read-only project shows the badge and a note, and
+  **Apply** is off; a partly read-only project lists its read-only files.
+  The Scope switcher shows the lock next to the project.
+- **MCP**: a client pill whose file is read only shows the lock and a
+  dashed border and cannot be switched. **Enable all**, **Disable all**
+  and the power button still send every client; the plan and the result
+  report the read-only one as blocked. At project scope, rows whose
+  manifest layer is read only cannot be edited, removed or switched, and
+  **Add**, **Override here** and **Hide here** are off when no layer can be
+  written.
+- **Tools**: each read-only user or project file path carries the badge;
+  in **Manage**, the switches that would write a read-only file are off.
+- **Skills**: a read-only client skill folder shows the lock on its tab
+  and pill; **Adopt**, **Adopt all identical** and **Delete** are off
+  there (**Import** stays).
+- **Effective config**: a cell whose winning file is read only shows the
+  lock.
+- **Import**: a read-only source file or not-managed group is marked; its
+  definition can still be imported, but Loadout never overwrites the entry
+  in that file, and **Add to project manifest** is off when that manifest
+  is read only. In **Discover projects**, a read-only folder without a
+  manifest cannot be added (adding would write one); one with a manifest
+  can.
+- **Pending changes**: a read-only file shows the badge and a blocked
+  row ("Blocked: its permissions do not let your account write it.
+  Loadout does not write this file; the other files are applied."). The
+  apply result adds "1 file read only, not written." (or N files).
+
+File permissions are a fact about this machine and may be temporary, so
+they never change what the store records. The check never writes: it asks
+the system whether your account may write the file and its folder (on
+Windows by opening the file for writing without changing it), gives up
+after two seconds (a stalled network share), and then counts the file as
+writable. A write the system refuses anyway, because the file turned read
+only after the check, is reported the same way, and the other files of
+the run still apply. To have Loadout manage such a file again, make it
+writable for your account (or ask whoever manages that folder). The CLI
+checks on every run; the app keeps its answer for a file until the file
+watcher sees a change in that folder, so when only the permissions
+changed and the app still shows the lock, restart the app (tracked in
+[#23](https://github.com/DailenG/agent-loadout/issues/23)).
 
 ## Projects and trust
 

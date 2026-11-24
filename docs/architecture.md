@@ -62,12 +62,13 @@ Rules every layer follows:
 | `formats/` | Format-preserving editors: `jsonc.rs` (JSON and JSONC), `toml.rs`, `yaml.rs`, `json5.rs`, `text.rs`. Unowned bytes stay identical. |
 | `adapters/` | The adapter table (`spec.rs`), per-client mappers (`omp.rs`, `claude_code.rs`, `codex.rs`, `pi.rs`, `claude_desktop.rs`, `copilot.rs`, `cursor.rs`, `vscode_legacy.rs`, `gemini.rs`, `antigravity.rs`, `opencode.rs`, `grok.rs`, `windsurf.rs`, `devin.rs`, `ported.rs`), capabilities (`caps.rs`), detection (`detect.rs`), path templates (`location.rs`), shared mapping (`mapper.rs`). |
 | `layering/` | Project manifests (`manifest.rs`), merge rules (`merge.rs`), effective config with provenance (`effective.rs`), known projects (`projects.rs`), project servers edited from the app (`project_servers.rs`), trust by content hash (`trust.rs`), `.git/info/exclude` handling (`git.rs`), Discover projects from client files (`discover.rs`). |
-| `apply/` | Rendering desired entries (`render.rs`), planning (`plan.rs`), execution (`exec.rs`), the ownership ledger (`ledger.rs`), backups (`backup.rs`), journals (`journal.rs`), rollback (`rollback.rs`), Discard pending (`discard.rs`), import and adopt (`import.rs`), the drift resolver (`resolve.rs`). |
-| `secrets/` | Reference grammar (`grammar.rs`), catalog (`catalog.rs`), providers (`providers/`: env, keyring, 1Password), statuses (`status.rs`), delivery selection and rendering (`delivery.rs`, `render.rs`), secret classification (`classify.rs`), the leak scanner (`scanner.rs`). |
-| `skills/` | Skill store (`store.rs`), installs from git, folders and archives (`install.rs`), links, junctions and copies (`link.rs`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
+| `apply/` | Rendering desired entries (`render.rs`), planning (`plan.rs`), execution (`exec.rs`), the pending-plan cache the app shares (`cache.rs`), the ownership ledger (`ledger.rs`), backups (`backup.rs`), journals (`journal.rs`), rollback (`rollback.rs`), Discard pending (`discard.rs`), import and adopt of foreign entries across user and project files, with conflicts, secret extraction and removal of backups holding old values (`import.rs`), the not-managed findings and acknowledged entries behind the app's lists and notice (`unmanaged.rs`), the drift resolver (`resolve.rs`). |
+| `secrets/` | Reference grammar (`grammar.rs`), catalog (`catalog.rs`), providers (`providers/`: env, keyring, 1Password), statuses (`status.rs`), delivery selection and rendering (`delivery.rs`, `render.rs`), secret classification (`classify.rs`), secret extraction shared by import and the SkillDock migration (`extract.rs`), the leak scanner (`scanner.rs`). |
+| `skills/` | Skill store (`store.rs`), installs from git, folders and archives (`install.rs`), links, junctions and copies (`link.rs`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), content summaries of skill folders cached by their file listing (`hash_cache.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
 | `remote/` | Remote config (`config.rs`), folder remotes (`folder.rs`), git remotes through the system git (`git.rs`), GitHub CLI helpers (`gh.rs`), token credentials (`credential.rs`), push and pull (`sync.rs`), sync-tool artifact filtering (`sync_artifacts.rs`), restore on a new machine (`restore.rs`), the remote manifest (`manifest.rs`), UNC paths (`unc.rs`). |
 | `migrate/` | SkillDock import (`skilldock.rs`) and the client scan (`scan.rs`). |
 | `paths.rs`, `local_settings.rs` | `LOADOUT_HOME` resolution and sync-folder detection; machine-local settings. |
+| `access.rs` | Write access to client files and folders: the probe that never writes (Windows: read-only attribute, then open for writing without creating or truncating, and the folder's add-file right; Unix: `access(W_OK)`), run on worker threads under a two-second budget per plan and cached per path and content fingerprint; `ReadOnlyKind` (`acl`, `attribute`, `owner`, `share`) and the mapping of a refused write to `read_only_target`. Reached through `Fs::write_probe`. |
 
 ## Apply data flow
 
@@ -96,6 +97,22 @@ commit. The CLI commands that edit and apply at once (`server add`,
 `server rm`, `secrets set`, `project trust` and others) follow the instant
 path.
 
+**Planning cost** (#14, #15). One plan parses each client file once,
+however many entries or targets read it (`~/.claude.json` serves several),
+and looks ledger entries up through an index. A store change plans only
+what it touched: the files that hold or own the changed server's entries,
+or the one project a trust, init, project server edit or share concerns.
+The app keeps one full plan in `apply::cache::PlanCache`: while a plan is
+computed, a recording view of the `Fs` notes every read (existence,
+content hash, folder listing), and the plan is served again only while
+every noted read gives the same answer. The drift watcher's event drops
+it; a plan that read secret values is shared with the requests waiting
+for it but never kept. The planner also probes every target
+file once (`access::probe_files`, results cached with the plan) and turns
+entries that would write a read-only file into `blocked` /
+`read_only_target`; the executor maps a refused write the same way and
+goes on with the other files.
+
 ## CLI
 
 `crates/agent-loadout/src/main.rs` defines the clap tree and the global
@@ -116,7 +133,8 @@ command reference is [cli.md](cli.md), generated from the clap help by
 - `src/commands/*.rs` group commands by page (`servers.rs`, `apply.rs`,
   `tools.rs`, `projects.rs`, `project_servers.rs`, `effective.rs`,
   `resolve.rs`, `history.rs`, `remotes.rs`, `secrets.rs`, `skills.rs`,
-  `discover.rs`, `migrate.rs`, `updates.rs`). Each one calls core on a
+  `import.rs` (scan and apply an import, not-managed summaries and the
+  notice), `discover.rs`, `migrate.rs`, `updates.rs`). Each one calls core on a
   blocking thread and returns
   `{ status: "ok", data } | { status: "error", error: IpcError }`.
 - Commands take ids, not paths: folders picked in the OS dialog are kept in
@@ -146,11 +164,11 @@ fallback: outside Tauri without the mock, calls fail.
 | Path | Contents |
 |---|---|
 | `src/main.tsx`, `src/app/App.tsx` | Shell: sidebar with the scope switcher and nav, header slots, window chrome, route error boundary |
-| `src/app/routes/<page>/` | One folder per page: `skills`, `mcp`, `projects`, `tools`, `install`, `history`, `settings` (`versioning`, `secrets`, `updates`), `migrate` |
+| `src/app/routes/<page>/` | One folder per page: `skills`, `mcp`, `projects`, `tools`, `install`, `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `updates`), `migrate` |
 | `src/app/apply/` | Pending changes pill and drawer, change notices, query keys, drift triggers, Refresh |
 | `src/app/resolver/` | The drift resolver dialog |
 | `src/app/scope/` | `ActiveScope.tsx` (User or one project; not persisted) and `ScopeSwitcher.tsx` |
-| `src/app/components/` | Shared controls ported from SkillDock |
+| `src/app/components/` | Shared controls ported from SkillDock, the shared `Modal` (focus trap, inert page, Escape, focus restore) and `ReadOnlyBadge` (lock, reason text and note) |
 | `src/i18n/en.ts` | Every display string, keyed by message key, enum or error code (English only) |
 | `src/styles/tokens.css` | Design tokens |
 
@@ -164,8 +182,10 @@ mutation the app invalidates the affected keys.
 `TargetsChanged` event and every time the window gains focus, the app
 invalidates `driftQueryKeys` (pending plan, servers, project servers,
 pending store changes, projects, effective matrices, tools, skills, skill
-tool folders). The Refresh buttons do the same. Drift is found by the
-planner and never reverted on its own.
+tool folders, and the not-managed summaries and notice checks, which
+focus and watcher events refetch at most once a minute). The
+Refresh buttons do the same. Drift is found by the planner and never
+reverted on its own.
 
 **Active scope** (`src/app/scope/ActiveScope.tsx`): `useActiveScope()`
 returns `{ kind: "user" }` or `{ kind: "project", id }`; Skills, MCP and

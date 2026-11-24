@@ -7,10 +7,23 @@ without touching anything it did not write. See [concepts.md](concepts.md).
 
 **Why does Manage or the MCP page show 0 servers when my client has some?**
 Those servers were not written by Loadout, so they are *foreign* entries:
-Loadout leaves them alone and the app does not list them yet
-([#3](https://github.com/DailenG/agent-loadout/issues/3)). Bring them in
-with `loadout import --scan` and `loadout import`. See
+Loadout leaves them alone, and the list shows only your store. Look under
+**Not managed by Loadout** below the list (and in Tools > Manage): each
+entry has **Import...**. The Import page, or `loadout import --scan` and
+`loadout import`, brings them in. See
 [troubleshooting](troubleshooting.md#manage-or-the-mcp-page-shows-0-servers-but-my-client-has-some).
+
+**How do I bring in the setup I already have?**
+Open the **Import** page: MCP servers (from your user files and every
+project this machine knows), skill folders, the project folders your
+clients already know, and the SkillDock migration. On the command line:
+`loadout import`, `loadout skills adopt`, `loadout project discover`.
+
+**What does "7 not managed" in the sidebar mean?**
+Seven MCP entries or skill folders in your clients are not managed by
+Loadout and are new since you last looked. Click it for details, then
+**Review** or **Dismiss**. Settings, Preferences, **Not-managed notice**
+turns it off.
 
 **Will Loadout overwrite or delete my existing client config?**
 No. It edits only entries it created or you adopted, keeps comments and
@@ -32,9 +45,25 @@ Skills, MCP and Tools follow the sidebar **Scope** switcher. Pick **User**
 for your user-level setup. The choice is not saved; the app starts at User.
 
 **Why is a project read only?**
-Its manifest is untrusted or changed since you trusted it. Manifests can
-start programs, so Loadout waits for **Review & trust**
-(`loadout project trust PATH`).
+Usually its manifest is untrusted or changed since you trusted it.
+Manifests can start programs, so Loadout waits for **Review & trust**
+(`loadout project trust PATH`). A lock marked **Read only** means
+something else: your account cannot write the project's files (a folder
+managed by a security-focused installer, a read-only share). Loadout then
+leaves them alone and applies everything else; see
+[troubleshooting](troubleshooting.md#a-file-or-project-is-marked-read-only).
+
+**Does an import leave my secret values anywhere?**
+The store gets only a `${secret:ALIAS}` reference; the value goes to the
+keyring, 1Password or an environment variable. The backup the import's
+apply took of the client file still holds the old value until you choose
+**Remove those backups now** (or `loadout import --remove-old-backups`).
+See [troubleshooting](troubleshooting.md#my-client-files-old-secret-values-are-still-in-backups).
+
+**Why did `adopt` keep some skill folders?**
+Loadout replaces a folder with its link only when the store copy holds
+everything the folder does; the result gives each kept folder's reason.
+See [troubleshooting](troubleshooting.md#adopt-kept-some-skill-folders).
 
 **What is the difference between instant and review mode?**
 Instant (default) applies each edit at once. Review collects edits in

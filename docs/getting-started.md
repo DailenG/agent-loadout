@@ -35,16 +35,42 @@ The app offers **Add a backup remote**. It is optional; choose **Not now**
 to stay local. Then open **Tools** to see which clients Loadout detected
 and where their config files are.
 
-Nothing has been written to any client yet.
+Nothing has been written to any client yet. If your clients already have
+MCP servers or skill folders, a one-line notice at the bottom of the
+sidebar counts them, for example "7 not managed"; click it to see the
+details, then **Review** (opens the Import page) or **Dismiss**.
 
 ## 3. Bring in what you already have
 
 Your clients probably have MCP servers already. Loadout does not manage
 them until you import them (they are *foreign* entries, see
-[concepts](concepts.md#ownership-managed-and-foreign-entries)), so the MCP
-page starts empty even when your clients are not.
+[concepts](concepts.md#ownership-managed-and-foreign-entries)). The MCP
+page lists them under **Not managed by Loadout**, and each Tools card
+counts its client's.
 
-Importing currently happens on the command line:
+**In the app**, open **Import** (in the sidebar, after Install). Scanning
+only reads; nothing changes until you confirm.
+
+- **MCP servers**: the entries of your user files and of every project
+  this machine knows. An entry that is the same in several files is one
+  row; a name with different definitions shows them side by side (use
+  one, import both under their own IDs, or skip). A value that looks
+  like a secret goes to the OS keyring by default, or to a 1Password
+  reference or an environment variable; the store keeps only a
+  `${secret:ALIAS}` reference. **Review import...**, then **Import**.
+- **Skills**: the skill folders of your clients that Loadout does not
+  manage. **Adopt** copies each into the store, enables it for the
+  clients where it was found, and replaces each folder whose content
+  matches with Loadout's link (the original goes to `backups/trash`).
+- **Discover projects**: folders Claude Code, Codex, omp and Pi already
+  know. **Add selected** adds them untrusted; each one waits for
+  **Review & trust**.
+- **From SkillDock**: **Migrate from SkillDock...** (SkillDock's folder is
+  only read).
+
+Details for each section: [user guide, Importing in the app](user-guide.md#importing-in-the-app).
+
+**On the command line:**
 
 ```sh
 loadout import --scan             # list the servers your clients have; changes nothing
@@ -54,18 +80,16 @@ loadout import --client omp       # or only one client's
 loadout import --only             # copy definitions without taking ownership
 loadout import --pick docs=omp    # an entry that differs between clients: take omp's
 loadout import --extract chatty=keyring  # a literal secret: send it to the OS keyring
+loadout skills adopt              # list unmanaged skill folders; changes nothing
+loadout skills adopt --all        # adopt every name that has one content
+loadout project discover          # folders your clients know; --add ID or --all adds them
+loadout migrate skilldock         # report; add --apply to migrate
 ```
 
-Skills work the same way:
-
-```sh
-loadout skills scan                       # managed, unmanaged and mismatched skill folders
-loadout skills import claude-code my-skill  # bring one unmanaged folder into the store
-```
-
-Coming from SkillDock? Use Settings, **Migrate from SkillDock...** in the
-app, or `loadout migrate skilldock` (report) then
-`loadout migrate skilldock --apply`. SkillDock's folder is only read.
+An import that moved secrets out of a client file says that the backup
+its apply took still holds the old values; **Remove those backups now**
+in the app, or `loadout import --remove-old-backups`, deletes exactly
+those backups.
 
 ## 4. Add a server and apply
 

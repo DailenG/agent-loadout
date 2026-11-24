@@ -92,6 +92,12 @@ optional update check. Everything else works offline.
   disk between planning and writing is re-planned.
 - **Drift is reported, not reverted.** Hand edits of managed entries are
   shown as drift and wait for your decision.
+- **Read-only files are left alone.** A file or folder your
+  account cannot write is found before the apply by a check that never
+  writes (it never creates, truncates or changes a file) and its entries
+  are blocked (`read_only_target`); a write the system refuses later is
+  reported the same way. Loadout never changes permissions, attributes or
+  ownership to get a write through.
 
 ## Projects
 

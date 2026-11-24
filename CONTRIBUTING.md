@@ -163,13 +163,26 @@ passed. Keep one logical change per commit.
 
 Maintainers only.
 
-1. Update the version in every place the release workflow checks: the
+1. **Docs and website.** For every user-visible change in the release,
+   update before tagging: [README.md](README.md) (features, screenshots),
+   the pages under [docs/](docs/README.md) that describe it (getting
+   started, concepts, user guide, troubleshooting, FAQ, security,
+   architecture for new modules; regenerate `docs/cli.md` with
+   `node scripts/gen-cli-docs.mjs` when help text changed), the website
+   in `site/` (copy, screenshots in `site/img/screens` as WebP with a PNG
+   fallback, package channel statuses in `site/data/channels.json`; run
+   `node site/tools/contrast.mjs` and `node site/tools/build.mjs --out
+   <temp>`, and refresh `site/previews/`), and the DeepWiki notes in
+   `.devin/wiki.json`. Screenshots show demo data only: no user names or
+   absolute paths. Material for a version not yet released is marked
+   "from X.Y.Z" until it ships; drop the marker in this step.
+2. Update the version in every place the release workflow checks: the
    workspace `Cargo.toml`, `src-tauri/Cargo.toml`, `package.json` and
    `packaging/aur/agent-loadout/PKGBUILD` (plus the `-bin` PKGBUILD and the
    `.SRCINFO` files). Move the `Unreleased` section of
    [CHANGELOG.md](CHANGELOG.md) under the new version. Commit as
    `release: X.Y.Z`.
-2. Tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks
+3. Tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks
    that the tag matches every version, builds the Windows NSIS installer
    (signed with Azure Trusted Signing through `scripts/sign-windows.ps1`
    when the `release` environment is configured) and the Linux AppImage,
@@ -178,9 +191,9 @@ Maintainers only.
    when the updater key is set, `latest.json` and `.sig` files. The draft's
    notes are the version's CHANGELOG section followed by the generated
    list of pull requests.
-3. Review the draft and publish it. Release tags are protected: a failed
+4. Review the draft and publish it. Release tags are protected: a failed
    run means a new version, not a re-tag.
-4. After publishing:
+5. After publishing:
    - **Chocolatey**: `.github/workflows/chocolatey.yml` runs on the
      published release (and daily), updates
      `packaging/chocolatey/agent-loadout` from the release's `SHA256SUMS`,

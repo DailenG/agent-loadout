@@ -69,18 +69,29 @@ not apply this setting by itself yet.
 
 ### Manage or the MCP page shows 0 servers, but my client has some
 
-Loadout lists only servers in its own store. Servers already in a client's
-config that Loadout did not write are *foreign* entries: Loadout never
-touches them, and the app does not show them yet
-([#3](https://github.com/DailenG/agent-loadout/issues/3)). Import them on
-the command line:
+The MCP list and the Manage switches show the servers in Loadout's store.
+Servers already in a client's config that Loadout did not write are
+*foreign* entries: Loadout never touches them. Since 0.3.1 they are listed
+below, under **Not managed by Loadout** (per client and file, with
+"N managed, M not managed by Loadout" above the list), and each Tools card
+counts its client's. Choose **Import...** on an entry, or open the
+**Import** page, to bring them in. On the command line:
 
 ```sh
 loadout import --scan               # what is there; changes nothing
 loadout import --client omp         # import one client's servers
 ```
 
-See [concepts: ownership](concepts.md#ownership-managed-and-foreign-entries).
+If the section is empty too, check the **Scope** switcher (a project scope
+lists only that project's files) and that the client is detected on the
+Tools page. See [concepts: ownership](concepts.md#ownership-managed-and-foreign-entries).
+
+### The sidebar says "N not managed"
+
+Your clients have MCP entries or skill folders that Loadout does not
+manage. Click the line to read which, then **Review** (the Import page) or
+**Dismiss**; both mark what was shown as seen on this machine. Turn the
+notice off in Settings, Preferences, **Not-managed notice**.
 
 ### `loadout import` skips an entry with `needs_secret_extraction`
 
@@ -111,14 +122,33 @@ The Skills, MCP and Tools pages follow the **Scope** switcher at the top of
 the sidebar. Pick the project there. The app always starts at **User**.
 History and Projects cover every scope.
 
-### A project is read only, or apply exits with code 7
+### A project waits for trust, or apply exits with code 7
 
 The project's manifest is new, or changed since you trusted it (for
 example after a `git pull`). Loadout applies a manifest only after you
 trusted its exact content. Review and trust it:
 `loadout project trust PATH`, or **Review & trust** in the app. Until then
-its servers are read only and its targets are blocked; user scope and other
-projects still apply.
+its servers cannot be edited in the app and its targets are blocked; user
+scope and other projects still apply.
+
+### A file or project is marked read only
+
+Your account can read the file or folder but not write it: its
+permissions (`acl`), the read-only attribute (`attribute`), another
+owner (`owner`), or a read-only share, mount or drive (`share`). A
+project folder managed by a separate, security-focused installer is the
+usual case. This is not the same as an untrusted project.
+
+Loadout leaves such a file alone: the entries it would write there are
+blocked (`read_only_target`, `read-only (<kind>)` in `loadout status`),
+everything else applies, and the exit code is not affected. You can
+still import a definition from it into the store. To let Loadout manage
+it, make the file (or the project's `.loadout` folder) writable for your
+account, or ask whoever manages that folder; otherwise there is nothing
+to fix. The app keeps its answer until the file watcher sees a change in
+that folder; after a permissions-only change, restart the app (tracked
+in [#23](https://github.com/DailenG/agent-loadout/issues/23)). Details:
+[user guide, Read-only files and folders](user-guide.md#read-only-files-and-folders).
 
 ### A server did not appear in the client
 
@@ -138,6 +168,41 @@ projects still apply.
 `loadout status` shows the entry as changed outside. Resolve it in the
 Pending changes drawer (**Resolve...**) or with
 `loadout apply --on-conflict overwrite|import|skip`.
+
+### `adopt` kept some skill folders
+
+`loadout skills adopt` and the app's **Adopt** replace a folder with
+Loadout's link only when nothing would be lost. The result lists each
+kept folder with its reason:
+
+- another content of its name was chosen, or its name has several
+  contents and you did not choose (`--pick NAME=CLIENT`, or `--both` to
+  keep each as `NAME-<client>`);
+- it holds a git repository, an empty folder, or (Linux, macOS) an
+  executable file, which the store copy would not keep;
+- the project's repository tracks it;
+- it changed after the scan (scan again).
+
+Kept folders stay as they are; the skill is still in the store for the
+clients where it was adopted. When Loadout's data folder is on another
+drive than the skill folder, the original is copied into
+`backups/trash` and compared before it is removed, so adopting takes
+longer there but loses nothing.
+
+### My client file's old secret values are still in `backups/`
+
+An import that moved literal secrets out of a client file backed the file
+up first, so that backup still holds the old values. The import result
+says so and lists the backups: choose **Remove those backups now** in the
+app, or run `loadout import --remove-old-backups=<APPLY-ID>` (the import
+printed the id). Exactly those backups are overwritten with zeros and
+deleted; undoing that import then restores the store but reports the
+files it can no longer put back. Copies kept by file system snapshots or
+backup tools are out of Loadout's reach. In review mode the import itself
+writes nothing; the apply that later rewrites the file takes a backup that
+is not marked, so delete that run's folder under `backups/files` or let
+retention remove it (50 runs or 30 days). See
+[security: old secret values in backups](security.md#client-files).
 
 ### Exit code 6
 

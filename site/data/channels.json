@@ -8,7 +8,7 @@
       "prompt": "PS>",
       "command": "winget install --id DailenG.AgentLoadout",
       "status": "pending",
-      "pending": "Submitted to winget-pkgs and waiting for a moderator's review. Until then, use the installer above.",
+      "pending": "Submitted to winget-pkgs (now at 0.3.1) and waiting for a moderator's review. Until then, use the installer above.",
       "url": ""
     },
     {

@@ -91,7 +91,7 @@ wrote (the ledger). Each entry gets a state:
 | conflict | Drift, and the store changed too |
 | not managed (foreign) | An entry Loadout did not write; never touched |
 | collision | A foreign entry has the same name as a store server |
-| blocked | Cannot be written now (missing secret, untrusted project, parse error, unsupported transport, file locked, and so on) |
+| blocked | Cannot be written now (missing secret, untrusted project, parse error, unsupported transport, file locked, read-only file, and so on) |
 
 `loadout status` shows the states, `loadout diff` shows the file diffs the
 next apply would make, and `loadout apply` writes them. Drift is never
@@ -102,6 +102,32 @@ ownership, Skip, Re-create and Respect deletion.
 The app rechecks drift when a client file, manifest or skill folder changes
 on disk (a file watcher), when the window gains focus, and when you click
 Refresh.
+
+### Read-only files and folders
+
+Some client files can be read but not written by your account: a project
+folder managed by a separate, security-focused installer, a file marked
+read only, a read-only network share. Loadout still shows them
+(status, effective config, import, the not-managed lists and the app's
+views), marked **read only** with the reason:
+
+| Reason | Meaning |
+|---|---|
+| `acl` | The file's or folder's permissions deny your account writing |
+| `attribute` | The file is marked read only (Windows), or its owner has no write permission (macOS, Linux) |
+| `owner` | Another user owns it, and your account may not write it (macOS, Linux) |
+| `share` | A network share that denies writing, a read-only mount or write-protected media |
+
+Loadout never plans or tries a write into such a file: the entries it would
+write there are **blocked** (`read_only_target`), and everything else
+applies as usual. Adopting an entry that already matches still works, and
+import can still copy a definition from a read-only file into the store; it
+just never overwrites the entry there. If a file turns read only between the
+check and the write, the write is reported the same way and the other files
+of the run still apply. A read-only file does not make `loadout apply` fail:
+the exit code ignores it. The check gives up after two seconds (a stalled
+network share), and then the file counts as writable until the write says
+otherwise.
 
 ### Instant and review mode
 
@@ -131,17 +157,27 @@ machine. An entry is **managed** only when the ledger says Loadout wrote it
 file is **foreign**:
 
 - Foreign entries are never edited, disabled or removed.
-- They do not appear in the store, so the MCP page and Tools > Manage do
-  not list them. (This is why Manage can show "0 servers" for a client that
-  has servers of its own; see the [FAQ](faq.md).)
-- To bring them under Loadout: `loadout import --scan` lists them (user
-  files and the files of every project this machine knows, identical
-  definitions collapsed, differing ones side by side), `loadout import`
-  copies them into the store and takes ownership, `loadout import --only`
-  copies the definitions without taking ownership, and
-  `loadout adopt CLIENT/NAME` takes over one entry. An entry found only in
-  a project's files becomes a store definition that is not enabled; name
-  it in the project's manifest (`from = "<id>"`) to manage it there.
+- They are not in the store, so the MCP list and the Tools > Manage
+  switches do not include them. Instead, **Not managed by Loadout** below
+  the MCP list and in Tools > Manage lists them per client and file
+  ("7 managed, 3 not managed by Loadout"), each Tools card counts its
+  client's, and a one-line sidebar notice ("7 not managed") says when new
+  ones appear.
+- To bring them under Loadout, **import** them: the app's Import page or
+  `loadout import --scan` lists them (user files and the files of every
+  project this machine knows, identical definitions collapsed, differing
+  ones side by side), and the import copies the chosen definitions into
+  the store and takes ownership; literal secrets move to the OS keyring,
+  1Password or an environment variable on the way. `loadout import
+  --only` copies the definitions without taking ownership. An entry found
+  only in a project's files becomes a store definition that is not
+  enabled; name it in the project's manifest (`from = "<id>"`, or **Add
+  to project manifest** in the app) to manage it there.
+- To take over an entry that has the same name as a store server,
+  **adopt** it: `loadout adopt CLIENT/NAME` overwrites it with the store's
+  definition and records ownership, `--theirs` takes the client's version
+  into the store instead, and `--all-identical` adopts every entry that
+  already matches a store server, without a write.
 
 The ledger is machine-local and is not synced: ownership is a fact about
 the files on one machine.
@@ -206,8 +242,16 @@ skill folder: a directory junction on Windows (no administrator rights
 needed), a symbolic link elsewhere, or a copy if you ask. Project-scope
 links are hidden from git through `.git/info/exclude`. `loadout skills
 scan` (and the Skills page's source tabs) classify each client's skill
-folder entries as managed, unmanaged or mismatch; unmanaged folders can be
-imported or moved to the trash, never silently replaced.
+folder entries as managed, unmanaged or mismatch; unmanaged folders are
+never silently replaced. **Adopting** them (`loadout skills adopt`, the
+Import page's Skills section, or **Adopt** on the Skills page) copies each
+into the store, enables it where it was found, and replaces a folder with
+the managed link only when its content equals the store copy; the
+original goes to `backups/trash`. A folder the store copy would lose
+something from (different content, a git repository, an empty folder, an
+executable file on Linux and macOS) or that the project's repository
+tracks is kept, with the reason. Unmanaged folders can also be imported
+one by one or moved to the trash.
 
 ## Remotes
 

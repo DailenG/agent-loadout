@@ -19,16 +19,25 @@ GitHub Copilot, Cursor and 31 more.
   any earlier version.
 - **No secret values in the store.** Servers refer to secrets by alias; the
   values come from environment variables, the OS keyring or 1Password.
+- **Bring your setup in.** The Import page (or `loadout import`,
+  `loadout skills adopt`, `loadout project discover`) takes over the MCP
+  servers, skill folders and project folders your clients already have,
+  moving literal secrets to the keyring, 1Password or an environment
+  variable on the way.
 - **Per-project servers**, applied only after you trust the project's
   manifest; **skills** linked into each client's skill folder; optional
   **remotes** to back up and sync between machines.
+- **Read-only aware.** Files and folders your account cannot write are
+  marked with the reason and left alone; the rest still applies.
 
 A desktop app (Windows, Linux) and a command-line tool, `loadout`, work on
 the same data.
 
-| MCP servers | Skills | History |
+| MCP servers | Import | Pending changes |
 |---|---|---|
-| ![MCP page](docs/milestones/M28-mcp.png) | ![Skills page](docs/milestones/M28-skills.png) | ![History page](docs/milestones/M28-history.png) |
+| ![MCP page](site/img/screens/mcp.png) | ![Import page](site/img/screens/import.png) | ![Pending changes drawer](site/img/screens/apply-drawer.png) |
+
+Screenshots use demo data.
 
 ## Install
 
@@ -62,10 +71,12 @@ Per-OS details, checksums and uninstalling: [user guide, Install](docs/user-guid
 ## Quick start
 
 **Desktop app:** start Loadout, open **Tools** to see the detected clients,
-then **MCP**, **Add** (or **Paste config** with an entry from any client),
-and turn the server on for the clients you want. Each change is applied at
-once and can be undone from the notification or **History**. The **Scope**
-switcher at the top of the sidebar picks User or one of your projects.
+then **Import** to bring in the MCP servers, skills and projects your
+clients already have. To add a server, open **MCP**, **Add** (or **Paste
+config** with an entry from any client), and turn it on for the clients
+you want. Each change is applied at once and can be undone from the
+notification or **History**. The **Scope** switcher at the top of the
+sidebar picks User or one of your projects.
 
 **Command line:**
 
@@ -105,7 +116,7 @@ Questions about the code: [Ask DeepWiki](https://deepwiki.com/DailenG/agent-load
 
 ## Status and roadmap
 
-Loadout is in early development (0.2.x). What changed in each release is in
+Loadout is in early development (0.3.x). What changed in each release is in
 the [changelog](CHANGELOG.md); how it was built is in
 [docs/history.md](docs/history.md). Planned work and known issues are
 tracked in [GitHub issues](https://github.com/DailenG/agent-loadout/issues).

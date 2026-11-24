@@ -4,9 +4,9 @@
 
 | Page | What it covers |
 |---|---|
-| [Getting started](getting-started.md) | Install, first run, importing what you have, first apply, undo |
-| [Concepts](concepts.md) | Store, scopes, clients and adapters, apply and drift, ownership, secrets, projects and trust, skills, remotes |
-| [User guide](user-guide.md) | Every task in the app and on the command line |
+| [Getting started](getting-started.md) | Install, first run, bringing in what you have (Import page, CLI), first apply, undo |
+| [Concepts](concepts.md) | Store, scopes, clients and adapters, apply and drift, read-only files, ownership (managed and not managed entries, import, adopt), secrets, projects and trust, skills, remotes |
+| [User guide](user-guide.md) | Every task in the app and on the command line, including importing, skill adopt, Discover projects and the not-managed notice |
 | [CLI reference](cli.md) | Every `loadout` command and option (generated from `--help`) |
 | [Supported clients](adapters.md) | All 38 client adapters: files, formats, capabilities, verification |
 | [Troubleshooting](troubleshooting.md) | Known problems and fixes |

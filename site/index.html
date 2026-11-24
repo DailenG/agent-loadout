@@ -43,6 +43,7 @@
     <nav class="top__nav" aria-label="Primary">
       <ul class="nav">
         <li><a href="#how">How it works</a></li>
+        <li><a href="#import">Import</a></li>
         <li><a href="#clients">Clients</a></li>
         <li><a href="#safety">Safety</a></li>
         <li><a href="#install">Install</a></li>
@@ -179,6 +180,20 @@ $ loadout rollback last</code></pre>
       </ol>
     </section>
 
+    <section class="sec import" id="import" aria-labelledby="import-title">
+      <header class="sec-head">
+        <p class="readout">Bring your setup in</p>
+        <h2 id="import-title">Start from what you already have.</h2>
+        <p class="sec-lede">Your clients already have MCP servers, skill folders and project folders. Loadout leaves them alone until you bring them in, and the Import page does it in one place. Scanning only reads.</p>
+      </header>
+      <ul class="mods" role="list">
+        <li class="mod"><h3>Import MCP servers</h3><p>Reads your user files and the files of every project this machine knows. An entry that is the same everywhere becomes one server; one that differs shows its definitions side by side, to use one or keep both. Literal secrets move to the OS keyring, 1Password or an environment variable, and the store keeps a reference. <code>loadout import --scan</code></p></li>
+        <li class="mod"><h3>Adopt skill folders</h3><p>Skill folders a client already has become store skills, enabled where they were found. A folder that matches the store copy is replaced by Loadout's link and moved to the trash; one that would lose something is left as it is, with the reason. <code>loadout skills adopt</code></p></li>
+        <li class="mod"><h3>Discover projects</h3><p>Folders Claude Code, Codex, omp and Pi already know are offered as projects. They are added untrusted, so nothing applies until you review and trust each one. <code>loadout project discover</code></p></li>
+      </ul>
+      <p class="aside"><b>Not managed by Loadout</b> lists each client's other entries on the MCP page and in Tools, with <b>Import…</b> on each, and a one-line sidebar notice (“7 not managed”) says when new ones appear. An import that moved secrets out of a file offers to remove the backups that still hold the old values. Details: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#importing-in-the-app">user guide, Importing in the app</a>.</p>
+    </section>
+
     <section class="sec dialects" id="dialects" aria-labelledby="dialects-title">
       <header class="sec-head">
         <p class="readout">One entry, many dialects</p>
@@ -283,6 +298,19 @@ clients = ["omp", "cursor", "opencode"]</code></pre>
       <p class="aside">Threat model and design: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/security.md">docs/security.md</a>. Report a vulnerability: <a href="https://github.com/DailenG/agent-loadout/blob/main/SECURITY.md">SECURITY.md</a>.</p>
     </section>
 
+    <section class="sec readonly" id="read-only" aria-labelledby="readonly-title">
+      <header class="sec-head">
+        <p class="readout">Read-only aware</p>
+        <h2 id="readonly-title">Locked files stay locked.</h2>
+        <p class="sec-lede">Some client files can be read but not written by your account: a project folder managed by a security-focused installer, a file marked read only, a read-only network share. Loadout shows them, says why, and plans around them.</p>
+      </header>
+      <ul class="mods" role="list">
+        <li class="mod"><h3>Says why</h3><p>A lock marks each read-only file, skill folder and project with its reason: the permissions (<code>acl</code>), the read-only attribute, another owner, or a share or drive that denies writing. The CLI prints <code>read-only (&lt;kind&gt;)</code> after the file.</p></li>
+        <li class="mod"><h3>Blocked, not failed</h3><p>Entries that would write a read-only file are blocked (<code>read_only_target</code>) before anything is written, every other file still applies, and the exit code ignores them. A file that turns read only during the run is reported the same way.</p></li>
+        <li class="mod"><h3>Still useful</h3><p>You can still view a read-only file, diff it and import a definition from it into the store; Loadout never overwrites the entry there. The check itself never writes and gives up after two seconds on a stalled share.</p></li>
+      </ul>
+    </section>
+
     <section class="sec screens" id="screens" aria-labelledby="screens-title">
       <header class="sec-head">
         <p class="readout">The desktop app</p>
@@ -293,30 +321,44 @@ clients = ["omp", "cursor", "opencode"]</code></pre>
         <figure class="monitor">
           <picture>
             <source srcset="img/screens/mcp.webp" type="image/webp">
-            <img src="img/screens/mcp.png" width="1088" height="680" loading="lazy" decoding="async" alt="The MCP page in light mode: servers such as GitHub, Context7, Filesystem, Sentry and Playwright, each with its transport, how many clients it is enabled for, and buttons to turn it off, edit or remove it. Sentry shows the warning A secret has no value.">
+            <img src="img/screens/mcp.png" width="1088" height="680" loading="lazy" decoding="async" alt="The MCP page in light mode: the line 7 managed, 7 not managed by Loadout above servers such as GitHub, Context7, Filesystem, Sentry, Playwright and Linear, each with its transport and how many clients it is enabled for. GitHub and Filesystem carry a Read only badge, Sentry shows the warning A secret has no value, and the sidebar shows 7 not managed.">
           </picture>
           <figcaption class="mono">MCP · one list for every client</figcaption>
         </figure>
         <figure class="monitor">
           <picture>
-            <source srcset="img/screens/apply-drawer.webp" type="image/webp">
-            <img src="img/screens/apply-drawer.png" width="1088" height="680" loading="lazy" decoding="async" alt="The Pending changes drawer in dark mode: three user files for omp, Codex and Cursor with their added and changed counts, a store change waiting to be applied with a Discard button, and two recent applies, each with Undo this apply.">
+            <source srcset="img/screens/import.webp" type="image/webp">
+            <img src="img/screens/import.png" width="1088" height="680" loading="lazy" decoding="async" alt="The Import page in light mode: the MCP servers section with the filters All, User files and Projects. The server notion, identical in omp's and Claude Code's user files, is checked for import with its server ID, and its NOTION_TOKEN value goes to the OS keyring. The footer reads Selected for import: 3, with Review import.">
           </picture>
-          <figcaption class="mono">Pending changes · review mode</figcaption>
+          <figcaption class="mono">Import · bring in what your clients have</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/skills-adopt.webp" type="image/webp">
+            <img src="img/screens/skills-adopt.png" width="1088" height="680" loading="lazy" decoding="async" alt="The Skills page in dark mode on Claude Code's skill folder, ~/.claude/skills: code-review is managed by Loadout, and pdf-tools, release-notes and My Notes are unmanaged real folders, each with an Adopt button, plus Adopt all identical at the top.">
+          </picture>
+          <figcaption class="mono">Skills · adopt the folders you already have</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/apply-drawer.webp" type="image/webp">
+            <img src="img/screens/apply-drawer.png" width="1088" height="680" loading="lazy" decoding="async" alt="The Pending changes drawer in dark mode: omp's and Codex's user files each add one entry. Cursor's ~/.cursor/mcp.json and a project's .mcp.json are marked Read only and blocked, with the note that Loadout does not write those files and applies the others. Below, a store change waits with a Discard button.">
+          </picture>
+          <figcaption class="mono">Pending changes · read-only files blocked, not failed</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/projects.webp" type="image/webp">
+            <img src="img/screens/projects.png" width="1088" height="680" loading="lazy" decoding="async" alt="The Projects page in light mode: web-shop is trusted; api-gateway shows Manifest changed with Review change and trust, and its read-only project.toml; secure-portal is trusted and read only, with Apply turned off and the note that its permissions do not let your account write it.">
+          </picture>
+          <figcaption class="mono">Projects · trust and read-only state</figcaption>
         </figure>
         <figure class="monitor">
           <picture>
             <source srcset="img/screens/history.webp" type="image/webp">
-            <img src="img/screens/history.png" width="1088" height="680" loading="lazy" decoding="async" alt="The History page in light mode: store commits such as Enable context7 for omp and Codex, Apply: 3 files written marked Applied, a commit tagged before-redesign, and Apply: 1 file written, 1 blocked marked Partly applied.">
+            <img src="img/screens/history.png" width="1088" height="680" loading="lazy" decoding="async" alt="The History page in light mode: store commits such as Enable context7 for omp and Codex, Apply: 3 files written marked Applied, Install skill frontend-design tagged before-redesign, and Apply: 1 file written, 1 blocked marked Partly applied.">
           </picture>
           <figcaption class="mono">History · every change, every machine</figcaption>
-        </figure>
-        <figure class="monitor">
-          <picture>
-            <source srcset="img/screens/projects-trust.webp" type="image/webp">
-            <img src="img/screens/projects-trust.png" width="1088" height="680" loading="lazy" decoding="async" alt="The trust review dialog for the project api-gateway: a warning that project manifests can run commands, the diff of .loadout/project.toml since it was last trusted adding an openapi server, and the buttons Cancel and Trust and apply.">
-          </picture>
-          <figcaption class="mono">Projects · review a change before trusting it</figcaption>
         </figure>
       </div>
     </section>
@@ -345,7 +387,7 @@ clients = ["omp", "cursor", "opencode"]</code></pre>
             <li class="chan" data-channel="winget" data-status="pending">
               <div class="chan__head"><b>winget</b><span class="status status--pending">Pending</span></div>
               <div class="term"><span class="prompt" aria-hidden="true">PS&gt;</span><code>winget install --id DailenG.AgentLoadout</code><button class="copy" type="button" data-copy="winget install --id DailenG.AgentLoadout" hidden>Copy</button></div>
-              <p class="note">Submitted to winget-pkgs and waiting for a moderator's review. Until then, use the installer above.</p>
+              <p class="note">Submitted to winget-pkgs (now at 0.3.1) and waiting for a moderator's review. Until then, use the installer above.</p>
             </li>
             <li class="chan" data-channel="chocolatey" data-status="pending">
               <div class="chan__head"><b>Chocolatey</b><span class="status status--pending">Pending</span></div>

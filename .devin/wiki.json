@@ -65,7 +65,17 @@
     },
     {
       "title": "Apply engine",
-      "purpose": "Planning, drift, ownership and execution: entry states, the planning table, instant versus review mode, apply commits, rollback, discard pending, import and adopt, the resolver. Sources: crates/agent-loadout-core/src/apply/ (plan.rs, render.rs, exec.rs, ledger.rs, journal.rs, backup.rs, rollback.rs, discard.rs, import.rs, resolve.rs), SPEC.md section 8."
+      "purpose": "Planning, drift, ownership and execution: entry states, the planning table, instant versus review mode, apply commits, rollback, discard pending, the resolver, and planning cost (each client file parsed once per plan, scoped instant applies, the app's cached plan in apply/cache.rs invalidated by recorded reads and the drift watcher). Sources: crates/agent-loadout-core/src/apply/ (plan.rs, render.rs, exec.rs, cache.rs, ledger.rs, journal.rs, backup.rs, rollback.rs, discard.rs, resolve.rs), SPEC.md section 8."
+    },
+    {
+      "title": "Import, adopt and not-managed entries",
+      "parent": "Apply engine",
+      "purpose": "Bringing an existing setup in: `loadout import` scans user files and every known project (trusted or not, read only), groups identical definitions, reports conflicts (--pick, --as, --skip), extracts literal secrets to the keyring, 1Password or env (--extract, secrets/extract.rs), names project-only entries in manifests (`from`), and removes the backups that still hold old secret values (--remove-old-backups); `loadout adopt` for entries that match a store server; the not-managed findings, acknowledged entries (state/unmanaged-seen.json) and the app's Import page, Not managed by Loadout sections and one-line sidebar notice; `loadout skills adopt` (skills/adopt.rs, skills/hash_cache.rs) and `loadout project discover` (layering/discover.rs). Sources: apply/import.rs, apply/unmanaged.rs, src-tauri/src/commands/import.rs and discover.rs, src/app/routes/import/, docs/user-guide.md (Importing in the app), SPEC.md sections 8.6, 11.7, 12.5 and 13.3."
+    },
+    {
+      "title": "Read-only contexts",
+      "parent": "Apply engine",
+      "purpose": "Client files and folders this account can read but not write (since 0.4.0). The write probe (access.rs, Fs::write_probe) never writes, runs under a two-second budget and is cached per path and content fingerprint; kinds acl, attribute, owner, share; entries that would write a read-only file are blocked with read_only_target, a refused write at execution maps to the same code, and the exit code ignores it. CLI `read-only (<kind>)` and JSON `read_only`; IPC readOnly fields and the app's ReadOnlyBadge (src/app/components/ReadOnlyBadge.tsx). Sources: crates/agent-loadout-core/src/access.rs, apply/plan.rs, apply/exec.rs, docs/milestones/M37.md (IPC contract), M38.md, SPEC.md section 8.2."
     },
     {
       "title": "Ownership ledger, backups and rollback",
@@ -74,7 +84,7 @@
     },
     {
       "title": "Secrets",
-      "purpose": "Secret references and resolution: the ${secret:ALIAS} grammar, store/secrets.toml catalog, machine overrides, providers (env, OS keyring, 1Password op and op-env), statuses, delivery modes (env, launch via `loadout exec`, command, inline), extraction on import, the leak scanner. Sources: crates/agent-loadout-core/src/secrets/ (grammar.rs, catalog.rs, providers/, status.rs, delivery.rs, render.rs, classify.rs, scanner.rs), crates/agent-loadout/src/exec, SPEC.md section 11."
+      "purpose": "Secret references and resolution: the ${secret:ALIAS} grammar, store/secrets.toml catalog, machine overrides, providers (env, OS keyring, 1Password op and op-env), statuses, delivery modes (env, launch via `loadout exec`, command, inline), extraction on import and migration, the leak scanner. Sources: crates/agent-loadout-core/src/secrets/ (grammar.rs, catalog.rs, providers/, status.rs, delivery.rs, render.rs, classify.rs, extract.rs, scanner.rs), crates/agent-loadout/src/exec, SPEC.md section 11."
     },
     {
       "title": "Projects, trust and effective config",
@@ -99,7 +109,7 @@
     {
       "title": "Desktop pages",
       "parent": "Desktop app",
-      "purpose": "Each page and what it does: src/app/routes/skills, mcp (including project scope ProjectServers.tsx), projects (effective matrix, trust review), tools (ToolManageDialog), install, history, settings (versioning, secrets, updates), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
+      "purpose": "Each page and what it does: src/app/routes/skills (source tabs with Adopt), mcp (including project scope ProjectServers.tsx and the Not managed by Loadout section), projects (effective matrix, trust review, Discover projects), tools (ToolManageDialog, not-managed counts), install, import (MCP import, skills adopt, Discover projects, the SkillDock migration, the sidebar notice UnmanagedNotice.tsx), history, settings (versioning, secrets, updates, the not-managed notice switch), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
     },
     {
       "title": "Command line interface",
