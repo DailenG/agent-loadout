@@ -448,7 +448,9 @@ pub(super) fn external_json(report: &ExternalReport) -> Value {
         "version": report.version,
         "status": report.status.as_str(),
         "reason": report.reason.map(|reason| reason.as_str()),
-        "verdict": report.verdict.as_str(),
+        // A report that wasn't scanned or wasn't understood has no verdict:
+        // `null`, never "clean" (scripts and agents read this field).
+        "verdict": (report.status == ExternalStatus::Scanned).then(|| report.verdict.as_str()),
         "detail": report.detail,
         "findings": report.findings.iter().map(|finding| json!({
             "scanner": finding.scanner,

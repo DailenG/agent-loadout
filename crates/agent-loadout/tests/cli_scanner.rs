@@ -201,6 +201,13 @@ fn the_switch_is_the_default_and_the_flags_override_it() {
     cli.stub.as_ref().unwrap().answer(&output("clean.json"));
     let doc = cli.ok(&["scanner", "run", "one"]);
     assert_eq!(doc["external"]["status"], "scanned", "{doc:#}");
+    assert_eq!(doc["external"]["verdict"], "clean", "{doc:#}");
+    // Not scanned (Snyk's daily limit): no verdict at all, never "clean".
+    cli.stub.as_ref().unwrap().answer(&output("limit.json"));
+    let (_, doc, _) = cli.json(&["scanner", "run", "one"]);
+    assert_eq!(doc["external"]["status"], "not_scanned", "{doc:#}");
+    assert_eq!(doc["external"]["reason"], "limit_reached", "{doc:#}");
+    assert!(doc["external"]["verdict"].is_null(), "{doc:#}");
 }
 
 /// Review F9: an untrusted source is never sent to Snyk: not by `update
