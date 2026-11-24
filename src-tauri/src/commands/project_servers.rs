@@ -9,6 +9,7 @@
 
 use std::path::Path;
 
+use agent_loadout_core::access::ReadOnlyKind;
 use agent_loadout_core::adapters::ADAPTERS;
 use agent_loadout_core::apply::render::Detected;
 use agent_loadout_core::apply::{self, PlanOptions, ProjectSelection, ScopeFilter};
@@ -29,7 +30,9 @@ use super::servers::{
     ClientChoice, ClientInfo, ClientPill, KeyValue, TransportKind, client_infos, launch_text,
     non_empty, pairs, pill_in, render_inputs, to_pairs,
 };
-use super::{AppState, ChangeResult, CmdResult, Core, IpcError, blocking, errors, scrubbed};
+use super::{
+    AppState, ChangeResult, CmdResult, Core, IpcError, ReadOnly, blocking, errors, scrubbed,
+};
 
 /// One of a project's two manifest files (SPEC 5.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -78,6 +81,19 @@ pub struct ProjectScopeInfo {
     pub layers: Vec<ManifestLayerKind>,
     /// The merged `[defaults] clients`.
     pub default_clients: ClientChoice,
+    /// The whole project is read only for this account (SPEC 8.2), as
+    /// `ProjectRow::read_only`.
+    pub read_only: Option<ReadOnly>,
+    /// Manifest layers an edit cannot write; an edit there fails with
+    /// `read_only_target`.
+    pub read_only_layers: Vec<ReadOnlyLayer>,
+}
+
+/// A manifest layer this account cannot write (SPEC 8.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+pub struct ReadOnlyLayer {
+    pub layer: ManifestLayerKind,
+    pub kind: ReadOnlyKind,
 }
 
 /// One server name of the project's manifests, both layers merged.
@@ -302,6 +318,7 @@ pub fn list(core: &Core, id: &str) -> CmdResult<ProjectServerList> {
                         &selected,
                         client,
                         unsupported(client),
+                        None,
                     )
                 })
                 .collect();
@@ -363,6 +380,16 @@ pub fn list(core: &Core, id: &str) -> CmdResult<ProjectServerList> {
         layers.push(ManifestLayerKind::Shared);
     }
     layers.push(ManifestLayerKind::Local);
+    let access = projects::project_access(core, &[(id, root)], &targets)
+        .remove(id)
+        .unwrap_or_default();
+    let read_only_layers = [
+        (ManifestLayerKind::Shared, access.shared),
+        (ManifestLayerKind::Local, access.local),
+    ]
+    .into_iter()
+    .filter_map(|(layer, kind)| kind.map(|kind| ReadOnlyLayer { layer, kind }))
+    .collect();
     let mut warnings: Vec<IpcError> = project.warnings.iter().map(scrub).collect();
     warnings.extend(errors(&plan.warnings).into_iter().map(|warning| IpcError {
         message: super::scrub(&core.env, &warning.message, Some(root)),
@@ -377,6 +404,8 @@ pub fn list(core: &Core, id: &str) -> CmdResult<ProjectServerList> {
             hash: project.hash(),
             layers,
             default_clients: choice(&agent_loadout_core::layering::default_clients(&project)),
+            read_only: access.read_only,
+            read_only_layers,
         },
         servers,
         inherited,

@@ -464,13 +464,7 @@ fn write_private_manifest(
     let plan = prepare_init(env, fs, root, None)?;
     let dir = manifest_dir(root);
     let dir_existed = fs.is_dir(&dir);
-    fs.create_dir_all(&dir).map_err(|err| {
-        CoreError::new(
-            ErrorCode::IoError,
-            format!("cannot create directory: {err}"),
-        )
-        .with_path(&dir)
-    })?;
+    projects::create_dir(fs, &dir)?;
     let file = dir.join(crate::layering::LOCAL_FILE);
     projects::write_file(fs, &file, plan.text.as_bytes())?;
     let loaded = exclude_manifest_dir(fs, root).and_then(|_| load_project(fs, root));

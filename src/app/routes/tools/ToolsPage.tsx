@@ -11,6 +11,7 @@ import { recommendedFirst } from "@/app/clients";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { useEventCallback } from "@/app/components/useEventCallback";
+import { ReadOnlyBadge } from "@/app/components/ReadOnlyBadge";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { ToolLogo } from "@/app/components/ToolLogo";
 import type { ImportTarget } from "@/app/routes/import/model";
@@ -178,13 +179,16 @@ const ToolCard = memo(function ToolCard({ tool, project, unmanagedCount, isOpeni
               tool.userFiles.map((file) => (
                 <li
                   key={file.path}
-                  className={`tool-card__path-value${file.exists ? "" : " is-missing"}`}
+                  className={`tool-card__path-value${file.exists ? "" : " is-missing"}${file.readOnly ? " has-read-only" : ""}`}
                   title={file.path}
                 >
-                  {file.path}
-                  {file.exists ? null : (
-                    <span className="tools-path-missing">{` (${t("tools.fileMissing")})`}</span>
-                  )}
+                  <span className="tools-path-text">
+                    {file.path}
+                    {file.exists ? null : (
+                      <span className="tools-path-missing">{` (${t("tools.fileMissing")})`}</span>
+                    )}
+                  </span>
+                  <ReadOnlyBadge readOnly={file.readOnly} path={file.path} />
                 </li>
               ))
             )}
@@ -216,9 +220,12 @@ const ToolCard = memo(function ToolCard({ tool, project, unmanagedCount, isOpeni
                 // `<P>/...` is relative to the project folder: under the active project's folder, or
                 // bare under "In each project" at user scope. Other paths are user files keyed by project.
                 const shown = projectRelativePath(path, project?.path);
+                // The active project's read-only files (M38) use the same `<P>/...` form.
+                const readOnly = project?.readOnlyFiles.find((entry) => entry.file === path) ?? null;
                 return (
-                  <li key={path} className="tool-card__path-value" title={shown}>
-                    {shown}
+                  <li key={path} className={`tool-card__path-value${readOnly ? " has-read-only" : ""}`} title={shown}>
+                    <span className="tools-path-text">{shown}</span>
+                    <ReadOnlyBadge readOnly={readOnly} path={shown} />
                   </li>
                 );
               })

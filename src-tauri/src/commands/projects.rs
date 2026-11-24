@@ -8,13 +8,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
+use agent_loadout_core::access::ReadOnlyKind;
 use agent_loadout_core::apply::{
-    self, ApplyRequest, EntryState, PlanOptions, ProjectSelection, ScopeFilter, placeholder_path,
+    self, ApplyRequest, EntryState, PlanOptions, ProjectSelection, ScopeFilter, TargetPlan,
+    placeholder_path,
 };
+use agent_loadout_core::layering::manifest::manifest_dir;
 use agent_loadout_core::layering::projects::{self, Layout, ManifestChange};
 use agent_loadout_core::layering::{
-    KnownProject, Project, ProjectStatus, TrustState, TrustStore, known_projects, resolved,
-    same_folder, same_path,
+    KnownProject, LOCAL_FILE, Project, ProjectStatus, SHARED_FILE, TrustState, TrustStore,
+    known_projects, resolved, same_folder, same_path,
 };
 use agent_loadout_core::model::applied::ApplyTrigger;
 use agent_loadout_core::store::Store;
@@ -22,7 +25,10 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use serde::Serialize;
 use specta::Type;
 
-use super::{AppState, ChangeResult, CmdResult, Core, IpcError, blocking, count, scrub, scrubbed};
+use super::{
+    AppState, ChangeResult, CmdResult, Core, IpcError, ReadOnly, ReadOnlyFile, blocking, count,
+    read_only_of, scrub, scrubbed,
+};
 
 /// The manifest files of a project folder (SPEC 5.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -78,6 +84,12 @@ pub struct ProjectRow {
     pub clients: u32,
     /// Entries waiting for an apply, a decision, or blocked.
     pub pending: u32,
+    /// The whole project is read only for this account (SPEC 8.2): every
+    /// manifest and every project client file of the plan.
+    pub read_only: Option<ReadOnly>,
+    /// Each read-only file of the project, manifests first, for a partly
+    /// read-only project; empty when none.
+    pub read_only_files: Vec<ReadOnlyFile>,
 }
 
 /// A manifest the folder holds already (Add binds it).
@@ -239,8 +251,98 @@ fn manifest_servers(project: &Project) -> usize {
     names.len()
 }
 
+/// What this account cannot write in a project (SPEC 8.2
+/// `read_only_target`).
+#[derive(Debug, Clone, Default)]
+pub(super) struct ProjectAccess {
+    /// Every project target file of the plan and every manifest (or, with
+    /// none, the private one a first edit would create) is read only; the
+    /// kind of the first manifest.
+    pub read_only: Option<ReadOnly>,
+    /// Each read-only file, manifests first, under its placeholder root.
+    pub files: Vec<ReadOnlyFile>,
+    /// `project.toml`, when it exists and is read only.
+    pub shared: Option<ReadOnlyKind>,
+    /// `project.local.toml` (or the folder it would be created in).
+    pub local: Option<ReadOnlyKind>,
+}
+
+/// [`ProjectAccess`] of each of `projects` (id and folder), from the
+/// project targets in `targets` and a probe of the manifests, all probed
+/// together.
+pub(super) fn project_access(
+    core: &Core,
+    projects: &[(&str, &Path)],
+    targets: &[&TargetPlan],
+) -> BTreeMap<String, ProjectAccess> {
+    let fs = core.fs.as_ref();
+    let manifests = |root: &Path| -> (Option<PathBuf>, PathBuf) {
+        let dir = manifest_dir(root);
+        let shared = dir.join(SHARED_FILE);
+        (fs.exists(&shared).then_some(shared), dir.join(LOCAL_FILE))
+    };
+    let mut paths = Vec::new();
+    for (_, root) in projects {
+        let (shared, local) = manifests(root);
+        paths.extend(shared);
+        paths.push(local);
+    }
+    let found = read_only_of(core, &paths);
+    let kind_of = |path: &Path| found.get(path).copied().flatten();
+    let mut out = BTreeMap::new();
+    for (id, root) in projects {
+        let (shared, local) = manifests(root);
+        let local_exists = fs.exists(&local);
+        // The manifests the project has; a folder without one counts the
+        // private file a first edit would create.
+        let mut files: Vec<(PathBuf, Option<ReadOnlyKind>)> = Vec::new();
+        if let Some(shared) = &shared {
+            files.push((shared.clone(), kind_of(shared)));
+        }
+        // The private manifest an edit (or Import's "add to manifest")
+        // would create next to a shared one: listed when its folder is read
+        // only, so the views can say why before trying.
+        if local_exists || shared.is_none() || kind_of(&local).is_some() {
+            files.push((local.clone(), kind_of(&local)));
+        }
+        let manifest_kind = files.first().and_then(|(_, kind)| *kind);
+        for target in targets
+            .iter()
+            .filter(|target| target.project_id.as_deref() == Some(*id))
+        {
+            if !files.iter().any(|(file, _)| *file == target.file) {
+                files.push((target.file.clone(), target.read_only));
+            }
+        }
+        let whole = files.iter().all(|(_, kind)| kind.is_some());
+        out.insert(
+            (*id).to_owned(),
+            ProjectAccess {
+                read_only: if whole {
+                    ReadOnly::of(manifest_kind)
+                } else {
+                    None
+                },
+                files: files
+                    .iter()
+                    .filter_map(|(file, kind)| {
+                        kind.map(|kind| ReadOnlyFile {
+                            file: placeholder_path(&core.env, file, Some(root)),
+                            kind,
+                        })
+                    })
+                    .collect(),
+                shared: shared.as_deref().and_then(kind_of),
+                local: kind_of(&local),
+            },
+        );
+    }
+    out
+}
+
 /// The Projects page: each known project with its layout, trust, server
-/// and client counts and pending entries (from one project plan).
+/// and client counts and pending entries (from one project plan), and
+/// what this account cannot write in it.
 pub fn list(core: &Core) -> CmdResult<Vec<ProjectRow>> {
     let store = core.open_store()?;
     let known = known(core, store.as_ref())?;
@@ -267,11 +369,19 @@ pub fn list(core: &Core) -> CmdResult<Vec<ProjectRow>> {
             }
         }
     }
+    let present: Vec<(&str, &Path)> = known
+        .iter()
+        .filter(|project| !matches!(project.status, ProjectStatus::Missing))
+        .map(|project| (project.id.as_str(), project.root.as_path()))
+        .collect();
+    let targets: Vec<&TargetPlan> = plan.targets.iter().collect();
+    let mut access = project_access(core, &present, &targets);
     Ok(known
         .iter()
         .map(|project| {
             let fs = core.fs.as_ref();
             let root = Some(project.root.as_path());
+            let access = access.remove(&project.id).unwrap_or_default();
             ProjectRow {
                 id: project.id.clone(),
                 name: project
@@ -287,6 +397,8 @@ pub fn list(core: &Core) -> CmdResult<Vec<ProjectRow>> {
                 servers: count(project.project().map_or(0, manifest_servers)),
                 clients: count(clients.get(project.id.as_str()).map_or(0, BTreeSet::len)),
                 pending: count(pending.get(project.id.as_str()).copied().unwrap_or(0)),
+                read_only: access.read_only,
+                read_only_files: access.files,
             }
         })
         .collect())

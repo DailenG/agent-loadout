@@ -228,7 +228,8 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
           : t("skill.card.bulkToggle.enable", { name: skill.name });
   const powerState = allEnabled ? "is-enabled" : partial ? "is-partial" : "is-disabled";
   const powerDisabled = isBulkUpdating || isDeleting || !skill.hasContent
-    || (project !== null && (project.trust !== "trusted" || (skill.projectEnabled && skill.projectShared)));
+    || (project !== null
+      && (project.trust !== "trusted" || project.readOnly !== null || (skill.projectEnabled && skill.projectShared)));
 
   const tagText = skill.tags.join(", ");
   const tagAction = (

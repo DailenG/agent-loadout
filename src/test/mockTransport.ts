@@ -102,7 +102,7 @@ export const MOCK_TOOLS: ToolInfo[] = [
     detected: true,
     supported: true,
     readOnly: false,
-    userFiles: [{ path: "~/.claude.json", exists: true }],
+    userFiles: [{ path: "~/.claude.json", exists: true, readOnly: null }],
     projectFiles: ["<P>/.mcp.json"],
     transports: { stdio: true, http: true, sse: true },
     envRefs: true,
@@ -147,12 +147,12 @@ export function mockIpcError(error: IpcError): CommandResult<never> {
 
 /** Six clients with skill folders (SPEC 7.6), Claude Code and Codex detected. */
 export const MOCK_SKILL_CLIENTS: SkillClient[] = [
-  { id: "claude-code", name: "Claude Code", detected: true },
-  { id: "omp", name: "omp", detected: false },
-  { id: "codex", name: "Codex", detected: true },
-  { id: "pi", name: "Pi", detected: false },
-  { id: "copilot", name: "GitHub Copilot", detected: false },
-  { id: "cursor", name: "Cursor", detected: false },
+  { id: "claude-code", name: "Claude Code", detected: true, readOnly: null },
+  { id: "omp", name: "omp", detected: false, readOnly: null },
+  { id: "codex", name: "Codex", detected: true, readOnly: null },
+  { id: "pi", name: "Pi", detected: false, readOnly: null },
+  { id: "copilot", name: "GitHub Copilot", detected: false, readOnly: null },
+  { id: "cursor", name: "Cursor", detected: false, readOnly: null },
 ];
 
 export const MOCK_SKILL_LIST: SkillList = {

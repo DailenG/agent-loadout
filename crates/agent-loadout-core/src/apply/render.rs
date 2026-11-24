@@ -257,6 +257,10 @@ pub struct RenderCx<'a> {
     pub registry: &'a dyn RegistryProbe,
     pub delivery: &'a DeliveryEnv,
     pub memory: Arc<SecretMemory>,
+    /// Where write probes of target files are cached (the app's plan
+    /// cache); `None` probes afresh each planner run (SPEC 8.2
+    /// `read_only_target`).
+    pub probes: Option<&'a crate::access::ProbeCache>,
 }
 
 /// Renders every enabled store server for every client it is enabled for

@@ -21,6 +21,8 @@ pub mod hash_cache;
 pub mod install;
 pub mod link;
 #[cfg(test)]
+mod read_only_tests;
+#[cfg(test)]
 mod replace_tests;
 pub mod store;
 
@@ -104,6 +106,49 @@ pub(crate) fn confine(fs: &dyn Fs, path: &Path) -> Result<(), CoreError> {
 
 pub(crate) fn io_error(what: &str, path: &Path, err: &io::Error) -> CoreError {
     CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(path)
+}
+
+/// A failed write into a client skill folder: `read_only_target` when the
+/// OS refused it as read only (SPEC 8.2, 12.2), else [`io_error`].
+pub(crate) fn write_error(fs: &dyn Fs, what: &str, path: &Path, err: &io::Error) -> CoreError {
+    crate::access::write_error(fs, what, path, err)
+}
+
+/// A failed removal or rename of the entry at `path` (a link, a copy, a
+/// folder moved aside): what decides is the folder holding it, so that
+/// folder is probed, never `path` itself (a link leads into the store,
+/// which is always writable). The error keeps `path`.
+pub(crate) fn removal_error(fs: &dyn Fs, what: &str, path: &Path, err: &io::Error) -> CoreError {
+    match path
+        .parent()
+        .and_then(|folder| crate::access::denied(fs, err, folder))
+    {
+        Some(kind) => crate::access::read_only_target(kind, path),
+        None => io_error(what, path, err),
+    }
+}
+
+/// A path inside `folder`, a folder that does not exist yet: probing it
+/// asks the nearest existing folder for creating a subfolder
+/// (`FILE_ADD_SUBDIRECTORY` on Windows), which is what making a junction,
+/// a symbolic link to a folder or a copy needs, not creating a file.
+fn inside_new(folder: &Path) -> PathBuf {
+    folder.join(".loadout-new")
+}
+
+/// Whether this account can create the folder entry `path` (missing).
+pub(crate) fn new_folder_access(fs: &dyn Fs, path: &Path) -> crate::access::WriteAccess {
+    crate::access::probe_path(fs, &inside_new(path))
+}
+
+/// A failed creation of the folder entry `path` (a junction, a link, a
+/// copy): `read_only_target` when its folder does not let this account
+/// create a subfolder, else [`io_error`].
+pub(crate) fn creation_error(fs: &dyn Fs, what: &str, path: &Path, err: &io::Error) -> CoreError {
+    match crate::access::denied(fs, err, &inside_new(path)) {
+        Some(kind) => crate::access::read_only_target(kind, path),
+        None => io_error(what, path, err),
+    }
 }
 
 /// What is at a path, without following a final link.
@@ -326,10 +371,10 @@ pub(crate) fn write_files(fs: &dyn Fs, dir: &Path, files: &SkillFiles) -> Result
             .fold(dir.to_path_buf(), |path, part| path.join(part));
         if let Some(parent) = path.parent() {
             fs.create_dir_all(parent)
-                .map_err(|err| io_error("cannot create directory", parent, &err))?;
+                .map_err(|err| write_error(fs, "cannot create directory", parent, &err))?;
         }
         fs.write(&path, bytes)
-            .map_err(|err| io_error("cannot write file", &path, &err))?;
+            .map_err(|err| write_error(fs, "cannot write file", &path, &err))?;
     }
     Ok(())
 }

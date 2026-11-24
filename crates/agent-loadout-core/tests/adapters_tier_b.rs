@@ -1258,7 +1258,7 @@ fn effective_view_lists_legacy_vscode_as_copilot_compat() {
     assert_eq!(docs["winner"]["source"], "foreign");
     assert_eq!(
         docs["shadowed"],
-        serde_json::json!([{ "layer": "project", "file": "<P>/.mcp.json" }])
+        serde_json::json!([{ "layer": "project", "file": "<P>/.mcp.json", "read_only": null }])
     );
     assert_eq!(docs["warnings"][0]["code"], "duplicate_via_compat");
     let message = docs["warnings"][0]["message"].as_str().unwrap();

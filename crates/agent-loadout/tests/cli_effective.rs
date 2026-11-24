@@ -85,7 +85,7 @@ fn a_trusted_project_override_shadows_the_system_entry() {
     assert_eq!(github["status"], "synced");
     assert_eq!(
         github["shadowed"],
-        serde_json::json!([{ "layer": "system", "file": "~/.claude.json" }]),
+        serde_json::json!([{ "layer": "system", "file": "~/.claude.json", "read_only": null }]),
         "{doc:#}"
     );
     assert_eq!(github["warnings"], serde_json::json!([]));

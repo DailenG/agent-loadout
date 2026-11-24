@@ -20,8 +20,8 @@ function makeRow(overrides: Partial<ServerRow>): ServerRow {
     tags: [],
     clients: { allDetected: false, clients: [] },
     pills: [
-      { client: "claude-code", selected: false, state: "disabled", reason: null },
-      { client: "codex", selected: false, state: "disabled", reason: null },
+      { client: "claude-code", selected: false, state: "disabled", reason: null, readOnly: null },
+      { client: "codex", selected: false, state: "disabled", reason: null, readOnly: null },
     ],
     problems: [],
     invalid: null,
@@ -40,8 +40,14 @@ const LIST: ServerList = {
       launch: "issue-server --token ${secret:issue-token}",
       clients: { allDetected: false, clients: ["claude-code"] },
       pills: [
-        { client: "claude-code", selected: true, state: "blocked", reason: { code: "missing_secret", message: "detail" } },
-        { client: "codex", selected: false, state: "disabled", reason: null },
+        {
+          client: "claude-code",
+          selected: true,
+          state: "blocked",
+          reason: { code: "missing_secret", message: "detail" },
+          readOnly: null,
+        },
+        { client: "codex", selected: false, state: "disabled", reason: null, readOnly: null },
       ],
       problems: [{ code: "missing_secret", message: "detail" }],
     }),
@@ -194,7 +200,7 @@ describe("McpPage", () => {
     }
     const drifted = makeRow({
       id: "drifty",
-      pills: [{ client: "codex", selected: true, state: "drift", reason: null }],
+      pills: [{ client: "codex", selected: true, state: "drift", reason: null, readOnly: null }],
       clients: { allDetected: false, clients: ["codex"] },
     });
     const { user } = renderWithProviders(<PageWithDrawer />, {

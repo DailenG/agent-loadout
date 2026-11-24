@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::access::{self, ReadOnlyKind};
 use crate::adapters::adapter;
 use crate::apply::backup;
 use crate::apply::journal::{FileRecord, Journal, RecordedError};
@@ -67,6 +68,10 @@ pub struct TargetResult {
     pub written: bool,
     pub backup: Option<PathBuf>,
     pub warnings: Vec<CoreError>,
+    /// This account cannot write the file: found by the write probe while
+    /// planning, or the OS refused the write (`read_only_target`, SPEC
+    /// 8.2).
+    pub read_only: Option<ReadOnlyKind>,
 }
 
 impl TargetResult {
@@ -643,9 +648,7 @@ pub(crate) fn swap_file(
     expected: Option<&[u8]>,
     after: &[u8],
 ) -> Result<bool, CoreError> {
-    let io = |what: &str, at: &Path, err: std::io::Error| {
-        CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(at)
-    };
+    let io = |what: &str, at: &Path, err: std::io::Error| access::write_error(fs, what, at, &err);
     if let Some(dir) = file.parent() {
         fs.create_dir_all(dir)
             .map_err(|err| io("cannot create directory", dir, err))?;
@@ -674,6 +677,16 @@ pub(crate) fn swap_file(
         match fs.replace(&temp, file) {
             Ok(()) => return Ok(true),
             Err(err) if is_sharing_violation(&err) && Instant::now() < deadline => {
+                // Access denied here is also what a read-only file gives
+                // (the read-only attribute, an ACL without DELETE on the
+                // file and FILE_DELETE_CHILD on its folder) as well as a
+                // handle held without delete sharing: only a file the
+                // probe (which asks for write and delete) finds writable is
+                // waited for as a lock.
+                if let Some(kind) = refused(fs, &err, file) {
+                    discard();
+                    return Err(access::read_only_target(kind, file));
+                }
                 thread::sleep(pause.min(deadline.saturating_duration_since(Instant::now())));
                 pause = (pause * 2).min(Duration::from_millis(200));
             }
@@ -828,6 +841,7 @@ fn finished(
         written,
         backup,
         warnings: plan.warnings,
+        read_only: plan.read_only,
     }
 }
 
@@ -864,8 +878,50 @@ fn ownership_lost(target: &mut TargetResult, err: &CoreError) {
     target.counts = OpCounts::default();
 }
 
-fn failed(plan: TargetPlan, err: CoreError) -> TargetResult {
+fn failed(mut plan: TargetPlan, err: CoreError) -> TargetResult {
+    // A write the OS refused as read only: blocked like a file the probe
+    // found read only, never a failure; the run goes on (SPEC 8.2). The
+    // file is marked read only only when the refused write was its own
+    // (the file, its temp file, a folder on its way); a read-only
+    // `info/exclude` blocks the target without blaming its file.
+    if let Some(kind) = err.read_only() {
+        if err.path().is_some_and(|at| own_write(&plan.file, at)) {
+            plan.read_only = Some(kind);
+        }
+        for entry in &mut plan.entries {
+            if entry.action.writes() {
+                entry.state = EntryState::Blocked;
+                entry.action = Action::None;
+                entry.unresolved = false;
+                entry.problem = Some(err.clone());
+            }
+        }
+        return finished(plan, ApplyOutcome::Blocked, Some(err), false, None);
+    }
     finished(plan, ApplyOutcome::Failed, Some(err), false, None)
+}
+
+/// Whether a write at `at` was one of `file`'s own: the file, a sibling
+/// (its temp file) or a folder on its way.
+fn own_write(file: &Path, at: &Path) -> bool {
+    at == file || at.parent() == file.parent() || file.starts_with(at)
+}
+
+/// Of a replace refused with access denied on Windows, the kind of
+/// read-only file it hit, when the write probe finds `file` read only;
+/// `None` for a file another process holds (retried, then
+/// `file_locked`).
+#[cfg(windows)]
+fn refused(fs: &dyn crate::fs::Fs, err: &std::io::Error, file: &Path) -> Option<ReadOnlyKind> {
+    if err.raw_os_error() != Some(5) {
+        return None;
+    }
+    fs.write_probe().and_then(|probe| probe(file).read_only())
+}
+
+#[cfg(not(windows))]
+fn refused(_fs: &dyn crate::fs::Fs, _err: &std::io::Error, _file: &Path) -> Option<ReadOnlyKind> {
+    None
 }
 
 #[cfg(windows)]

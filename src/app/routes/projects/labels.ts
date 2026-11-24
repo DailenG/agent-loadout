@@ -2,7 +2,7 @@
 // effective matrix.
 
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
-import type { LayerKind, ManifestLayout, ProjectTrust } from "@/ipc/bindings";
+import type { LayerKind, ManifestLayerKind, ManifestLayout, ProjectRow, ProjectTrust, ReadOnly } from "@/ipc/bindings";
 import { IpcFailure } from "@/ipc/transport";
 
 export const LAYOUT_KEYS = {
@@ -54,4 +54,22 @@ export function projectRelativePath(path: string, root?: string): string {
   }
   const rest = path.slice(PROJECT_ROOT.length);
   return root ? `${root}/${rest}` : rest;
+}
+
+/** The manifest files as `ProjectRow.readOnlyFiles` names them (M38). */
+const MANIFEST_FILES: Record<ManifestLayerKind, string> = {
+  shared: `${PROJECT_ROOT}.loadout/project.toml`,
+  local: `${PROJECT_ROOT}.loadout/project.local.toml`,
+};
+
+/** Why `layer`'s manifest of `project` cannot be written (M38), or null. */
+export function manifestReadOnly(project: ProjectRow | undefined | null, layer: ManifestLayerKind): ReadOnly | null {
+  if (!project) {
+    return null;
+  }
+  if (project.readOnly) {
+    return project.readOnly;
+  }
+  const entry = project.readOnlyFiles.find((file) => file.file === MANIFEST_FILES[layer]);
+  return entry ? { kind: entry.kind } : null;
 }

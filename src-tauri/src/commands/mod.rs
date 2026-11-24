@@ -34,6 +34,8 @@ mod tests_perf;
 #[cfg(test)]
 mod tests_project_servers;
 #[cfg(test)]
+mod tests_read_only;
+#[cfg(test)]
 mod tests_skills;
 #[cfg(test)]
 mod tests_versioning;
@@ -47,6 +49,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use agent_loadout_core::access::{self, ReadOnlyKind};
 use agent_loadout_core::adapters::detect::NoRegistry;
 use agent_loadout_core::apply::cache::{CachedPlan, PlanCache};
 use agent_loadout_core::apply::{
@@ -243,6 +246,53 @@ pub type CmdResult<T> = Result<T, IpcError>;
 
 fn errors(list: &[CoreError]) -> Vec<IpcError> {
     list.iter().map(IpcError::from).collect()
+}
+
+/// This account cannot write a file or folder (SPEC 8.2
+/// `read_only_target`); the views show it and disable the controls that
+/// would write it. `null` where it is writable or the probe could not tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+pub struct ReadOnly {
+    pub kind: ReadOnlyKind,
+}
+
+impl ReadOnly {
+    pub fn of(kind: Option<ReadOnlyKind>) -> Option<Self> {
+        kind.map(|kind| Self { kind })
+    }
+}
+
+/// A read-only file, under its placeholder root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+pub struct ReadOnlyFile {
+    pub file: String,
+    pub kind: ReadOnlyKind,
+}
+
+/// Whether this account can write each of `paths` (a file, or the folder
+/// it would be created in; a folder for skill folders), probed together
+/// under the probe budget and kept per file fingerprint in the plan
+/// cache's probes (SPEC 8.2).
+pub(crate) fn read_only_of(
+    core: &Core,
+    paths: &[PathBuf],
+) -> HashMap<PathBuf, Option<ReadOnlyKind>> {
+    let fs = core.fs.as_ref();
+    let mut files: Vec<(PathBuf, Option<u64>)> = Vec::new();
+    for path in paths {
+        if files.iter().any(|(known, _)| known == path) {
+            continue;
+        }
+        let bytes = fs
+            .is_regular_file(path)
+            .then(|| fs.read(path).ok())
+            .flatten();
+        files.push((path.clone(), access::fingerprint(bytes.as_deref())));
+    }
+    access::probe_files(fs, &files, Some(core.plan_cache.probes()))
+        .into_iter()
+        .map(|(path, found)| (path, found.read_only()))
+        .collect()
 }
 
 /// Operating system the app runs on; selects the window chrome (SPEC 13.1:
@@ -491,6 +541,10 @@ pub struct AppliedFile {
     /// Entries with a problem or a pending decision.
     pub notes: Vec<EntryNote>,
     pub warnings: Vec<IpcError>,
+    /// This account cannot write the file: found while planning, or the OS
+    /// refused the write (`error.code` `read_only_target`, `outcome`
+    /// `blocked`).
+    pub read_only: Option<ReadOnly>,
 }
 
 impl AppliedFile {
@@ -512,6 +566,7 @@ impl AppliedFile {
                 .map(EntryNote::from)
                 .collect(),
             warnings: errors(&target.warnings),
+            read_only: ReadOnly::of(target.read_only),
         }
     }
 }

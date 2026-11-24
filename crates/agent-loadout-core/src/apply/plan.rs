@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use similar::TextDiff;
 
+use crate::access::{self, ReadOnlyKind, WriteAccess};
 use crate::adapters::caps::{
     DisableMech, ProjectDisable, ProjectSemantics, TimeUnit, TimeoutField, TrustGate,
 };
@@ -402,6 +403,10 @@ pub struct TargetPlan {
     /// `trust_required`).
     pub problem: Option<CoreError>,
     pub warnings: Vec<CoreError>,
+    /// This account cannot write the file (or create it): what the write
+    /// probe found while planning (SPEC 8.2 `read_only_target`). Entries
+    /// that would write it are blocked; the target is listed all the same.
+    pub read_only: Option<ReadOnlyKind>,
     /// Values the file holds now in entries written inline, masked in
     /// [`TargetPlan::diff`].
     pub(crate) masked: Vec<SecretValue>,
@@ -433,6 +438,8 @@ pub(crate) struct TargetInput {
     /// The store servers the target's project entries start from (`from`),
     /// for [`PlanOptions::servers`].
     pub(crate) sources: Vec<String>,
+    /// What the write probe found for the file; kept for a re-plan.
+    pub(crate) access: WriteAccess,
 }
 
 /// A string a list target should hold (a server name in Claude Code's
@@ -459,6 +466,7 @@ impl TargetInput {
             blocked: None,
             exclude: false,
             sources: Vec::new(),
+            access: WriteAccess::Unknown,
         }
     }
 
@@ -791,6 +799,8 @@ pub(crate) fn plan_each(
 struct Files {
     bytes: HashMap<PathBuf, Option<Vec<u8>>>,
     docs: HashMap<(PathBuf, Format), Result<Document, CoreError>>,
+    /// Write probe results (SPEC 8.2 `read_only_target`).
+    access: HashMap<PathBuf, WriteAccess>,
 }
 
 impl Files {
@@ -817,6 +827,27 @@ impl Files {
                 .clone()
         });
         Ok((bytes, parsed))
+    }
+
+    /// Probes whether this account can write each target file not probed
+    /// yet in this run, all together under the probe budget
+    /// ([`crate::access::probe_files`]); results are keyed by each file's
+    /// content fingerprint in `cx.probes` when given.
+    fn probe(&mut self, cx: &RenderCx<'_>, inputs: &[TargetInput]) -> Result<(), CoreError> {
+        let mut wanted: Vec<(PathBuf, Option<u64>)> = Vec::new();
+        for input in inputs {
+            let file = &input.target.file;
+            if self.access.contains_key(file) || wanted.iter().any(|(path, _)| path == file) {
+                continue;
+            }
+            let (bytes, _) = self.of(cx.fs, &input.target)?;
+            wanted.push((file.clone(), access::fingerprint(bytes.as_deref())));
+        }
+        if !wanted.is_empty() {
+            self.access
+                .extend(access::probe_files(cx.fs, &wanted, cx.probes));
+        }
+        Ok(())
     }
 }
 
@@ -876,8 +907,14 @@ fn plan_one(
     inputs.retain(|input| {
         options.selects_target(&input.target) && options.selects_servers(input, ledger, &derived)
     });
-    for input in inputs {
+    files.probe(cx, &inputs)?;
+    for mut input in inputs {
         let (bytes, parsed) = files.of(cx.fs, &input.target)?;
+        input.access = files
+            .access
+            .get(&input.target.file)
+            .copied()
+            .unwrap_or(WriteAccess::Unknown);
         plan.targets.push(plan_target_in(
             cx, input, bytes, parsed, ledger, key, options,
         ));
@@ -1710,9 +1747,50 @@ pub(crate) fn plan_target(
     plan_target_in(cx, input, bytes, None, ledger, key, options)
 }
 
+/// [`plan_target_body`], then a read-only file's writes blocked
+/// ([`read_only_blocks`]).
+fn plan_target_in(
+    cx: &RenderCx<'_>,
+    input: TargetInput,
+    bytes: Option<Vec<u8>>,
+    parsed: Option<Result<Document, CoreError>>,
+    ledger: &Ledger,
+    key: &LedgerKey,
+    options: &PlanOptions,
+) -> TargetPlan {
+    read_only_blocks(plan_target_body(
+        cx, input, bytes, parsed, ledger, key, options,
+    ))
+}
+
+/// SPEC 8.2 `read_only_target`: in a file the probe found read only, every
+/// entry that would write it is blocked (no decision is asked for a write
+/// that cannot happen) and the file stays as it is. Ledger-only work
+/// (adopting an identical entry, refreshing a hash, forgetting a deleted
+/// one) and decisions that need no write (import theirs, release) remain.
+fn read_only_blocks(mut plan: TargetPlan) -> TargetPlan {
+    let Some(kind) = plan.read_only else {
+        return plan;
+    };
+    if plan.problem.is_some() {
+        return plan;
+    }
+    let err = access::read_only_target(kind, &plan.file);
+    for entry in &mut plan.entries {
+        if entry.action.writes() {
+            entry.state = EntryState::Blocked;
+            entry.action = Action::None;
+            entry.unresolved = false;
+            entry.problem = Some(err.clone());
+        }
+    }
+    plan.after = None;
+    plan
+}
+
 /// [`plan_target`], with `bytes` already parsed as the target's format
 /// when `parsed` is given.
-fn plan_target_in(
+fn plan_target_body(
     cx: &RenderCx<'_>,
     input: TargetInput,
     bytes: Option<Vec<u8>>,
@@ -1742,6 +1820,7 @@ fn plan_target_in(
             .cloned()
             .collect(),
         masked: Vec::new(),
+        read_only: input.access.read_only(),
         input: input.clone(),
     };
     let keys = match input.container_keys() {

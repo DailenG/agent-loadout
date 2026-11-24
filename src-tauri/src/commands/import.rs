@@ -10,6 +10,8 @@
 //! apply made of files that held an extracted value are listed (M35), and
 //! `purge_import_backups` removes exactly those.
 
+use std::path::PathBuf;
+
 use agent_loadout_core::apply::backup;
 use agent_loadout_core::apply::import::{
     self, Candidate, ImportRequest, ScanFilter, ScanScope, SecretChoice, SecretDestination,
@@ -27,7 +29,8 @@ use specta::Type;
 
 use super::servers::{ServerDraft, draft_of};
 use super::{
-    AppState, ChangeResult, CmdResult, Core, FileScope, IpcError, blocking, count, scrubbed,
+    AppState, ChangeResult, CmdResult, Core, FileScope, IpcError, ReadOnly, blocking, count,
+    read_only_of, scrubbed,
 };
 
 /// Which client files a scan reads.
@@ -70,6 +73,9 @@ pub struct ImportSource {
     pub trusted: Option<bool>,
     /// Under its placeholder root.
     pub file: String,
+    /// This account cannot write the file (SPEC 8.2): the definition can
+    /// be imported, but the entry there is never overwritten.
+    pub read_only: Option<ReadOnly>,
 }
 
 /// A literal that may be a secret: it needs a destination.
@@ -159,6 +165,7 @@ fn candidate_of(
                         project_id: source.project.as_ref().map(|p| p.id.clone()),
                         trusted: source.project.as_ref().map(|p| p.trusted),
                         file: file_of(core, source),
+                        read_only: ReadOnly::of(source.read_only),
                     }
                 })
                 .collect();
@@ -516,6 +523,9 @@ pub struct UnmanagedGroup {
     /// Under their placeholder roots.
     pub files: Vec<String>,
     pub entries: Vec<UnmanagedEntry>,
+    /// Every file of the group is read only for this account (the kind of
+    /// the first; SPEC 8.2).
+    pub read_only: Option<ReadOnly>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -546,7 +556,13 @@ pub fn summary(
     let seen = Seen::load(core.fs.as_ref(), &core.home.state_dir()).map_err(fail)?;
     let mut total = 0;
     let mut new = 0;
-    let groups = unmanaged::groups(findings, &seen)
+    let groups = unmanaged::groups(findings, &seen);
+    let files: Vec<PathBuf> = groups
+        .iter()
+        .flat_map(|group| group.files.iter().cloned())
+        .collect();
+    let access = read_only_of(core, &files);
+    let groups = groups
         .into_iter()
         .filter_map(|group| {
             let root = group.project_root.as_deref();
@@ -565,6 +581,16 @@ pub fn summary(
             }
             total += entries.len();
             new += entries.iter().filter(|entry| entry.new).count();
+            let kinds: Vec<_> = group
+                .files
+                .iter()
+                .map(|file| access.get(file).copied().flatten())
+                .collect();
+            let read_only = kinds
+                .iter()
+                .all(Option::is_some)
+                .then(|| kinds.first().copied().flatten())
+                .flatten();
             Some(UnmanagedGroup {
                 client: group.client.to_owned(),
                 scope: group.scope.into(),
@@ -575,6 +601,7 @@ pub fn summary(
                     .map(|file| placeholder_path(&core.env, file, root))
                     .collect(),
                 entries,
+                read_only: ReadOnly::of(read_only),
             })
         })
         .collect();

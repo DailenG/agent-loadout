@@ -8,6 +8,24 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Added
+
+- Read-only contexts: client files and folders your account can read but
+  not write (a project managed by a separate security-focused installer, a
+  file marked read only, a read-only share) are listed with the reason
+  (`acl`, `attribute`, `owner`, `share`) in `loadout status`, `effective`,
+  `apply --dry-run`, `import --scan` and their `--json` output
+  (`read_only`), and in the app's data for the Projects list, Tools cards,
+  MCP pills, Skills, the effective matrix, Import and the Pending changes
+  drawer. Loadout never plans a write into them: those entries are blocked
+  (`read_only_target`), the rest applies, and the exit code ignores them.
+  A write the OS refuses as read only (the file changed after the check)
+  is reported the same way instead of failing, and the other files of the
+  run still apply; skill links and project manifest edits report it too.
+  Import never overwrites an entry in a read-only file. The check never
+  writes, gives up after two seconds on a stalled share, and is cached
+  with the app's plan (#4).
+
 ## [0.3.1] - 2026-11-23
 
 The first published release of the 0.3 line: it contains everything listed

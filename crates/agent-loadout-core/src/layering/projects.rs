@@ -683,20 +683,17 @@ pub fn read_optional(fs: &dyn Fs, path: &Path) -> Result<Option<String>, CoreErr
     })
 }
 
+/// Writes a project file (a manifest, `.gitignore`, the repository's
+/// `info/exclude`); a write the OS refuses as read only is
+/// `read_only_target` (SPEC 8.2).
 pub fn write_file(fs: &dyn Fs, path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
-    fs.write(path, bytes).map_err(|err| {
-        CoreError::new(ErrorCode::IoError, format!("cannot write file: {err}")).with_path(path)
-    })
+    fs.write(path, bytes)
+        .map_err(|err| crate::access::write_error(fs, "cannot write file", path, &err))
 }
 
-fn create_dir(fs: &dyn Fs, dir: &Path) -> Result<(), CoreError> {
-    fs.create_dir_all(dir).map_err(|err| {
-        CoreError::new(
-            ErrorCode::IoError,
-            format!("cannot create directory: {err}"),
-        )
-        .with_path(dir)
-    })
+pub(crate) fn create_dir(fs: &dyn Fs, dir: &Path) -> Result<(), CoreError> {
+    fs.create_dir_all(dir)
+        .map_err(|err| crate::access::write_error(fs, "cannot create directory", dir, &err))
 }
 
 /// `not_found` for a project id this machine does not know.

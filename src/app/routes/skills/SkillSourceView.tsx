@@ -4,9 +4,11 @@
 // conflict), import, open folder, two-click delete and expandable details. Delete moves the entry
 // to the trash and never deletes (SPEC 12.5); managed entries link to their store skill instead.
 // The agents CLI list (SPEC 12.4) is new. Adopt (one folder, or every name with one content)
-// replaces real folders with links to the store (#3).
+// replaces real folders with links to the store (#3). A skill folder this account cannot write
+// (M38) shows the lock and why; Adopt and Delete are disabled, Import stays available.
 
 import { useEffect, useRef, useState } from "react";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { t } from "@/i18n/en";
 import type { AgentsCliList, SkillScope, ToolSkillDir, ToolSkillEntry } from "@/ipc/bindings";
 import { IpcFailure } from "@/ipc/transport";
@@ -119,6 +121,7 @@ function EntryRow({ dir, entry, scope, expanded, onExpandedChange, onShowManaged
             className="secondary-button secondary-button--compact"
             type="button"
             onClick={onAdopt}
+            disabled={dir.readOnly !== null}
             aria-label={t("skills.source.adoptAria", { name: entry.name })}
             data-tooltip={t("skills.source.adoptTooltip")}
           >
@@ -167,6 +170,7 @@ function EntryRow({ dir, entry, scope, expanded, onExpandedChange, onShowManaged
               className="skill-card__icon-button skill-card__icon-button--delete"
               type="button"
               onClick={() => void handleTrash()}
+              disabled={dir.readOnly !== null}
               aria-label={t("skills.source.trash", { name: entry.name })}
               data-tooltip={t("skills.source.trashTooltip")}
             >
@@ -245,12 +249,23 @@ export function ToolSkillList({ dir, scope, query, onShowManaged, confirmRename 
             ? t("skills.source.folder", { path: dir.dir })
             : t("skills.source.folderMissing", { tool: dir.name, path: dir.dir })}
         </p>
+        <ReadOnlyBadge readOnly={dir.readOnly} path={dir.dir} />
         {hasRealFolders ? (
-          <button className="secondary-button secondary-button--compact" type="button" onClick={() => setAdopting("")}>
+          <button
+            className="secondary-button secondary-button--compact"
+            type="button"
+            onClick={() => setAdopting("")}
+            disabled={dir.readOnly !== null}
+          >
             {t("skills.source.adoptAll")}
           </button>
         ) : null}
       </div>
+      {dir.readOnly ? (
+        <ReadOnlyNote>
+          {t("readOnly.skills.folder", { client: dir.name, path: dir.dir, reason: readOnlyReason(dir.readOnly.kind) })}
+        </ReadOnlyNote>
+      ) : null}
       <div className="card-list">
         {rows.length > 0 ? (
           rows.map((entry) => (

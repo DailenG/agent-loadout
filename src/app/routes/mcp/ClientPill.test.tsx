@@ -7,7 +7,7 @@ import { renderWithProviders } from "@/test/renderWithProviders";
 import { ClientPill, visiblePills } from "./ClientPill";
 
 function pill(client: string, state: PillState, selected: boolean, reason: ClientPillData["reason"] = null): ClientPillData {
-  return { client, state, selected, reason };
+  return { client, state, selected, reason, readOnly: null };
 }
 
 function makeRow(overrides: Partial<ServerRow> = {}): ServerRow {

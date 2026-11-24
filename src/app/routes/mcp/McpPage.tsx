@@ -11,6 +11,7 @@ import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/com
 import { ListGridViewToggle, type ListGridViewMode } from "@/app/components/ListGridViewToggle";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
+import { ReadOnlyBadge } from "@/app/components/ReadOnlyBadge";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useEventCallback } from "@/app/components/useEventCallback";
 import type { ImportTarget } from "@/app/routes/import/model";
@@ -29,7 +30,7 @@ import {
   type VisiblePill,
 } from "./ClientPill";
 import { AddIcon, DeleteIcon, EditIcon, McpServerMonogram, PasteIcon, PowerToggleIcon } from "./icons";
-import { ProjectServersView, useProjectServers } from "./ProjectServers";
+import { ProjectServersView, useProjectServers, writableLayers } from "./ProjectServers";
 import type { ProjectDialogState } from "./ProjectServerDialog";
 import { ServerEditDialog, type EditTab } from "./ServerEditDialog";
 
@@ -174,6 +175,9 @@ const McpServerCard = memo(function McpServerCard({
   const readyPills = pills.filter(
     (entry: VisiblePill) => entry.client.detected && entry.client.supported && entry.pill.state !== "not_supported",
   );
+  // A selected client whose file is read only (M38): the row says so; Enable
+  // all / Disable all still send the same choice and the plan reports it blocked.
+  const readOnlyPills = enabledPills.filter((entry) => entry.pill.readOnly);
   const allReadyEnabled = readyPills.length > 0 && readyPills.every((entry) => entry.pill.selected);
   const partial = enabledPills.length > 0 && !allReadyEnabled;
   const powerTooltip = allReadyEnabled
@@ -290,6 +294,15 @@ const McpServerCard = memo(function McpServerCard({
                       </span>
                     </>
                   )}
+                  {readOnlyPills.length > 0 ? (
+                    <ReadOnlyBadge
+                      readOnly={readOnlyPills[0].pill.readOnly}
+                      focusable={false}
+                      tooltip={t("readOnly.tooltipClients", {
+                        clients: readOnlyPills.map((entry) => entry.client.name).join(", "),
+                      })}
+                    />
+                  ) : null}
                   <span className="status-badge tone-neutral mcp-layer-chip">{t("scope.user")}</span>
                 </div>
                 <div className="mcp-server-card__subtitle">{subtitle}</div>
@@ -574,10 +587,15 @@ export function McpPage({ onOpenPending, onOpenInstall, onOpenImport }: McpPageP
         onClick={() =>
           inProject ? setProjectDialog({ mode: "create" }) : setDialog({ mode: "create", focusPaste: false })}
         // An untrusted or changed project is read only until it is trusted;
-        // a running edit or refetch may make the shown hash stale.
+        // a running edit or refetch may make the shown hash stale; a project
+        // whose manifests are read only for this account (M38) has nowhere
+        // to write the new entry (the project view says why).
         disabled={
           inProject
-          && (projectServers.data?.project.trust !== "trusted" || projectServers.isFetching || projectBusy)
+          && (projectServers.data?.project.trust !== "trusted"
+            || writableLayers(projectServers.data.project).length === 0
+            || projectServers.isFetching
+            || projectBusy)
         }
       >
         <span aria-hidden="true" className="skills-toolbar-button__icon">

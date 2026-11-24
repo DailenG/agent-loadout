@@ -24,6 +24,8 @@ const TRUSTED: ProjectRow = {
   servers: 3,
   clients: 5,
   pending: 1,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 const CHANGED: ProjectRow = {
@@ -281,7 +283,15 @@ describe("ProjectsPage", () => {
   it("opens Discover projects from the toolbar and from the empty state (#3)", async () => {
     const discovery = {
       candidates: [
-        { id: "d-0a1b2c3d4e5f", name: "web-shop", path: "~/Code/web-shop", clients: ["claude-code"], manifest: null, error: null },
+        {
+          id: "d-0a1b2c3d4e5f",
+          name: "web-shop",
+          path: "~/Code/web-shop",
+          clients: ["claude-code"],
+          manifest: null,
+          error: null,
+          readOnly: null,
+        },
       ],
       warnings: [],
     };

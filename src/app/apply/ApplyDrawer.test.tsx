@@ -54,6 +54,7 @@ const USER_FILE: PlannedFile = {
   ],
   problem: null,
   warnings: [],
+  readOnly: null,
 };
 
 const CODEX_FILE: PlannedFile = {

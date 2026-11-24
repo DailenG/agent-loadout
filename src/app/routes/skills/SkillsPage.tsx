@@ -143,7 +143,13 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   const available = Object.values(updates).filter((check) => check.status === "available");
 
   const toolTabs: SourceTab[] = [
-    ...(toolDirs.data ?? []).map((dir) => ({ id: dir.client, name: dir.name, count: dir.entries.length })),
+    ...(toolDirs.data ?? []).map((dir) => ({
+      id: dir.client,
+      name: dir.name,
+      count: dir.entries.length,
+      readOnly: dir.readOnly,
+      path: dir.dir,
+    })),
     ...(data?.agentsCli
       ? [{ id: AGENTS_SOURCE, name: t("skills.source.agentsCli"), count: data.agentsCli.skills.length }]
       : []),

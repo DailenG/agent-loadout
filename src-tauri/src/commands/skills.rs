@@ -14,7 +14,7 @@ use std::path::{Component, Path, PathBuf};
 
 use agent_loadout_core::adapters::adapter;
 use agent_loadout_core::adapters::detect::detect;
-use agent_loadout_core::apply::placeholder_path;
+use agent_loadout_core::apply::{ScopeFilter, TargetPlan, placeholder_path};
 use agent_loadout_core::layering::{Project, resolved, same_path};
 use agent_loadout_core::model::applied::Scope as TargetScope;
 use agent_loadout_core::model::clients::ClientSelection;
@@ -37,7 +37,8 @@ use specta::Type;
 use super::projects::{self, ProjectTrust};
 use super::remotes::mask_url;
 use super::{
-    AppState, CmdResult, Core, FileScope, IpcError, NO_REGISTRY, blocking, count, scrubbed,
+    AppState, CmdResult, Core, FileScope, IpcError, NO_REGISTRY, ReadOnly, blocking, count,
+    read_only_of, scrubbed,
 };
 
 static RUNNER: SystemRunner = SystemRunner {
@@ -191,10 +192,15 @@ pub struct SkillInfo {
 
 /// A client with a skill folder (SPEC 7.6).
 #[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillClient {
     pub id: String,
     pub name: String,
     pub detected: bool,
+    /// This account cannot write the client's skill folder at the page's
+    /// scope (or create it; SPEC 8.2): links and copies there are
+    /// `read_only_target`.
+    pub read_only: Option<ReadOnly>,
 }
 
 /// The project the Skills page is scoped to.
@@ -212,6 +218,9 @@ pub struct SkillProject {
     pub clients: Vec<String>,
     /// `[skills] share`: copies to commit instead of hidden links.
     pub share: bool,
+    /// The whole project is read only for this account (SPEC 8.2), as
+    /// `ProjectRow::read_only`.
+    pub read_only: Option<ReadOnly>,
 }
 
 /// A skill of the agents CLI (SPEC 12.4), read only.
@@ -289,6 +298,8 @@ pub struct ToolSkillDir {
     pub dir: String,
     pub exists: bool,
     pub entries: Vec<ToolSkillEntry>,
+    /// This account cannot write the folder, or create it (SPEC 8.2).
+    pub read_only: Option<ReadOnly>,
 }
 
 /// What happened to one client folder entry (SPEC 12.2).
@@ -336,6 +347,9 @@ pub struct SkillLinkNote {
     /// Where a colliding link points.
     pub found_target: Option<String>,
     pub error: Option<IpcError>,
+    /// The entry was not made or removed: this account cannot write there
+    /// (`status` `blocked`, `error.code` `read_only_target`).
+    pub read_only: Option<ReadOnly>,
 }
 
 /// What client folders did after a change.
@@ -520,6 +534,7 @@ fn sync_of(env: &Env, report: &SyncReport) -> SkillSync {
                 status: result.status.into(),
                 found_target: result.found_target.as_deref().map(path),
                 error: result.error.as_ref().map(|err| scrubbed(env, err, None)),
+                read_only: ReadOnly::of(result.error.as_ref().and_then(CoreError::read_only)),
             })
             .collect(),
         warnings: report
@@ -580,6 +595,14 @@ fn project_scope(core: &Core, store: Option<&Store<'_>>, id: &str) -> CmdResult<
         .clone();
     let wanted = link::project_skills(&project);
     let sx = sx(core);
+    let cached = core
+        .plan()
+        .map_err(|err| scrubbed(&core.env, &err, Some(&root)))?;
+    let plan = cached.plan.scope_part(ScopeFilter::Project);
+    let targets: Vec<&TargetPlan> = plan.targets.iter().collect();
+    let access = projects::project_access(core, &[(id, &root)], &targets)
+        .remove(id)
+        .unwrap_or_default();
     let info = SkillProject {
         id: project.id.clone(),
         name: project.name().to_owned(),
@@ -591,6 +614,7 @@ fn project_scope(core: &Core, store: Option<&Store<'_>>, id: &str) -> CmdResult<
             .map(str::to_owned)
             .collect(),
         share: wanted.share,
+        read_only: access.read_only,
     };
     Ok(ProjectScope { project, info })
 }
@@ -695,13 +719,28 @@ pub fn list(core: &Core, scope: &SkillScope) -> CmdResult<SkillList> {
         None => Vec::new(),
     };
     let ledger = SkillLedger::load(sx.fs, &sx.home.state_dir())?;
+    let (dir_scope, dir_root) = match &project {
+        Some(scope) => (TargetScope::Project, Some(scope.project.root.clone())),
+        None => (TargetScope::User, None),
+    };
+    let dirs: Vec<Option<PathBuf>> = CLIENT_SKILLS
+        .iter()
+        .map(|entry| link::skills_dir(env, entry.client, dir_scope, dir_root.as_deref()).ok())
+        .collect();
+    let probed: Vec<PathBuf> = dirs.iter().flatten().cloned().collect();
+    let access = read_only_of(core, &probed);
     let clients = CLIENT_SKILLS
         .iter()
-        .map(|entry| SkillClient {
+        .zip(&dirs)
+        .map(|(entry, dir)| SkillClient {
             id: entry.client.to_owned(),
             name: client_name(entry.client),
             detected: adapter(entry.client)
                 .is_some_and(|spec| detect(spec, env, sx.fs, sx.registry).detected()),
+            read_only: ReadOnly::of(
+                dir.as_ref()
+                    .and_then(|dir| access.get(dir).copied().flatten()),
+            ),
         })
         .collect();
     let agents_cli = if store
@@ -768,6 +807,8 @@ pub fn tool_dirs(core: &Core, scope: &SkillScope) -> CmdResult<Vec<ToolSkillDir>
     let root = root.as_deref();
     let dirs = classify::scan(&sx(core), scope, root).map_err(|err| scrubbed(env, &err, root))?;
     let path = |path: &Path| placeholder_path(env, path, root);
+    let probed: Vec<PathBuf> = dirs.iter().map(|dir| dir.dir.clone()).collect();
+    let access = read_only_of(core, &probed);
     Ok(dirs
         .iter()
         .map(|dir| ToolSkillDir {
@@ -787,6 +828,7 @@ pub fn tool_dirs(core: &Core, scope: &SkillScope) -> CmdResult<Vec<ToolSkillDir>
                     description: entry.description.clone(),
                 })
                 .collect(),
+            read_only: ReadOnly::of(access.get(&dir.dir).copied().flatten()),
         })
         .collect())
 }

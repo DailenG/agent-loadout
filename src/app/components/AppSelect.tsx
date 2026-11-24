@@ -20,6 +20,8 @@ export type AppSelectOption<T extends string> = {
   icon?: ReactNode;
   /** Hover text of the option (`data-tooltip`). */
   tooltip?: string;
+  /** Shown after the label (a status mark, such as the read-only lock); give it an accessible name. */
+  badge?: ReactNode;
   /** Makes the option an action: choosing it runs this instead of `onChange`. */
   onSelect?: () => void;
 };
@@ -283,6 +285,7 @@ export function AppSelect<T extends string>(props: AppSelectProps<T>) {
                 ) : (
                   <span>{option.label}</span>
                 )}
+                {option.badge ? <span className="app-select__badge">{option.badge}</span> : null}
               </button>
             );
           })}

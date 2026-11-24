@@ -5,14 +5,16 @@
 //! discover` runs it: one store commit, never a trust (SPEC 17). Folders go
 //! out under their placeholder roots; candidates are named by id.
 
+use std::path::PathBuf;
+
 use agent_loadout_core::apply::placeholder_path;
-use agent_loadout_core::layering::discover;
-use agent_loadout_core::layering::projects;
+use agent_loadout_core::layering::manifest::manifest_dir;
+use agent_loadout_core::layering::{LOCAL_FILE, discover, projects};
 use serde::Serialize;
 use specta::Type;
 
 use super::projects::{FoundManifest, ProjectTrust, find, trust_of};
-use super::{AppState, CmdResult, Core, IpcError, blocking, scrubbed};
+use super::{AppState, CmdResult, Core, IpcError, ReadOnly, blocking, read_only_of, scrubbed};
 
 /// A folder the clients know that is not a project here yet.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -31,6 +33,10 @@ pub struct DiscoveredProject {
     pub manifest: Option<FoundManifest>,
     /// Why the folder cannot be added.
     pub error: Option<IpcError>,
+    /// This account cannot write the folder's private manifest location
+    /// (SPEC 8.2): adding a folder without a manifest would fail with
+    /// `read_only_target`; one with a manifest is bound without a write.
+    pub read_only: Option<ReadOnly>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -81,11 +87,19 @@ pub fn discover_list(core: &Core) -> CmdResult<ProjectDiscovery> {
     let store = core.open_store()?;
     let found = discover::discover(store.as_ref(), env, fs, &core.home)
         .map_err(|err| scrubbed(env, &err, None))?;
+    // The private manifest a folder without one gets on Add (SPEC 8.2).
+    let manifests: Vec<PathBuf> = found
+        .candidates
+        .iter()
+        .map(|candidate| manifest_dir(&candidate.root).join(LOCAL_FILE))
+        .collect();
+    let access = read_only_of(core, &manifests);
     Ok(ProjectDiscovery {
         candidates: found
             .candidates
             .iter()
-            .map(|candidate| {
+            .zip(&manifests)
+            .map(|(candidate, manifest)| {
                 let root = Some(candidate.root.as_path());
                 DiscoveredProject {
                     id: candidate.id.clone(),
@@ -108,6 +122,7 @@ pub fn discover_list(core: &Core) -> CmdResult<ProjectDiscovery> {
                         .problem
                         .as_ref()
                         .map(|err| scrubbed(env, err, root)),
+                    read_only: ReadOnly::of(access.get(manifest).copied().flatten()),
                 }
             })
             .collect(),

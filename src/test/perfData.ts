@@ -103,6 +103,7 @@ function buildServers(clients: ClientInfo[]): ServerRow[] {
       selected: enabled.includes(client.id),
       state: client.supported ? PILL_CYCLE[(i + c) % PILL_CYCLE.length] : "not_supported",
       reason: null,
+      readOnly: null,
     }));
     const stdio = i % 3 !== 0;
     return {
@@ -122,7 +123,7 @@ function buildServers(clients: ClientInfo[]): ServerRow[] {
 }
 
 function buildSkillClients(): SkillClient[] {
-  return CLIENTS.map(([id, name], index) => ({ id, name, detected: detected(index) }));
+  return CLIENTS.map(([id, name], index) => ({ id, name, detected: detected(index), readOnly: null }));
 }
 
 function buildSkills(clients: SkillClient[]): SkillInfo[] {
@@ -170,8 +171,8 @@ function buildTools(): ToolInfo[] {
     supported: id !== "intellij",
     readOnly: id === "vscode-legacy",
     userFiles: [
-      { path: `~/.${id}/mcp.json`, exists: detected(index) },
-      { path: `~/.config/${id}/settings.json`, exists: false },
+      { path: `~/.${id}/mcp.json`, exists: detected(index), readOnly: null },
+      { path: `~/.config/${id}/settings.json`, exists: false, readOnly: null },
     ],
     projectFiles: [`<P>/.${id}/mcp.json`],
     transports: { stdio: true, http: index % 2 === 0, sse: index % 4 === 0 },
@@ -194,6 +195,8 @@ function buildProjects(): ProjectRow[] {
     servers: 3 + (i % 8),
     clients: 2 + (i % 5),
     pending: i % 4 === 0 ? 2 : 0,
+    readOnly: null,
+    readOnlyFiles: [],
   }));
 }
 
@@ -266,6 +269,7 @@ function buildPlan(clients: ClientInfo[], servers: ServerRow[], projects: Projec
       })),
       problem: null,
       warnings: [],
+      readOnly: null,
     }));
   const projectFiles: PlannedFile[] = projects
     .filter((p) => p.pending > 0)
@@ -280,6 +284,7 @@ function buildPlan(clients: ClientInfo[], servers: ServerRow[], projects: Projec
       entries: [],
       problem: null,
       warnings: [],
+      readOnly: null,
     }));
   const files = [...userFiles, ...projectFiles];
   const pending = files.reduce((sum, f) => sum + f.counts.create + f.counts.update + f.counts.remove, 0);
@@ -297,6 +302,8 @@ function buildProjectServers(project: ProjectRow, clients: ClientInfo[], servers
       hash: hex(project.servers, 64),
       layers: project.layout === "shared_and_local" ? ["shared", "local"] : ["shared"],
       defaultClients: { allDetected: true, clients: defaults },
+      readOnly: null,
+      readOnlyLayers: [],
     },
     servers: Array.from({ length: project.servers }, (_, i) => ({
       name: `proj-server-${i}`,
@@ -313,6 +320,7 @@ function buildProjectServers(project: ProjectRow, clients: ClientInfo[], servers
         selected: client.detected,
         state: client.supported ? PILL_CYCLE[(i + c) % PILL_CYCLE.length] : "not_supported",
         reason: null,
+        readOnly: null,
       })),
       problems: [],
       invalid: null,
@@ -335,7 +343,7 @@ function buildMatrix(project: ProjectRow, clients: ClientInfo[], servers: Server
       name: s.id,
       cells: columns.map((c) => ({
         client: c.id,
-        winner: { layer: i % 4 === 0 ? "project" : "system", file: `~/.${c.id}/mcp.json` },
+        winner: { layer: i % 4 === 0 ? "project" : "system", file: `~/.${c.id}/mcp.json`, readOnly: null },
         source: "loadout",
         loaded: true,
         shadowed: [],
@@ -365,6 +373,7 @@ function buildToolSkillDirs(clients: SkillClient[], skills: SkillInfo[]): ToolSk
         skillId: i % 10 === 9 ? null : s.id,
         description: s.description,
       })),
+      readOnly: null,
     }));
 }
 
@@ -426,7 +435,7 @@ export function buildPerfDataset(): MockTransportOptions {
         skills: project ? skills.map((s, i) => ({ ...s, projectEnabled: i % 4 === 0 })) : skills,
         clients: skillClients,
         project: project
-          ? { id: project.id, name: project.name, path: project.path, trust: project.trust, hash: hex(1, 64), clients: ["claude-code"], share: false }
+          ? { id: project.id, name: project.name, path: project.path, trust: project.trust, hash: hex(1, 64), clients: ["claude-code"], share: false, readOnly: null }
           : null,
         agentsCli: null,
         sizeWarning: null,

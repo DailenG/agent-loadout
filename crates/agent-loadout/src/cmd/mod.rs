@@ -25,6 +25,7 @@ pub mod tag;
 
 use std::path::Path;
 
+use agent_loadout_core::access::ReadOnlyKind;
 use agent_loadout_core::adapters::detect::NoRegistry;
 pub use agent_loadout_core::apply::instant_apply;
 use agent_loadout_core::apply::{ApplyEnv, ApplyReport, ApplyStatus, EntryPlan, TargetResult};
@@ -198,10 +199,25 @@ fn target_result_json(target: &TargetResult) -> Value {
         "remove": target.counts.remove,
         "disable": target.counts.disable,
         "error": target.error.as_ref().map(error_json),
+        "read_only": read_only_json(target.read_only),
         "backup": target.backup.as_deref().map(path_json),
         "entries": target.entries.iter().map(entry_json).collect::<Vec<_>>(),
         "warnings": target.warnings.iter().map(error_json).collect::<Vec<_>>(),
     })
+}
+
+/// A file's read-only state in `--json` output (SPEC 8.2
+/// `read_only_target`): `{"kind": "acl"}`, or `null` when writable or
+/// unknown.
+pub fn read_only_json(kind: Option<ReadOnlyKind>) -> Value {
+    kind.map_or(Value::Null, |kind| json!({ "kind": kind.as_str() }))
+}
+
+/// `  read-only (<kind>)` after a file in text output; empty when
+/// writable or unknown.
+pub fn read_only_note(kind: Option<ReadOnlyKind>) -> String {
+    kind.map(|kind| format!("  read-only ({kind})"))
+        .unwrap_or_default()
 }
 
 /// An apply run as JSON (`apply`, `rollback`, `adopt`, `import`, `server`).
@@ -230,14 +246,15 @@ pub fn print_report(report: &ApplyReport, commit: Option<&CommitId>) {
             continue;
         }
         println!(
-            "{:<8} {}  ({}; +{} ~{} -{} !{})",
+            "{:<8} {}  ({}; +{} ~{} -{} !{}){}",
             outcome_str(target.outcome),
             target.file.display(),
             target.clients.join(", "),
             counts.create,
             counts.update,
             counts.remove,
-            counts.disable
+            counts.disable,
+            read_only_note(target.read_only)
         );
         if let Some(err) = &target.error {
             println!("         error[{}]: {err}", err.code());

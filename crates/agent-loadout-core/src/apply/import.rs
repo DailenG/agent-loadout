@@ -37,6 +37,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
+use crate::access::ReadOnlyKind;
 use crate::adapters::caps::FieldSet;
 use crate::adapters::mapper::WriteCx;
 use crate::adapters::{ADAPTERS, AdapterSpec, Target, adapter};
@@ -306,6 +307,10 @@ pub struct Source {
     pub file: PathBuf,
     /// The native entry.
     pub value: NativeValue,
+    /// This account cannot write the file (SPEC 8.2 `read_only_target`):
+    /// the definition can be imported, but the entry is never overwritten
+    /// there.
+    pub read_only: Option<ReadOnlyKind>,
     /// The entry as store fields, sensitive literals included (an import
     /// extracts them), or why it cannot be imported.
     pub def: Result<ImportedDef, CoreError>,
@@ -580,6 +585,7 @@ pub fn scan_with(
             slot: found.slot,
             file: found.target.file.clone(),
             value,
+            read_only: None,
             def,
         };
         let at = match by_name.get(&name) {
@@ -602,10 +608,34 @@ pub fn scan_with(
         Ok(())
     })?;
     warnings.extend(skips);
+    mark_read_only(ax, &mut candidates);
     for candidate in &mut candidates {
         candidate.group();
     }
     Ok((candidates, warnings))
+}
+
+/// Probes the files the sources were found in (SPEC 8.2
+/// `read_only_target`), all together under the probe budget.
+fn mark_read_only(ax: &ApplyEnv<'_>, candidates: &mut [Candidate]) {
+    let mut files: Vec<(PathBuf, Option<u64>)> = Vec::new();
+    for source in candidates.iter().flat_map(|candidate| &candidate.sources) {
+        if !files.iter().any(|(file, _)| *file == source.file) {
+            files.push((source.file.clone(), None));
+        }
+    }
+    if files.is_empty() {
+        return;
+    }
+    let found = crate::access::probe_files(ax.fs, &files, None);
+    for source in candidates
+        .iter_mut()
+        .flat_map(|candidate| &mut candidate.sources)
+    {
+        source.read_only = found
+            .get(&source.file)
+            .and_then(|access| access.read_only());
+    }
 }
 
 /// One foreign entry [`walk`] meets.
@@ -902,11 +932,13 @@ pub fn variant_server(
     let mut server = Server::new(id.to_owned());
     set_fields(&mut server, &fields, first.tools.clone());
     // Read-only clients (`vscode-legacy`) and project files are sources
-    // only: no enablement, and no `[client.<id>]` table.
+    // only: no enablement, and no `[client.<id>]` table. A source in a
+    // file this account cannot write enables its client only when nothing
+    // is extracted, so the entry can be adopted as it is, without a write.
     let enabling: Vec<&Source> = sources
         .iter()
         .copied()
-        .filter(|source| source.enables())
+        .filter(|source| source.enables() && (source.read_only.is_none() || extracted.is_empty()))
         .collect();
     let mut clients = BTreeMap::new();
     for source in &enabling {
@@ -1323,10 +1355,12 @@ pub fn stage_import(
                         || candidate.variants[v].contains(&j)
                 });
                 let pair = (source.client.to_owned(), candidate.name.clone());
-                if source.enables() && whole_client && !result.entries.contains(&pair) {
+                // Never an overwrite in a file this account cannot write.
+                let writable = source.read_only.is_none();
+                if source.enables() && writable && whole_client && !result.entries.contains(&pair) {
                     result.entries.push(pair);
                 }
-                if source.enables() && !extracted.is_empty() {
+                if source.enables() && writable && !extracted.is_empty() {
                     result.extracted_from.insert(source.file.clone());
                 }
             }

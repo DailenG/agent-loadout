@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
+use crate::access::ReadOnlyKind;
 use crate::adapters::caps::{CompatSource, Outrank, ProjectDisable, ProjectSemantics, Source};
 use crate::adapters::detect::replacing_extension;
 use crate::adapters::{ADAPTERS, AdapterSpec, adapter};
@@ -94,6 +95,9 @@ pub struct Winner {
     /// override with `from`, or a suppression), `project:<name>` (defined
     /// by the project only) or `foreign`.
     pub source: String,
+    /// This account cannot write the file (SPEC 8.2 `read_only_target`).
+    #[serde(serialize_with = "crate::access::read_only_json")]
+    pub read_only: Option<ReadOnlyKind>,
 }
 
 /// A same-named entry the winner hides (or, for a client that merges
@@ -102,6 +106,8 @@ pub struct Winner {
 pub struct Shadowed {
     pub layer: Layer,
     pub file: String,
+    #[serde(serialize_with = "crate::access::read_only_json")]
+    pub read_only: Option<ReadOnlyKind>,
 }
 
 /// One server name a client loads, or would load, in the folder.
@@ -342,6 +348,7 @@ fn view_of(
         let rows = view.client(spec);
         out.insert(spec.id, rows);
     }
+    view.mark_read_only(&mut out);
     let warnings = view.warnings;
     Ok(EffectiveView {
         project: project.map(|project| ProjectRef {
@@ -638,6 +645,7 @@ impl<'a> View<'a> {
             .map(|candidate| Shadowed {
                 layer: candidate.layer.clone(),
                 file: self.display(&candidate.file),
+                read_only: None,
             })
             .collect();
         let also_visible_to = self.readers_of(spec.id, &winner.file, &winner.pointer);
@@ -648,6 +656,7 @@ impl<'a> View<'a> {
                 layer: winner.layer.clone(),
                 file: self.display(&winner.file),
                 source: winner.source.clone(),
+                read_only: None,
             },
             shadowed,
             also_visible_to,
@@ -1095,6 +1104,36 @@ impl<'a> View<'a> {
             .entry(file.to_path_buf())
             .or_insert_with(|| placeholder_path(self.cx.env, file, self.root))
             .clone()
+    }
+
+    /// Fills in which files of `out` this account cannot write: from the
+    /// plan for a planned file, else from a probe of the file (SPEC 8.2
+    /// `read_only_target`).
+    fn mark_read_only(&self, out: &mut BTreeMap<&'static str, Vec<EffectiveEntry>>) {
+        let displayed = self.displayed.borrow();
+        let mut kinds: HashMap<&str, Option<ReadOnlyKind>> = HashMap::new();
+        let mut unplanned: Vec<(PathBuf, Option<u64>)> = Vec::new();
+        for (file, shown) in displayed.iter() {
+            match self.planned.iter().find(|target| target.file == *file) {
+                Some(target) => {
+                    kinds.insert(shown.as_str(), target.read_only);
+                }
+                None => unplanned.push((file.clone(), None)),
+            }
+        }
+        if !unplanned.is_empty() {
+            let found = crate::access::probe_files(self.cx.fs, &unplanned, None);
+            for (file, _) in &unplanned {
+                let kind = found.get(file).and_then(|access| access.read_only());
+                kinds.insert(displayed[file].as_str(), kind);
+            }
+        }
+        for entry in out.values_mut().flatten() {
+            entry.winner.read_only = kinds.get(entry.winner.file.as_str()).copied().flatten();
+            for shadowed in &mut entry.shadowed {
+                shadowed.read_only = kinds.get(shadowed.file.as_str()).copied().flatten();
+            }
+        }
     }
 }
 

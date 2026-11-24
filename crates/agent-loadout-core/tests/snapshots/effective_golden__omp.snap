@@ -15,16 +15,19 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "project",
           "file": "<P>/.omp/mcp.json",
-          "source": "project:docs"
+          "source": "project:docs",
+          "read_only": null
         },
         "shadowed": [
           {
             "layer": "client-compat:<P>/.mcp.json",
-            "file": "<P>/.mcp.json"
+            "file": "<P>/.mcp.json",
+            "read_only": null
           },
           {
             "layer": "client-compat:<P>/.codex/config.toml",
-            "file": "<P>/.codex/config.toml"
+            "file": "<P>/.codex/config.toml",
+            "read_only": null
           }
         ],
         "also_visible_to": [],
@@ -42,28 +45,34 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "project",
           "file": "<P>/.omp/mcp.json",
-          "source": "store:github+project"
+          "source": "store:github+project",
+          "read_only": null
         },
         "shadowed": [
           {
             "layer": "system",
-            "file": "~/.omp/agent/mcp.json"
+            "file": "~/.omp/agent/mcp.json",
+            "read_only": null
           },
           {
             "layer": "client-compat:~/.claude.json",
-            "file": "~/.claude.json"
+            "file": "~/.claude.json",
+            "read_only": null
           },
           {
             "layer": "client-compat:<P>/.mcp.json",
-            "file": "<P>/.mcp.json"
+            "file": "<P>/.mcp.json",
+            "read_only": null
           },
           {
             "layer": "client-compat:~/.codex/config.toml",
-            "file": "~/.codex/config.toml"
+            "file": "~/.codex/config.toml",
+            "read_only": null
           },
           {
             "layer": "client-compat:<P>/.codex/config.toml",
-            "file": "<P>/.codex/config.toml"
+            "file": "<P>/.codex/config.toml",
+            "read_only": null
           }
         ],
         "also_visible_to": [],
@@ -81,7 +90,8 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "client-compat:~/.claude.json",
           "file": "~/.claude.json",
-          "source": "foreign"
+          "source": "foreign",
+          "read_only": null
         },
         "shadowed": [],
         "also_visible_to": [
@@ -97,7 +107,8 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "project",
           "file": "<P>/.omp/mcp.json",
-          "source": "project:notes"
+          "source": "project:notes",
+          "read_only": null
         },
         "shadowed": [],
         "also_visible_to": [],
@@ -110,7 +121,8 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "client-compat:<P>/.mcp.json",
           "file": "<P>/.mcp.json",
-          "source": "foreign"
+          "source": "foreign",
+          "read_only": null
         },
         "shadowed": [],
         "also_visible_to": [
@@ -127,24 +139,29 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "project",
           "file": "<P>/.omp/mcp.json",
-          "source": "store:slack+project"
+          "source": "store:slack+project",
+          "read_only": null
         },
         "shadowed": [
           {
             "layer": "system",
-            "file": "~/.omp/agent/mcp.json"
+            "file": "~/.omp/agent/mcp.json",
+            "read_only": null
           },
           {
             "layer": "client-compat:~/.claude.json",
-            "file": "~/.claude.json"
+            "file": "~/.claude.json",
+            "read_only": null
           },
           {
             "layer": "client-compat:~/.codex/config.toml",
-            "file": "~/.codex/config.toml"
+            "file": "~/.codex/config.toml",
+            "read_only": null
           },
           {
             "layer": "client-compat:<P>/.codex/config.toml",
-            "file": "<P>/.codex/config.toml"
+            "file": "<P>/.codex/config.toml",
+            "read_only": null
           }
         ],
         "also_visible_to": [],

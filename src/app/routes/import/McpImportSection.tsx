@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { ReadOnlyBadge, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { projectRelativePath } from "@/app/routes/projects/labels";
 import { useProjectList } from "@/app/scope/ActiveScope";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -116,6 +117,18 @@ function VariantCard(props: { candidate: ImportCandidate; variant: ImportVariant
               {source.trusted === false ? (
                 <span className="status-badge tone-warning">{t("import.source.untrusted")}</span>
               ) : null}
+              {/* A read-only source file (M38): the definition still imports; Loadout never writes this file. */}
+              <ReadOnlyBadge
+                readOnly={source.readOnly}
+                tooltip={
+                  source.readOnly
+                    ? t("readOnly.import.source", {
+                        file: projectRelativePath(source.file, project?.path),
+                        reason: readOnlyReason(source.readOnly.kind),
+                      })
+                    : undefined
+                }
+              />
             </li>
           );
         })}

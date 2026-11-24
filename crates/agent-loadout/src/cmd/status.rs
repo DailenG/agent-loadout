@@ -13,7 +13,10 @@ use serde_json::{Value, json};
 
 use super::apply::ScopeArg;
 use super::project::selection;
-use super::{Context, EXIT_PENDING, JSON_SCHEMA, entry_json, error_json, path_json, print_json};
+use super::{
+    Context, EXIT_PENDING, JSON_SCHEMA, entry_json, error_json, path_json, print_json,
+    read_only_json, read_only_note,
+};
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
@@ -85,6 +88,7 @@ pub fn plan_json(plan: &Plan) -> Vec<Value> {
                 "scope": target.scope,
                 "project_id": target.project_id,
                 "file": path_json(&target.file),
+                "read_only": read_only_json(target.read_only),
                 "problem": target.problem.as_ref().map(error_json),
                 "warnings": target.warnings.iter().map(error_json).collect::<Vec<_>>(),
                 "entries": target.entries.iter().map(entry_json).collect::<Vec<_>>(),
@@ -103,7 +107,12 @@ pub fn print_plan(plan: &Plan) {
         println!("Nothing to manage: no server is enabled and nothing is owned.");
     }
     for target in &plan.targets {
-        println!("{}  ({})", target.file.display(), target.clients.join(", "));
+        println!(
+            "{}  ({}){}",
+            target.file.display(),
+            target.clients.join(", "),
+            read_only_note(target.read_only)
+        );
         if let Some(problem) = &target.problem {
             println!("  blocked[{}]: {problem}", problem.code());
         }

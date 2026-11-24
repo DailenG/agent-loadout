@@ -146,6 +146,14 @@ export function useUndoApply() {
   );
 }
 
+/** The run summary plus how many files were read only and not written (M38), when any. */
+function readOnlyNote(summary: string, count: number): string {
+  if (count === 0) {
+    return summary;
+  }
+  return `${summary} ${t(count === 1 ? "apply.readOnly.one" : "apply.readOnly.many", { count })}`;
+}
+
 /**
  * Reports a store change: `message` says what changed ("Saved github"); the
  * apply status adds what is left to do. A recorded run offers "Undo this
@@ -166,7 +174,7 @@ export function useChangeNotice() {
       const failed = run.status === "file_failed" || run.status === "missing_secrets";
       notify({
         tone: failed ? "error" : run.status === "done" ? "success" : "info",
-        message: t(STATUS_KEYS[run.status], { message }),
+        message: readOnlyNote(t(STATUS_KEYS[run.status], { message }), run.files.filter((file) => file.readOnly).length),
         ...(run.recorded
           ? {
               actionLabel: t("apply.undo.action"),

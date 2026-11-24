@@ -19,6 +19,7 @@ function summary(client: string, names: string[], isNew = true): UnmanagedSummar
         projectId: null,
         files: [`~/.${client}/mcp.json`],
         entries: names.map((name) => ({ id: `${client}/${name}`, name, new: isNew })),
+        readOnly: null,
       },
     ],
     total: names.length,

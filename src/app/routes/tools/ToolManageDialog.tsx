@@ -4,22 +4,33 @@
 // Only the MCP tab is shown: Skills arrive with the skills milestone, Plugins are hidden (SPEC 13.7).
 // It follows the sidebar's scope (SPEC 13.1): at project scope it toggles the client in that
 // project's manifest entries with the MCP page's rules (M24: the shown hash, one edit at a time,
-// read only until the project is trusted) and lists the inherited store servers read only.
+// read only until the project is trusted) and lists the inherited store servers read only. A
+// row whose file or manifest this account cannot write (M38) shows the lock and its switch is
+// disabled with the reason.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
 import { Modal } from "@/app/components/Modal";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason, readOnlyTooltip } from "@/app/components/ReadOnlyBadge";
 import { RecommendedBadge } from "@/app/components/RecommendedBadge";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useNotifications } from "@/app/components/notifications";
 import type { ImportTarget } from "@/app/routes/import/model";
 import { unmanagedByClient, UnmanagedSection } from "@/app/routes/import/UnmanagedSection";
-import { useProjectServers } from "@/app/routes/mcp/ProjectServers";
+import { useProjectServers, writableLayers } from "@/app/routes/mcp/ProjectServers";
 import { TrustReviewDialog } from "@/app/routes/projects/TrustReviewDialog";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { errorMessage, t } from "@/i18n/en";
-import type { ClientChoice, PillState, ProjectServerRow, ServerRow, ToolInfo, UnmanagedSummary } from "@/ipc/bindings";
+import type {
+  ClientChoice,
+  PillState,
+  ProjectServerRow,
+  ReadOnly,
+  ServerRow,
+  ToolInfo,
+  UnmanagedSummary,
+} from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 
 export type ToolManageDialogProps = {
@@ -39,6 +50,8 @@ type CapabilityRow = {
   name: string;
   isEnabled: boolean;
   state: PillState;
+  /** The client file, or at project scope the entry's manifest, is read only (M38). */
+  readOnly: ReadOnly | null;
 };
 
 /** The explicit client list of `server`'s pills, with `client` turned on or off. */
@@ -112,12 +125,28 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp, unmanaged, 
 
   const allRows = useMemo<CapabilityRow[]>(() => {
     if (inProject) {
+      const writable = projectData ? writableLayers(projectData.project) : [];
+      const manifestReadOnly = (row: ProjectServerRow): ReadOnly | null => {
+        if (writable.includes(row.editLayer) || !projectData) {
+          return null;
+        }
+        const layer = projectData.project.readOnlyLayers.find((entry) => entry.layer === row.editLayer);
+        return projectData.project.readOnly ?? (layer ? { kind: layer.kind } : null);
+      };
       // Suppressions hide a store server; they have no switch for one client here.
       return (projectData?.servers ?? [])
         .filter((row) => row.invalid === null && row.kind !== "suppress")
         .flatMap((row) => {
           const pill = row.pills.find((item) => item.client === tool.id);
-          return pill ? [{ id: row.name, name: row.name, isEnabled: pill.selected, state: pill.state }] : [];
+          return pill
+            ? [{
+                id: row.name,
+                name: row.name,
+                isEnabled: pill.selected,
+                state: pill.state,
+                readOnly: pill.readOnly ?? manifestReadOnly(row),
+              }]
+            : [];
         })
         .sort((left, right) => left.name.localeCompare(right.name));
     }
@@ -129,7 +158,13 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp, unmanaged, 
       .flatMap((server) => {
         const pill = server.pills.find((item) => item.client === tool.id);
         return pill
-          ? [{ id: server.id, name: server.displayName ?? server.id, isEnabled: pill.selected, state: pill.state }]
+          ? [{
+              id: server.id,
+              name: server.displayName ?? server.id,
+              isEnabled: pill.selected,
+              state: pill.state,
+              readOnly: pill.readOnly,
+            }]
           : [];
       })
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -197,7 +232,7 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp, unmanaged, 
   }
 
   function rowDisabled(row: CapabilityRow) {
-    if (row.state === "not_supported") {
+    if (row.state === "not_supported" || row.readOnly) {
       return true;
     }
     return inProject ? readOnly || projectLocked : pendingServerIds.has(row.id);
@@ -244,6 +279,18 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp, unmanaged, 
             {t("tools.dialog.projectNote", { name: project.name })}
           </p>
         ) : null}
+        {inProject && project?.readOnly ? (
+          <ReadOnlyNote>
+            {t("readOnly.project.whole", { name: project.name, reason: readOnlyReason(project.readOnly.kind) })}
+          </ReadOnlyNote>
+        ) : null}
+        {!inProject
+          ? tool.userFiles
+              .filter((file) => file.readOnly)
+              .map((file) => (
+                <ReadOnlyNote key={file.path}>{file.readOnly ? readOnlyTooltip(file.readOnly, file.path) : ""}</ReadOnlyNote>
+              ))
+          : null}
         {project && readOnly ? (
           <div className="mcp-page-warning mcp-project-trust tool-manage-dialog__trust" role="alert">
             <span>{t(project.trust === "changed" ? "mcp.project.changed" : "mcp.project.untrusted")}</span>
@@ -313,6 +360,7 @@ export function ToolManageDialog({ isOpen, onClose, tool, onOpenMcp, unmanaged, 
                   <span className="tool-manage-dialog__item-name" title={item.name}>
                     {item.name}
                   </span>
+                  <ReadOnlyBadge readOnly={item.readOnly} />
                   <button
                     className={`switch-button${item.isEnabled ? " is-enabled" : ""}${projectBusy === item.id ? " is-loading" : ""}`}
                     type="button"

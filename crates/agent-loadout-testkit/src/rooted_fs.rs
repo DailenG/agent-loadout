@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use agent_loadout_core::access::WriteProbe;
 use agent_loadout_core::paths::{normalize, plain};
 use agent_loadout_core::{Fs, RealFs};
 
@@ -112,5 +114,15 @@ impl Fs for RootedFs {
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         RealFs.canonicalize(self.check(path))
+    }
+
+    /// The real probe, confined like every other access: it panics on a
+    /// path outside the root (on the probe's worker thread; the planner
+    /// passes the panic on).
+    fn write_probe(&self) -> Option<WriteProbe> {
+        let rooted = self.clone();
+        Some(Arc::new(move |path: &Path| {
+            agent_loadout_core::access::probe(rooted.check(path))
+        }))
     }
 }

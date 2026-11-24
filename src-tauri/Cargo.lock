@@ -56,6 +56,7 @@ dependencies = [
  "jsonc-parser",
  "junction",
  "keyring",
+ "rustix",
  "saphyr-parser",
  "schemars 1.2.3",
  "secret-service",

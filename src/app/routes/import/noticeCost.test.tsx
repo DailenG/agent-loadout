@@ -24,8 +24,8 @@ function row(id: string): ServerRow {
     tags: [],
     clients: { allDetected: false, clients: ["claude-code"] },
     pills: [
-      { client: "claude-code", selected: true, state: "enabled", reason: null },
-      { client: "codex", selected: false, state: "disabled", reason: null },
+      { client: "claude-code", selected: true, state: "enabled", reason: null, readOnly: null },
+      { client: "codex", selected: false, state: "disabled", reason: null, readOnly: null },
     ],
     problems: [],
     invalid: null,

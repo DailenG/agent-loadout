@@ -279,6 +279,12 @@ export type AppliedFile = {
 	/**  Entries with a problem or a pending decision. */
 	notes: EntryNote[],
 	warnings: IpcError[],
+	/**
+	 *  This account cannot write the file: found while planning, or the OS
+	 *  refused the write (`error.code` `read_only_target`, `outcome`
+	 *  `blocked`).
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  An apply run this machine recorded, newest first. */
@@ -413,6 +419,12 @@ export type ClientPill = {
 	selected: boolean,
 	state: PillState,
 	reason: IpcError | null,
+	/**
+	 *  This account cannot write the file the entry is (or would be)
+	 *  written to at this scope (SPEC 8.2); a pending change there is
+	 *  `blocked` with `read_only_target`.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  One client's rendered entry for the Preview tab. */
@@ -502,6 +514,12 @@ export type DiscoveredProject = {
 	manifest: FoundManifest | null,
 	/**  Why the folder cannot be added. */
 	error: IpcError | null,
+	/**
+	 *  This account cannot write the folder's private manifest location
+	 *  (SPEC 8.2): adding a folder without a manifest would fail with
+	 *  `read_only_target`; one with a manifest is bound without a write.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 export type DiscoveredProjectsAdded = {
@@ -884,7 +902,15 @@ export type ErrorCode =
  *  The desktop app's update check or install failed, or updates are
  *  turned off or not part of this build (SPEC 16.4).
  */
-"update_failed";
+"update_failed" | 
+/**
+ *  A client file or folder this account cannot write (access denied, a
+ *  read-only attribute, another owner, a read-only share or mount),
+ *  found by the probe while planning or refused by the OS at write
+ *  time (SPEC 8.2, #4). The target is blocked and left as it is; the
+ *  rest of the run goes on. [`CoreError::read_only`] gives the kind.
+ */
+"read_only_target";
 
 /**
  *  `env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`; refs stay refs,
@@ -1117,6 +1143,11 @@ export type ImportSource = {
 	trusted: boolean | null,
 	/**  Under its placeholder root. */
 	file: string,
+	/**
+	 *  This account cannot write the file (SPEC 8.2): the definition can
+	 *  be imported, but the entry there is never overwritten.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  One definition of an entry, with every source that has it. */
@@ -1199,6 +1230,8 @@ export type LayerKind = "system" | "project" | "project_local" |
 export type LayerRef = {
 	layer: LayerKind,
 	file: string,
+	/**  This account cannot write the file (SPEC 8.2). */
+	readOnly: ReadOnly | null,
 };
 
 /**  How a manifest file compares with the content last trusted. */
@@ -1519,6 +1552,11 @@ export type PlannedFile = {
 	/**  The whole file is blocked (`parse_error`, `trust_required`, ...). */
 	problem: IpcError | null,
 	warnings: IpcError[],
+	/**
+	 *  This account cannot write the file (SPEC 8.2): entries that would
+	 *  write it are blocked with `read_only_target`.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**
@@ -1555,6 +1593,16 @@ export type ProjectRow = {
 	clients: number,
 	/**  Entries waiting for an apply, a decision, or blocked. */
 	pending: number,
+	/**
+	 *  The whole project is read only for this account (SPEC 8.2): every
+	 *  manifest and every project client file of the plan.
+	 */
+	readOnly: ReadOnly | null,
+	/**
+	 *  Each read-only file of the project, manifests first, for a partly
+	 *  read-only project; empty when none.
+	 */
+	readOnlyFiles: ReadOnlyFile[],
 };
 
 /**  The project the MCP page is scoped to. */
@@ -1575,6 +1623,16 @@ export type ProjectScopeInfo = {
 	layers: ManifestLayerKind[],
 	/**  The merged `[defaults] clients`. */
 	defaultClients: ClientChoice,
+	/**
+	 *  The whole project is read only for this account (SPEC 8.2), as
+	 *  `ProjectRow::read_only`.
+	 */
+	readOnly: ReadOnly | null,
+	/**
+	 *  Manifest layers an edit cannot write; an edit there fails with
+	 *  `read_only_target`.
+	 */
+	readOnlyLayers: ReadOnlyLayer[],
 };
 
 /**
@@ -1735,6 +1793,44 @@ export type PushEntry = {
 	/**  A git push that was rejected pulled first. */
 	pulled: boolean,
 	error: IpcError | null,
+};
+
+/**
+ *  This account cannot write a file or folder (SPEC 8.2
+ *  `read_only_target`); the views show it and disable the controls that
+ *  would write it. `null` where it is writable or the probe could not tell.
+ */
+export type ReadOnly = {
+	kind: ReadOnlyKind,
+};
+
+/**  A read-only file, under its placeholder root. */
+export type ReadOnlyFile = {
+	file: string,
+	kind: ReadOnlyKind,
+};
+
+/**  Why this account cannot write a file or folder. */
+export type ReadOnlyKind = 
+/**  Access denied by the permissions (a Windows ACL, a POSIX ACL). */
+"acl" | 
+/**
+ *  The read-only attribute (Windows), or no write bit for the owner
+ *  (Unix).
+ */
+"attribute" | 
+/**  Unix: owned by another user, with no write permission for this one. */
+"owner" | 
+/**
+ *  A network share that denies writing, a read-only mount or
+ *  write-protected media.
+ */
+"share";
+
+/**  A manifest layer this account cannot write (SPEC 8.2). */
+export type ReadOnlyLayer = {
+	layer: ManifestLayerKind,
+	kind: ReadOnlyKind,
 };
 
 export type RefSourceDto = 
@@ -2096,6 +2192,12 @@ export type SkillClient = {
 	id: string,
 	name: string,
 	detected: boolean,
+	/**
+	 *  This account cannot write the client's skill folder at the page's
+	 *  scope (or create it; SPEC 8.2): links and copies there are
+	 *  `read_only_target`.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  Class of a client skill folder entry (SPEC 12.5). */
@@ -2215,6 +2317,11 @@ export type SkillLinkNote = {
 	/**  Where a colliding link points. */
 	foundTarget: string | null,
 	error: IpcError | null,
+	/**
+	 *  The entry was not made or removed: this account cannot write there
+	 *  (`status` `blocked`, `error.code` `read_only_target`).
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  What happened to one client folder entry (SPEC 12.2). */
@@ -2251,6 +2358,11 @@ export type SkillProject = {
 	clients: string[],
 	/**  `[skills] share`: copies to commit instead of hidden links. */
 	share: boolean,
+	/**
+	 *  The whole project is read only for this account (SPEC 8.2), as
+	 *  `ProjectRow::read_only`.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**
@@ -2341,6 +2453,11 @@ export type TierKind = "a" | "b" | "c" | "d";
 export type ToolFile = {
 	path: string,
 	exists: boolean,
+	/**
+	 *  This account cannot write the file, or create it in its folder
+	 *  (SPEC 8.2). Not [`ToolInfo::read_only`], which is about the client.
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  One client on the Tools page. */
@@ -2380,6 +2497,8 @@ export type ToolSkillDir = {
 	dir: string,
 	exists: boolean,
 	entries: ToolSkillEntry[],
+	/**  This account cannot write the folder, or create it (SPEC 8.2). */
+	readOnly: ReadOnly | null,
 };
 
 export type ToolSkillEntry = {
@@ -2449,6 +2568,11 @@ export type UnmanagedGroup = {
 	/**  Under their placeholder roots. */
 	files: string[],
 	entries: UnmanagedEntry[],
+	/**
+	 *  Every file of the group is read only for this account (the kind of
+	 *  the first; SPEC 8.2).
+	 */
+	readOnly: ReadOnly | null,
 };
 
 /**  Unmanaged folders of one name, grouped by content. */

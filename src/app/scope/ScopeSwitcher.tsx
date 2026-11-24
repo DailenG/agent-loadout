@@ -2,9 +2,11 @@
 // its trust state, then Add folder. Choosing an entry sets the active scope;
 // Add folder runs the Projects page's folder flow and selects the result.
 // With the sidebar collapsed, one icon shows the current scope in its tooltip.
+// A project this account cannot write (M38) carries the lock and says why.
 
 import { createPortal } from "react-dom";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
+import { ReadOnlyBadge, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
 import { TRUST_KEYS } from "@/app/routes/projects/labels";
 import { useActiveScope, useProjectList } from "@/app/scope/ActiveScope";
@@ -85,12 +87,19 @@ export function ScopeSwitcher(props: { onExpandSidebar: () => void }) {
 
   const options: AppSelectOption<string>[] = [
     { value: USER_VALUE, label: t("scope.userOption"), icon: <UserIcon /> },
-    ...rows.map((row) => ({
-      value: `${PROJECT_PREFIX}${row.id}`,
-      label: row.name,
-      icon: <TrustIcon trust={row.trust} />,
-      tooltip: t("scope.projectTooltip", { path: row.path, trust: t(TRUST_KEYS[row.trust]) }),
-    })),
+    ...rows.map((row) => {
+      const readOnly = row.readOnly
+        ? t("readOnly.project.whole", { name: row.name, reason: readOnlyReason(row.readOnly.kind) })
+        : null;
+      const tooltip = t("scope.projectTooltip", { path: row.path, trust: t(TRUST_KEYS[row.trust]) });
+      return {
+        value: `${PROJECT_PREFIX}${row.id}`,
+        label: row.name,
+        icon: <TrustIcon trust={row.trust} />,
+        tooltip: readOnly ? `${tooltip} ${readOnly}` : tooltip,
+        badge: row.readOnly ? <ReadOnlyBadge readOnly={row.readOnly} variant="mark" tooltip={readOnly ?? undefined} /> : undefined,
+      };
+    }),
     ...(projects.data && rows.length === 0
       ? [{ value: HINT_VALUE, label: t("scope.noProjects"), disabled: true }]
       : []),
@@ -104,7 +113,18 @@ export function ScopeSwitcher(props: { onExpandSidebar: () => void }) {
   ];
 
   const value = scope.kind === "user" ? USER_VALUE : `${PROJECT_PREFIX}${scope.id}`;
-  const selectedLabel = scope.kind === "user" ? t("scope.user") : (project?.name ?? "");
+  const selectedLabel = scope.kind === "user" ? t("scope.user") : (
+    project?.readOnly ? (
+      <span className="app-select__label">
+        <span>{project.name}</span>
+        <ReadOnlyBadge
+          readOnly={project.readOnly}
+          variant="mark"
+          tooltip={t("readOnly.project.whole", { name: project.name, reason: readOnlyReason(project.readOnly.kind) })}
+        />
+      </span>
+    ) : (project?.name ?? "")
+  );
   const currentName = scope.kind === "user" ? t("scope.userOption") : (project?.name ?? "");
   const collapsedLabel = t("scope.collapsed", { name: currentName });
 

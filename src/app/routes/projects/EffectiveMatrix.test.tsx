@@ -8,10 +8,10 @@ import { renderWithProviders } from "@/test/renderWithProviders";
 
 const GITHUB_CLAUDE: MatrixCell = {
   client: "claude-code",
-  winner: { layer: "project", file: "<P>/.mcp.json" },
+  winner: { layer: "project", file: "<P>/.mcp.json", readOnly: null },
   source: "store:github+project",
   loaded: true,
-  shadowed: [{ layer: "system", file: "~/.claude.json" }],
+  shadowed: [{ layer: "system", file: "~/.claude.json", readOnly: null }],
   alsoVisibleTo: ["copilot", "grok"],
   status: "synced",
   warnings: [],
@@ -21,14 +21,14 @@ const GITHUB_CLAUDE: MatrixCell = {
 const GITHUB_GROK: MatrixCell = {
   ...GITHUB_CLAUDE,
   client: "grok",
-  winner: { layer: "client_compat", file: "<P>/.mcp.json" },
+  winner: { layer: "client_compat", file: "<P>/.mcp.json", readOnly: null },
   alsoVisibleTo: ["claude-code", "copilot"],
   warnings: [{ code: "duplicate_via_compat", message: "Grok loads \"github\" from ~/.grok/config.toml and from <P>/.mcp.json" }],
 };
 
 const SLACK_CLAUDE: MatrixCell = {
   client: "claude-code",
-  winner: { layer: "system", file: "~/.claude.json" },
+  winner: { layer: "system", file: "~/.claude.json", readOnly: null },
   source: "store:slack+project",
   loaded: false,
   shadowed: [],

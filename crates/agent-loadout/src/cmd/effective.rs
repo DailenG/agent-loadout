@@ -88,6 +88,10 @@ fn row(entry: &EffectiveEntry) -> [String; 6] {
     } else {
         format!("{layer} {}", entry.winner.file)
     };
+    let winner = match entry.winner.read_only {
+        Some(kind) => format!("{winner} read-only ({kind})"),
+        None => winner,
+    };
     let shadowed: Vec<String> = entry
         .shadowed
         .iter()

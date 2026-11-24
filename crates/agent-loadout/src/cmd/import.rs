@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use super::apply::ScopeArg;
 use super::{
     Context, JSON_SCHEMA, apply_exit_code, error_json, path_json, print_json, print_report,
-    report_json,
+    read_only_json, read_only_note, report_json,
 };
 
 #[derive(Debug, Args)]
@@ -449,6 +449,7 @@ fn candidate_json(candidate: &Candidate, previews: &[VariantPreview]) -> Value {
             "project": source.project.as_ref().map(|p| p.id.clone()),
             "trusted": source.project.as_ref().map(|p| p.trusted),
             "file": path_json(&source.file),
+            "read_only": read_only_json(source.read_only),
             "variant": variant_of(index),
             "importable": source.def.is_ok(),
             "error": source.def.as_ref().err().map(error_json),
@@ -506,6 +507,7 @@ fn print_candidates(candidates: &[Candidate], previews: &[Vec<VariantPreview>]) 
                     Some(project) if !project.trusted => "  (untrusted project)",
                     _ => "",
                 };
+                let trust = format!("{trust}{}", read_only_note(source.read_only));
                 match &source.def {
                     Ok(_) => println!("{indent}{}  {}{trust}", source.key(), source.file.display()),
                     Err(err) => println!(

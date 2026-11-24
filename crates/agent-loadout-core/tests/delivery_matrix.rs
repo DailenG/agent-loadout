@@ -183,6 +183,7 @@ fn render_one(
         registry: &NoRegistry,
         delivery,
         memory: Arc::new(SecretMemory::new().unwrap()),
+        probes: None,
     };
     let spec = adapter(client).unwrap();
     render(&cx, desired, &desired.servers[server], spec, sharing)

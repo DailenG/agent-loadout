@@ -3,16 +3,18 @@
 //! and client enablement. Every change is one store commit with its instant
 //! apply, as `loadout server add|rm` does (SPEC 8.7).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use agent_loadout_core::access::ReadOnlyKind;
 use agent_loadout_core::adapters::detect::detect;
 use agent_loadout_core::adapters::mapper::WriteCx;
 use agent_loadout_core::adapters::{ADAPTERS, AdapterSpec, adapter};
 use agent_loadout_core::apply::import::server_from_native;
 use agent_loadout_core::apply::render::{DesiredState, Detected, RenderCx, native_name, render};
 use agent_loadout_core::apply::{
-    EntryState, Plan, ScopeFilter, TargetPlan, Touched, instant_apply,
+    EntryPlan, EntryState, Plan, ScopeFilter, TargetPlan, Touched, instant_apply,
 };
 use agent_loadout_core::formats::{Document, Format};
 use agent_loadout_core::model::TomlDocument;
@@ -30,7 +32,10 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{AppState, ChangeResult, CmdResult, Core, IpcError, NO_REGISTRY, blocking, errors};
+use super::{
+    AppState, ChangeResult, CmdResult, Core, IpcError, NO_REGISTRY, ReadOnly, blocking, errors,
+    read_only_of,
+};
 
 /// A client the MCP page can enable servers for.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -72,6 +77,10 @@ pub struct ClientPill {
     pub selected: bool,
     pub state: PillState,
     pub reason: Option<IpcError>,
+    /// This account cannot write the file the entry is (or would be)
+    /// written to at this scope (SPEC 8.2); a pending change there is
+    /// `blocked` with `read_only_target`.
+    pub read_only: Option<ReadOnly>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -342,7 +351,13 @@ fn pill_state(state: EntryState) -> Option<PillState> {
 
 /// `selected`: the clients the core writes the server for here
 /// ([`Detected::system_clients`]).
-fn pill(plan: &Plan, server: &str, selected: &[String], client: &ClientInfo) -> ClientPill {
+fn pill(
+    plan: &Plan,
+    server: &str,
+    selected: &[String],
+    client: &ClientInfo,
+    user_file: Option<ReadOnlyKind>,
+) -> ClientPill {
     let unsupported = IpcError {
         code: ErrorCode::NotSupportedOnOs,
         message: format!("{} has no MCP config on this OS", client.name),
@@ -351,18 +366,22 @@ fn pill(plan: &Plan, server: &str, selected: &[String], client: &ClientInfo) -> 
         .targets
         .iter()
         .filter(|target| target.scope == TargetScope::User);
-    pill_in(targets, server, selected, client, unsupported)
+    pill_in(targets, server, selected, client, unsupported, user_file)
 }
 
 /// The pill of `server` for `client` from the entries of `targets`: the
 /// most pressing entry state, else pending when selected and disabled
-/// otherwise. A client that is not `supported` gets `unsupported`.
+/// otherwise. A client that is not `supported` gets `unsupported`. Its
+/// read-only state is that of the file holding the server's entry for the
+/// client, else of the client's first file among `targets`, else
+/// `fallback` (the file an enable would write, probed by the caller).
 pub(super) fn pill_in<'a>(
-    targets: impl Iterator<Item = &'a TargetPlan>,
+    targets: impl Iterator<Item = &'a TargetPlan> + Clone,
     server: &str,
     selected: &[String],
     client: &ClientInfo,
     unsupported: IpcError,
+    fallback: Option<ReadOnlyKind>,
 ) -> ClientPill {
     let selected = selected.contains(&client.id);
     if !client.supported {
@@ -371,12 +390,28 @@ pub(super) fn pill_in<'a>(
             selected,
             state: PillState::NotSupported,
             reason: Some(unsupported),
+            read_only: None,
         };
     }
-    let mut worst: Option<(PillState, Option<IpcError>)> = None;
-    let entries = targets.flat_map(|target| &target.entries).filter(|entry| {
+    let is_entry = |entry: &EntryPlan| {
         entry.server_id.as_deref() == Some(server) && entry.client == Some(client.id.as_str())
-    });
+    };
+    let holding = targets
+        .clone()
+        .find(|target| target.entries.iter().any(is_entry))
+        .or_else(|| {
+            targets
+                .clone()
+                .find(|target| target.clients.contains(&client.id.as_str()))
+        });
+    let read_only = match holding {
+        Some(target) => target.read_only,
+        None => fallback,
+    };
+    let mut worst: Option<(PillState, Option<IpcError>)> = None;
+    let entries = targets
+        .flat_map(|target| &target.entries)
+        .filter(|entry| is_entry(entry));
     for entry in entries {
         let Some(state) = pill_state(entry.state) else {
             continue;
@@ -395,6 +430,7 @@ pub(super) fn pill_in<'a>(
         selected,
         state,
         reason,
+        read_only: ReadOnly::of(read_only),
     }
 }
 
@@ -411,7 +447,13 @@ pub(super) fn launch_text(fields: &Server) -> String {
     }
 }
 
-fn row(plan: &Plan, clients: &[ClientInfo], selected: &[String], server: &Server) -> ServerRow {
+fn row(
+    plan: &Plan,
+    clients: &[ClientInfo],
+    selected: &[String],
+    server: &Server,
+    user_files: &HashMap<String, Option<ReadOnlyKind>>,
+) -> ServerRow {
     let body = &server.body;
     let choice = ClientChoice::from_selection(
         server
@@ -444,7 +486,10 @@ fn row(plan: &Plan, clients: &[ClientInfo], selected: &[String], server: &Server
         tags: body.tags.clone().unwrap_or_default(),
         pills: clients
             .iter()
-            .map(|client| pill(plan, &server.id, selected, client))
+            .map(|client| {
+                let user_file = user_files.get(&client.id).copied().flatten();
+                pill(plan, &server.id, selected, client, user_file)
+            })
             .collect(),
         clients: choice,
         problems,
@@ -467,12 +512,13 @@ pub fn list(core: &Core) -> CmdResult<ServerList> {
     let ax = core.apply_env();
     let cx = ax.render_cx(cached.memory());
     let mut detected = Detected::default();
+    let user_files = user_file_access(core, &plan, desired, &clients);
     let servers = entries
         .iter()
         .map(|entry| match &entry.document {
             Ok(doc) => {
                 let selected = detected.system_clients(&cx, desired, doc.value());
-                row(&plan, &clients, &selected, doc.value())
+                row(&plan, &clients, &selected, doc.value(), &user_files)
             }
             Err(err) => ServerRow {
                 id: entry.id.clone(),
@@ -494,6 +540,43 @@ pub fn list(core: &Core) -> CmdResult<ServerList> {
         clients,
         warnings: errors(&plan.warnings),
     })
+}
+
+/// For each client without a user target in `plan` (nothing enabled or
+/// owned there), whether this account can write the user file an enable
+/// would write (its first user file), probed together (SPEC 8.2).
+fn user_file_access(
+    core: &Core,
+    plan: &Plan,
+    desired: &DesiredState,
+    clients: &[ClientInfo],
+) -> HashMap<String, Option<ReadOnlyKind>> {
+    let mut wanted: Vec<(String, PathBuf)> = Vec::new();
+    for client in clients.iter().filter(|client| client.supported) {
+        let planned = plan
+            .targets
+            .iter()
+            .any(|target| target.clients.contains(&client.id.as_str()));
+        let Some(spec) = adapter(&client.id).filter(|_| !planned) else {
+            continue;
+        };
+        let prefs = desired.prefs(spec.id);
+        if let Ok(targets) =
+            spec.mcp_targets(&core.env, core.fs.as_ref(), TargetScope::User, None, &prefs)
+            && let Some(first) = targets.first()
+        {
+            wanted.push((client.id.clone(), first.file.clone()));
+        }
+    }
+    let paths: Vec<PathBuf> = wanted.iter().map(|(_, path)| path.clone()).collect();
+    let found = read_only_of(core, &paths);
+    wanted
+        .into_iter()
+        .map(|(client, path)| {
+            let kind = found.get(&path).copied().flatten();
+            (client, kind)
+        })
+        .collect()
 }
 
 pub(super) fn non_empty(text: &Option<String>) -> Option<String> {

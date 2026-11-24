@@ -5,7 +5,9 @@ use std::borrow::Cow;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::access::WriteProbe;
 use crate::paths::extended;
 
 pub trait Fs: Send + Sync {
@@ -80,6 +82,14 @@ pub trait Fs: Send + Sync {
     /// index). Nothing here; a recording view takes note (the plan cache,
     /// [`crate::apply::cache`]).
     fn note_dependency(&self, _path: &Path) {}
+
+    /// A probe of whether this account can write a path (SPEC 8.2
+    /// `read_only_target`), to run on a worker thread; it never writes.
+    /// `None`: this view cannot probe, so every target counts as
+    /// [`WriteAccess::Unknown`](crate::access::WriteAccess::Unknown).
+    fn write_probe(&self) -> Option<WriteProbe> {
+        None
+    }
 }
 
 /// The real file system, unconfined.
@@ -91,7 +101,7 @@ pub struct RealFs;
 /// built from whole paths (backup copies) work past it (SPEC 16.1). std
 /// does this for its own calls; the Windows security calls need it too.
 /// Paths given back to callers stay as they were given.
-fn long(path: &Path) -> Cow<'_, Path> {
+pub(crate) fn long(path: &Path) -> Cow<'_, Path> {
     // std's threshold: `MAX_PATH` less room for an 8.3 file name.
     const LIMIT: usize = 248;
     if cfg!(windows) && path.as_os_str().len() >= LIMIT {
@@ -230,6 +240,10 @@ impl Fs for RealFs {
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         std::fs::canonicalize(long(path))
+    }
+
+    fn write_probe(&self) -> Option<WriteProbe> {
+        Some(Arc::new(crate::access::probe))
     }
 }
 

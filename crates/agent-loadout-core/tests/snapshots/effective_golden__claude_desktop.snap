@@ -1,6 +1,5 @@
 ---
 source: crates/agent-loadout-core/tests/effective_golden.rs
-assertion_line: 148
 expression: "golden(&fx, &root, &view)"
 ---
 {
@@ -16,7 +15,8 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "system",
           "file": "<claude-desktop>",
-          "source": "store:github"
+          "source": "store:github",
+          "read_only": null
         },
         "shadowed": [],
         "also_visible_to": [],
@@ -29,7 +29,8 @@ expression: "golden(&fx, &root, &view)"
         "winner": {
           "layer": "system",
           "file": "<claude-desktop>",
-          "source": "store:slack"
+          "source": "store:slack",
+          "read_only": null
         },
         "shadowed": [],
         "also_visible_to": [],

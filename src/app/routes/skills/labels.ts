@@ -74,7 +74,8 @@ export function syncMessage(sync: SkillSync, message: string): string {
     return t("skills.links.attention", {
       message,
       notes: notes
-        .map((note) => `${note.client} ${note.path}: ${t(LINK_STATUS_KEYS[note.status])}`)
+        // A folder this account cannot write (M38) says so instead of "blocked".
+        .map((note) => `${note.client} ${note.path}: ${note.readOnly ? t("readOnly.skills.linkBlocked") : t(LINK_STATUS_KEYS[note.status])}`)
         .join("; "),
     });
   }

@@ -169,7 +169,7 @@ impl ProjectRepo {
         }
         text.push_str(&pattern);
         text.push('\n');
-        crate::apply::write_atomic(fs, &file, text.as_bytes())?;
+        crate::apply::write_atomic_project(fs, &file, text.as_bytes())?;
         Ok(true)
     }
 }

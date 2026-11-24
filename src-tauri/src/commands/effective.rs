@@ -13,7 +13,9 @@ use specta::Type;
 
 use super::projects::validate_known_root;
 use super::servers::client_infos;
-use super::{AppState, CmdResult, Core, EntryStateKind, IpcError, blocking, scrub, scrubbed};
+use super::{
+    AppState, CmdResult, Core, EntryStateKind, IpcError, ReadOnly, blocking, scrub, scrubbed,
+};
 
 /// The layer an entry comes from (SPEC 6.4); the legend's S, P, L, F, C.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -46,6 +48,8 @@ impl From<&Layer> for LayerKind {
 pub struct LayerRef {
     pub layer: LayerKind,
     pub file: String,
+    /// This account cannot write the file (SPEC 8.2).
+    pub read_only: Option<ReadOnly>,
 }
 
 /// One client's entry of a server name: the matrix cell and its
@@ -120,6 +124,7 @@ pub fn matrix(core: &Core, id: &str) -> CmdResult<EffectiveMatrix> {
                 winner: LayerRef {
                     layer: (&entry.winner.layer).into(),
                     file: entry.winner.file.clone(),
+                    read_only: ReadOnly::of(entry.winner.read_only),
                 },
                 source: entry.winner.source.clone(),
                 loaded: entry.loaded,
@@ -129,6 +134,7 @@ pub fn matrix(core: &Core, id: &str) -> CmdResult<EffectiveMatrix> {
                     .map(|shadowed| LayerRef {
                         layer: (&shadowed.layer).into(),
                         file: shadowed.file.clone(),
+                        read_only: ReadOnly::of(shadowed.read_only),
                     })
                     .collect(),
                 also_visible_to: entry

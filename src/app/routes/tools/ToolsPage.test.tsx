@@ -22,7 +22,7 @@ const CURSOR: ToolInfo = {
   detected: false,
   supported: true,
   readOnly: false,
-  userFiles: [{ path: "~/.cursor/mcp.json", exists: false }],
+  userFiles: [{ path: "~/.cursor/mcp.json", exists: false, readOnly: null }],
   projectFiles: [],
   transports: { stdio: true, http: true, sse: false },
   envRefs: false,
@@ -38,7 +38,7 @@ const CLAUDE: ToolInfo = {
   detected: true,
   supported: true,
   readOnly: false,
-  userFiles: [{ path: "~/.claude.json", exists: true }],
+  userFiles: [{ path: "~/.claude.json", exists: true, readOnly: null }],
   projectFiles: ["<P>/.mcp.json"],
   transports: { stdio: true, http: true, sse: true },
   envRefs: true,
@@ -63,7 +63,7 @@ const OMP: ToolInfo = {
   id: "omp",
   name: "omp",
   tier: "a",
-  userFiles: [{ path: "~/.omp/agent/mcp.json", exists: false }],
+  userFiles: [{ path: "~/.omp/agent/mcp.json", exists: false, readOnly: null }],
   homepage: "https://github.com/can1357/oh-my-pi",
 };
 
@@ -73,6 +73,7 @@ function pills(selected: string[]): ServerRow["pills"] {
     selected: selected.includes(client.id),
     state: selected.includes(client.id) ? "enabled" : "disabled",
     reason: null,
+    readOnly: null,
   }));
 }
 
@@ -112,6 +113,8 @@ const PROJECT: ProjectRow = {
   servers: 2,
   clients: 1,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 const HASH = "sha256:shown";
@@ -142,6 +145,8 @@ const PROJECT_SERVERS: ProjectServerList = {
     hash: HASH,
     layers: ["shared", "local"],
     defaultClients: { allDetected: true, clients: [] },
+    readOnly: null,
+    readOnlyLayers: [],
   },
   servers: [
     manifestRow("docs", ["claude-code", "codex"]),
@@ -221,7 +226,7 @@ describe("ToolsPage", () => {
 
     const cursor = within(cards[1]);
     const cursorFile = cursor.getByText(/~\/\.cursor\/mcp\.json/);
-    expect(cursorFile).toHaveClass("is-missing");
+    expect(cursorFile.closest("li")).toHaveClass("is-missing");
     expect(cursorFile).toHaveTextContent(t("tools.fileMissing"));
     expect(cursor.getByText(t("tools.noProjectFiles"))).toBeInTheDocument();
     expect(cursor.getByText("stdio / HTTP")).toBeInTheDocument();

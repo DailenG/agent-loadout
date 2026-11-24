@@ -19,6 +19,8 @@ const PROJECT: ProjectRow = {
   servers: 2,
   clients: 1,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 const HASH = "sha256:shown";
@@ -35,14 +37,15 @@ function makeRow(overrides: Partial<ProjectServerRow>): ProjectServerRow {
     clients: { allDetected: false, clients: ["claude-code"] },
     usesDefaults: false,
     pills: [
-      { client: "claude-code", selected: true, state: "enabled", reason: null },
-      { client: "codex", selected: false, state: "disabled", reason: null },
-      { client: "cursor", selected: false, state: "disabled", reason: null },
+      { client: "claude-code", selected: true, state: "enabled", reason: null, readOnly: null },
+      { client: "codex", selected: false, state: "disabled", reason: null, readOnly: null },
+      { client: "cursor", selected: false, state: "disabled", reason: null, readOnly: null },
       {
         client: "claude-desktop",
         selected: false,
         state: "not_supported",
         reason: { code: "scope_not_supported", message: "detail" },
+        readOnly: null,
       },
     ],
     problems: [],
@@ -60,6 +63,8 @@ const LIST: ProjectServerList = {
     hash: HASH,
     layers: ["shared", "local"],
     defaultClients: { allDetected: true, clients: [] },
+    readOnly: null,
+    readOnlyLayers: [],
   },
   servers: [
     makeRow({}),
@@ -299,9 +304,9 @@ describe("McpPage at project scope", () => {
       // is not selected here.
       clients: { allDetected: false, clients: ["claude-code", "cursor"] },
       pills: [
-        { client: "claude-code", selected: true, state: "enabled", reason: null },
-        { client: "codex", selected: false, state: "disabled", reason: null },
-        { client: "cursor", selected: false, state: "disabled", reason: null },
+        { client: "claude-code", selected: true, state: "enabled", reason: null, readOnly: null },
+        { client: "codex", selected: false, state: "disabled", reason: null, readOnly: null },
+        { client: "cursor", selected: false, state: "disabled", reason: null, readOnly: null },
       ],
     });
     const { user } = await renderProjectScope({

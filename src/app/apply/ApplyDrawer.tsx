@@ -2,7 +2,9 @@
 // scope, each file expandable to its masked unified diff, Apply all / Apply
 // selected, Discard pending (review mode: store edits not applied yet, all
 // or one, back to the last applied state), the drift resolver for entries
-// that need a decision, and the recent apply runs with "Undo this apply".
+// that need a decision, and the recent apply runs with "Undo this apply". A
+// file this account cannot write (M38) shows the lock and a blocked-reason row;
+// the other files still apply.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
@@ -10,6 +12,7 @@ import { storeQueryKeys, useChangeNotice, useInvalidateStore, useUndoApply } fro
 import { STATE_KEYS, diffLineClass } from "@/app/apply/labels";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { Modal } from "@/app/components/Modal";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { useNotifications } from "@/app/components/notifications";
 import { ResolverDialog } from "@/app/resolver/ResolverDialog";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
@@ -123,6 +126,7 @@ function PlannedFileItem({ file, selected, onSelect, clientName, onResolve }: Fi
             <span className="apply-count apply-count--disable">!{counts.disable}</span>
           </span>
         </button>
+        <ReadOnlyBadge readOnly={file.readOnly} path={file.file} />
       </div>
       <div className="apply-file__clients">
         {file.clients.map(clientName).join(", ")}
@@ -131,6 +135,9 @@ function PlannedFileItem({ file, selected, onSelect, clientName, onResolve }: Fi
         <p className="apply-file__problem" role="alert">
           {errorMessage(file.problem.code)}
         </p>
+      ) : null}
+      {file.readOnly ? (
+        <ReadOnlyNote>{t("readOnly.drawer.row", { reason: readOnlyReason(file.readOnly.kind) })}</ReadOnlyNote>
       ) : null}
       {expanded ? (
         <div className="apply-file__detail" id={detailId}>

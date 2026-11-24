@@ -2,13 +2,16 @@
 // Ported from DailenG/skilldock@181b52b src/features/skills/components/SkillSourceSwitcher.tsx:
 // the tabs row (managed library first, then the first tools, then "More" with a menu). Sources
 // here are the store, each client's skill folder in the page's scope, and the agents CLI. The
-// recommended client comes first and every tab shows its tool's name (#2).
+// recommended client comes first and every tab shows its tool's name (#2). A client whose skill
+// folder this account cannot write (M38) carries the lock and says why.
 
 import { useEffect, useId, useRef, useState } from "react";
 import { orderByRecommended } from "@/app/clients";
 import { RecommendedBadge, recommendedReasonId } from "@/app/components/RecommendedBadge";
+import { ReadOnlyBadge, readOnlyTooltip } from "@/app/components/ReadOnlyBadge";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { t } from "@/i18n/en";
+import type { ReadOnly } from "@/ipc/bindings";
 import { ManagedLibraryIcon } from "./icons";
 import { monogram } from "./labels";
 
@@ -23,6 +26,10 @@ export type SourceTab = {
   id: string;
   name: string;
   count: number;
+  /** The client's skill folder in the page's scope is read only (M38). */
+  readOnly?: ReadOnly | null;
+  /** That folder, under its placeholder root. */
+  path?: string;
 };
 
 function SourceLogo({ tab }: { tab: SourceTab }) {
@@ -85,6 +92,7 @@ export function SkillSourceSwitcher({ active, storeCount, tools: incoming, onCha
     const isMenuItem = className.includes("menu-item");
     const selected = tool.id === active;
     const reasonId = recommendedReasonId(baseId, tool.id);
+    const readOnlyId = tool.readOnly ? `${baseId}-${tool.id}-read-only` : undefined;
     return (
       <button
         key={tool.id}
@@ -92,13 +100,19 @@ export function SkillSourceSwitcher({ active, storeCount, tools: incoming, onCha
         type="button"
         role={isMenuItem ? "menuitem" : "tab"}
         aria-selected={isMenuItem ? undefined : selected}
-        aria-label={`${tool.name} ${tool.count}`}
-        aria-describedby={reasonId}
+        aria-label={`${tool.name} ${tool.count}${tool.readOnly ? `, ${t("readOnly.label")}` : ""}`}
+        aria-describedby={[reasonId, readOnlyId].filter(Boolean).join(" ") || undefined}
         onClick={() => choose(tool.id)}
       >
         <SourceLogo tab={tool} />
         <span className="skills-source-tab__name">{tool.name}</span>
         <RecommendedBadge clientId={tool.id} variant="mark" reasonId={reasonId} />
+        <ReadOnlyBadge
+          readOnly={tool.readOnly}
+          variant="mark"
+          reasonId={readOnlyId}
+          tooltip={tool.readOnly ? readOnlyTooltip(tool.readOnly, tool.path) : undefined}
+        />
         <span className="skills-source-tab__count">{tool.count}</span>
       </button>
     );

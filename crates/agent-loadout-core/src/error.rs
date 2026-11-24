@@ -4,6 +4,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::access::ReadOnlyKind;
+
 /// Stable error code, serialized as `snake_case` (the same string as
 /// [`ErrorCode::as_str`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -226,6 +228,12 @@ pub enum ErrorCode {
     /// The desktop app's update check or install failed, or updates are
     /// turned off or not part of this build (SPEC 16.4).
     UpdateFailed,
+    /// A client file or folder this account cannot write (access denied, a
+    /// read-only attribute, another owner, a read-only share or mount),
+    /// found by the probe while planning or refused by the OS at write
+    /// time (SPEC 8.2, #4). The target is blocked and left as it is; the
+    /// rest of the run goes on. [`CoreError::read_only`] gives the kind.
+    ReadOnlyTarget,
 }
 
 impl ErrorCode {
@@ -301,6 +309,7 @@ impl ErrorCode {
             ErrorCode::RestartRequired => "restart_required",
             ErrorCode::SourceUnreachable => "source_unreachable",
             ErrorCode::UpdateFailed => "update_failed",
+            ErrorCode::ReadOnlyTarget => "read_only_target",
         }
     }
 }
@@ -316,6 +325,8 @@ pub struct CoreError {
     code: ErrorCode,
     message: String,
     path: Option<PathBuf>,
+    /// Why the target is read only, for [`ErrorCode::ReadOnlyTarget`].
+    read_only: Option<ReadOnlyKind>,
 }
 
 impl CoreError {
@@ -324,12 +335,24 @@ impl CoreError {
             code,
             message: message.into(),
             path: None,
+            read_only: None,
         }
     }
 
     pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.path = Some(path.into());
         self
+    }
+
+    /// Attaches the kind of a `read_only_target` error.
+    pub fn with_read_only(mut self, kind: ReadOnlyKind) -> Self {
+        self.read_only = Some(kind);
+        self
+    }
+
+    /// The kind of a `read_only_target` error.
+    pub fn read_only(&self) -> Option<ReadOnlyKind> {
+        self.read_only
     }
 
     pub fn code(&self) -> ErrorCode {

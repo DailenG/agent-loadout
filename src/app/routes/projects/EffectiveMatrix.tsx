@@ -2,7 +2,8 @@
 // clients; each cell shows the layer letter and whether the client loads the
 // entry. Clicking a cell shows its provenance chain: the winner's file, the
 // entries it shadows, the other clients that read the same file, warnings
-// and the native snippet (masked by the backend).
+// and the native snippet (masked by the backend). A layer file this account
+// cannot write (M38) carries the lock, in the cell and in the chain.
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -10,6 +11,7 @@ import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { STATE_KEYS } from "@/app/apply/labels";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
+import { ReadOnlyBadge, readOnlyTooltip } from "@/app/components/ReadOnlyBadge";
 import { LAYER_KEYS, LAYER_LETTERS, failureText } from "@/app/routes/projects/labels";
 import { errorMessage, t } from "@/i18n/en";
 import type { MatrixCell, MatrixClient } from "@/ipc/bindings";
@@ -40,16 +42,20 @@ function CellButton(props: {
         cell.warnings.length > 0 ? " has-warning" : ""
       }`}
       aria-pressed={props.selected}
-      aria-label={t("matrix.cell.aria", {
-        server,
-        client: client.name,
-        layer: t(LAYER_KEYS[cell.winner.layer]),
-        state,
-      })}
+      aria-label={
+        t("matrix.cell.aria", {
+          server,
+          client: client.name,
+          layer: t(LAYER_KEYS[cell.winner.layer]),
+          state,
+        }) + (cell.winner.readOnly ? `, ${t("readOnly.label")}` : "")
+      }
+      data-tooltip={cell.winner.readOnly ? readOnlyTooltip(cell.winner.readOnly, cell.winner.file) : undefined}
       onClick={props.onSelect}
     >
       <span className="matrix-cell__layer">{LAYER_LETTERS[cell.winner.layer]}</span>
       <span className="matrix-cell__mark">{cellSymbol(cell)}</span>
+      {cell.winner.readOnly ? <ReadOnlyBadge readOnly={cell.winner.readOnly} variant="mark" /> : null}
     </button>
   );
 }
@@ -72,7 +78,8 @@ function Provenance({ selected, clientName, onClose }: {
         <dt>{t("matrix.detail.winner")}</dt>
         <dd>
           <span className="matrix-detail__layer">{t(LAYER_KEYS[cell.winner.layer])}</span>{" "}
-          <code>{cell.winner.file}</code>
+          <code>{cell.winner.file}</code>{" "}
+          <ReadOnlyBadge readOnly={cell.winner.readOnly} path={cell.winner.file} />
         </dd>
         <dt>{t("matrix.detail.source")}</dt>
         <dd>
@@ -91,7 +98,8 @@ function Provenance({ selected, clientName, onClose }: {
             <ul className="matrix-detail__chain" aria-label={t("matrix.detail.shadowed")}>
               {cell.shadowed.map((entry, index) => (
                 <li key={index}>
-                  {t(LAYER_KEYS[entry.layer])} <code>{entry.file}</code>
+                  {t(LAYER_KEYS[entry.layer])} <code>{entry.file}</code>{" "}
+                  <ReadOnlyBadge readOnly={entry.readOnly} path={entry.file} />
                 </li>
               ))}
             </ul>

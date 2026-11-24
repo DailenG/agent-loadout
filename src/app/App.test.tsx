@@ -27,6 +27,8 @@ const TRUSTED_PROJECT: ProjectRow = {
   servers: 1,
   clients: 2,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 const UNTRUSTED_PROJECT: ProjectRow = {

@@ -3,12 +3,15 @@
 // "Enable in Tools" header, Enable All / Disable All, and one pill per tool with optimistic
 // state. The data layer is new: each pill is a `set_skill_clients` store change (SPEC 12.1
 // `enable.clients`), Enable All selects all detected clients, and the link/copy method is a
-// setting of the skill (SPEC 12.2). ProjectSkillPanel is new (SPEC 12.3).
+// setting of the skill (SPEC 12.2). ProjectSkillPanel is new (SPEC 12.3). A client whose
+// skill folder this account cannot write (M38) has its pill disabled with the lock and the
+// reason; Enable All / Disable All send what they always did and the backend reports it blocked.
 
 import { useEffect, useId, useState } from "react";
 import { orderByRecommended } from "@/app/clients";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { RecommendedBadge, recommendedReasonId } from "@/app/components/RecommendedBadge";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { t } from "@/i18n/en";
 import type { SkillClient, SkillInfo, SkillMethod, SkillProject } from "@/ipc/bindings";
@@ -27,6 +30,12 @@ function PillLogo({ client }: { client: SkillClient }) {
       {url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : <span>{client.name.slice(0, 1)}</span>}
     </span>
   );
+}
+
+function skillFolderTooltip(client: SkillClient): string {
+  return client.readOnly
+    ? t("readOnly.skills.folderNoPath", { client: client.name, reason: readOnlyReason(client.readOnly.kind) })
+    : "";
 }
 
 type ToolSyncPanelProps = {
@@ -124,30 +133,41 @@ export function ToolSyncPanel({ skill, clients, isBulkUpdatingExternally = false
       <div className="tool-pill-grid">
         {orderByRecommended(clients, (client) => client.id).map((client) => {
           const on = enabled.includes(client.id);
-          const tooltip = on
-            ? t("skill.tools.tooltip.enabled")
-            : client.detected
-              ? t("skill.tools.tooltip.disabled")
-              : t("skill.tools.tooltip.notDetected");
+          const tooltip = client.readOnly
+            ? skillFolderTooltip(client)
+            : on
+              ? t("skill.tools.tooltip.enabled")
+              : client.detected
+                ? t("skill.tools.tooltip.disabled")
+                : t("skill.tools.tooltip.notDetected");
           const reasonId = recommendedReasonId(baseId, client.id);
-          return (
+          const readOnlyId = client.readOnly ? `${baseId}-${client.id}-read-only` : undefined;
+          const describedBy = [reasonId, readOnlyId].filter(Boolean).join(" ") || undefined;
+          const pill = (
             <button
               key={client.id}
-              className={`tool-pill${on ? " is-enabled" : ""}${client.detected ? "" : " is-undetected"}`}
+              className={`tool-pill${on ? " is-enabled" : ""}${client.detected ? "" : " is-undetected"}${client.readOnly ? " is-read-only" : ""}`}
               type="button"
               onClick={() => void handleToggle(client)}
               aria-pressed={on}
               aria-label={on ? t("skill.tools.aria.disable", { name: client.name }) : t("skill.tools.aria.enable", { name: client.name })}
-              aria-describedby={reasonId}
+              aria-describedby={describedBy}
               data-tooltip={tooltip}
-              disabled={isBulk || pending.includes(client.id)}
+              disabled={isBulk || pending.includes(client.id) || client.readOnly !== null}
             >
               <PillLogo client={client} />
               <span className="tool-pill__name">{client.name}</span>
               <RecommendedBadge clientId={client.id} variant="mark" reasonId={reasonId} />
+              <ReadOnlyBadge readOnly={client.readOnly} variant="mark" reasonId={readOnlyId} tooltip={tooltip} />
               <span className="sr-only">{on ? t("skill.tools.toggle.on") : t("skill.tools.toggle.off")}</span>
             </button>
           );
+          // A disabled button gets no pointer events; the wrapper shows the tooltip.
+          return client.readOnly ? (
+            <span key={client.id} className="mcp-pill-wrap" data-tooltip={tooltip}>
+              {pill}
+            </span>
+          ) : pill;
         })}
       </div>
     </section>
@@ -187,7 +207,7 @@ export function ProjectSkillPanel({ skill, project, clients }: ProjectSkillPanel
           <button
             className={`secondary-button secondary-button--compact semantic-action ${skill.projectEnabled ? "semantic-action--disable" : "semantic-action--enable"}`}
             type="button"
-            disabled={busy || locked || project.trust !== "trusted"}
+            disabled={busy || locked || project.trust !== "trusted" || project.readOnly !== null}
             onClick={() => void toggle()}
           >
             {skill.projectEnabled ? t("skill.project.off") : t("skill.project.on")}
@@ -200,13 +220,19 @@ export function ProjectSkillPanel({ skill, project, clients }: ProjectSkillPanel
         })}
       </p>
       {locked ? <p className="skill-project-panel__note" role="note">{t("skill.project.shared")}</p> : null}
+      {project.readOnly ? (
+        <ReadOnlyNote>
+          {t("readOnly.project.whole", { name: project.name, reason: readOnlyReason(project.readOnly.kind) })}
+        </ReadOnlyNote>
+      ) : null}
       <div className="tool-pill-grid">
         {projectClients.map((id) => {
-          const client = clients.find((entry) => entry.id === id) ?? { id, name: id, detected: false };
+          const client = clients.find((entry) => entry.id === id) ?? { id, name: id, detected: false, readOnly: null };
           return (
-            <span key={id} className={`tool-pill${skill.projectEnabled ? " is-enabled" : ""}`} aria-hidden="true">
+            <span key={id} className={`tool-pill${skill.projectEnabled ? " is-enabled" : ""}${client.readOnly ? " is-read-only" : ""}`}>
               <PillLogo client={client} />
               <span className="tool-pill__name">{client.name}</span>
+              <ReadOnlyBadge readOnly={client.readOnly} variant="mark" tooltip={skillFolderTooltip(client)} />
             </span>
           );
         })}

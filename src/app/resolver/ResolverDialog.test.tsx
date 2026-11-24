@@ -194,6 +194,7 @@ describe("ResolverDialog", () => {
           ],
           problem: null,
           warnings: [],
+          readOnly: null,
         },
       ],
       pending: 1,

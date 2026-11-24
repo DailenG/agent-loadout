@@ -17,6 +17,8 @@ const PROJECT: ProjectRow = {
   servers: 0,
   clients: 0,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 const USER_SUMMARY: UnmanagedSummary = {
@@ -30,6 +32,7 @@ const USER_SUMMARY: UnmanagedSummary = {
         { id: "claude-code/docs", name: "docs", new: true },
         { id: "claude-code/fetch", name: "fetch", new: false },
       ],
+      readOnly: null,
     },
     {
       client: "codex",
@@ -37,6 +40,7 @@ const USER_SUMMARY: UnmanagedSummary = {
       projectId: null,
       files: ["~/.codex/config.toml"],
       entries: [{ id: "codex/docs", name: "docs", new: false }],
+      readOnly: null,
     },
   ],
   total: 3,
@@ -51,6 +55,7 @@ const PROJECT_SUMMARY: UnmanagedSummary = {
       projectId: PROJECT.id,
       files: ["<P>/.mcp.json"],
       entries: [{ id: `claude-code@${PROJECT.id}/linear`, name: "linear", new: false }],
+      readOnly: null,
     },
   ],
   total: 1,
@@ -66,6 +71,8 @@ const PROJECT_SERVERS: ProjectServerList = {
     hash: "h",
     layers: ["shared", "local"],
     defaultClients: { allDetected: true, clients: [] },
+    readOnly: null,
+    readOnlyLayers: [],
   },
   servers: [],
   inherited: [],

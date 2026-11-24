@@ -4,7 +4,7 @@
 //! the frontend (SPEC 17).
 
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use agent_loadout_core::adapters::detect::detect;
 use agent_loadout_core::adapters::location::Location;
@@ -19,7 +19,7 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use serde::Serialize;
 use specta::Type;
 
-use super::{AppState, CmdResult, Core, IpcError, NO_REGISTRY, blocking};
+use super::{AppState, CmdResult, Core, IpcError, NO_REGISTRY, ReadOnly, blocking, read_only_of};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +46,9 @@ impl From<Tier> for TierKind {
 pub struct ToolFile {
     pub path: String,
     pub exists: bool,
+    /// This account cannot write the file, or create it in its folder
+    /// (SPEC 8.2). Not [`ToolInfo::read_only`], which is about the client.
+    pub read_only: Option<ReadOnly>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Type)]
@@ -115,19 +118,30 @@ fn project_file(location: &Location, core: &Core) -> Option<String> {
     }
 }
 
-fn tool(core: &Core, spec: &AdapterSpec, desired: Option<&DesiredState>) -> Option<ToolInfo> {
+/// The client's Tools card, and the real path of each user file (in
+/// `user_files` order) for [`list`]'s write probes.
+fn tool(
+    core: &Core,
+    spec: &AdapterSpec,
+    desired: Option<&DesiredState>,
+) -> Option<(ToolInfo, Vec<PathBuf>)> {
     let mcp = spec.mcp.as_ref()?;
     let detection = detect(spec, &core.env, core.fs.as_ref(), &NO_REGISTRY);
     let prefs = prefs_of(desired, spec.id);
     let mut warnings: Vec<IpcError> = detection.warnings.iter().map(IpcError::from).collect();
+    let mut paths = Vec::new();
     let user_files =
         match spec.mcp_targets(&core.env, core.fs.as_ref(), TargetScope::User, None, &prefs) {
             Ok(targets) => targets
                 .iter()
-                .map(|target| ToolFile {
-                    // Opening goes through `reveal_tool_folder` by client id.
-                    path: placeholder_path(&core.env, &target.file, None),
-                    exists: core.fs.exists(&target.file),
+                .map(|target| {
+                    paths.push(target.file.clone());
+                    ToolFile {
+                        // Opening goes through `reveal_tool_folder` by client id.
+                        path: placeholder_path(&core.env, &target.file, None),
+                        exists: core.fs.exists(&target.file),
+                        read_only: None,
+                    }
                 })
                 .collect(),
             Err(err) => {
@@ -137,30 +151,33 @@ fn tool(core: &Core, spec: &AdapterSpec, desired: Option<&DesiredState>) -> Opti
                 Vec::new()
             }
         };
-    Some(ToolInfo {
-        id: spec.id.to_owned(),
-        name: spec.display_name.to_owned(),
-        tier: spec.tier.into(),
-        detected: detection.detected(),
-        supported: mcp.oses.contains(&core.os()),
-        read_only: mcp.read_only,
-        user_files,
-        project_files: mcp
-            .project
-            .iter()
-            .chain(mcp.project_local)
-            .filter_map(|location| project_file(location, core))
-            .collect(),
-        transports: Transports {
-            stdio: mcp.caps.transports.stdio,
-            http: mcp.caps.transports.http,
-            sse: mcp.caps.transports.sse,
+    Some((
+        ToolInfo {
+            id: spec.id.to_owned(),
+            name: spec.display_name.to_owned(),
+            tier: spec.tier.into(),
+            detected: detection.detected(),
+            supported: mcp.oses.contains(&core.os()),
+            read_only: mcp.read_only,
+            user_files,
+            project_files: mcp
+                .project
+                .iter()
+                .chain(mcp.project_local)
+                .filter_map(|location| project_file(location, core))
+                .collect(),
+            transports: Transports {
+                stdio: mcp.caps.transports.stdio,
+                http: mcp.caps.transports.http,
+                sse: mcp.caps.transports.sse,
+            },
+            env_refs: mcp.caps.env_ref.is_some(),
+            restart_required: mcp.caps.restart_required,
+            warnings,
+            homepage: homepage(spec.id).map(str::to_owned),
         },
-        env_refs: mcp.caps.env_ref.is_some(),
-        restart_required: mcp.caps.restart_required,
-        warnings,
-        homepage: homepage(spec.id).map(str::to_owned),
-    })
+        paths,
+    ))
 }
 
 /// The store's desired state, for `clients.toml` preferences (omp profiles);
@@ -177,12 +194,24 @@ fn prefs_of(desired: Option<&DesiredState>, client: &str) -> ClientPrefs {
     desired.map_or_else(ClientPrefs::default, |desired| desired.prefs(client))
 }
 
-/// Every client with an MCP config, in table order.
+/// Every client with an MCP config, in table order, with whether this
+/// account can write each user file (SPEC 8.2), probed together.
 pub fn list(core: &Core) -> CmdResult<Vec<ToolInfo>> {
     let desired = desired_state(core)?;
-    Ok(ADAPTERS
+    let tools: Vec<(ToolInfo, Vec<PathBuf>)> = ADAPTERS
         .iter()
         .filter_map(|spec| tool(core, spec, desired.as_ref()))
+        .collect();
+    let all: Vec<PathBuf> = tools.iter().flat_map(|(_, paths)| paths.clone()).collect();
+    let found = read_only_of(core, &all);
+    Ok(tools
+        .into_iter()
+        .map(|(mut info, paths)| {
+            for (file, path) in info.user_files.iter_mut().zip(&paths) {
+                file.read_only = ReadOnly::of(found.get(path).copied().flatten());
+            }
+            info
+        })
         .collect())
 }
 

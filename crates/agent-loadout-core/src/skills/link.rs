@@ -39,8 +39,9 @@ use crate::model::project::ProjectManifest;
 use crate::model::skill_meta::{DistributionMethod, SkillEnable, SkillMeta};
 use crate::skills::store::{self, content_dir};
 use crate::skills::{
-    Entry, MARKER_FILE, SkillFiles, SkillsEnv, confine, content_hash, entry, has_nested_git,
-    io_error, read_folder, write_files,
+    Entry, MARKER_FILE, SkillFiles, SkillsEnv, confine, content_hash, creation_error, entry,
+    has_nested_git, io_error, new_folder_access, read_folder, removal_error, write_error,
+    write_files,
 };
 use crate::store::{
     self as store_mod, CommitId, LOCK_TIMEOUT, Operation, Store, StoreLock, utc_datetime,
@@ -719,6 +720,13 @@ fn try_ensure(
     let owned = ledger.get(&desired.path).cloned();
     let status = match entry(fs, &desired.path)? {
         Entry::Missing => {
+            // A folder this account cannot write is reported, never tried
+            // (SPEC 8.2 `read_only_target`). Entries are folders (a
+            // junction, a link to a folder, a copy): the question is
+            // whether a subfolder can be created there.
+            if let Some(kind) = new_folder_access(fs, &desired.path).read_only() {
+                return Err(crate::access::read_only_target(kind, &desired.path));
+            }
             // The exclude line first: a link that cannot be hidden is
             // never made.
             git_visibility(fs, desired)?;
@@ -876,17 +884,17 @@ fn create(fs: &dyn Fs, desired: &Desired) -> Result<Option<String>, CoreError> {
     if let Some(parent) = desired.path.parent() {
         confine(fs, parent)?;
         fs.create_dir_all(parent)
-            .map_err(|err| io_error("cannot create directory", parent, &err))?;
+            .map_err(|err| write_error(fs, "cannot create directory", parent, &err))?;
     }
     confine(fs, &desired.path)?;
     confine(fs, &desired.source)?;
     match desired.method {
         LinkMethod::Junction => {
-            make_junction(&desired.source, &desired.path)?;
+            make_junction(fs, &desired.source, &desired.path)?;
             Ok(None)
         }
         LinkMethod::Symlink => {
-            make_symlink(&desired.source, &desired.path)?;
+            make_symlink(fs, &desired.source, &desired.path)?;
             Ok(None)
         }
         LinkMethod::Copy => {
@@ -900,26 +908,28 @@ fn create(fs: &dyn Fs, desired: &Desired) -> Result<Option<String>, CoreError> {
                 desired.skill_id
             );
             fs.write(&marker, text.as_bytes())
-                .map_err(|err| io_error("cannot write file", &marker, &err))?;
+                .map_err(|err| write_error(fs, "cannot write file", &marker, &err))?;
             Ok(Some(content_hash(&files)))
         }
     }
 }
 
 #[cfg(windows)]
-fn make_junction(target: &Path, link: &Path) -> Result<(), CoreError> {
-    junction::create(target, link).map_err(|err| io_error("cannot create junction", link, &err))
+fn make_junction(fs: &dyn Fs, target: &Path, link: &Path) -> Result<(), CoreError> {
+    junction::create(target, link)
+        .map_err(|err| creation_error(fs, "cannot create junction", link, &err))
 }
 
 #[cfg(not(windows))]
-fn make_junction(target: &Path, link: &Path) -> Result<(), CoreError> {
-    make_symlink(target, link)
+fn make_junction(fs: &dyn Fs, target: &Path, link: &Path) -> Result<(), CoreError> {
+    make_symlink(fs, target, link)
 }
 
 #[cfg(windows)]
-fn make_symlink(target: &Path, link: &Path) -> Result<(), CoreError> {
+fn make_symlink(fs: &dyn Fs, target: &Path, link: &Path) -> Result<(), CoreError> {
     std::os::windows::fs::symlink_dir(target, link).map_err(|err| {
-        io_error(
+        creation_error(
+            fs,
             "cannot create symbolic link (Windows needs Developer Mode or admin rights; \
              junctions need neither)",
             link,
@@ -929,9 +939,9 @@ fn make_symlink(target: &Path, link: &Path) -> Result<(), CoreError> {
 }
 
 #[cfg(unix)]
-fn make_symlink(target: &Path, link: &Path) -> Result<(), CoreError> {
+fn make_symlink(fs: &dyn Fs, target: &Path, link: &Path) -> Result<(), CoreError> {
     std::os::unix::fs::symlink(target, link)
-        .map_err(|err| io_error("cannot create symbolic link", link, &err))
+        .map_err(|err| creation_error(fs, "cannot create symbolic link", link, &err))
 }
 
 /// Removes a link only, never what it points to.
@@ -944,12 +954,12 @@ pub(crate) fn remove_link(fs: &dyn Fs, path: &Path) -> Result<(), CoreError> {
     } else {
         std::fs::remove_file(path)
     };
-    removed.map_err(|err| io_error("cannot remove link", path, &err))
+    removed.map_err(|err| removal_error(fs, "cannot remove link", path, &err))
 }
 
 fn remove_copy(fs: &dyn Fs, path: &Path) -> Result<(), CoreError> {
     fs.remove_dir_all(path)
-        .map_err(|err| io_error("cannot remove folder", path, &err))
+        .map_err(|err| removal_error(fs, "cannot remove folder", path, &err))
 }
 
 /// Removes an owned entry that is no longer desired, when unchanged.
@@ -1158,7 +1168,7 @@ fn replace_one(
     }
     let exclude = exclude_state(fs, desired)?;
     (ops.rename)(&item.folder, &aside)
-        .map_err(|err| io_error("cannot move the folder aside", &item.folder, &err))?;
+        .map_err(|err| removal_error(fs, "cannot move the folder aside", &item.folder, &err))?;
     let done = (|| -> Result<(PathBuf, Option<String>), CoreError> {
         // The exclude line before the entry: a link that cannot be hidden
         // is never made.
@@ -1224,7 +1234,11 @@ fn put_back(
         return err;
     }
     let message = format!("{}; also, {}", err.message(), notes.join("; "));
-    CoreError::new(err.code(), message).with_path(&item.folder)
+    let kept = CoreError::new(err.code(), message).with_path(&item.folder);
+    match err.read_only() {
+        Some(kind) => kept.with_read_only(kind),
+        None => kept,
+    }
 }
 
 /// A file and its bytes before a change (`None`: it did not exist).

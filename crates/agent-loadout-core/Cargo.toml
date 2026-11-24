@@ -45,6 +45,11 @@ junction.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service.workspace = true
 
+# Write probes (SPEC 8.2 `read_only_target`): `access(2)` and the effective
+# user id.
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [dev-dependencies]
 agent-loadout-testkit.workspace = true
 insta.workspace = true

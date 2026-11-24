@@ -135,6 +135,8 @@ const UNTRUSTED: ProjectRow = {
   servers: 0,
   clients: 2,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 function renderSection(options: RenderOptions = {}) {

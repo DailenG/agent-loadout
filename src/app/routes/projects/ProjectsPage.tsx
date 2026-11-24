@@ -1,7 +1,9 @@
 // Projects page (SPEC 13.3): the projects this machine knows, Add folder and
 // Init manifest (the folder is picked in the OS dialog and stays in the
 // backend), the trust review, Apply, Remove from list, the effective config
-// matrix of a project, and Discover projects (#3) in a dialog.
+// matrix of a project, and Discover projects (#3) in a dialog. A project this
+// account cannot write (M38) shows the lock with its reason, a partly read-only
+// one lists its read-only files, and Apply is disabled when nothing is writable.
 
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
@@ -10,10 +12,11 @@ import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { DiscoverProjectsSection } from "@/app/routes/import/projects/DiscoverProjectsSection";
 import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
 import { EffectiveMatrixView } from "@/app/routes/projects/EffectiveMatrix";
-import { LAYOUT_KEYS, TRUST_KEYS, failureText } from "@/app/routes/projects/labels";
+import { LAYOUT_KEYS, TRUST_KEYS, failureText, projectRelativePath } from "@/app/routes/projects/labels";
 import { useActiveScope, useProjectList } from "@/app/scope/ActiveScope";
 import { errorMessage, t } from "@/i18n/en";
 import type { ProjectRow, ProjectTrust } from "@/ipc/bindings";
@@ -40,6 +43,10 @@ type ProjectCardProps = {
 function ProjectCard({ project, busy, onOpen, onEffective, onApply, onRemove, onReview }: ProjectCardProps) {
   const needsReview = project.trust === "untrusted" || project.trust === "changed";
   const usable = project.trust !== "missing" && project.trust !== "invalid";
+  const readOnlyText = project.readOnly
+    ? t("readOnly.project.whole", { name: project.name, reason: readOnlyReason(project.readOnly.kind) })
+    : undefined;
+  const applyNoteId = useId();
   return (
     <article className="panel-card project-card" aria-label={project.name}>
       <div className="project-card__head">
@@ -60,7 +67,21 @@ function ProjectCard({ project, busy, onOpen, onEffective, onApply, onRemove, on
         <span className={`status-badge ${TRUST_TONES[project.trust]}`}>
           {t(TRUST_KEYS[project.trust])}
         </span>
+        <ReadOnlyBadge readOnly={project.readOnly} tooltip={readOnlyText} />
       </div>
+      {!project.readOnly && project.readOnlyFiles.length > 0 ? (
+        <ul className="read-only-files" aria-label={t("readOnly.project.filesAria", { name: project.name })}>
+          {project.readOnlyFiles.map((entry) => {
+            const shown = projectRelativePath(entry.file, project.path);
+            return (
+              <li key={entry.file}>
+                <span>{shown}</span>
+                <ReadOnlyBadge readOnly={entry} path={shown} />
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
       {project.error ? (
         <p className="project-card__problem" role="alert">
           {errorMessage(project.error.code)}
@@ -87,7 +108,8 @@ function ProjectCard({ project, busy, onOpen, onEffective, onApply, onRemove, on
           className="secondary-button secondary-button--compact"
           type="button"
           onClick={onApply}
-          disabled={busy || project.trust !== "trusted"}
+          disabled={busy || project.trust !== "trusted" || project.readOnly !== null}
+          aria-describedby={project.readOnly ? applyNoteId : undefined}
         >
           {t("projects.action.apply")}
         </button>
@@ -95,6 +117,7 @@ function ProjectCard({ project, busy, onOpen, onEffective, onApply, onRemove, on
           {t("projects.action.remove")}
         </button>
       </div>
+      {readOnlyText ? <ReadOnlyNote id={applyNoteId}>{readOnlyText}</ReadOnlyNote> : null}
     </article>
   );
 }

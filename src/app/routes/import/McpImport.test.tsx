@@ -27,6 +27,8 @@ const PROJECT: ProjectRow = {
   servers: 1,
   clients: 1,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 function draft(id: string, fields: Partial<ServerDraft>): ServerDraft {
@@ -58,6 +60,7 @@ function source(client: string, name: string, fields: Partial<ImportSource> = {}
     projectId: null,
     trusted: null,
     file: `~/.${client}/mcp.json`,
+    readOnly: null,
     ...fields,
   };
 }
@@ -421,6 +424,8 @@ describe("MCP import", () => {
         hash: "hash-1",
         layers: ["shared", "local"],
         defaultClients: { allDetected: true, clients: [] },
+        readOnly: null,
+        readOnlyLayers: [],
       },
       servers: [],
       inherited: [],

@@ -22,7 +22,7 @@ use specta::Type;
 
 use super::{
     AppState, ApplyRun, ChangeResult, CmdResult, Core, EntryNote, FileScope, IpcError, OpCounts,
-    blocking, count, errors,
+    ReadOnly, blocking, count, errors,
 };
 
 /// What the executor does with an entry (SPEC 8.3).
@@ -101,6 +101,9 @@ pub struct PlannedFile {
     /// The whole file is blocked (`parse_error`, `trust_required`, ...).
     pub problem: Option<IpcError>,
     pub warnings: Vec<IpcError>,
+    /// This account cannot write the file (SPEC 8.2): entries that would
+    /// write it are blocked with `read_only_target`.
+    pub read_only: Option<ReadOnly>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -397,6 +400,7 @@ fn planned_file(env: &Env, target: &TargetPlan) -> PlannedFile {
             .collect(),
         problem: target.problem.as_ref().map(IpcError::from),
         warnings: errors(&target.warnings),
+        read_only: ReadOnly::of(target.read_only),
     }
 }
 

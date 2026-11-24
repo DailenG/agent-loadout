@@ -57,6 +57,7 @@ dependencies = [
  "junction",
  "keyring",
  "proptest",
+ "rustix",
  "saphyr-parser",
  "schemars",
  "secret-service",

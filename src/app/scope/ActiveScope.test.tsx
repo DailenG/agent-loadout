@@ -17,6 +17,8 @@ const APP: ProjectRow = {
   servers: 0,
   clients: 0,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 function Probe() {

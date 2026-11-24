@@ -70,6 +70,8 @@ const PROJECT: ProjectRow = {
   servers: 0,
   clients: 0,
   pending: 0,
+  readOnly: null,
+  readOnlyFiles: [],
 };
 
 const CLAUDE_DIR: ToolSkillDir = {
@@ -82,6 +84,7 @@ const CLAUDE_DIR: ToolSkillDir = {
     { name: "hand-made", path: "~/.claude/skills/hand-made", class: "unmanaged", linkTarget: null, skillId: null, description: "Made by hand." },
     { name: "elsewhere", path: "~/.claude/skills/elsewhere", class: "mismatch", linkTarget: "~/other/elsewhere", skillId: null, description: null },
   ],
+  readOnly: null,
 };
 
 function renderPage(commands: MockTransportOptions["commands"] = {}) {
@@ -155,6 +158,7 @@ describe("SkillsPage", () => {
                 status: "foreign",
                 foundTarget: null,
                 error: null,
+                readOnly: null,
               },
             ],
           },
@@ -383,6 +387,7 @@ describe("SkillsPage", () => {
             hash: "sha256:shown",
             clients: ["claude-code"],
             share: false,
+            readOnly: null,
           },
           skills: [makeSkill({}), makeSkill({ id: "alpha", name: "alpha", projectEnabled: true })],
         });

@@ -1,7 +1,9 @@
 // A realistic demo dataset for `npm run dev:mock` (the default
-// `?dataset=demo`): two projects (one trusted, one changed since trusted),
-// store servers in mixed pill states, skills, tools with omp detected and a
-// history with applies and tags. It gives every page and dialog content for
+// `?dataset=demo`): three projects (one trusted, one changed since trusted
+// with a read-only shared manifest, one managed by a security installer and
+// read only for this account), store servers in mixed pill states, skills,
+// tools with omp detected and a history with applies and tags. Cursor's user
+// files are read only too (M38). It gives every page and dialog content for
 // screenshots and design review. Values are synthetic: paths stay under
 // their placeholder roots and no secret value appears anywhere.
 
@@ -19,6 +21,7 @@ import type {
   PendingPlan,
   PillState,
   ProjectRow,
+  ReadOnly,
   ProjectServerList,
   ProjectServerRow,
   RemotesOverview,
@@ -53,6 +56,12 @@ import { MOCK_CHANGE, mockAdoptResult, mockIpcError, ok, type MockTransportOptio
 
 const problem = (code: IpcError["code"], message: string): IpcError => ({ code, message });
 
+/* M38 read-only contexts (#4): a security-focused installer owns Cursor's user files and the secure-portal project. */
+const ACL: ReadOnly = { kind: "acl" };
+/** User-scope files (MCP config and skill folder) per client that this account cannot write. */
+const USER_READ_ONLY: Partial<Record<string, ReadOnly>> = { cursor: ACL };
+const READ_ONLY_PROJECT = "secure-portal-9d40";
+
 // --- Clients -------------------------------------------------------------
 
 const CLIENTS: ClientInfo[] = [
@@ -65,12 +74,12 @@ const CLIENTS: ClientInfo[] = [
 ];
 
 const SKILL_CLIENTS: SkillClient[] = [
-  { id: "claude-code", name: "Claude Code", detected: true },
-  { id: "omp", name: "omp", detected: true },
-  { id: "codex", name: "Codex", detected: true },
-  { id: "pi", name: "Pi", detected: false },
-  { id: "copilot", name: "GitHub Copilot", detected: true },
-  { id: "cursor", name: "Cursor", detected: true },
+  { id: "claude-code", name: "Claude Code", detected: true, readOnly: null },
+  { id: "omp", name: "omp", detected: true, readOnly: null },
+  { id: "codex", name: "Codex", detected: true, readOnly: null },
+  { id: "pi", name: "Pi", detected: false, readOnly: null },
+  { id: "copilot", name: "GitHub Copilot", detected: true, readOnly: null },
+  { id: "cursor", name: "Cursor", detected: true, readOnly: ACL },
 ];
 
 /** One pill per client in `CLIENTS` order; `states` maps client id to state. */
@@ -82,6 +91,7 @@ function pills(states: Partial<Record<string, PillState>>, reasons: Partial<Reco
       selected: state !== "disabled" && state !== "not_supported",
       state,
       reason: reasons[client.id] ?? null,
+      readOnly: null,
     };
   });
 }
@@ -104,6 +114,8 @@ function server(
     problems: [],
     invalid: null,
     ...fields,
+    // A store server's pills write user files: Cursor's is read only.
+    pills: fields.pills.map((pill) => ({ ...pill, readOnly: USER_READ_ONLY[pill.client] ?? null })),
   };
 }
 
@@ -130,7 +142,10 @@ const SERVERS: ServerRow[] = [
     description: "Read and write files under the allowed folders.",
     transport: "stdio",
     launch: "npx -y @modelcontextprotocol/server-filesystem ~/Code",
-    pills: pills({ "claude-code": "enabled", omp: "enabled", cursor: "drift" }),
+    pills: pills(
+      { "claude-code": "enabled", omp: "enabled", cursor: "blocked" },
+      { cursor: problem("read_only_target", "~/.cursor/mcp.json: access is denied") },
+    ),
   }),
   server("sentry", {
     displayName: "Sentry",
@@ -229,6 +244,8 @@ const PROJECTS: ProjectRow[] = [
     servers: 3,
     clients: 3,
     pending: 1,
+    readOnly: null,
+    readOnlyFiles: [],
   },
   {
     id: "api-gateway-81c2",
@@ -240,6 +257,27 @@ const PROJECTS: ProjectRow[] = [
     servers: 2,
     clients: 2,
     pending: 0,
+    readOnly: null,
+    // Partly read only: the committed manifest is marked read only; the private one is writable.
+    readOnlyFiles: [{ file: "<P>/.loadout/project.toml", kind: "attribute" }],
+  },
+  {
+    id: READ_ONLY_PROJECT,
+    name: "secure-portal",
+    path: "~/Code/secure-portal",
+    layout: "shared",
+    trust: "trusted",
+    error: null,
+    servers: 1,
+    clients: 2,
+    pending: 1,
+    readOnly: ACL,
+    readOnlyFiles: [
+      { file: "<P>/.loadout/project.toml", kind: "acl" },
+      { file: "<P>/.loadout/project.local.toml", kind: "acl" },
+      { file: "<P>/.mcp.json", kind: "acl" },
+      { file: "<P>/.cursor/mcp.json", kind: "acl" },
+    ],
   },
 ];
 
@@ -273,6 +311,8 @@ const PROJECT_SERVERS: Record<string, ProjectServerList> = {
       hash: "b3a1c0de",
       layers: ["shared", "local"],
       defaultClients: { allDetected: true, clients: [] },
+      readOnly: null,
+      readOnlyLayers: [],
     },
     servers: [
       projectServer({
@@ -316,6 +356,8 @@ const PROJECT_SERVERS: Record<string, ProjectServerList> = {
       hash: "77e0aa12",
       layers: ["shared", "local"],
       defaultClients: { allDetected: false, clients: ["omp", "codex"] },
+      readOnly: null,
+      readOnlyLayers: [{ layer: "shared", kind: "attribute" }],
     },
     servers: [
       projectServer({
@@ -331,6 +373,37 @@ const PROJECT_SERVERS: Record<string, ProjectServerList> = {
         launch: "http://localhost:8088/mcp",
         pills: pills({ omp: "blocked" }, { omp: problem("missing_secret", "alias GATEWAY_KEY has no value") }),
         problems: [problem("missing_secret", "alias GATEWAY_KEY has no value")],
+      }),
+    ],
+    inherited: INHERITED,
+    clients: CLIENTS,
+    storeServers: SERVERS.map((row) => row.id),
+    warnings: [],
+  },
+  [READ_ONLY_PROJECT]: {
+    project: {
+      id: READ_ONLY_PROJECT,
+      name: "secure-portal",
+      path: "~/Code/secure-portal",
+      trust: "trusted",
+      hash: "5ec0a7a1",
+      layers: ["shared", "local"],
+      defaultClients: { allDetected: false, clients: ["claude-code", "cursor"] },
+      readOnly: ACL,
+      readOnlyLayers: [
+        { layer: "shared", kind: "acl" },
+        { layer: "local", kind: "acl" },
+      ],
+    },
+    servers: [
+      projectServer({
+        name: "vault",
+        transport: "stdio",
+        launch: "vault-mcp --read-only",
+        usesDefaults: true,
+        pills: pills({ "claude-code": "enabled", cursor: "blocked" }, { cursor: problem("read_only_target", "<P>/.cursor/mcp.json: access is denied") }).map(
+          (pill) => (pill.client === "claude-code" || pill.client === "cursor" ? { ...pill, readOnly: ACL } : pill),
+        ),
       }),
     ],
     inherited: INHERITED,
@@ -394,20 +467,24 @@ function matrix(projectId: string): EffectiveMatrix | null {
   if (!project) {
     return null;
   }
-  const cell = (client: string, layer: "system" | "project" | "project_local" | "foreign", source: string, loaded = true) => ({
-    client,
-    winner: {
-      layer,
-      file: layer === "system" ? "~/.claude.json" : layer === "foreign" ? "<P>/.cursor/mcp.json" : "<P>/.mcp.json",
-    },
-    source,
-    loaded,
-    shadowed: [],
-    alsoVisibleTo: [],
-    status: loaded ? ("synced" as const) : ("pending_create" as const),
-    warnings: [],
-    snippet: `"${source.split(":")[1] ?? source}": { "command": "npx" }`,
-  });
+  const readOnlyOf = (file: string): ReadOnly | null => {
+    const found = project.readOnlyFiles.find((entry) => entry.file === file);
+    return found ? { kind: found.kind } : null;
+  };
+  const cell = (client: string, layer: "system" | "project" | "project_local" | "foreign", source: string, loaded = true) => {
+    const file = layer === "system" ? "~/.claude.json" : layer === "foreign" ? "<P>/.cursor/mcp.json" : "<P>/.mcp.json";
+    return {
+      client,
+      winner: { layer, file, readOnly: readOnlyOf(file) },
+      source,
+      loaded,
+      shadowed: [],
+      alsoVisibleTo: [],
+      status: loaded ? ("synced" as const) : ("pending_create" as const),
+      warnings: [],
+      snippet: `"${source.split(":")[1] ?? source}": { "command": "npx" }`,
+    };
+  };
   return {
     projectId,
     projectName: project.name,
@@ -417,7 +494,7 @@ function matrix(projectId: string): EffectiveMatrix | null {
       {
         name: "github",
         cells: [
-          { ...cell("claude-code", "project_local", "store:github+project"), shadowed: [{ layer: "system", file: "~/.claude.json" }] },
+          { ...cell("claude-code", "project_local", "store:github+project"), shadowed: [{ layer: "system", file: "~/.claude.json", readOnly: null }] },
           cell("omp", "project_local", "store:github+project"),
           cell("codex", "system", "store:github"),
         ],
@@ -446,6 +523,7 @@ const PENDING_PLAN: PendingPlan = {
       entries: [{ action: "create", name: "context7", client: "omp", server: "context7", state: "pending_create", unresolved: false, problem: null }],
       problem: null,
       warnings: [],
+      readOnly: null,
     },
     {
       file: "~/.codex/config.toml",
@@ -458,6 +536,7 @@ const PENDING_PLAN: PendingPlan = {
       entries: [{ action: "create", name: "context7", client: "codex", server: "context7", state: "pending_create", unresolved: false, problem: null }],
       problem: null,
       warnings: [],
+      readOnly: null,
     },
     {
       file: "~/.cursor/mcp.json",
@@ -467,14 +546,48 @@ const PENDING_PLAN: PendingPlan = {
       project: null,
       counts: { create: 0, update: 0, remove: 0, disable: 0 },
       diff: "",
-      entries: [{ action: "none", name: "filesystem", client: "cursor", server: "filesystem", state: "drifted", unresolved: true, problem: null }],
+      entries: [
+        {
+          action: "none",
+          name: "filesystem",
+          client: "cursor",
+          server: "filesystem",
+          state: "blocked",
+          unresolved: false,
+          problem: problem("read_only_target", "~/.cursor/mcp.json: access is denied"),
+        },
+      ],
       problem: null,
       warnings: [],
+      readOnly: ACL,
+    },
+    {
+      file: "<P>/.mcp.json",
+      clients: ["claude-code"],
+      scope: "project",
+      projectId: READ_ONLY_PROJECT,
+      project: "~/Code/secure-portal",
+      counts: { create: 0, update: 0, remove: 0, disable: 0 },
+      diff: "",
+      entries: [
+        {
+          action: "none",
+          name: "vault",
+          client: "claude-code",
+          server: "vault",
+          state: "blocked",
+          unresolved: false,
+          problem: problem("read_only_target", "<P>/.mcp.json: access is denied"),
+        },
+      ],
+      problem: null,
+      warnings: [],
+      readOnly: ACL,
     },
   ],
-  pending: 3,
+  pending: 4,
   writes: 2,
-  unresolved: 1,
+  unresolved: 0,
   warnings: [],
 };
 
@@ -570,6 +683,7 @@ function skillList(scope: { kind: "user" } | { kind: "project"; id: string }): S
       hash: PROJECT_SERVERS[project.id]?.project.hash ?? "00000000",
       clients: ["claude-code", "omp", "codex"],
       share: false,
+      readOnly: project.readOnly,
     },
     agentsCli: null,
     sizeWarning: null,
@@ -588,6 +702,7 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
       { name: "release-notes", path: "~/.claude/skills/release-notes", class: "unmanaged", linkTarget: null, skillId: null, description: "Draft release notes from merged pull requests." },
       { name: "My Notes", path: "~/.claude/skills/My Notes", class: "unmanaged", linkTarget: null, skillId: null, description: null },
     ],
+    readOnly: null,
   },
   {
     client: "omp",
@@ -598,6 +713,7 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
       { name: "code-review", path: "~/.omp/agent/skills/code-review", class: "managed", linkTarget: "%LOCALAPPDATA%/Loadout/store/skills/code-review", skillId: "code-review", description: "Review a diff for correctness, security and style before it lands." },
       { name: "release-notes", path: "~/.omp/agent/skills/release-notes", class: "unmanaged", linkTarget: null, skillId: null, description: "Release notes with a changelog section and upgrade notes." },
     ],
+    readOnly: null,
   },
   {
     client: "codex",
@@ -608,6 +724,17 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
       { name: "incident-triage", path: "~/.codex/skills/incident-triage", class: "mismatch", linkTarget: null, skillId: "incident-triage", description: null },
       { name: "pdf-tools", path: "~/.codex/skills/pdf-tools", class: "unmanaged", linkTarget: null, skillId: null, description: "Fill and split PDF files." },
     ],
+    readOnly: null,
+  },
+  {
+    client: "cursor",
+    name: "Cursor",
+    dir: "~/.cursor/skills",
+    exists: true,
+    entries: [
+      { name: "secure-coding", path: "~/.cursor/skills/secure-coding", class: "unmanaged", linkTarget: null, skillId: null, description: "House rules the security team installs for every developer." },
+    ],
+    readOnly: ACL,
   },
 ];
 
@@ -721,6 +848,7 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["claude-code", "codex"],
       manifest: null,
       error: null,
+      readOnly: null,
     },
     {
       id: "d-8e2d5a1c9f04",
@@ -729,6 +857,7 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["claude-code", "omp"],
       manifest: { id: "docs-site-5b7e", name: "Docs site", layout: "shared", known: false },
       error: null,
+      readOnly: null,
     },
     {
       id: "d-b05e7c3a2d61",
@@ -737,6 +866,16 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["omp"],
       manifest: null,
       error: null,
+      readOnly: null,
+    },
+    {
+      id: "d-27c4e81f0a93",
+      name: "payments-core",
+      path: "~/Code/payments-core",
+      clients: ["claude-code", "cursor"],
+      manifest: null,
+      error: null,
+      readOnly: ACL,
     },
     {
       id: "d-f3a90b6d1e58",
@@ -745,6 +884,7 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["claude-code"],
       manifest: null,
       error: problem("parse_error", "<P>/.loadout/project.toml is not valid TOML (line 4)"),
+      readOnly: null,
     },
   ],
   warnings: [problem("parse_error", "~/.codex/config.toml could not be read; the other clients were")],
@@ -796,20 +936,20 @@ const TOOLS: ToolInfo[] = [
   tool({
     id: "claude-code",
     name: "Claude Code",
-    userFiles: [{ path: "~/.claude.json", exists: true }],
+    userFiles: [{ path: "~/.claude.json", exists: true, readOnly: null }],
     projectFiles: ["<P>/.mcp.json"],
   }),
   tool({
     id: "omp",
     name: "omp",
-    userFiles: [{ path: "~/.omp/agent/mcp.json", exists: true }],
+    userFiles: [{ path: "~/.omp/agent/mcp.json", exists: true, readOnly: null }],
     projectFiles: ["<P>/.omp/mcp.json"],
     homepage: "https://github.com/can1357/oh-my-pi",
   }),
   tool({
     id: "codex",
     name: "Codex",
-    userFiles: [{ path: "~/.codex/config.toml", exists: true }],
+    userFiles: [{ path: "~/.codex/config.toml", exists: true, readOnly: null }],
     projectFiles: ["<P>/.codex/config.toml"],
     envRefs: false,
     transports: { stdio: true, http: true, sse: false },
@@ -818,7 +958,7 @@ const TOOLS: ToolInfo[] = [
     id: "cursor",
     name: "Cursor",
     tier: "b",
-    userFiles: [{ path: "~/.cursor/mcp.json", exists: true }],
+    userFiles: [{ path: "~/.cursor/mcp.json", exists: true, readOnly: ACL }],
     projectFiles: ["<P>/.cursor/mcp.json"],
     restartRequired: true,
   }),
@@ -827,7 +967,7 @@ const TOOLS: ToolInfo[] = [
     name: "Windsurf",
     tier: "b",
     detected: false,
-    userFiles: [{ path: "~/.codeium/windsurf/mcp_config.json", exists: false }],
+    userFiles: [{ path: "~/.codeium/windsurf/mcp_config.json", exists: false, readOnly: null }],
   }),
   tool({
     id: "claude-desktop",
@@ -842,7 +982,7 @@ const TOOLS: ToolInfo[] = [
     name: "VS Code (legacy settings)",
     tier: "d",
     readOnly: true,
-    userFiles: [{ path: "%APPDATA%/Code/User/settings.json", exists: true }],
+    userFiles: [{ path: "%APPDATA%/Code/User/settings.json", exists: true, readOnly: null }],
   }),
 ];
 
@@ -1044,12 +1184,12 @@ function importDraft(id: string, fields: Partial<ServerDraft>): ServerDraft {
 }
 
 function userSource(client: string, name: string): ImportSource {
-  return { key: client, id: `${client}/${name}`, client, scope: "user", projectId: null, trusted: null, file: USER_FILES[client] };
+  return { key: client, id: `${client}/${name}`, client, scope: "user", projectId: null, trusted: null, file: USER_FILES[client], readOnly: USER_READ_ONLY[client] ?? null };
 }
 
 function projectSource(client: string, name: string, project: ProjectRow, file: string): ImportSource {
   const key = `${client}@${project.id}`;
-  return { key, id: `${key}/${name}`, client, scope: "project", projectId: project.id, trusted: project.trust === "trusted", file };
+  return { key, id: `${key}/${name}`, client, scope: "project", projectId: project.id, trusted: project.trust === "trusted", file, readOnly: null };
 }
 
 function importVariant(fields: Partial<ImportVariant> & Pick<ImportVariant, "key" | "suggestedId" | "sources">): ImportVariant {
@@ -1183,7 +1323,7 @@ function unmanagedSummary(scope: ImportScope | null): UnmanagedSummary {
       }
       let group = groups.find((item) => item.client === source.client && item.projectId === source.projectId);
       if (!group) {
-        group = { client: source.client, scope: source.scope, projectId: source.projectId, files: [source.file], entries: [] };
+        group = { client: source.client, scope: source.scope, projectId: source.projectId, files: [source.file], entries: [], readOnly: source.readOnly };
         groups.push(group);
       }
       group.entries.push({ id: source.id, name: candidate.name, new: !ACKNOWLEDGED.has(source.id) });

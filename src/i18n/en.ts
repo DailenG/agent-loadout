@@ -1419,6 +1419,33 @@ const messages = {
   /* M36 compact not-managed notice (0.3.1). */
   "import.notice.short": "{count} not managed",
   /* end M36 */
+  /* M38 read-only contexts (0.4.0, #4). */
+  "readOnly.label": "Read only",
+  "readOnly.kind.acl": "its permissions do not let your account write it",
+  "readOnly.kind.attribute": "it is marked read only",
+  "readOnly.kind.owner": "another user owns it and your account has no write permission",
+  "readOnly.kind.share": "the network share or drive it is on does not allow writing",
+  "readOnly.tooltip": "Read only: {reason}. Loadout shows it and does not change it.",
+  "readOnly.tooltipPath": "{path} is read only: {reason}. Loadout shows it and does not change it.",
+  "readOnly.tooltipClients": "Read only for {clients}. Loadout shows these entries and does not change them.",
+  "readOnly.project.whole": "{name} is read only: {reason}. Loadout shows it and does not change its files.",
+  "readOnly.project.filesAria": "Read-only files of {name}",
+  "readOnly.layer.shared": "The shared manifest (project.toml) is read only: {reason}.",
+  "readOnly.layer.local": "The private manifest (project.local.toml) is read only: {reason}.",
+  "readOnly.layer.editDisabled": "This entry lives in a manifest that is read only ({reason}); it can be viewed, not changed.",
+  "readOnly.skills.folder": "{client}'s skill folder {path} is read only: {reason}.",
+  "readOnly.skills.folderNoPath": "{client}'s skill folder is read only: {reason}.",
+  "readOnly.import.source":
+    "{file} is read only: {reason}. The definition can still be imported; Loadout will not change this file.",
+  "readOnly.import.manifest":
+    "The manifest of {project} that this entry would go into is read only: {reason}. The definition stays in your store.",
+  "readOnly.drawer.row": "Blocked: {reason}. Loadout does not write this file; the other files are applied.",
+  "readOnly.discover.noManifest":
+    "This folder is read only: {reason}. It has no manifest, and adding it needs to write one.",
+  "readOnly.skills.linkBlocked": "read only",
+  "apply.readOnly.one": "1 file read only, not written.",
+  "apply.readOnly.many": "{count} files read only, not written.",
+  /* end M38 */
 } as const;
 
 export type MessageKey = keyof typeof messages;
@@ -1511,6 +1538,7 @@ const errorMessages: Record<ErrorCode, string> = {
   restart_required: "Restart the client to load the change.",
   source_unreachable: "The skill's source cannot be reached; its copy in the store is unchanged.",
   update_failed: "The update could not be checked or installed. Loadout keeps working as it is.",
+  read_only_target: "This file or folder is read only for your account; Loadout left it as it is.",
 };
 
 export function errorMessage(code: ErrorCode): string {

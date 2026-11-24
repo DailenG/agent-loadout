@@ -16,6 +16,7 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["claude-code", "omp"],
       manifest: { id: "web-shop-3f9a", name: "Web shop", layout: "shared", known: false },
       error: null,
+      readOnly: null,
     },
     {
       id: "d-111111111111",
@@ -24,6 +25,7 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["codex"],
       manifest: null,
       error: null,
+      readOnly: null,
     },
     {
       id: "d-222222222222",
@@ -32,6 +34,7 @@ const DISCOVERY: ProjectDiscovery = {
       clients: ["claude-code"],
       manifest: null,
       error: { code: "parse_error", message: "the manifest is not valid TOML" },
+      readOnly: null,
     },
   ],
   warnings: [{ code: "parse_error", message: "~/.codex/config.toml is not valid TOML" }],

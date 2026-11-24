@@ -2,12 +2,15 @@
 // per-client pills from the project plan, the store servers the folder inherits, and edits of
 // the manifest (each one commit that trusts and applies what Loadout wrote). An untrusted or
 // changed project is read only until it is reviewed and trusted (SPEC 17, `loadout project
-// trust`). Card, pill and toolbar markup are the store list's (McpPage, ClientPill).
+// trust`). Card, pill and toolbar markup are the store list's (McpPage, ClientPill). A manifest
+// this account cannot write (M38) is shown with its reason, and the edits that would write it
+// are disabled.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { storeQueryKeys, useChangeNotice } from "@/app/apply/changeNotice";
 import { useNotifications } from "@/app/components/notifications";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { TrustReviewDialog } from "@/app/routes/projects/TrustReviewDialog";
 import { errorMessage, t } from "@/i18n/en";
 import type {
@@ -15,9 +18,12 @@ import type {
   ClientChoice,
   ClientInfo,
   InheritedServer,
+  ManifestLayerKind,
+  ProjectScopeInfo,
   ProjectServerKind,
   ProjectServerList,
   ProjectServerRow,
+  ReadOnly,
 } from "@/ipc/bindings";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 import { PillButton, pillsToShow, type VisiblePill } from "./ClientPill";
@@ -55,6 +61,23 @@ function kindLabel(row: ProjectServerRow): string {
   return kinds[row.kind];
 }
 
+/** The manifest layers an edit can write: none when the whole project is read only (M38). */
+export function writableLayers(project: ProjectScopeInfo): ManifestLayerKind[] {
+  if (project.readOnly) {
+    return [];
+  }
+  return project.layers.filter((layer) => !project.readOnlyLayers.some((entry) => entry.layer === layer));
+}
+
+/** Why `layer` cannot be written, or null. */
+function layerReadOnly(project: ProjectScopeInfo, layer: ManifestLayerKind): ReadOnly | null {
+  if (project.readOnly) {
+    return project.readOnly;
+  }
+  const entry = project.readOnlyLayers.find((item) => item.layer === layer);
+  return entry ? { kind: entry.kind } : null;
+}
+
 /** The project scope's server list; the page and the view share this query. */
 export function useProjectServers(projectId: string, enabled = true) {
   const { commands } = useTransport();
@@ -78,7 +101,11 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
 
   const data = list.data;
   const project = data?.project;
-  const readOnly = !project || project.trust !== "trusted";
+  const untrusted = !project || project.trust !== "trusted";
+  // The manifests an edit can write (M38); none: every edit is disabled and the note says why.
+  const writable = project ? writableLayers(project) : [];
+  const noWrite = writable.length === 0;
+  const hideLayer: ManifestLayerKind | undefined = writable.includes("shared") ? "shared" : writable[0];
   const needle = query.trim().toLowerCase();
   const rows = (data?.servers ?? []).filter(
     (row) => !needle || [row.name, row.from ?? "", row.launch].some((field) => field.toLowerCase().includes(needle)),
@@ -133,12 +160,12 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
   }
 
   function handleHide(server: InheritedServer) {
-    if (!project) {
+    if (!project || !hideLayer) {
       return;
     }
     const draft = {
       name: server.id,
-      layer: project.layers.includes("shared") ? ("shared" as const) : ("local" as const),
+      layer: hideLayer,
       kind: "suppress" as const,
       from: null,
       transport: null,
@@ -175,7 +202,7 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
       <p className="skills-scope-note" role="note">
         {t("mcp.project.note", { name: project.name, path: project.path })}
       </p>
-      {readOnly ? (
+      {untrusted ? (
         <div className="mcp-page-warning mcp-project-trust" role="alert">
           <span>{t(project.trust === "changed" ? "mcp.project.changed" : "mcp.project.untrusted")}</span>
           <button className="secondary-button secondary-button--compact" type="button" onClick={() => setReviewing(true)}>
@@ -183,6 +210,19 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
           </button>
         </div>
       ) : null}
+      {project.readOnly ? (
+        <ReadOnlyNote>
+          {t("readOnly.project.whole", { name: project.name, reason: readOnlyReason(project.readOnly.kind) })}
+        </ReadOnlyNote>
+      ) : (
+        project.readOnlyLayers.map((entry) => (
+          <ReadOnlyNote key={entry.layer}>
+            {t(entry.layer === "shared" ? "readOnly.layer.shared" : "readOnly.layer.local", {
+              reason: readOnlyReason(entry.kind),
+            })}
+          </ReadOnlyNote>
+        ))
+      )}
       {data.warnings.map((warning, index) => (
         <p key={`${index}-${warning.code}`} className="mcp-page-warning" role="note">
           {errorMessage(warning.code)}
@@ -195,7 +235,8 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
             key={row.name}
             row={row}
             clients={data.clients}
-            readOnly={readOnly}
+            untrusted={untrusted}
+            editLayerReadOnly={layerReadOnly(project, row.editLayer)}
             busy={busy === row.name}
             locked={locked}
             expanded={expanded === row.name}
@@ -234,7 +275,7 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
                   <button
                     className="secondary-button secondary-button--compact"
                     type="button"
-                    disabled={readOnly || locked}
+                    disabled={untrusted || noWrite || locked}
                     aria-label={t("mcp.project.inherited.overrideAria", { name })}
                     onClick={() =>
                       onDialog({
@@ -247,7 +288,7 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
                   <button
                     className="secondary-button secondary-button--compact semantic-action semantic-action--disable"
                     type="button"
-                    disabled={readOnly || locked}
+                    disabled={untrusted || noWrite || locked}
                     aria-label={t("mcp.project.inherited.hideAria", { name })}
                     onClick={() => handleHide(server)}
                   >
@@ -260,12 +301,12 @@ export function ProjectServersView({ projectId, query, onOpenPending, dialog, on
         </section>
       ) : null}
 
-      {dialog && !readOnly ? (
+      {dialog && !untrusted && !noWrite ? (
         <ProjectServerDialog
           projectId={projectId}
           projectName={project.name}
           hash={project.hash}
-          layers={project.layers}
+          layers={writable}
           clients={data.clients}
           storeServers={data.storeServers}
           state={dialog}
@@ -290,7 +331,10 @@ type ProjectServerCardProps = {
   row: ProjectServerRow;
   clients: ClientInfo[];
   projectName: string;
-  readOnly: boolean;
+  /** The project is not trusted: nothing is edited until it is reviewed. */
+  untrusted: boolean;
+  /** The manifest this row's edits write is read only for this account (M38). */
+  editLayerReadOnly: ReadOnly | null;
   /** This card's change is running (spinner). */
   busy: boolean;
   /** A project edit is running or the list is refetching: hashes may be stale. */
@@ -305,7 +349,7 @@ type ProjectServerCardProps = {
 };
 
 function ProjectServerCard(props: ProjectServerCardProps) {
-  const { row, clients, projectName, readOnly, busy, locked, expanded, deleteConfirming } = props;
+  const { row, clients, projectName, untrusted, editLayerReadOnly, busy, locked, expanded, deleteConfirming } = props;
   const pills = pillsToShow(row.pills, clients);
   const selected = row.pills.filter((pill) => pill.selected).map((pill) => pill.client);
   // What a toggle starts from: the manifest's explicit list as written (it
@@ -322,7 +366,8 @@ function ProjectServerCard(props: ProjectServerCardProps) {
   const powerLabel = allReady
     ? t("mcp.card.disableAllApps", { name: row.name })
     : t("mcp.card.enableAllApps", { name: row.name });
-  const disabled = readOnly || locked;
+  // A row whose manifest is read only (M38) can be viewed, not changed.
+  const disabled = untrusted || locked || editLayerReadOnly !== null;
 
   function enableAll() {
     const missing = ready.map((entry) => entry.client.id).filter((id) => !written.includes(id));
@@ -386,6 +431,11 @@ function ProjectServerCard(props: ProjectServerCardProps) {
                       {t(layer === "shared" ? "mcp.project.layer.shared" : "mcp.project.layer.local")}
                     </span>
                   ))}
+                  <ReadOnlyBadge
+                    readOnly={editLayerReadOnly}
+                    focusable={false}
+                    tooltip={editLayerReadOnly ? t("readOnly.layer.editDisabled", { reason: readOnlyReason(editLayerReadOnly.kind) }) : undefined}
+                  />
                 </div>
                 <div className="mcp-server-card__subtitle">{subtitle}</div>
                 {row.problems.map((problem, index) => (
@@ -448,6 +498,9 @@ function ProjectServerCard(props: ProjectServerCardProps) {
       </div>
       {expanded ? (
         <div className="mcp-server-card__details">
+          {editLayerReadOnly ? (
+            <ReadOnlyNote>{t("readOnly.layer.editDisabled", { reason: readOnlyReason(editLayerReadOnly.kind) })}</ReadOnlyNote>
+          ) : null}
           <section>
             <div className="skill-card__section-header">
               <h4>{t(suppress ? "mcp.project.hiddenFor" : "mcp.card.enableApps")}</h4>

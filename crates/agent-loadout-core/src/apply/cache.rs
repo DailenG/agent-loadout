@@ -30,6 +30,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::access::ProbeCache;
 use crate::apply::ApplyEnv;
 use crate::apply::exec::PlanInputs;
 use crate::apply::plan::{self, Plan, PlanOptions};
@@ -76,6 +77,8 @@ pub struct PlanCache {
     state: Mutex<State>,
     /// Held while a plan is computed, so concurrent requests wait for it.
     computing: Mutex<()>,
+    /// Write probes of the target files, per file fingerprint (#4).
+    probes: ProbeCache,
 }
 
 #[derive(Default)]
@@ -108,12 +111,29 @@ impl PlanCache {
         Self::default()
     }
 
+    /// A cache whose planner runs wait `budget` for their write probes
+    /// (default [`crate::access::PROBE_BUDGET`]).
+    pub fn with_probe_budget(budget: std::time::Duration) -> Self {
+        Self {
+            probes: ProbeCache::with_budget(budget),
+            ..Self::default()
+        }
+    }
+
     /// Drops the cached plan; the next request plans again. A plan being
     /// computed now is returned to its requests but not kept.
     pub fn invalidate(&self) {
         let mut state = self.lock();
         state.generation += 1;
         state.entry = None;
+        self.probes.clear();
+    }
+
+    /// The write probes of client files, kept per file fingerprint; the
+    /// app's views probe files outside the plan (manifests, skill folders)
+    /// through it too.
+    pub fn probes(&self) -> &ProbeCache {
+        &self.probes
     }
 
     /// The full plan of this machine: the cached one when everything it was
@@ -150,8 +170,10 @@ impl PlanCache {
         };
         let store = open(&recorder)?;
         let inputs = PlanInputs::load(store.as_ref(), &recorded)?;
+        let mut cx = recorded.render_cx(inputs.memory.clone());
+        cx.probes = Some(&self.probes);
         let plan = plan::plan(
-            &recorded.render_cx(inputs.memory.clone()),
+            &cx,
             &inputs.desired,
             &inputs.ledger,
             &inputs.key,
@@ -397,5 +419,11 @@ impl Fs for Recorder<'_> {
     fn note_dependency(&self, path: &Path) {
         let seen = seen(&self.inner.read(path), |bytes| Seen::Hash(hash_of(bytes)));
         self.note(Read::Bytes(path.to_path_buf()), seen);
+    }
+
+    /// Not a read the plan is checked against: probe results are kept per
+    /// file fingerprint in the cache's [`ProbeCache`] instead.
+    fn write_probe(&self) -> Option<crate::access::WriteProbe> {
+        self.inner.write_probe()
     }
 }

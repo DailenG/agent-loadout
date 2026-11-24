@@ -19666,3 +19666,91 @@ button.settings-form-item:disabled {
   }
 }
 /* end M36 */
+/* M38 read-only contexts (0.4.0, #4): the lock badge and mark, the
+   explanation rows next to disabled controls, and read-only pills. Colors
+   only from existing tokens (`--warning-text` on `--surface` and on
+   `--warning-soft`, both in the contrast test). */
+.read-only-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.read-only-badge svg,
+.read-only-mark svg {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.read-only-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--warning-text);
+}
+
+.read-only-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.read-only-note svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.read-only-files {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.read-only-files li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.tool-pill.is-read-only {
+  border-style: dashed;
+}
+
+.tool-pill.is-read-only .read-only-mark {
+  margin-left: 2px;
+}
+
+.tool-card__path-value.has-read-only {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-path-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-select__option:has(> .app-select__badge) {
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+}
+
+.app-select__badge {
+  display: inline-flex;
+  align-items: center;
+}
+/* end M38 */

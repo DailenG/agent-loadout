@@ -2,13 +2,16 @@
 // (Claude Code, Codex, omp, Pi) that this machine has no project for, as a
 // checklist; "Add selected" binds them untrusted (a folder without a
 // manifest gets a private one) and each added project offers its review.
-// Shown on the Import page and, in a dialog, from the Projects page.
+// Shown on the Import page and, in a dialog, from the Projects page. A folder
+// whose `.loadout` location this account cannot write (M38) shows the lock;
+// without a manifest it cannot be added (that needs a write) and says why.
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { storeQueryKeys, useInvalidateImports, useInvalidateStore } from "@/app/apply/changeNotice";
 import { orderByRecommended } from "@/app/clients";
 import { useNotifications } from "@/app/components/notifications";
+import { ReadOnlyBadge, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { reasonText } from "@/app/routes/import/skills/labels";
 import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
 import { LAYOUT_KEYS, TRUST_KEYS, failureText } from "@/app/routes/projects/labels";
@@ -19,6 +22,11 @@ import { unwrap, useTransport } from "@/ipc/transport";
 /** Not a store query: discovery reads client files, so it runs again on every open. */
 const DISCOVER_KEY = ["discover_projects"] as const;
 
+/** Adding writes a private manifest, which a read-only folder refuses (M38). */
+function addBlocked(project: DiscoveredProject): boolean {
+  return project.error !== null || (project.readOnly !== null && project.manifest === null);
+}
+
 function ProjectRowItem(props: {
   project: DiscoveredProject;
   checked: boolean;
@@ -28,12 +36,12 @@ function ProjectRowItem(props: {
   const { project, checked, clientNames, onChange } = props;
   const hintId = useId();
   return (
-    <li className={`discover-item${project.error ? " is-blocked" : ""}`}>
+    <li className={`discover-item${addBlocked(project) ? " is-blocked" : ""}`}>
       <label className="project-dialog__choice">
         <input
           type="checkbox"
           checked={checked}
-          disabled={project.error !== null}
+          disabled={addBlocked(project)}
           aria-describedby={hintId}
           onChange={(event) => onChange(event.target.checked)}
         />
@@ -54,6 +62,12 @@ function ProjectRowItem(props: {
           <span className="status-badge tone-neutral">{t("discover.noManifest")}</span>
         )}
         {project.error ? <span className="discover-item__problem">{reasonText(project.error)}</span> : null}
+        <ReadOnlyBadge readOnly={project.readOnly} path={project.path} />
+        {project.readOnly && !project.manifest ? (
+          <span className="discover-item__problem">
+            {t("readOnly.discover.noManifest", { reason: readOnlyReason(project.readOnly.kind) })}
+          </span>
+        ) : null}
       </div>
     </li>
   );
@@ -165,7 +179,7 @@ export function DiscoverProjectsSection({ onCancel, descriptionId }: DiscoverPro
   }, [result]);
 
   const candidates = discovery.data?.candidates ?? [];
-  const addable = candidates.filter((candidate) => candidate.error === null);
+  const addable = candidates.filter((candidate) => !addBlocked(candidate));
   const chosen = addable.filter((candidate) => selected.has(candidate.id));
   const clientNames = (ids: string[]) => {
     const known = new Map((tools.data ?? []).map((tool) => [tool.id, tool.name]));

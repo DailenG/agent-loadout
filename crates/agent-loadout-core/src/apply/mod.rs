@@ -71,6 +71,7 @@ impl<'a> ApplyEnv<'a> {
             registry: self.registry,
             delivery: self.delivery,
             memory,
+            probes: None,
         }
     }
 }
@@ -93,11 +94,33 @@ pub(crate) fn temp_path(file: &Path) -> Result<PathBuf, CoreError> {
 }
 
 /// Writes a machine-local state file atomically: a temp file in the same
-/// directory, then a replace.
+/// directory, then a replace. Loadout's own files: a failure is always
+/// `io_error`, never `read_only_target` (that names files of the user's
+/// tools, SPEC 8.2).
 pub(crate) fn write_atomic(fs: &dyn Fs, path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
-    let io = |what: &str, at: &Path, err: std::io::Error| {
+    write_atomic_with(fs, path, bytes, &|what, at, err| {
         CoreError::new(ErrorCode::IoError, format!("{what}: {err}")).with_path(at)
-    };
+    })
+}
+
+/// [`write_atomic`] for a file of a project (its repository's
+/// `info/exclude`): a write refused as read only is `read_only_target`.
+pub(crate) fn write_atomic_project(
+    fs: &dyn Fs,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), CoreError> {
+    write_atomic_with(fs, path, bytes, &|what, at, err| {
+        crate::access::write_error(fs, what, at, &err)
+    })
+}
+
+fn write_atomic_with(
+    fs: &dyn Fs,
+    path: &Path,
+    bytes: &[u8],
+    io: &dyn Fn(&str, &Path, std::io::Error) -> CoreError,
+) -> Result<(), CoreError> {
     if let Some(dir) = path.parent() {
         fs.create_dir_all(dir)
             .map_err(|err| io("cannot create directory", dir, err))?;

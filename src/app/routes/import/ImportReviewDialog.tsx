@@ -12,6 +12,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { storeQueryKeys, useChangeNotice, useInvalidateImports } from "@/app/apply/changeNotice";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
+import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
+import { manifestReadOnly } from "@/app/routes/projects/labels";
 import { TrustReviewDialog } from "@/app/routes/projects/TrustReviewDialog";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import type {
@@ -306,20 +308,28 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
                 .map((offer) => {
                   const done = added.includes(offer.key);
                   const layer = layers[offer.key] ?? offer.placement.layer;
+                  // A manifest this account cannot write (M38): adding is disabled and says why.
+                  const readOnly = manifestReadOnly(names.project(offer.projectId), layer);
                   return (
                     <div key={offer.key} className="import-result__offer">
                       <div className="migrate-item--row">
                         <span>{offer.projectName}</span>
+                        <ReadOnlyBadge readOnly={readOnly} />
                         <button
                           className="secondary-button secondary-button--compact"
                           type="button"
-                          disabled={done || adding !== ""}
+                          disabled={done || adding !== "" || readOnly !== null}
                           aria-label={t("import.manifest.addAria", { id, project: offer.projectName })}
                           onClick={() => void addToManifest(offer)}
                         >
                           {done ? t("import.manifest.done") : t("import.manifest.add")}
                         </button>
                       </div>
+                      {readOnly && !done ? (
+                        <ReadOnlyNote>
+                          {t("readOnly.import.manifest", { project: offer.projectName, reason: readOnlyReason(readOnly.kind) })}
+                        </ReadOnlyNote>
+                      ) : null}
                       {offer.placement.offersChoice && !done ? (
                         <fieldset className="import-candidate__choice import-result__layers">
                           <legend>{t("import.manifest.layerLegend", { project: offer.projectName })}</legend>

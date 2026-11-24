@@ -1,10 +1,13 @@
 // The read-only "not managed by Loadout" list (#3, #9): foreign MCP entries
 // of the client files in one scope, per client and file, each with "Import…"
 // that opens the import view with that entry picked. The MCP page shows it
-// for the sidebar's scope, the Tools Manage dialog for one client.
+// for the sidebar's scope, the Tools Manage dialog for one client. A group
+// whose files this account cannot write (M38) carries the lock; Import stays
+// available (importing reads the file and never writes it).
 
 import { useId } from "react";
 import { orderByRecommended } from "@/app/clients";
+import { ReadOnlyBadge, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { projectRelativePath } from "@/app/routes/projects/labels";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { t } from "@/i18n/en";
@@ -74,6 +77,19 @@ export function UnmanagedSection({ summary, clientNames, client, onImport }: Unm
               <span className="status-badge tone-neutral">
                 {t("import.unmanaged.count", { count: group.entries.length })}
               </span>
+              <ReadOnlyBadge
+                readOnly={group.readOnly}
+                tooltip={
+                  group.readOnly
+                    ? t("readOnly.import.source", {
+                        file: group.files
+                          .map((file) => projectRelativePath(file, project?.id === group.projectId ? project?.path : undefined))
+                          .join(", "),
+                        reason: readOnlyReason(group.readOnly.kind),
+                      })
+                    : undefined
+                }
+              />
             </div>
             <ul className="import-unmanaged__files" aria-label={t("import.unmanaged.filesAria", { name: title })}>
               {group.files.map((file) => (
