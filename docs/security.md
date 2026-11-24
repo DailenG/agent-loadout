@@ -10,7 +10,8 @@ Loadout reads and writes:
 
 - its own data directory (`LOADOUT_HOME`): the store, `state/`,
   `servers/` (local copies of MCP servers that run from their repository),
-  `backups/`, `cache/`, `logs/`;
+  `tools/` (the optional Snyk Agent Scan download), `backups/`, `cache/`,
+  `logs/`;
 - the MCP config files and skill folders of the clients listed in
   [adapters.md](adapters.md), at user scope and in the project folders you
   add;
@@ -18,8 +19,9 @@ Loadout reads and writes:
   it, the 1Password CLI `op`.
 
 It uses the network only for remotes you add, git sources of skills and
-MCP servers, and the optional update check. Everything else, the built-in
-scan included, works offline.
+MCP servers, online catalogs and the optional Snyk Agent Scan (each off
+until you turn it on), and the optional update check. Everything else,
+the built-in scan included, works offline.
 
 ## Secrets
 

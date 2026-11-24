@@ -105,6 +105,37 @@ edit them by hand:
 
 In PowerShell, set the variable first: `$env:LOADOUT_UPDATE_DOCS = "1"`.
 
+### Bumping the Snyk Agent Scan pin
+
+The optional external scanner (#27) runs one pinned release of
+[snyk/agent-scan](https://github.com/snyk/agent-scan), verified against
+SHA-256 values compiled into Loadout. Moving to a new release is a normal
+change:
+
+1. Read the release notes and the scanner's `--json` schema: Loadout parses
+   that output (`scan/external/adapter.rs`), and output it can't read is
+   reported as "not understood", never clean.
+2. In `crates/agent-loadout-core/src/scan/external/pin.rs`, set `VERSION`
+   and, for each of the five assets (Windows x64, Linux x64 and arm64,
+   macOS arm64 and x64), the SHA-256 and size from the release's
+   `sha256sums.txt.asc`. Never compute them from a download.
+3. Replace `fixtures/agent-scan/v<old>/` with `v<new>/`: the release's
+   `sha256sums.txt.asc` byte for byte and Snyk's signing key from the
+   repository at that tag (`-Download` / `--download` fetches both).
+4. Run `scripts/verify-agent-scan-pins.sh` (or `pwsh -File
+   scripts/verify-agent-scan-pins.ps1`; both need gpg). It must report a
+   good signature from the pinned fingerprint
+   `EF4F F9D1 8D82 D562 9B82 491D 2A20 F86E 4EF1 31B1` and that every
+   compiled hash equals the signed one. If Snyk's key or fingerprint
+   changed, stop and confirm the new key through a second channel before
+   changing `SIGNING_FINGERPRINT` and the scripts.
+5. Run `cargo test -p agent-loadout-core --lib scan::external` and
+   `--test external_scan` (the compiled-hash test reads the new fixture),
+   update `fixtures/agent-scan/output/` if the JSON schema changed, and
+   regenerate `docs/cli.md` if help text names the version.
+6. Update the version in `docs/user-guide.md`, `docs/security.md` and
+   `docs/troubleshooting.md`, and add a CHANGELOG entry.
+
 ## Test rules
 
 Tests must never touch real client configs, real secrets, the real OS

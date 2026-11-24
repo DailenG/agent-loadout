@@ -84,13 +84,47 @@ anything. A block wins over any trust, and a blocked source is never
 contacted.
 
 **What does "Install anyway" mean?**
-The built-in scan found something `dangerous` (for example `curl ... | sh`
-in a script, hidden instructions, a credential upload), so Loadout stopped
+The built-in scan (or Snyk Agent Scan, when you turned it on) found
+something `dangerous` (for example `curl ... | sh` in a script, hidden
+instructions, a credential upload), so Loadout stopped
 before saving anything. **Install anyway** (or **Update anyway**, **Save
 anyway**, `--allow-dangerous`) installs exactly the content you reviewed
 despite the findings; it is offered only after you tick that you read
 them. Use it only for content whose author you trust. Warnings never
 block.
+
+**Is my skill sent anywhere when it is scanned?**
+Not by the built-in scan, which runs offline on your computer. Only if you
+turn on the optional Snyk Agent Scan (Settings > Security or `loadout
+scanner enable`), or ask for one run with `--external`, is a skill sent to
+Snyk's analysis service (`api.snyk.io`): every file of the skill (Snyk
+redacts secrets it detects), its name, the path of the scanned copy in
+your data folder, your user name, the scanner version and, where the
+scanner's platform reports one, this machine's host name. Loadout adds no
+serial number or other identifier, and while the scanner is off nothing
+is sent. See [security](security.md#snyk-agent-scan-optional-sends-skills-to-snyk).
+
+**Why does Snyk Agent Scan need a token?**
+Snyk's analysis service requires a Snyk API token for every scan; Loadout
+can't scan with Snyk on your behalf. You give a reference to where the
+token is (a secret alias, `env:NAME`, `keyring://...` or `op://...`),
+never the token: Loadout reads it for each run and hands it only to the
+scanner, in its environment. A 1Password Environment (`op-env://`) can't
+be used, because Loadout never reads those values.
+
+**What happens when I reach Snyk's daily limit?**
+The free tier allows a limited number of scans a day. After that, skills
+show "Not scanned (Snyk limit reached)" and install as usual: a skill
+Snyk didn't scan is never blocked and never counts as clean, and the
+built-in scan still runs.
+
+**Why doesn't Snyk Agent Scan check MCP servers?**
+In this version it scans skills only. Snyk's scanner sends an MCP
+server's configuration (command, arguments, URL) to Snyk even when it
+declines to start the server, and scanning remote servers contacts them
+with their headers, so MCP scanning needs its own design (tracked in
+[#27](https://github.com/DailenG/agent-loadout/issues/27)). MCP servers
+from a source are still checked by the built-in scan.
 
 **Can a coding agent approve a source for me?**
 Not by accident: `--yes` never answers the trust question, and a run
@@ -171,8 +205,9 @@ never enables anything in omp, or any client, on its own.
 
 **Does Loadout need the network?**
 No. Only remotes, git sources of skills and MCP servers, online catalogs
-(off until you turn them on) and the optional update check use it. The
-built-in scan runs offline.
+(off until you turn them on), the optional Snyk Agent Scan (off until you
+turn it on) and the optional update check use it. The built-in scan runs
+offline.
 
 **Does Loadout need git installed?**
 No for the store (it has git built in). Git remotes and installing skills

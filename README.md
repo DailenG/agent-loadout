@@ -28,7 +28,11 @@ GitHub Copilot, Cursor and 31 more.
   Git repository or folder (`loadout server add --from`, **Install > MCP >
   From Git or folder**). Loadout asks before it trusts a new source,
   scans everything it fetched offline with its own rules before anything
-  is saved, and pins commands to the commit or version it checked.
+  is saved, and pins commands to the commit or version it checked. For a
+  second opinion on skills, turn on the optional **Snyk Agent Scan**
+  (Settings > Security, `loadout scanner`): off by default, it sends the
+  skill to Snyk's cloud with your own token, and its dangerous findings
+  need the same explicit "install anyway".
 - **Catalogs, when you want them.** Search the Official MCP Registry,
   Anthropic's skills and any registry or Git tap you add from **Install >
   Browse** or `loadout catalog search`. Online catalogs stay off until you
@@ -141,7 +145,7 @@ Questions about the code: [Ask DeepWiki](https://deepwiki.com/DailenG/agent-load
 
 ## Status and roadmap
 
-Loadout is in early development (0.6.x). What changed in each release is in
+Loadout is in early development (0.7.x). What changed in each release is in
 the [changelog](CHANGELOG.md); how it was built is in
 [docs/history.md](docs/history.md). Planned work and known issues are
 tracked in [GitHub issues](https://github.com/DailenG/agent-loadout/issues).

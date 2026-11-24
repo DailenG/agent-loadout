@@ -309,6 +309,27 @@ go ahead anyway; warnings never block. Trusting a source never skips the
 scan, and a clean verdict means no rule matched, not that the content is
 safe. Nothing is sent anywhere; results are cached by content.
 
+**A second scanner, if you want one.** For skills, Loadout can also run
+**Snyk Agent Scan**, an external scanner, beside the built-in one. The two
+differ in where they run:
+
+| | Built-in scan | Snyk Agent Scan (optional) |
+|---|---|---|
+| On by default | Always on | Off until you install it, set a token and turn it on |
+| Where it runs | On your computer, offline | Sends the skill to Snyk's cloud (`api.snyk.io`) |
+| What it scans | Skills, MCP server files and command lines | Skills only |
+| Needs | Nothing | A pinned, verified download and your Snyk API token (as a secret reference) |
+| When | Every install, update and save from a source | Reviews of skills from Git, a catalog or an update; a local folder or library skill on request |
+
+Both report findings in the same form, labeled by scanner, and a
+`dangerous` verdict from either needs the same explicit "install anyway".
+When Snyk can't scan (its daily limit, offline, a timeout), the skill is
+"not scanned" by it: that never blocks and never counts as clean. While
+Snyk Agent Scan is on, the app won't install from a source or update
+until the Snyk result (or its not-scanned reason) is in the review. MCP
+servers aren't sent to Snyk: its scanner would send a server's
+configuration even when it declines to start it.
+
 **MCP servers from a source.** `loadout server add --from` and **Install >
 MCP > From Git or folder** read a repository or folder and propose
 **drafts**: from an MCP Registry `server.json`, an MCPB `manifest.json`,

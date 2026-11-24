@@ -211,15 +211,19 @@ use and where it came from. Inside it:
   preferences (`clients.toml`), portable settings (`settings.toml`),
   skills, and project and machine files. It never contains secret values.
 - `state/`: this machine only (ownership ledger, remotes, trusted projects,
-  `local-settings.toml` with the Online catalogs switch, apply records, an
-  optional `scan-rules.toml`).
+  `local-settings.toml` with the Online catalogs switch and the Snyk Agent
+  Scan switch and token reference, apply records, an optional
+  `scan-rules.toml`).
 - `servers/<id>/`: local copies (checkouts) of MCP servers that run from
   their repository's files; this machine only, never synced.
+- `tools/snyk-agent-scan/`: the optional Snyk Agent Scan download, when
+  you install it; this machine only.
 - `backups/`: copies of client files taken before each write, and the
   trash. These can contain secrets from your client files and are never
   pushed.
 - `cache/` (git clones of skill and server sources, scan results, saved
-  catalog results, the bundled agent skill's copy), `imports/`, `logs/`.
+  catalog results, the bundled agent skill's copy, Snyk Agent Scan's
+  short-lived run folders), `imports/`, `logs/`.
 
 Do not put the data directory inside a file-sync folder (OneDrive,
 Dropbox, Google Drive, Syncthing, Resilio Sync): sync tools corrupt live
@@ -290,7 +294,8 @@ always starts at User. The pages:
   fetches the next 200.
 - **Settings**: App Preferences (Appearance, the not-managed notice),
   Versioning & Backup (remotes), Migration (a link to the Import page),
-  Secrets, Sources (see [Source trust](#source-trust)), Catalogs (see
+  Secrets, Sources (see [Source trust](#source-trust)), Security (the
+  optional [Snyk Agent Scan](#snyk-agent-scan-optional)), Catalogs (see
   [Catalogs](#catalogs)), Agent integration
   (see [The Loadout skill for agents](#the-loadout-skill-for-agents)) and
   Updates (see [Updates](#updates)).
@@ -393,6 +398,7 @@ Commands:
 | `doctor [--paths] [--scan-history]` | Check the installation: data directory, sync-folder warning, optional secret scan of every store commit |
 | `server ls\|show\|add\|rm\|update\|checkout` | Manage MCP servers in the store; `add --from <GIT-URL\|PATH>` proposes servers from a repository or folder, `update` reads a server's source again, `checkout` restores its local copy |
 | `source ls\|trust\|block\|untrust` | Trusted and blocked sources of skills and MCP servers |
+| `scanner ls\|status\|install\|remove\|enable\|disable\|token\|run` | The optional Snyk Agent Scan: install the pinned build, set the token reference, turn it on or off, scan a library skill |
 | `catalog ls\|add\|rm\|enable\|disable\|online\|search\|show\|refresh` | Online catalogs of MCP servers and skills (off until `catalog online on`) |
 | `agent install [--client C]... [--reset]`, `agent remove [--client C]...`, `agent status`, `agent skill-path` | The read-only Loadout skill for coding agents: install and enable it per client (`--reset` puts the bundled copy back over your edits), disable or remove it, show its state |
 | `skills ls\|add\|rm\|enable\|disable\|update\|scan\|import\|adopt\|trash\|vendor` | Install skills, enable them for clients and projects, update, scan and adopt client folders |
@@ -433,7 +439,8 @@ Exit codes:
 | 5 | Blocked by missing secrets |
 | 6 | Timed out waiting for the store lock |
 | 7 | A project manifest needs `loadout project trust` |
-| 8 | The built-in scan blocked an install, update, save or checkout (`--allow-dangerous` overrides it) |
+| 8 | A scan blocked an install, update, save or checkout: the built-in scan, or Snyk Agent Scan when it is on (`--allow-dangerous` overrides it) |
+| 130 | Interrupted with Ctrl+C (or SIGTERM) while Snyk Agent Scan ran or downloaded; the scan was stopped and its files removed |
 
 Commands that edit the store and apply at once (`server add`, `server rm`,
 `server update`, `server checkout`,
@@ -958,7 +965,9 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
   `loadout skills rm ID` removes a skill and the links and copies Loadout
   made.
 - Every install and update is scanned first by Loadout's built-in
-  scanner (see [below](#the-built-in-scan)). In the app, **Update all**
+  scanner (see [below](#the-built-in-scan)), and by Snyk Agent Scan too
+  when you turned it on ([below](#snyk-agent-scan-optional);
+  `--external` / `--no-external` override it for one run). In the app, **Update all**
   sends no trust answer and no override, so an update that needs one
   fails with a message and stays for you to review on its own card.
 - `loadout skills scan` classifies each client skill folder: managed,
