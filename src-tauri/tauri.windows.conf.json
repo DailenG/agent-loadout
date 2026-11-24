@@ -24,7 +24,8 @@
         "template": "windows/installer.nsi",
         "installerHooks": "windows/hooks.nsh",
         "sidebarImage": "windows/sidebar.bmp",
-        "headerImage": "windows/header.bmp"
+        "headerImage": "windows/header.bmp",
+        "customLanguageFiles": { "English": "windows/English.nsh" }
       }
     }
   }

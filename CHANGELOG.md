@@ -8,6 +8,32 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Changed
+
+- Snyk Agent Scan (#27) is disabled and hidden. Snyk's free tier refuses
+  new accounts by every path we tried, so the optional scanner could not
+  be used, and Loadout no longer integrates with Snyk. The scanner never
+  runs (even if 0.7.0 turned it on), is never downloaded or executed, and
+  Settings > Security, the External scan section of reviews and **Scan
+  with Snyk** are gone; `loadout scanner` and `--external` /
+  `--no-external` are hidden (`--external` is ignored with a note), and
+  every `scanner` subcommand except `status` and `remove` fails with
+  `scanner_unavailable`. If you installed it in 0.7.0, run `loadout
+  scanner remove` to delete the download and its settings. The built-in
+  offline scan is unchanged.
+- Windows installer: running a newer installer over an installed version
+  now preselects **Upgrade in place (recommended)**, what the in-app
+  updater does, instead of uninstalling first, and the page says your
+  Loadout data, settings and history are kept either way. **Replace the
+  installed version (removes it first)** is still offered. The
+  uninstaller's checkbox now reads "Delete the app's window cache (your
+  Loadout data folder is kept)", which is all it removes.
+
+### Fixed
+
+- The omp logo in the app is omp's own mark (the gradient π from
+  omp.sh), not a placeholder.
+
 ## [0.7.0] - 2026-11-24
 
 ### Added

@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OMP">
-  <rect width="64" height="64" rx="16" fill="#7c3aed"/>
-  <path d="M17 42V22h11c7 0 11 4 11 10s-4 10-11 10H17Zm8-7h3c2.5 0 4-1 4-3s-1.5-3-4-3h-3v6Zm17 7V22h7v20h-7Z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="omp">
+  <!-- omp's mark as published at https://omp.sh/favicon.svg (oh-my-pi, MIT). -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ed4abf"/>
+      <stop offset=".5" stop-color="#9b4dff"/>
+      <stop offset="1" stop-color="#5ad8e6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#0f0a14"/>
+  <path fill="url(#g)" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z"/>
 </svg>

@@ -1,8 +1,10 @@
 ; Derived from the NSIS template of tauri-bundler 2.10.6 (src/bundle/windows/nsis/installer.nsi,
 ; https://github.com/tauri-apps/tauri), Apache-2.0 OR MIT, Copyright 2017 Cargo-Bundle developers,
 ; Copyright (c) 2017 - Present Tauri Apps Contributors.
-; One change (SPEC 16.1): the per-user default install folder is
-; %LOCALAPPDATA%\Programs\<productName>, never %LOCALAPPDATA%\Loadout (the data directory).
+; Two changes (SPEC 16.1): the per-user default install folder is
+; %LOCALAPPDATA%\Programs\<productName>, never %LOCALAPPDATA%\Loadout (the data directory);
+; and an upgrade preselects "Upgrade in place" on the reinstall page (PageReinstall).
+; The page's English text comes from windows/English.nsh (customLanguageFiles).
 ; Re-copy from the tauri-bundler release that @tauri-apps/cli uses when upgrading it.
 
 Unicode true
@@ -317,14 +319,22 @@ Function PageReinstall
 
     ; Check the first radio button if this the first time
     ; we enter this page or if the second button wasn't
-    ; selected the last time we were on this page
+    ; selected the last time we were on this page.
+    ; Loadout: on the first visit of an upgrade, preselect the second button
+    ; ("Upgrade in place"), what the in-app updater does; uninstalling first
+    ; stays one click away. Same-version and downgrade pages keep Tauri's default.
+    ${If} $ReinstallPageCheck = 0
+    ${AndIf} $R0 = 1
+      StrCpy $ReinstallPageCheck 2
+    ${EndIf}
     ${If} $ReinstallPageCheck <> 2
       SendMessage $R2 ${BM_SETCHECK} ${BST_CHECKED} 0
+      ${NSD_SetFocus} $R2
     ${Else}
       SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
+      ${NSD_SetFocus} $R3
     ${EndIf}
 
-    ${NSD_SetFocus} $R2
     nsDialogs::Show
   ${EndIf}
 FunctionEnd
