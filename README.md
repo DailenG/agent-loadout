@@ -29,6 +29,15 @@ GitHub Copilot, Cursor and 31 more.
   From Git or folder**). Loadout asks before it trusts a new source,
   scans everything it fetched offline with its own rules before anything
   is saved, and pins commands to the commit or version it checked.
+- **Catalogs, when you want them.** Search the Official MCP Registry,
+  Anthropic's skills and any registry or Git tap you add from **Install >
+  Browse** or `loadout catalog search`. Online catalogs stay off until you
+  turn them on, nothing is contacted in the background, and every install
+  goes through the same review, trust question and scan.
+- **A read-only skill for your agents.** `loadout agent install` (or
+  Settings > Agent integration) teaches omp, Claude Code and your other
+  clients how to read your Loadout setup. For any change, the agent hands
+  you the command to run; it never makes the change itself.
 - **Per-project servers**, applied only after you trust the project's
   manifest; **skills** linked into each client's skill folder; optional
   **remotes** to back up and sync between machines.
@@ -38,9 +47,9 @@ GitHub Copilot, Cursor and 31 more.
 A desktop app (Windows, Linux) and a command-line tool, `loadout`, work on
 the same data.
 
-| MCP servers | Import | Install from Git |
+| MCP servers | Browse catalogs | Install from Git |
 |---|---|---|
-| ![MCP page](site/img/screens/mcp.png) | ![Import page](site/img/screens/import.png) | ![Trust dialog over a skill install review with scan findings](site/img/screens/trust-dialog.png) |
+| ![MCP page](site/img/screens/mcp.png) | ![Install, Browse: catalog results with publisher, pinning and saved-result labels](site/img/screens/browse.png) | ![Trust dialog over a skill install review with scan findings](site/img/screens/trust-dialog.png) |
 
 Screenshots use demo data.
 
@@ -78,8 +87,9 @@ Per-OS details, checksums and uninstalling: [user guide, Install](docs/user-guid
 **Desktop app:** start Loadout, open **Tools** to see the detected clients,
 then **Import** to bring in the MCP servers, skills and projects your
 clients already have. To add a server, open **MCP**, **Add** (or **Paste
-config** with an entry from any client), or **Install > MCP > From Git or
-folder** for a repository, and turn it on for the clients you want. Each
+config** with an entry from any client), **Install > MCP > From Git or
+folder** for a repository, or **Install > Browse** to search the catalogs,
+and turn it on for the clients you want. Each
 change is applied at once and can be undone from the notification or
 **History**. The **Scope** switcher at the top of the sidebar picks User
 or one of your projects.
@@ -94,6 +104,8 @@ loadout server add github --client omp --client claude-code \
   -- npx -y @modelcontextprotocol/server-github
 loadout server add --from https://github.com/acme/weather --dry-run   # propose servers, scan, save nothing
 loadout skills add https://github.com/acme/skills   # asks whether you trust the source, then scans
+loadout catalog online on && loadout catalog search weather   # catalogs stay off until you turn them on
+loadout agent install        # the read-only Loadout skill for your coding agents
 loadout secrets set GITHUB_PAT --ref 'op://Developer/GitHub PAT/credential'
 loadout status               # what is in sync, pending or drifted
 loadout rollback last        # undo the last apply
@@ -129,7 +141,7 @@ Questions about the code: [Ask DeepWiki](https://deepwiki.com/DailenG/agent-load
 
 ## Status and roadmap
 
-Loadout is in early development (0.5.x). What changed in each release is in
+Loadout is in early development (0.6.x). What changed in each release is in
 the [changelog](CHANGELOG.md); how it was built is in
 [docs/history.md](docs/history.md). Planned work and known issues are
 tracked in [GitHub issues](https://github.com/DailenG/agent-loadout/issues).

@@ -207,18 +207,19 @@ use and where it came from. Inside it:
 
 - `store/`: the git repository with your servers (`servers/<id>.toml`),
   secret references (`secrets.toml`), source trust decisions
-  (`sources.toml`), client preferences (`clients.toml`), portable settings
-  (`settings.toml`), skills, and project and machine files. It never
-  contains secret values.
+  (`sources.toml`), your catalog list (`catalogs.toml`), client
+  preferences (`clients.toml`), portable settings (`settings.toml`),
+  skills, and project and machine files. It never contains secret values.
 - `state/`: this machine only (ownership ledger, remotes, trusted projects,
-  `local-settings.toml`, apply records, an optional `scan-rules.toml`).
+  `local-settings.toml` with the Online catalogs switch, apply records, an
+  optional `scan-rules.toml`).
 - `servers/<id>/`: local copies (checkouts) of MCP servers that run from
   their repository's files; this machine only, never synced.
 - `backups/`: copies of client files taken before each write, and the
   trash. These can contain secrets from your client files and are never
   pushed.
-- `cache/` (git clones of skill and server sources, scan results),
-  `imports/`, `logs/`.
+- `cache/` (git clones of skill and server sources, scan results, saved
+  catalog results, the bundled agent skill's copy), `imports/`, `logs/`.
 
 Do not put the data directory inside a file-sync folder (OneDrive,
 Dropbox, Google Drive, Syncthing, Resilio Sync): sync tools corrupt live
@@ -392,7 +393,8 @@ Commands:
 | `doctor [--paths] [--scan-history]` | Check the installation: data directory, sync-folder warning, optional secret scan of every store commit |
 | `server ls\|show\|add\|rm\|update\|checkout` | Manage MCP servers in the store; `add --from <GIT-URL\|PATH>` proposes servers from a repository or folder, `update` reads a server's source again, `checkout` restores its local copy |
 | `source ls\|trust\|block\|untrust` | Trusted and blocked sources of skills and MCP servers |
-| `agent install\|remove [--client C]...`, `agent status`, `agent skill-path` | The read-only Loadout skill for coding agents: install and enable it per client, disable or remove it, show its state |
+| `catalog ls\|add\|rm\|enable\|disable\|online\|search\|show\|refresh` | Online catalogs of MCP servers and skills (off until `catalog online on`) |
+| `agent install [--client C]... [--reset]`, `agent remove [--client C]...`, `agent status`, `agent skill-path` | The read-only Loadout skill for coding agents: install and enable it per client (`--reset` puts the bundled copy back over your edits), disable or remove it, show its state |
 | `skills ls\|add\|rm\|enable\|disable\|update\|scan\|import\|adopt\|trash\|vendor` | Install skills, enable them for clients and projects, update, scan and adopt client folders |
 | `project init\|add\|discover\|ls\|rm\|trust\|share` | Project manifests, and the folders your clients already know |
 | `status [PATH] [--client C] [--scope system\|project\|all] [--check]` | State of every owned and desired entry |
@@ -1171,9 +1173,11 @@ Built in (each can be turned off):
 - **skills.sh**: a link only. skills.sh has no search Loadout can use, so
   Browse opens it in your browser; paste a skill's address
   (`https://skills.sh/<owner>/<repo>/<skill>`) to install that skill from
-  its GitHub repository (this needs online catalogs on, like any install from
-  Browse). Skills that skills.sh lists from other websites can't be
-  installed this way.
+  its GitHub repository. In the app the paste field appears only while
+  online catalogs are on, like any install from Browse; on the command
+  line, `loadout skills add https://skills.sh/...` is a plain git install
+  of that repository. Skills that skills.sh lists from other websites
+  can't be installed this way.
 
 You can add any server that answers the MCP Registry API, and any Git
 repository of skills or Claude Code plugin marketplace (a "tap").
@@ -1186,7 +1190,12 @@ would contact; nothing is requested before you answer. With online
 catalogs on, Loadout contacts only the catalogs you turned on, only when you
 open Browse, search, open an entry or install, and sends them only your
 search words: nothing runs in the background and there is no telemetry.
-Installing an entry also contacts its own repository or package registry.
+Installing an entry also contacts its own repository or package registry,
+and installing or updating a skill or plugin server from a tap (or a
+skills.sh address) is a git install that contacts the git host even with
+online catalogs off. Requests go through the proxy in `HTTPS_PROXY` (or
+`ALL_PROXY`), and hosts in `NO_PROXY` are reached directly; a SOCKS proxy
+is not supported and is reported as an error, never bypassed.
 Every request has a time limit, and each catalog is searched on its own, so
 one slow or failing catalog never holds up the others.
 
@@ -1220,12 +1229,23 @@ parts Loadout doesn't import (hooks, commands, agents and other code that
 would run on its own). Then:
 
 - **Review MCP server** opens the same review as **From Git or folder**:
-  drafts, the source's trust question, the built-in scan and the client
-  picker. The saved server records the catalog entry it came from.
+  drafts, the trust question, the built-in scan and the client picker. For
+  a registry entry the trust question names what the server runs (its
+  package on npm, PyPI, NuGet or crates.io, its container image, or a
+  remote server's host), never the repository the publisher names: the
+  details show that one as "Repository (claimed by the publisher, not
+  verified)". The saved server records the catalog entry it came from.
 - **Review skill** opens the skill install review. A plugin with several
   skills asks which one first.
 - A plugin from an npm package, an archive or a command can't be installed,
   and the details say so.
+
+**Official** appears only on taps under `github.com/anthropics` (such as
+Anthropic skills) and on their entries whose code is Anthropic's own: skill
+folders and plugins that live in the tap or in another `github.com/anthropics` repository. A third-party
+plugin that the Anthropic marketplace lists is not marked Official, and a
+marketplace elsewhere that uses a name reserved for Anthropic is flagged
+with a warning. Registry entries are never marked Official.
 
 **Settings > Catalogs** has the **Online catalogs** switch (this computer
 only) and the list of catalogs: turn each on or off, **Add catalog...**
@@ -1250,8 +1270,11 @@ loadout catalog refresh                    # drop saved results and fetch again
 - `loadout catalog add <url>` adds an MCP registry or a Git tap (`--kind
   registry|tap`; GitHub, GitLab, Bitbucket, SSH, `file://` and `.git`
   addresses are taps). `--id`, `--title` and, for a tap, `--ref <branch,
-  tag or commit>` (a commit pins it) are optional. A registry address must
-  use https (http only for `localhost`). `catalog rm <id>` removes one you
+  tag or full 40-character commit>` (a commit pins it; a short commit is
+  refused) are optional. A registry address must use https (http only for
+  `localhost`), and a tap address may not hold a user name, password or
+  token (it would be saved in your synced store; use your git credential
+  helper). `catalog rm <id>` removes one you
   added; `catalog enable|disable <id>` turns any catalog on or off,
   built-ins included. These change `store/catalogs.toml` (one commit each).
 - `catalog search <query>` needs at least 3 characters for a registry; a
@@ -1270,8 +1293,9 @@ loadout catalog refresh                    # drop saved results and fetch again
   entry `kind = "registry"` and its `version`); `loadout server update`
   asks the registry for a newer version.
 - `skills add catalog:<source>/<id>` is the git skill install of the tap at
-  that skill's folder (`--ref` overrides the branch, tag or commit). A
-  plugin with several skills lists them; install one by its own entry.
+  that skill's folder (`--ref` overrides the branch, tag or full
+  40-character commit). A plugin with several skills lists them; install
+  one by its own entry.
 - Online catalogs off: `search` and `show` answer from saved results only,
   and `refresh` and installs from a catalog stop with `catalogs_off`;
   nothing is contacted.

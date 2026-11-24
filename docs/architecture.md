@@ -9,7 +9,7 @@ describes the code as it is. For the user-level ideas see
 
 | Path | Crate | Role |
 |---|---|---|
-| `crates/agent-loadout-core` | `agent-loadout-core` (library) | All logic: schemas, store, formats, adapters, layering, apply, secrets, skills, remotes, migration. No Tauri dependency. |
+| `crates/agent-loadout-core` | `agent-loadout-core` (library) | All logic: schemas, store, formats, adapters, layering, apply, secrets, skills, sources, scan, catalogs, the agent skill, remotes, migration. No Tauri dependency. Also holds the bundled agent skill's files (`agent-skill/loadout/`). |
 | `crates/agent-loadout` | `agent-loadout` (binary `loadout`) | The CLI (clap). Thin over core; also `loadout exec` and the hidden `loadout git-credential`. |
 | `crates/agent-loadout-testkit` | `agent-loadout-testkit` (unpublished) | Hermetic test helpers: `TempHome`, `RootedFs`, `MemKeyring`, `op-stub`, `gh-stub`, isolated git config. |
 | `src-tauri` | `agent-loadout-app` (unpublished) | The Tauri 2 desktop app. Its own Cargo workspace, so the root workspace builds without WebView tooling. Commands are thin wrappers over core. |
@@ -57,7 +57,7 @@ Rules every layer follows:
 
 | Module | Owns |
 |---|---|
-| `model/` | Store file schemas (`server.rs` with `[meta.source]`, `secrets.rs`, `sources.rs`, `clients.rs`, `project.rs`, `machine.rs`, `applied.rs`, `settings.rs`, `skill_meta.rs`), id rules (`ids.rs`), validation. JSON Schemas in `docs/schema` are generated from these types. |
+| `model/` | Store file schemas (`server.rs` with `[meta.source]`, `secrets.rs`, `sources.rs`, `catalogs.rs`, `clients.rs`, `project.rs`, `machine.rs`, `applied.rs`, `settings.rs`, `skill_meta.rs` with `[bundled]`), id rules (`ids.rs`), validation. JSON Schemas in `docs/schema` are generated from these types. |
 | `sources/` | Source trust: keys and scopes built from a git URL or local path, canonical and credential-free, with their own keys for `http://` and `git://` (`key.rs`); force-push and redirect detection on fetch (`detect.rs`); the read-only `check` the trust dialog shows, the gate `admit` (and `would_admit`, `refuse_blocked`, which run before any clone or fetch), `trust`, `block`, `untrust` and `lapse`, each one store commit to `store/sources.toml` (`mod.rs`). `store/merge.rs` merges that file record by record on pull. |
 | `store/` | The git-backed store (libgit2, vendored, no network features): `bootstrap.rs` (init), `transaction.rs`, commit `trailers.rs`, `log.rs`, `diff.rs`, `tags.rs`, `restore.rs`, `revision.rs`, `merge.rs` (per-entity merge for pulls), `lock.rs`. |
 | `formats/` | Format-preserving editors: `jsonc.rs` (JSON and JSONC), `toml.rs`, `yaml.rs`, `json5.rs`, `text.rs`. Unowned bytes stay identical. |
@@ -68,6 +68,8 @@ Rules every layer follows:
 | `secrets/` | Reference grammar (`grammar.rs`), catalog (`catalog.rs`), providers (`providers/`: env, keyring, 1Password), statuses (`status.rs`), delivery selection and rendering (`delivery.rs`, `render.rs`), secret classification (`classify.rs`), secret extraction shared by import and the SkillDock migration (`extract.rs`), the leak scanner (`scanner.rs`). |
 | `skills/` | Skill store (`store.rs`; listings read only `SKILL.md` and file metadata through `summarize_folder`), installs from git, folders and archives with the review step and the gates before the commit (`install.rs`: `prepare`, `install_prepared`, `Decisions { allow_dangerous, trust, moved_trust, via }`, update checks with force-push and move detection, `sweep_temp_clones`), links, junctions and copies, with client detection probed once per operation (`link.rs`, `DetectedClients`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), content summaries of skill folders cached by their file listing (`hash_cache.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
 | `scan/` | The built-in offline scanner: rules as data (`rules.toml`, parsed and checked in `rules.rs`), matching, line numbers and masked excerpts (`engine.rs`), results cached by content hash in `cache/scan` (`cache.rs`), the findings model, `Scanner` and the `scan_blocked` gate (`mod.rs`). Used by skill installs and updates and by MCP drafts from a repository. |
+| `catalog/` | Online catalogs: the catalog list (built-ins plus `store/catalogs.toml`), the machine-local Online catalogs switch, search, show and refresh per catalog (in parallel, each with its own status), the handoff of an entry to the existing reviews (`mcp_handoff`, `skill_request`, skills.sh addresses), and `catalog:<source>/<id>` references (`mod.rs`); the HTTP client behind the `Http` trait, `ureq` with rustls and the platform verifier, time limits, an 8 MiB cap after decompression, https-only redirects and the proxy rules (SOCKS refused, never a direct fallback) (`http.rs`); the MCP Registry client (`/v0.1`, falling back to `/v0`), its pinning and trust keys on what runs (`registry.rs`); Git taps, shallow and sparse through the system git, skill folders and Claude Code plugin marketplaces (`tap.rs`); the 24-hour cache in `cache/catalogs` keyed on the catalog's address (`cache.rs`). Nothing here runs in the background. |
+| `agent.rs` | The Loadout skill for agents: the bundled files (`include_str!` of `agent-skill/loadout/`, LF line endings), its status in the store (`Current`, `Outdated`, `Customized`, `Newer`, by content hash and the `[bundled]` version), `install` (with `reset`), `remove`, `refresh` and `startup_refresh` (re-checked under the store lock; a customized copy is reported once per version through `agent_skill_notice` in `state/local-settings.toml`), and `materialize` into `cache/agent-skill/loadout` for `agent skill-path`. |
 | `remote/` | Remote config (`config.rs`), folder remotes (`folder.rs`), git remotes through the system git (`git.rs`), GitHub CLI helpers (`gh.rs`), token credentials (`credential.rs`), push and pull (`sync.rs`), sync-tool artifact filtering (`sync_artifacts.rs`), restore on a new machine (`restore.rs`), the remote manifest (`manifest.rs`), UNC paths (`unc.rs`). |
 | `migrate/` | SkillDock import (`skilldock.rs`) and the client scan (`scan.rs`). |
 | `paths.rs`, `local_settings.rs` | `LOADOUT_HOME` resolution and sync-folder detection; machine-local settings. |
@@ -148,7 +150,13 @@ command in `src/cmd/`. `src/exec/` is `loadout exec`, which parses its own
 arguments before clap, never writes to stdout (the MCP channel) and does
 not read the store. `src/keyring.rs` is the OS keyring provider. The full
 command reference is [cli.md](cli.md), generated from the clap help by
-`scripts/gen-cli-docs.mjs`.
+`scripts/gen-cli-docs.mjs`. Commands that change the store open it through
+`Context::open_store_for_change`, which first replaces an outdated agent
+skill copy (`cmd::agent::refresh_before_change`); read commands never
+write or take the lock. Tests in `main.rs` check that every command and
+long flag the agent skill's `references/commands.md` cites exists, and
+that decision flags (`--yes`, `--trust-source`, `--allow-dangerous`, ...)
+appear there only in "never" guidance.
 
 ## Desktop app
 
@@ -163,8 +171,12 @@ command reference is [cli.md](cli.md), generated from the clap help by
   `remotes.rs`, `secrets.rs`, `skills.rs` (installs through a review),
   `scan.rs` (the scan DTOs), `sources.rs` (Settings > Sources and the trust
   dialog), `mcp_source.rs` (MCP servers from a Git repository or folder),
-  `import.rs` (scan and apply an import, not-managed summaries and the
-  notice), `discover.rs`, `migrate.rs`, `updates.rs`). Each one calls core on a
+  `catalogs.rs` (Install > Browse and Settings > Catalogs; one
+  `search_catalog` call per catalog, `open_catalog_link` looks the URL up
+  itself and opens only https), `agent.rs` (Settings > Agent integration and
+  the update at app start), `import.rs` (scan and apply an import,
+  not-managed summaries and the notice), `discover.rs`, `migrate.rs`,
+  `updates.rs`). Each one calls core on a
   blocking thread and returns
   `{ status: "ok", data } | { status: "error", error: IpcError }`.
 - Commands take ids, not paths: folders picked in the OS dialog are kept in
@@ -174,8 +186,11 @@ command reference is [cli.md](cli.md), generated from the clap help by
   folders and skill folders (debounced, not recursive) and sends one
   payload-free `TargetsChanged` event.
 - `tauri.conf.json` sets a strict CSP; `capabilities/` grants only window
-  controls and events. Release builds add `tauri.release.conf.json`
-  (bundles the CLI) and, when the updater key is configured, the updater.
+  controls and events, and `bundle.resources` ships the agent skill's
+  folder as `agent-skill/loadout/` (the AUR source package has no resource
+  folder; **View skill files** then opens the cache copy). Release builds
+  add `tauri.release.conf.json` (bundles the CLI) and, when the updater key
+  is configured, the updater.
 
 ### IPC bindings
 
@@ -194,7 +209,7 @@ fallback: outside Tauri without the mock, calls fail.
 | Path | Contents |
 |---|---|
 | `src/main.tsx`, `src/app/App.tsx` | Shell: sidebar with the scope switcher and nav, header slots, window chrome, route error boundary |
-| `src/app/routes/<page>/` | One folder per page: `skills` (with the update review), `mcp` (with `McpSourceUpdate.tsx`: Check for update, Restore copy), `projects`, `tools`, `install` (skill review, `McpSourcePanel.tsx`: MCP From Git or folder), `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `sources`, `updates`), `migrate` |
+| `src/app/routes/<page>/` | One folder per page: `skills` (with the update review), `mcp` (with `McpSourceUpdate.tsx`: Check for update, Restore copy), `projects`, `tools`, `install` (skill review, `McpSourcePanel.tsx`: MCP From Git or folder, `catalog/`: Browse with `BrowsePanel.tsx` and `EntryDetail.tsx`), `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `sources`, `catalogs`, `agent`, `updates`), `migrate` |
 | `src/app/apply/` | Pending changes pill and drawer, change notices, query keys, drift triggers, Refresh |
 | `src/app/resolver/` | The drift resolver dialog |
 | `src/app/scope/` | `ActiveScope.tsx` (User or one project; not persisted) and `ScopeSwitcher.tsx` |

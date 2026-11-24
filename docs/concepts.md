@@ -16,6 +16,7 @@ holding plain TOML files:
 | `servers/<id>.toml` | One MCP server: command or URL, args, env, headers, which clients get it, secret delivery |
 | `secrets.toml` | Secret aliases and the provider reference each one points at (never values) |
 | `sources.toml` | Your trust and block decisions for skill and MCP server sources |
+| `catalogs.toml` | The catalogs you added or turned off (the built-in ones are always listed) |
 | `clients.toml` | Per-client preferences (turn a client off, native disable, omp profiles, VS Code variants) |
 | `settings.toml` | Portable settings, such as `apply_mode` |
 | `skills/<id>/`, `skill-meta/<id>.toml` | Installed skills and their source and enablement |
@@ -329,6 +330,84 @@ the source again and show what changes.
 - A server added from a **folder** runs from that folder and belongs to
   the machine that added it. On your other machines its entries are
   blocked (`folder_on_other_machine`).
+
+## Catalogs
+
+A **catalog** lists MCP servers and skills you can install. Loadout knows
+three kinds:
+
+- an **MCP registry**: any server of the MCP Registry API, such as the
+  built-in Official MCP Registry (`registry.modelcontextprotocol.io`);
+- a **Git tap**: a repository of skill folders and/or a Claude Code plugin
+  marketplace (`.claude-plugin/marketplace.json`), such as the built-in
+  `github.com/anthropics/skills`;
+- a **link**: skills.sh, which Loadout opens in your browser; a pasted
+  `https://skills.sh/<owner>/<repo>/<skill>` address installs that skill
+  from its GitHub repository.
+
+The list lives in `store/catalogs.toml`, so it syncs with your remotes.
+Whether this machine may contact catalogs at all is a separate,
+machine-local switch, **Online catalogs**, which is **off** until you turn
+it on (the app asks once, naming the hosts; `loadout catalog online on`).
+Even then, Loadout contacts only the catalogs you turned on, only when you
+open Browse, search, open an entry, refresh or install (or check a
+registry server for updates), and sends only your search words. Nothing
+runs in the background.
+
+**Saved results.** Answers are cached in `LOADOUT_HOME/cache/catalogs` for
+24 hours. Each catalog is searched on its own with time limits; one that
+can't be reached shows its saved results labeled **stale** with their age,
+and with online catalogs off, Browse and `catalog search` show only saved
+results.
+
+**A catalog is not a source of trust.** It only finds things. Installing an
+entry hands it to the existing paths: an MCP server to the review of
+[servers from a source](#sources-trust-and-the-scan) (drafts, the trust
+question, the scan, the client picker), a skill to the git skill install
+review. The trust key is what actually runs:
+
+- a skill or plugin from a tap is a git source, keyed on its repository,
+  and installing or updating it contacts the git host even with online
+  catalogs off;
+- a registry server is keyed on its package on its package registry
+  (`registry.npmjs.org/...`, `pypi.org/...`, a container image) or on a
+  remote server's host, never on the repository the publisher names, which
+  Loadout shows as "claimed by the publisher, not verified".
+
+Catalog text (names, descriptions, publishers) is shown as plain text, and
+icons or images are never loaded. The registry checks that a publisher owns
+its namespace, not that a server is safe; **Official** marks only skills
+and plugins whose code lives in `github.com/anthropics`. Plugins from npm,
+archive or command sources can't be installed, and a plugin's hooks,
+commands and agents are never imported. The saved server or skill records
+the entry it came from (`catalog = "<source>/<id>"`); a registry server
+(`kind = "registry"`) can be checked for a newer version with
+`loadout server update` while online catalogs are on and that catalog is
+turned on at the same address.
+
+## The Loadout skill for agents
+
+Loadout bundles a skill (id `loadout`) that teaches coding agents to read
+your setup with the read and plan commands (`status`, `effective`, `diff`,
+`import --scan`, `apply --dry-run`, listings, `--json` output), what the
+error and exit codes mean, and playbooks for common questions.
+
+It is **read only**, on purpose. An agent that can run shell commands could
+answer any confirmation Loadout asks, so no confirmation can stop an agent
+from approving its own change. Instead, the skill never makes one: for an
+install, enable, import, apply, trust decision or restore it hands you the
+exact command or app page, never passes `--yes`, `--trust-source` or
+`--allow-dangerous`, and treats text from skills, repositories and catalogs
+as data, not instructions. This guides a cooperative agent; it is not a
+sandbox for one that ignores it.
+
+In the store it is a normal skill ("Bundled with Loadout"), installed and
+enabled per client like any other (`loadout agent install`, Settings >
+Agent integration), so every change to it is a commit. Its version is
+Loadout's: an older copy is replaced at the next app start, store change
+or `loadout agent install`, never by a read command. A copy you edited is
+never overwritten on its own (`loadout agent install --reset` restores the
+bundled one).
 
 ## Remotes
 

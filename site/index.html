@@ -45,6 +45,7 @@
         <li><a href="#how">How it works</a></li>
         <li><a href="#import">Import</a></li>
         <li><a href="#sources">Sources</a></li>
+        <li><a href="#catalogs">Catalogs</a></li>
         <li><a href="#clients">Clients</a></li>
         <li><a href="#safety">Safety</a></li>
         <li><a href="#install">Install</a></li>
@@ -207,6 +208,20 @@ $ loadout rollback last</code></pre>
         <li class="mod"><h3>Built-in offline scan</h3><p>Every skill and server draft is scanned on your machine before it is saved: download-and-run commands, credential theft, hidden text and prompt overrides, native binaries, unpinned commands. Dangerous findings block until you choose <b>Install anyway</b>; trusting a source never skips the scan.</p></li>
       </ul>
       <p class="aside">Trust is never implicit: <code>--yes</code> never grants it, and a run without a terminal needs an explicit <code>--trust-source</code>. Details: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#source-trust">user guide, Source trust</a> and <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/security.md">docs/security.md</a>.</p>
+    </section>
+
+    <section class="sec catalogs" id="catalogs" aria-labelledby="catalogs-title">
+      <header class="sec-head">
+        <p class="readout">Catalogs and agents</p>
+        <h2 id="catalogs-title">Find it, check it, then install it.</h2>
+        <p class="sec-lede">Browse MCP servers and skills from public catalogs inside Loadout, and give your coding agent a skill that explains your setup without letting it change anything.</p>
+      </header>
+      <ul class="mods" role="list">
+        <li class="mod"><h3>Browse catalogs</h3><p>Search the Official MCP Registry, Anthropic's skills and plugin marketplace, and any MCP registry, Git repository of skills or Claude Code plugin marketplace you add. Each result shows who published it, what it needs and how it is pinned. Installing goes through the same review, trust question and scan as any Git source. <code>loadout catalog search &lt;words&gt;</code></p></li>
+        <li class="mod"><h3>Online only when you say so</h3><p>Online catalogs stay off until you turn them on. Loadout contacts a catalog only when you open Browse, search, open an entry or install, never in the background, and keeps results for a day so they still show offline, labeled with their age. Installing a skill from a Git tap is a Git install and contacts that host like any other.</p></li>
+        <li class="mod"><h3>A Loadout skill for agents</h3><p>Settings &gt; Agent integration adds a read-only skill to omp and your other clients. It teaches the agent Loadout's status, diff, scan and dry-run commands, and hands every change back to you as a command to run or a place in the app. <code>loadout agent install</code></p></li>
+      </ul>
+      <p class="aside">Registry trust is keyed on what actually runs (the package or the server's host), never on the repository a publisher claims, which is shown as unverified. Data from the Official MCP Registry is shown as published there, with no endorsement implied, and the Official mark is kept for Anthropic's own skills and plugins. Details: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#catalogs">user guide, Catalogs</a> and <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#the-loadout-skill-for-agents">The Loadout skill for agents</a>.</p>
     </section>
 
     <section class="sec dialects" id="dialects" aria-labelledby="dialects-title">
@@ -388,6 +403,20 @@ clients = ["omp", "cursor", "opencode"]</code></pre>
             <img src="img/screens/mcp-source.png" width="1088" height="680" loading="lazy" decoding="async" alt="Install, MCP, From Git or folder in light mode: the review of github.com/acme/weather-mcp at commit b41d0c2, Not trusted yet, a warning finding from the scan of the files, the dependency folders that were not read, and the first of 3 proposed servers, Weather from server.json, with its pinned command, its Windows command and the secret it needs.">
           </picture>
           <figcaption class="mono">MCP from Git or a folder · review before saving</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/browse.webp" type="image/webp">
+            <img src="img/screens/browse.png" width="1088" height="680" loading="lazy" decoding="async" alt="Install, Browse in light mode: a search for weather. The Official MCP Registry section, with Data from the Official MCP Registry, lists Weather, pinned to version 1.2.0, and Weather (legacy), marked Deprecated and Not pinned, each with its publisher and the note namespace ownership checked by the registry. Below, Anthropic skills, marked Official, shows 0 results saved 2 hours ago, and Team skills shows stale saved results because it could not be refreshed.">
+          </picture>
+          <figcaption class="mono">Browse · catalogs, with their age and pins</figcaption>
+        </figure>
+        <figure class="monitor">
+          <picture>
+            <source srcset="img/screens/agent-integration.webp" type="image/webp">
+            <img src="img/screens/agent-integration.png" width="1088" height="680" loading="lazy" decoding="async" alt="Settings, Agent integration in light mode: the Loadout skill for agents, a read-only skill that teaches coding agents Loadout's status, plan and scan commands and gives you the command for any change, with View skill files; version 0.6.0 in the store and up to date, with Remove from store; and a checkbox per client, oh-my-pi turned on, Claude Code and Codex off.">
+          </picture>
+          <figcaption class="mono">Agent integration · a read-only skill for agents</figcaption>
         </figure>
       </div>
     </section>

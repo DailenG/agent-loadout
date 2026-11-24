@@ -183,7 +183,60 @@ folder](user-guide.md#servers-from-a-git-repository-or-folder),
 [The built-in scan](user-guide.md#the-built-in-scan) and
 [Source trust](user-guide.md#source-trust).
 
-## 6. Undo
+## 6. Browse a catalog
+
+Catalogs list MCP servers and skills: the Official MCP Registry,
+Anthropic's skills (with its Claude Code plugin marketplace) and any MCP
+registry or Git repository ("tap") you add. Searching them contacts those
+sites, so **online catalogs are off until you turn them on**.
+
+- **In the app:** **Install > Browse**. The first time, Loadout asks once
+  and names the hosts it would contact; nothing is requested before you
+  answer. Search, open a result's **Details**, then **Review MCP server**
+  or **Review skill**: that opens the same review, trust question and scan
+  as in step 5. A result shows its publisher, version and how it is
+  pinned; when a catalog can't be reached, its saved results are labeled
+  with their age.
+- **On the command line:**
+
+  ```sh
+  loadout catalog online on                 # once, on this machine
+  loadout catalog search weather
+  loadout catalog show mcp-registry/io.github.acme/weather
+  loadout server add --from catalog:mcp-registry/io.github.acme/weather --dry-run
+  loadout skills add catalog:anthropic-skills/pdf
+  ```
+
+Nothing is contacted in the background, only your search words are sent,
+and results are kept for 24 hours. **Official** marks only Anthropic's own
+skills and plugins; the registry checks that a publisher owns its
+namespace, not that a server is safe. For a registry server, the trust
+question names what it runs (its package or its remote host), not the
+repository the publisher claims. Settings > Catalogs turns catalogs on or
+off and adds your own. Details: [user guide, Catalogs](user-guide.md#catalogs).
+
+## 7. Give your agents the Loadout skill
+
+Loadout ships a skill that teaches coding agents how to read your setup:
+which servers each client loads and why, what an apply or import would do,
+what an error code means. Turn it on per client in **Settings > Agent
+integration**, or:
+
+```sh
+loadout agent install                  # every detected client with a skill folder
+loadout agent install --client omp     # or only some
+loadout agent status
+```
+
+The skill is read only. An agent with a shell could answer any question
+Loadout asks, so the skill never lets it change anything: for an install,
+apply, trust decision or restore it gives you the exact command or the app
+page, and you decide. It updates with Loadout (at the next app start, store
+change or `loadout agent install`), and a copy you edited is never
+overwritten on its own. Details: [user guide, The Loadout skill for
+agents](user-guide.md#the-loadout-skill-for-agents).
+
+## 8. Undo
 
 - App: the notification's undo, or **History**, pick the apply, **Undo this
   apply**.
@@ -198,6 +251,7 @@ a client file back exactly as it was, byte for byte:
 
 - Per-project servers and trust: [user guide, Projects and trust](user-guide.md#projects-and-trust).
 - Install from anywhere, safely: [concepts, Sources, trust and the scan](concepts.md#sources-trust-and-the-scan).
+- Catalogs and the agent skill: [concepts, Catalogs](concepts.md#catalogs) and [The Loadout skill for agents](concepts.md#the-loadout-skill-for-agents).
 - Secrets from the keyring or 1Password: [user guide, Secrets](user-guide.md#secrets).
 - Backups and other machines: [user guide, History, restore and remotes](user-guide.md#history-restore-and-remotes).
 - Something wrong? [troubleshooting.md](troubleshooting.md) and [faq.md](faq.md).

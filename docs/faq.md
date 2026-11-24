@@ -98,8 +98,49 @@ without a terminal fails with `source_trust_required`. But
 `--trust-source[=once|repo|owner|host]` and `loadout source trust` are
 explicit opt-ins that need no terminal, so an agent with shell access can
 run them. They are recorded (`via = "cli-flag"` or `"cli-command"`); keep
-them for sources you trust yourself. Keeping agents out of trust approval
-is tracked in [#8](https://github.com/DailenG/agent-loadout/issues/8).
+them for sources you trust yourself. The bundled Loadout skill for agents
+never uses them (see below).
+
+**Can my agent install things with Loadout?**
+Not through the Loadout skill. The skill (`loadout agent install`,
+Settings > Agent integration) is read only: it lets your agent check
+status, diffs, effective config, import scans, dry runs and catalog
+search, and explain errors, but for any install, enable, import, apply,
+trust decision or restore it gives you the exact command or the app page
+to use yourself. Any confirmation Loadout asks could be answered by an
+agent with a shell, so the skill never asks the agent to make a change at
+all, never passes `--yes`, `--trust-source` or `--allow-dangerous`, and
+treats text from repositories and catalogs as data. It guides a
+cooperative agent; it is not a sandbox, so an agent you let run any
+command can still run Loadout's write commands. See
+[concepts](concepts.md#the-loadout-skill-for-agents).
+
+**Why are online catalogs off?**
+Searching a catalog sends your search words to someone else's server, so
+Loadout never does it without asking. The first time you open **Install >
+Browse** it asks once, naming the hosts; `loadout catalog online on` does
+the same on the command line. Even when they are on, nothing runs in the
+background: Loadout contacts only the catalogs you turned on, only when
+you browse, search, open an entry, refresh or install. Settings > Catalogs
+turns it off again; the setting is per machine.
+
+**What does "Official" mean in a catalog?**
+Only that the code comes from Anthropic: it marks the
+`github.com/anthropics` taps (such as Anthropic skills) and their skills
+and plugins that live there, not third-party plugins an Anthropic
+marketplace lists. The MCP Registry has no "official" or "verified" mark;
+it checks that a publisher owns its namespace, which Loadout shows as
+"namespace ownership checked by the registry". Neither is a safety claim:
+installs still go through the trust question and the scan.
+
+**Why can't this plugin be installed?**
+Loadout installs Claude Code plugins only from a folder of the tap or a
+Git repository (`github`, `url` and `git-subdir` sources). Plugins
+published as an npm package, an archive or a command are listed with
+"Can't be installed" and the reason, because Loadout can't review and scan
+them the same way. Deleted registry entries are refused too. A plugin's
+hooks, commands, agents and other code that would run on its own are
+never imported; only its skills and MCP servers are.
 
 **Why is a server blocked as "checkout out of date"?**
 It runs from a copy of its repository that Loadout keeps on each machine
@@ -129,8 +170,9 @@ first, so it is listed first and badged. It is presentation only: Loadout
 never enables anything in omp, or any client, on its own.
 
 **Does Loadout need the network?**
-No. Only remotes, git sources of skills and MCP servers, and the optional
-update check use it. The built-in scan runs offline.
+No. Only remotes, git sources of skills and MCP servers, online catalogs
+(off until you turn them on) and the optional update check use it. The
+built-in scan runs offline.
 
 **Does Loadout need git installed?**
 No for the store (it has git built in). Git remotes and installing skills

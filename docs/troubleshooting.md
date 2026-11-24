@@ -362,6 +362,108 @@ credentials), or the folder is gone or belongs to another machine. The
 server and its checkout are left as they are; other servers are still
 checked.
 
+## Catalogs
+
+### `catalogs_off`
+
+Online catalogs are off on this machine (the default), so nothing was
+contacted. Searches and `catalog show` answer only from saved results;
+refreshing, installing from a catalog (`catalog:<source>/<id>`) and
+checking a registry server for updates stop with this error. Turn them on
+with **Turn on online catalogs** in Install > Browse, Settings > Catalogs,
+or `loadout catalog online on`. The setting is per machine, so turning it
+on elsewhere does not turn it on here.
+
+Installing a skill from a Git tap's own repository, or with
+`loadout skills add https://skills.sh/...`, is a plain git install and
+does not need online catalogs.
+
+### `catalog_unreachable`, "Timed out" or "Offline"
+
+The catalog did not answer, or answered with an error: no network, a time
+limit (10 seconds to connect, 20 seconds in all), an HTTP error or rate
+limit, an answer larger than 8 MiB, or something that isn't the expected
+JSON. Each catalog is searched on its own, so the others still answer.
+
+- **Behind a proxy:** Loadout reads `HTTPS_PROXY` (then `ALL_PROXY`) and
+  `NO_PROXY` from the environment of the app or the shell. A SOCKS proxy
+  (`socks5://...`) is not supported and an address it can't parse is
+  refused: the request fails with a message naming the variable instead of
+  connecting directly. Point the variable at an HTTP proxy
+  (`http://host:port`), or add the catalog's host to `NO_PROXY` if it
+  should be reached directly. The desktop app reads the environment it was
+  started with; restart it after you change these variables.
+- **A self-hosted registry:** its address must be https (http only for
+  `localhost`), and redirects must stay on https.
+- **A Git tap:** taps are fetched with your system git, so git's own proxy
+  and credential settings apply; see the git error in the message.
+
+**Try again** (app) or `loadout catalog refresh [ID]` fetches again.
+
+### Results say "Stale" or "saved 1 day ago"
+
+Results are kept for 24 hours. When a catalog can't be refreshed, Loadout
+shows the saved ones with their age and the reason ("Stale: 4 results
+saved 1 day ago. Couldn't refresh: ..."), and "Offline" while this
+computer has no network. Nothing is wrong with your setup; refresh once
+the catalog answers again. Details of an entry can be stale the same way.
+
+### A registry search says "type at least 3 characters"
+
+MCP registries answer only queries of 3 characters or more. Git taps list
+all their entries for an empty query.
+
+### "looks like a short commit: pin the full 40-character commit"
+
+A `--ref` (for `skills add`, a catalog's tap, or a server from Git) that
+looks like an abbreviated commit is refused, because a short id can match
+a different commit later. Use the full commit, for example
+`git rev-parse a1b2c3d` in a clone of the repository, or a branch or tag
+name.
+
+### "a tap URL must not hold a user name, password or token"
+
+The catalog list is part of your store, which syncs to your remotes, so a
+credential in a tap address would be copied there. Add the tap without
+it (`https://github.com/acme/private-skills`) and let git supply the
+credential: a credential helper (`git credential-manager`, `gh auth
+setup-git`) or an SSH URL (`git@github.com:acme/private-skills`).
+
+### A plugin says "Can't be installed"
+
+Plugins from npm, archive or command sources aren't supported; only
+plugins in a tap's folder or a Git repository (`github`, `url`,
+`git-subdir`) can be installed. A deleted registry entry can't be
+installed either. Ask the publisher for a Git source, or install its MCP
+server or skill from its repository with **From Git or folder**.
+
+## The Loadout skill for agents
+
+### `loadout agent status` says `outdated`
+
+You updated Loadout, and the store still holds the previous version of the
+skill. Read commands never write, so it is replaced only at the next app
+start, the next command that changes the store, or when you run
+`loadout agent install` (the command `agent status` shows). Each of these
+makes one commit and says so.
+
+### "The Loadout skill in your store is customized, so it wasn't updated"
+
+The store copy no longer matches the copy Loadout put there: someone
+edited it. Loadout never overwrites an edited copy on its own; it tells you once
+per Loadout version, and `loadout agent status` shows `customized`. Junk
+files such as `.DS_Store` and line-ending changes don't count as edits. To
+go back to Loadout's version and keep the clients it is turned on for, run
+`loadout agent install --reset` or click **Restore Loadout's version** in
+Settings > Agent integration; your edited version stays in History.
+
+### `agent install` says the id `loadout` is taken
+
+Your store already has a skill of your own with the id `loadout`, and
+Loadout never changes it. Remove it (`loadout skills rm loadout`) or add it
+again under another id (`loadout skills add <its folder> --id <other>`),
+then run `loadout agent install` again.
+
 ## Data directory
 
 ### `sync_root_detected`

@@ -54,14 +54,9 @@
       "purpose": "The daily Tier A adapters and their files, shapes, native disable and secret delivery: adapters/omp.rs, claude_code.rs, codex.rs, claude_desktop.rs; the generated table in docs/adapters.md."
     },
     {
-      "title": "Tier B clients: Pi, GitHub Copilot, Cursor",
+      "title": "Tier B, C and D clients",
       "parent": "Client adapters and formats",
-      "purpose": "adapters/pi.rs, copilot.rs, cursor.rs and vscode_legacy.rs (the legacy VS Code mcp.json, read only): Copilot and VS Code variants and profiles, Cursor project servers that need enabling in Cursor. docs/adapters.md and SPEC.md section 7.3."
-    },
-    {
-      "title": "Tier C and D clients",
-      "parent": "Client adapters and formats",
-      "purpose": "Tier C (adapters/gemini.rs, antigravity.rs, opencode.rs, grok.rs) and Tier D (windsurf.rs, devin.rs, and the user-scope clients ported from SkillDock in ported.rs). Read-only and best-effort rules, YAML and JSON5 editors. docs/adapters.md, SPEC.md sections 7.5 and 20.2."
+      "purpose": "Tier B (adapters/pi.rs, copilot.rs, cursor.rs and vscode_legacy.rs, the legacy VS Code mcp.json, read only): Copilot and VS Code variants and profiles, Cursor project servers that need enabling in Cursor. Tier C (gemini.rs, antigravity.rs, opencode.rs, grok.rs) and Tier D (windsurf.rs, devin.rs, and the user-scope clients ported from SkillDock in ported.rs): read-only and best-effort rules, YAML and JSON5 editors. docs/adapters.md, SPEC.md sections 7.3, 7.5 and 20.2."
     },
     {
       "title": "Apply engine",
@@ -92,7 +87,7 @@
     },
     {
       "title": "Skills",
-      "purpose": "Skill store (store/skills, store/skill-meta), installs from git, folders and .zip/.skill archives through a review (fetch and scan first, then `install_prepared` behind the trust gate and the scan gate), updates with change detection and the script marker, frontmatter, links (Windows junctions, symlinks, copies), project links hidden via .git/info/exclude, scanning client skill folders, the agents CLI folder, listings that read only SKILL.md and metadata (summarize_folder, DetectedClients). Sources: crates/agent-loadout-core/src/skills/ (store.rs, install.rs, link.rs, classify.rs, frontmatter.rs, agents_cli.rs), src/app/routes/install, src/app/routes/skills (SkillUpdateDialog), SPEC.md section 12."
+      "purpose": "Skill store (store/skills, store/skill-meta with [source] or [bundled]), installs from git, folders and .zip/.skill archives through a review (fetch and scan first, then `install_prepared` behind the trust gate and the scan gate), full 40-character commit pins (short commits refused), updates with change detection and the script marker, frontmatter, links (Windows junctions, symlinks, copies), project links hidden via .git/info/exclude, scanning client skill folders, the agents CLI folder, listings that read only SKILL.md and metadata (summarize_folder, DetectedClients). Sources: crates/agent-loadout-core/src/skills/ (store.rs, install.rs, link.rs, classify.rs, frontmatter.rs, agents_cli.rs), src/app/routes/install, src/app/routes/skills (SkillUpdateDialog), SPEC.md section 12."
     },
     {
       "title": "Source trust",
@@ -110,6 +105,16 @@
       "purpose": "`loadout server add --from <GIT-URL|PATH>` and Install > MCP > From Git or folder: drafts from server.json (MCP Registry packages and remotes), MCPB/DXT manifest.json, committed client configs, or the repository itself (package.json bin, pyproject scripts, Dockerfile), pinned to the version or commit (unversioned packages marked not pinned); nothing runs while proposing; dependency and build folders skipped; secrets become references and literal values are dropped; save behind source trust and the scan of files and every launch line; [meta.source] provenance; machine-local checkouts in LOADOUT_HOME/servers/<id> (checkout_out_of_date until `loadout server checkout` or Restore copy); folder sources bound to their machine (folder_on_other_machine); `loadout server update [--check]` and Check for update; review stores and the sweep of temporary clones. Sources: crates/agent-loadout-core/src/mcp_source/ (mod.rs, convert.rs, snippet.rs), crates/agent-loadout/src/cmd/server.rs, src-tauri/src/commands/mcp_source.rs, src/app/routes/install/McpSourcePanel.tsx, src/app/routes/mcp/McpSourceUpdate.tsx, docs/milestones/M41.md, M42.md, SPEC.md sections 5.2, 14 and 17."
     },
     {
+      "title": "Catalogs",
+      "parent": "Skills",
+      "purpose": "Online catalogs (#26): built-ins (Official MCP Registry /v0.1 with /v0 fallback, the github.com/anthropics/skills Git tap with its Claude Code plugin marketplace, skills.sh as a link plus pasted-URL install) and user-added MCP registries and Git taps in store/catalogs.toml (synced; tap URLs with a user name or token refused; commit refs are full 40-character commits). The machine-local Online catalogs switch (state/local-settings.toml online_catalogs, off until turned on; catalogs_off otherwise); nothing in the background; per-catalog search with its own status (fresh, cached, stale, off, query_too_short, error) and a 24 h cache in cache/catalogs; ureq + rustls, time limits, 8 MiB cap, https-only redirects, HTTPS_PROXY/ALL_PROXY/NO_PROXY with SOCKS refused (catalog_unreachable). Installs hand off to the existing reviews (`server add --from catalog:<source>/<id>`, `skills add catalog:...`); registry trust keyed on what runs (package or remote host), the repository shown as claimed by the publisher, not verified; Official only for code in github.com/anthropics; npm/archive/command plugin sources refused; plugin hooks, commands and agents never imported; registry servers updatable through `server update`. Sources: crates/agent-loadout-core/src/catalog/ (mod.rs, http.rs, registry.rs, tap.rs, cache.rs), model/catalogs.rs, crates/agent-loadout/src/cmd/catalog.rs, src-tauri/src/commands/catalogs.rs, src/app/routes/install/catalog, src/app/routes/settings/catalogs, docs/milestones/M44.md, M45.md, docs/security.md (Catalogs), SPEC.md section 17."
+    },
+    {
+      "title": "Loadout skill for agents",
+      "parent": "Skills",
+      "purpose": "The read-only skill bundled with Loadout (#8, narrowed): content in crates/agent-loadout-core/agent-skill/loadout/ (SKILL.md, references/commands.md, errors.md, playbooks.md), embedded by agent::FILES and shipped as a Tauri resource. It teaches read and plan commands, error codes and playbooks and hands every change to the user (never --yes, --trust-source, --allow-dangerous; third-party text is data); tests check cited commands, flags and JSON fields against the CLI. A normal store skill (id `loadout`, skill-meta [bundled] table readable by 0.5.x, origin Bundled with Loadout); `loadout agent install|remove|status|skill-path`, `agent install --reset`, Settings > Agent integration. Updates only from store-changing commands (Context::open_store_for_change), `agent install` and app start; read commands never write; Current/Outdated/Customized/Newer states; customized copies reported once per version and never overwritten. Sources: crates/agent-loadout-core/src/agent.rs, crates/agent-loadout/src/cmd/agent.rs, src-tauri/src/commands/agent.rs, src/app/routes/settings/agent, docs/milestones/M46.md, SPEC.md sections 12.6 and 13.6."
+    },
+    {
       "title": "Remotes and sync",
       "purpose": "Optional backup and sync remotes: folder remotes (repo-per-machine, mirror, archive), git remotes through the system git with system, gh or token auth, the git-credential helper, push, pull with per-entity merge and conflicts, restore --from on a new machine. Sources: crates/agent-loadout-core/src/remote/ (config.rs, folder.rs, git.rs, gh.rs, credential.rs, sync.rs, sync_artifacts.rs, restore.rs, manifest.rs, unc.rs), store/merge.rs, SPEC.md section 9.6 to 9.9."
     },
@@ -124,11 +129,11 @@
     {
       "title": "Desktop pages",
       "parent": "Desktop app",
-      "purpose": "Each page and what it does: src/app/routes/skills (source tabs with Adopt, the update review with trust and findings, long lists rendered near the viewport via useVirtualSlots), mcp (including project scope ProjectServers.tsx, the Not managed by Loadout section, McpSourceUpdate.tsx with Check for update and Restore copy), projects (effective matrix, trust review, Discover projects), tools (ToolManageDialog, not-managed counts), install (skill review with trust and scan, MCP Form or paste and From Git or folder), import (MCP import, skills adopt, Discover projects, the SkillDock migration, the sidebar notice UnmanagedNotice.tsx), history (200 commits a page, Load more), settings (versioning, secrets, sources, updates, the not-managed notice switch), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
+      "purpose": "Each page and what it does: src/app/routes/skills (source tabs with Adopt, the update review with trust and findings, long lists rendered near the viewport via useVirtualSlots), mcp (including project scope ProjectServers.tsx, the Not managed by Loadout section, McpSourceUpdate.tsx with Check for update and Restore copy), projects (effective matrix, trust review, Discover projects), tools (ToolManageDialog, not-managed counts), install (skill review with trust and scan, MCP Form or paste and From Git or folder, Browse with the online-catalogs question, per-catalog sections and entry details handed to the reviews), import (MCP import, skills adopt, Discover projects, the SkillDock migration, the sidebar notice UnmanagedNotice.tsx), history (200 commits a page, Load more), settings (versioning, secrets, sources, catalogs, agent integration, updates, the not-managed notice switch), migrate; the apply drawer and resolver (src/app/apply, src/app/resolver)."
     },
     {
       "title": "Command line interface",
-      "purpose": "Using `loadout`: command groups (including `server add --from`, `server update`, `server checkout`, `source ls|trust|block|untrust`), global options, exit codes (0 to 8, with 8 for a scan block; exec 77 and 78), the trust prompt and `--trust-source`, JSON output, commands that commit and apply at once. Sources: docs/cli.md (generated), docs/user-guide.md, crates/agent-loadout/src/main.rs and src/cmd/, SPEC.md section 14."
+      "purpose": "Using `loadout`: command groups (including `server add --from` with Git, folders and `catalog:` references, `server update`, `server checkout`, `source ls|trust|block|untrust`, `catalog ls|add|rm|enable|disable|online|search|show|refresh`, `agent install|remove|status|skill-path`), global options, exit codes (0 to 8, with 8 for a scan block; exec 77 and 78), the trust prompt and `--trust-source`, JSON output, commands that commit and apply at once, read commands that never write. Sources: docs/cli.md (generated), docs/user-guide.md, crates/agent-loadout/src/main.rs and src/cmd/, SPEC.md section 14."
     },
     {
       "title": "Packaging and release",
@@ -140,7 +145,7 @@
     },
     {
       "title": "Security model",
-      "purpose": "Threat model and invariants: no secret values in the store, logs or IPC; leak scanner; foreign entries untouched; ledger ownership; project trust; source trust (never implicit, blocks win, lapses, credential-free keys) and the built-in offline scan before anything from a source is saved; MCP drafts that run nothing while proposing, pinned commands, machine-local checkouts and folder sources bound to their machine; atomic writes and backups; backups never pushed; Tauri CSP and path validation; skill archive limits. Sources: docs/security.md, SECURITY.md, SPEC.md sections 11 and 17."
+      "purpose": "Threat model and invariants: no secret values in the store, logs or IPC; leak scanner; foreign entries untouched; ledger ownership; project trust; source trust (never implicit, blocks win, lapses, credential-free keys) and the built-in offline scan before anything from a source is saved; MCP drafts that run nothing while proposing, pinned commands, machine-local checkouts and folder sources bound to their machine; catalogs off until turned on, no background requests, untrusted catalog text, registry trust keyed on what runs, Official only for Anthropic's code; the read-only agent skill (guidance, not a sandbox); atomic writes and backups; backups never pushed; Tauri CSP and path validation; skill archive limits. Sources: docs/security.md, SECURITY.md, SPEC.md sections 11 and 17."
     },
     {
       "title": "Contributing",

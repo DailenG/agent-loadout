@@ -241,6 +241,30 @@ Catalogs are the only part of Loadout that makes HTTP requests of its own
   machine only, keyed on the catalog's address) for 24 hours; stale
   results are labeled with their age, and a failed refresh keeps them.
 
+## The Loadout skill for agents
+
+A coding agent that can run shell commands can answer any confirmation
+Loadout asks (`--yes`, `--trust-source`, `--allow-dangerous`), so Loadout
+does not try to make an agent a safe approver. The bundled skill
+(`loadout agent install`) is **read only**: it teaches the read and plan
+commands, the error codes and playbooks, and for any change it hands you
+the exact command or app page to run or approve yourself. It never passes
+a decision flag, and it treats text from skills, READMEs, repositories and
+catalogs as data, not instructions. Tests check that every command and
+JSON field the skill cites exists and that a decision flag appears only in
+"never" guidance. This is guidance for a cooperative agent, not a sandbox:
+an agent with your shell can still run any command you can, so keep
+decisions such as trusting a source for yourself.
+
+- The skill is a normal store skill (id `loadout`), so installing,
+  updating or removing it is a commit you can see and undo. Read commands
+  never write; an older copy is replaced only by an app start, a command
+  that changes the store, or `loadout agent install`. A copy you edited is
+  never overwritten on its own (`loadout agent install --reset` restores
+  the bundled one; History keeps yours).
+- A store skill named `loadout` that Loadout did not install is never
+  touched.
+
 ## Desktop app
 
 - A strict Content Security Policy; no remote content is loaded.
