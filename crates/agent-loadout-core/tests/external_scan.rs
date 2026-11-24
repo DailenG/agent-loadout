@@ -146,10 +146,13 @@ fn the_scanner_gets_one_skill_path_and_the_token_only_in_its_environment() {
         .map(|name| name.to_ascii_uppercase())
         .collect();
     for key in call.env.keys() {
-        // Windows adds a few variables to every process it starts.
-        let windows_added = cfg!(windows) && key.starts_with('=');
+        // Windows adds a few variables to every process it starts, and
+        // macOS adds __CF_USER_TEXT_ENCODING to every process even after an
+        // env_clear (it holds the user's text encoding, no identity).
+        let os_added = (cfg!(windows) && key.starts_with('='))
+            || (cfg!(target_os = "macos") && key == "__CF_USER_TEXT_ENCODING");
         assert!(
-            windows_added || allowed.contains(&key.to_ascii_uppercase()),
+            os_added || allowed.contains(&key.to_ascii_uppercase()),
             "{key} reached the scanner"
         );
     }
