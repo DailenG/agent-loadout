@@ -36,6 +36,7 @@ import type { ImportTarget } from "@/app/routes/import/model";
 import { UnmanagedNotice, UnmanagedNoticeSetting } from "@/app/routes/import/UnmanagedNotice";
 import { MigrateSection } from "@/app/routes/migrate/MigrateSection";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
+import { SourcesSection } from "@/app/routes/settings/sources/SourcesSection";
 import { SkillsPage } from "@/app/routes/skills/SkillsPage";
 import { FirstRunBackupRemote } from "@/app/routes/settings/versioning/BackupRemoteStep";
 import { VersioningSection } from "@/app/routes/settings/versioning/VersioningSection";
@@ -665,6 +666,7 @@ function SettingsPage(props: {
       <VersioningSection onOpenPending={props.onOpenPending} />
       <MigrateSection onOpenImport={props.onOpenImport} />
       <SecretsSection onOpenPending={props.onOpenPending} />
+      <SourcesSection />
       <UpdatesSection />
     </div>
   );

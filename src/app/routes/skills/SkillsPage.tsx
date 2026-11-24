@@ -8,8 +8,10 @@
 import { useIsFetching, useQuery } from "@tanstack/react-query";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { storeQueryKeys, useInvalidateStore } from "@/app/apply/changeNotice";
+import { useRecheckTargets } from "@/app/apply/driftTriggers";
 import { useActiveScope } from "@/app/scope/ActiveScope";
 import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
+import { useVirtualList, VirtualSlot } from "@/app/components/useVirtualSlots";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { ToolbarGoInstallButton } from "@/app/components/ToolbarGoInstallButton";
@@ -28,6 +30,9 @@ import { useRenameConfirm } from "./useRenameConfirm";
 export type SkillViewMode = "list" | "grid" | "grouped";
 
 const GRID_COLUMNS = 3;
+/** Heights of a list card and a grid row never rendered yet (#17), in pixels. */
+const LIST_CARD_ESTIMATE = 68;
+const GRID_ROW_ESTIMATE = 180;
 
 const VIEW_MODES: { mode: SkillViewMode; label: "skills.view.list" | "skills.view.grid" | "skills.view.grouped"; icon: () => JSX.Element }[] = [
   { mode: "list", label: "skills.view.list", icon: ListIcon },
@@ -61,6 +66,7 @@ function groupBySource(skills: SkillInfo[]): SkillGroup[] {
  */
 function SkillsRefreshButton({ scope }: { scope: SkillScope }) {
   const invalidate = useInvalidateStore();
+  const recheckTargets = useRecheckTargets();
   const isFetching =
     useIsFetching({ queryKey: [...storeQueryKeys.skills, scope] })
     + useIsFetching({ queryKey: [...storeQueryKeys.skillToolDirs, scope] }) > 0;
@@ -68,7 +74,7 @@ function SkillsRefreshButton({ scope }: { scope: SkillScope }) {
     <button
       className={`secondary-button secondary-button--compact skills-toolbar-button skills-toolbar-button--refresh${isFetching ? " is-loading" : ""}`}
       type="button"
-      onClick={() => void invalidate()}
+      onClick={() => void recheckTargets().then(() => invalidate())}
       disabled={isFetching}
       {...collapsibleAction(t("skills.refresh"), "early")}
     >
@@ -98,6 +104,8 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<SkillViewMode>("list");
   const [expandedId, setExpandedId] = useState("");
+  // Cards with a dialog, the tag editor, a toggle or a delete under way: kept rendered (#17).
+  const [activeIds, setActiveIds] = useState<readonly string[]>([]);
   if (shownScopeKey !== scopeKey) {
     setShownScopeKey(scopeKey);
     setExpandedId("");
@@ -214,6 +222,17 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   }
 
   const handleExpandedChange = useCallback((skillId: string, open: boolean) => setExpandedId(open ? skillId : ""), []);
+  const handleActiveChange = useCallback(
+    (skillId: string, active: boolean) =>
+      setActiveIds((current) =>
+        active === current.includes(skillId)
+          ? current
+          : active
+            ? [...current, skillId]
+            : current.filter((id) => id !== skillId),
+      ),
+    [],
+  );
   const handleUpdated = useCallback(
     (skillId: string) =>
       setUpdates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== skillId))),
@@ -232,6 +251,7 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
         onExpandedChange={handleExpandedChange}
         update={updates[skill.id]}
         onUpdated={handleUpdated}
+        onActiveChange={handleActiveChange}
         allTags={allTags}
       />
     );
@@ -302,6 +322,20 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   for (let index = 0; index < visible.length; index += GRID_COLUMNS) {
     gridRows.push(visible.slice(index, index + GRID_COLUMNS));
   }
+  // Only the cards near the viewport render (#17); the open card and a card with a dialog, an editor or
+  // an action under way always do. Grid rows are slots keyed by position, so an insert above keeps heights.
+  const pinnedIds = [expandedId, ...activeIds];
+  const pinnedRows = gridRows.flatMap((row, index) =>
+    row.some((skill) => pinnedIds.includes(skill.id)) ? [`row:${index}`] : [],
+  );
+  const slots = useVirtualList(LIST_CARD_ESTIMATE, [...pinnedIds, ...pinnedRows], viewMode);
+  function slotted(skill: SkillInfo, index: number) {
+    return (
+      <VirtualSlot key={skill.id} list={slots} id={skill.id} index={index} label={skill.name} className="virtual-slot">
+        {() => renderCard(skill)}
+      </VirtualSlot>
+    );
+  }
 
   let body: JSX.Element;
   if (activeSource === AGENTS_SOURCE && data?.agentsCli) {
@@ -341,6 +375,7 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
       </div>
     );
   } else if (viewMode === "grouped") {
+    let position = 0;
     body = (
       <>
         {groupBySource(visible).map((group) => {
@@ -387,7 +422,9 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
                 </div>
               </div>
               {!isCollapsed ? (
-                <div className="skill-group-section__list">{group.skills.map((skill) => renderCard(skill))}</div>
+                <div className="skill-group-section__list">
+                  {group.skills.map((skill) => slotted(skill, position++))}
+                </div>
               ) : null}
             </section>
           );
@@ -397,15 +434,23 @@ export function SkillsPage({ onOpenInstall }: SkillsPageProps) {
   } else if (viewMode === "grid") {
     body = (
       <>
-        {gridRows.map((row) => (
-          <div key={row[0].id} className="skill-card-grid__row">
-            {row.map((skill) => renderCard(skill, "grid"))}
-          </div>
+        {gridRows.map((row, index) => (
+          <VirtualSlot
+            key={`row:${index}`}
+            list={slots}
+            id={`row:${index}`}
+            index={index}
+            label={row.map((skill) => skill.name).join(", ")}
+            className="skill-card-grid__row"
+            estimate={GRID_ROW_ESTIMATE}
+          >
+            {() => row.map((skill) => renderCard(skill, "grid"))}
+          </VirtualSlot>
         ))}
       </>
     );
   } else {
-    body = <>{visible.map((skill) => renderCard(skill))}</>;
+    body = <>{visible.map((skill, index) => slotted(skill, index))}</>;
   }
 
   const projectClients = project

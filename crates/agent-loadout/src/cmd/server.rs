@@ -1,21 +1,38 @@
-//! `loadout server ls|show|add|rm` (SPEC 14). Every change is one store
-//! commit; `rm` with several ids is one commit too. In instant mode (the
-//! default, SPEC 8.7) the change is applied in that same commit.
+//! `loadout server ls|show|add|rm|update|checkout` (SPEC 14). Every change
+//! is one store commit; `rm` with several ids is one commit too. In instant
+//! mode (the default, SPEC 8.7) the change is applied in that same commit.
+//!
+//! `add --from` drafts servers from a git repository or a local folder
+//! (#5): nothing runs while drafting; saving goes through the source trust
+//! prompt (or `--trust-source`) and the built-in scan (`--allow-dangerous`).
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use agent_loadout_core::apply::Touched;
+use agent_loadout_core::mcp_source::{self, Draft, Pick, ResolveRequest, Resolved};
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::ids::{self, IdKind};
-use agent_loadout_core::model::server::{Enable, Meta, Server, Transport};
-use agent_loadout_core::store::{Operation, ServerEntry};
+use agent_loadout_core::model::server::{Enable, Meta, Server, ServerSource, Transport};
+use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
+use agent_loadout_core::scan::ScanReport;
+use agent_loadout_core::skills::install::{Decisions, FileChange, Source, UpdateStatus};
+use agent_loadout_core::skills::{LinkKind, SkillsEnv};
+use agent_loadout_core::sources::SourceRef;
+use agent_loadout_core::store::{Operation, ServerEntry, Store};
 use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 
+use super::skills::{print_scan, scan_json};
+use super::source::{Answer, Answers, TrustSourceArg, cancelled};
 use super::{
-    Context, JSON_SCHEMA, apply_exit_code, error_json, instant_apply, print_json, print_report,
-    report_json, report_warnings,
+    Context, EXIT_SCAN_BLOCKED, JSON_SCHEMA, apply_exit_code, error_json, instant_apply,
+    print_json, print_report, report_json, report_warnings,
+};
+
+static RUNNER: SystemRunner = SystemRunner {
+    idle_timeout: IDLE_TIMEOUT,
 };
 
 #[derive(Debug, Args)]
@@ -33,7 +50,8 @@ enum ServerCommand {
         /// Server id.
         id: String,
     },
-    /// Add a server.
+    /// Add a server, or (--from) draft servers from a git repository or
+    /// a local folder.
     Add(Box<AddArgs>),
     /// Remove servers; several ids make one commit.
     Rm {
@@ -41,12 +59,54 @@ enum ServerCommand {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Update servers added with --from (all, or ID) to what their source
+    /// gives now; --check only reports.
+    Update {
+        id: Option<String>,
+        /// Report available updates; change nothing.
+        #[arg(long)]
+        check: bool,
+        /// Answer the source trust prompt up front (see `server add`).
+        #[arg(
+            long,
+            value_enum,
+            value_name = "ONCE|REPO|OWNER|HOST",
+            num_args = 0..=1,
+            default_missing_value = "once",
+            conflicts_with = "check"
+        )]
+        trust_source: Option<TrustSourceArg>,
+        /// Update even when the built-in scan finds dangerous content.
+        #[arg(long, conflicts_with = "check")]
+        allow_dangerous: bool,
+    },
+    /// Re-create or bring up to date this machine's checkout of a server
+    /// added with --from that runs from its repository
+    /// (`LOADOUT_HOME/servers/<ID>`), at the commit its file names. The
+    /// same gates as `add --from`: source trust, then the scan.
+    Checkout {
+        id: String,
+        /// Answer the source trust prompt up front (see `server add`).
+        #[arg(
+            long,
+            value_enum,
+            value_name = "ONCE|REPO|OWNER|HOST",
+            num_args = 0..=1,
+            default_missing_value = "once"
+        )]
+        trust_source: Option<TrustSourceArg>,
+        /// Check out even when the built-in scan finds dangerous content.
+        #[arg(long)]
+        allow_dangerous: bool,
+    },
 }
 
 #[derive(Debug, Args)]
 struct AddArgs {
-    /// Server id: 1 to 64 characters from a-z, 0-9, '.', '_', '-'.
-    id: String,
+    /// Server id: 1 to 64 characters from a-z, 0-9, '.', '_', '-'. With
+    /// --from: the id of the one draft saved [default: from its name].
+    #[arg(required_unless_present = "from")]
+    id: Option<String>,
     /// Endpoint of an http or sse server.
     #[arg(long)]
     url: Option<String>,
@@ -83,6 +143,49 @@ struct AddArgs {
     /// Command and arguments of a stdio server, after `--`.
     #[arg(last = true, value_name = "COMMAND")]
     command: Vec<String>,
+    /// Draft servers from a git repository (https, ssh, file://, a bare
+    /// repository) or a local folder: server.json, an MCPB manifest.json,
+    /// committed client configs, or the repository as a package.
+    #[arg(
+        long,
+        value_name = "GIT-URL|PATH",
+        conflicts_with_all = ["url", "transport", "env", "headers", "cwd", "command"]
+    )]
+    from: Option<String>,
+    /// Folder inside the git repository.
+    #[arg(long, requires = "from")]
+    path: Option<String>,
+    /// Branch, tag or commit of the git repository.
+    #[arg(long = "ref", value_name = "REF", requires = "from")]
+    git_ref: Option<String>,
+    /// The draft to save, by key or id (repeatable) [default: the only
+    /// draft].
+    #[arg(long = "pick", value_name = "KEY|ID", requires = "from")]
+    picks: Vec<String>,
+    /// Save every draft.
+    #[arg(long, requires = "from", conflicts_with = "picks")]
+    all: bool,
+    /// List the drafts, their inputs and scan findings; save nothing (the
+    /// clone is removed).
+    #[arg(long, requires = "from")]
+    dry_run: bool,
+    /// Answer the source trust prompt up front: once (this save only), or
+    /// always for the repo, its owner or its host. Only for a source you
+    /// trust: a server drafted from it runs its commands. --yes never
+    /// answers the trust prompt.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "ONCE|REPO|OWNER|HOST",
+        num_args = 0..=1,
+        default_missing_value = "once",
+        requires = "from"
+    )]
+    trust_source: Option<TrustSourceArg>,
+    /// Save even when the built-in scan finds dangerous content (review
+    /// the findings first, with --dry-run).
+    #[arg(long, requires = "from")]
+    allow_dangerous: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -103,11 +206,36 @@ fn parse_pair(text: &str) -> Result<(String, String), String> {
 /// entries blocked (5), unresolved (4) or a file failed (1); the store
 /// edit itself is committed either way.
 pub fn run(ctx: &Context, args: &ServerArgs) -> Result<u8, CoreError> {
+    // Temporary clones a crash or an interrupted prompt left behind.
+    mcp_source::sweep_temp_clones(&sx(ctx), std::time::Duration::from_secs(60 * 60));
     match &args.command {
         ServerCommand::Ls => list(ctx).map(|()| 0),
         ServerCommand::Show { id } => show(ctx, id).map(|()| 0),
+        ServerCommand::Add(args) if args.from.is_some() => add_from(ctx, args),
         ServerCommand::Add(args) => add(ctx, args),
         ServerCommand::Rm { ids } => remove(ctx, ids),
+        ServerCommand::Update {
+            id,
+            check,
+            trust_source,
+            allow_dangerous,
+        } => update(ctx, id.as_deref(), *check, *trust_source, *allow_dangerous),
+        ServerCommand::Checkout {
+            id,
+            trust_source,
+            allow_dangerous,
+        } => checkout(ctx, id, *trust_source, *allow_dangerous),
+    }
+}
+
+fn sx(ctx: &Context) -> SkillsEnv<'_> {
+    SkillsEnv {
+        env: &ctx.env,
+        fs: ctx.fs(),
+        home: &ctx.home,
+        registry: ctx.apply_env().registry,
+        runner: &RUNNER,
+        link_kind: LinkKind::Junction,
     }
 }
 
@@ -244,16 +372,16 @@ fn show(ctx: &Context, id: &str) -> Result<(), CoreError> {
 }
 
 fn add(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
-    let server = build_server(args);
+    let id = args.id.clone().unwrap_or_default();
+    let server = build_server(&id, args);
     // Checked before the store is opened, so a bad definition creates nothing.
-    let diagnostics = server.validate(Some(&args.id));
+    let diagnostics = server.validate(Some(&id));
     if let Some(err) = diagnostics.first_error(None) {
         return Err(err);
     }
     report_warnings(diagnostics.warnings());
 
     let store = ctx.open_store_for_change()?;
-    let id = args.id.clone();
     let operation =
         Operation::new("server.add", format!("server: add {id}")).entity(format!("server/{id}"));
     let ax = ctx.apply_env();
@@ -282,7 +410,7 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
     Ok(report.as_ref().map_or(0, apply_exit_code))
 }
 
-fn build_server(args: &AddArgs) -> Server {
+fn build_server(id: &str, args: &AddArgs) -> Server {
     let transport = match (args.transport, &args.url) {
         (Some(TransportArg::Stdio), _) | (None, None) => Transport::Stdio,
         (Some(TransportArg::Http), _) | (None, Some(_)) => Transport::Http,
@@ -291,7 +419,7 @@ fn build_server(args: &AddArgs) -> Server {
     let map = |pairs: &[(String, String)]| {
         (!pairs.is_empty()).then(|| pairs.iter().cloned().collect::<BTreeMap<_, _>>())
     };
-    let mut server = Server::new(args.id.clone());
+    let mut server = Server::new(id.to_owned());
     let body = &mut server.body;
     body.transport = Some(transport);
     body.command = args.command.first().cloned();
@@ -307,16 +435,20 @@ fn build_server(args: &AddArgs) -> Server {
         origin: Some("manual".to_owned()),
         ..Meta::default()
     });
-    let clients = if args.all_detected {
-        Some(ClientSelection::AllDetected)
-    } else {
-        (!args.clients.is_empty()).then(|| ClientSelection::List(args.clients.clone()))
-    };
-    server.enable = clients.map(|clients| Enable {
+    server.enable = clients(args).map(|clients| Enable {
         clients: Some(clients),
         ..Enable::default()
     });
     server
+}
+
+/// The `--client`/`--all-detected` choice.
+fn clients(args: &AddArgs) -> Option<ClientSelection> {
+    if args.all_detected {
+        Some(ClientSelection::AllDetected)
+    } else {
+        (!args.clients.is_empty()).then(|| ClientSelection::List(args.clients.clone()))
+    }
 }
 
 fn remove(ctx: &Context, ids: &[String]) -> Result<u8, CoreError> {
@@ -342,10 +474,19 @@ fn remove(ctx: &Context, ids: &[String]) -> Result<u8, CoreError> {
             operation.entity(format!("server/{id}"))
         });
     let ax = ctx.apply_env();
-    let committed = store.transaction(operation, |tx| {
+    let sx = sx(ctx);
+    // Machine-local checkouts of servers added with --from go with them:
+    // moved aside under the store lock, deleted once the removal commits.
+    let mut removal = None;
+    let result = store.transaction(operation, |tx| {
         unique.iter().try_for_each(|id| tx.remove_server(id))?;
+        removal = Some(mcp_source::CheckoutRemoval::begin(&sx, &unique)?);
         instant_apply(tx, &ax, &Touched::Servers(unique.clone()))
-    })?;
+    });
+    if let Some(removal) = removal {
+        removal.finish(sx.fs, result.is_ok());
+    }
+    let committed = result?;
     let report = committed.value;
     if ctx.json {
         print_json(&json!({
@@ -369,4 +510,678 @@ fn remove(ctx: &Context, ids: &[String]) -> Result<u8, CoreError> {
 
 fn not_found(id: &str) -> CoreError {
     CoreError::new(ErrorCode::NotFound, format!("server {id:?} does not exist"))
+}
+
+/// The trust answer for `source`, or the error a cancelled prompt ends
+/// with.
+fn trust_answer(
+    ctx: &Context,
+    answers: &mut Answers,
+    store: &Store<'_>,
+    source: &SourceRef,
+    flag: Option<TrustSourceArg>,
+) -> Result<Answer, CoreError> {
+    let answer = answers.decide(ctx, Some(store), source, flag)?;
+    if answer == Answer::Cancelled {
+        return Err(cancelled(source));
+    }
+    Ok(answer)
+}
+
+fn decisions(answer: Answer, moved: Option<Answer>, allow_dangerous: bool) -> Decisions {
+    let (trust, via) = answer.grant();
+    Decisions {
+        allow_dangerous,
+        trust,
+        moved_trust: moved.and_then(|moved| moved.grant().0),
+        via,
+    }
+}
+
+fn source_json(source: &ServerSource) -> Value {
+    json!({
+        "kind": source.kind.as_str(),
+        "url": source.url,
+        "folder": source.folder,
+        "path": source.path,
+        "ref": source.git_ref,
+        "commit": source.commit,
+    })
+}
+
+fn launch(server: &Server) -> String {
+    let body = &server.body;
+    match (&body.url, &body.command) {
+        (Some(url), _) => url.clone(),
+        (None, Some(command)) => std::iter::once(command)
+            .chain(body.args.iter().flatten())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" "),
+        (None, None) => String::new(),
+    }
+}
+
+fn lines_json(server: &Server) -> Value {
+    json!(
+        mcp_source::launch_lines(server)
+            .iter()
+            .map(|line| json!({"os": line.os, "line": line.line}))
+            .collect::<Vec<_>>()
+    )
+}
+
+fn draft_json(draft: &Draft) -> Value {
+    let source = draft.provenance();
+    json!({
+        "key": draft.key,
+        "kind": draft.kind.as_str(),
+        "id": draft.server.id,
+        "file": source.file,
+        "converter": source.converter,
+        "entry": source.entry,
+        "launch": launch(&draft.server),
+        "launch_lines": lines_json(&draft.server),
+        "runs_repo_code": draft.runs_repo_code,
+        "checkout": draft.checkout,
+        "pinned": draft.pinned,
+        "setup": draft.setup,
+        "also_in": draft.also_in,
+        "inputs": draft.inputs.iter().map(|input| json!({
+            "field": input.field,
+            "description": input.description,
+            "secret": input.secret,
+            "required": input.required,
+            "alias": input.alias,
+            "value_dropped": input.value_dropped,
+        })).collect::<Vec<_>>(),
+        "scan": scan_json(&draft.scan),
+    })
+}
+
+/// A setup step as a person types it: the store's `${home}` and
+/// `${loadout_home}` written out (they are not shell variables).
+fn setup_line(ctx: &Context, step: &str) -> String {
+    mcp_source::setup_text(
+        step,
+        &ctx.env.home().to_string_lossy(),
+        &ctx.home.path.to_string_lossy(),
+    )
+}
+
+fn print_drafts(ctx: &Context, resolved: &Resolved) {
+    let source = resolved.source();
+    let place = source
+        .url
+        .as_deref()
+        .or(source.folder.as_deref())
+        .unwrap_or_default();
+    match &source.commit {
+        Some(commit) => println!("Source: {place} at {}", &commit[..commit.len().min(12)]),
+        None => println!("Source: {place}"),
+    }
+    if !resolved.skipped_folders().is_empty() {
+        println!(
+            "Not read or scanned (dependencies and builds): {}",
+            resolved.skipped_folders().join(", ")
+        );
+    }
+    for draft in resolved.drafts() {
+        println!();
+        println!(
+            "{}  ({}, {})",
+            draft.key,
+            draft.server.id,
+            draft.kind.as_str()
+        );
+        for line in mcp_source::launch_lines(&draft.server) {
+            match &line.os {
+                None => println!("  {}", line.line),
+                Some(os) => println!("  on {os}: {}", line.line),
+            }
+        }
+        if !draft.pinned {
+            println!(
+                "  Not pinned: the package has no version, so each start can run different code."
+            );
+        }
+        if draft.runs_repo_code {
+            println!("  Runs code from this source every time a client starts it.");
+        }
+        if draft.checkout {
+            println!(
+                "  Runs from a clone kept in {}/{}.",
+                mcp_source::CHECKOUTS_DIR,
+                draft.server.id
+            );
+        }
+        for step in &draft.setup {
+            println!("  Before it works, run: {}", setup_line(ctx, step));
+        }
+        for other in &draft.also_in {
+            println!("  Also in {other}.");
+        }
+        for input in &draft.inputs {
+            match (&input.alias, input.secret) {
+                (Some(alias), true) if input.value_dropped => println!(
+                    "  {}: the file held a value; it was not kept. Set secret {alias}.",
+                    input.field
+                ),
+                (Some(alias), true) => println!("  {}: set secret {alias}.", input.field),
+                (None, true) => println!(
+                    "  {}: the file held a value that looks secret; it was left out.",
+                    input.field
+                ),
+                _ => println!(
+                    "  {}: read from the environment{}.",
+                    input.field,
+                    input
+                        .description
+                        .as_deref()
+                        .map(|d| format!(" ({d})"))
+                        .unwrap_or_default()
+                ),
+            }
+        }
+        print_scan(&draft.scan, "  ");
+    }
+    for skipped in resolved.skipped() {
+        let entry = skipped
+            .entry
+            .as_deref()
+            .map(|entry| format!(" {entry}"))
+            .unwrap_or_default();
+        eprintln!(
+            "skipped {}{entry}: [{}] {}",
+            skipped.file,
+            skipped.error.code(),
+            skipped.error.message()
+        );
+    }
+}
+
+fn resolved_json(resolved: &Resolved) -> Value {
+    json!({
+        "source": source_json(resolved.source()),
+        "skipped_folders": resolved.skipped_folders(),
+        "drafts": resolved.drafts().iter().map(draft_json).collect::<Vec<_>>(),
+        "skipped": resolved.skipped().iter().map(|skipped| json!({
+            "file": skipped.file,
+            "entry": skipped.entry,
+            "error": error_json(&skipped.error),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// The drafts `args` picks: `--pick` by key or id, `--all`, or the only
+/// draft.
+fn chosen<'a>(resolved: &'a Resolved, args: &AddArgs) -> Result<Vec<&'a Draft>, CoreError> {
+    let drafts = resolved.drafts();
+    if drafts.is_empty() {
+        return Err(CoreError::new(
+            ErrorCode::NotFound,
+            "the source holds no MCP server Loadout can draft",
+        ));
+    }
+    if args.all {
+        return Ok(drafts.iter().collect());
+    }
+    if args.picks.is_empty() {
+        return match drafts {
+            [one] => Ok(vec![one]),
+            many => Err(CoreError::new(
+                ErrorCode::InvalidValue,
+                format!(
+                    "the source holds {} drafts; choose with --pick <KEY|ID> or --all: {}",
+                    many.len(),
+                    many.iter()
+                        .map(|draft| draft.key.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            )),
+        };
+    }
+    args.picks
+        .iter()
+        .map(|wanted| {
+            drafts
+                .iter()
+                .find(|draft| draft.key == *wanted || draft.server.id == *wanted)
+                .ok_or_else(|| CoreError::new(ErrorCode::NotFound, format!("no draft {wanted:?}")))
+        })
+        .collect()
+}
+
+/// `loadout server add --from`: drafts, the trust prompt, the save.
+fn add_from(ctx: &Context, args: &AddArgs) -> Result<u8, CoreError> {
+    let text = args.from.as_deref().unwrap_or_default();
+    let sx = sx(ctx);
+    let mut source = Source::parse(text, sx.fs);
+    if let Source::Local(local) = &source {
+        let absolute = std::path::absolute(local).map_err(|err| {
+            CoreError::new(
+                ErrorCode::InvalidPath,
+                format!("cannot resolve path: {err}"),
+            )
+            .with_path(local)
+        })?;
+        source = Source::parse(&absolute.to_string_lossy(), sx.fs);
+    }
+    let asked = match &source {
+        Source::Git { url, .. } => SourceRef::from_git_url(url)?,
+        Source::Local(folder) => SourceRef::from_local_path(folder)?,
+    };
+    let mut request = ResolveRequest::new(source);
+    request.path.clone_from(&args.path);
+    request.git_ref.clone_from(&args.git_ref);
+
+    if args.dry_run {
+        let store = ctx.open_store()?;
+        let resolved = mcp_source::resolve(store.as_ref(), &sx, &request)?;
+        if ctx.json {
+            let mut doc = resolved_json(&resolved);
+            doc["schema"] = json!(JSON_SCHEMA);
+            doc["saved"] = Value::Null;
+            print_json(&doc);
+        } else {
+            print_drafts(ctx, &resolved);
+        }
+        return Ok(0);
+    }
+
+    let store = ctx.open_store_for_change()?;
+    // Asked before anything is fetched, like `skills add`.
+    let mut answers = Answers::default();
+    let answer = trust_answer(ctx, &mut answers, &store, &asked, args.trust_source)?;
+    let mut resolved = mcp_source::resolve(Some(&store), &sx, &request)?;
+    // The host redirected a moved repository: where the content really
+    // comes from is asked about too.
+    let moved = match resolved.moved_source() {
+        Some(real) => {
+            if !ctx.json {
+                eprintln!("note: {} moved to {}", asked.key(), real.key());
+            }
+            Some(trust_answer(
+                ctx,
+                &mut answers,
+                &store,
+                real,
+                args.trust_source,
+            )?)
+        }
+        None => None,
+    };
+    let drafts = match chosen(&resolved, args) {
+        Ok(drafts) => drafts,
+        Err(err) => {
+            if !ctx.json {
+                print_drafts(ctx, &resolved);
+            }
+            return Err(err);
+        }
+    };
+    if args.id.is_some() && drafts.len() > 1 {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            "an id names one draft; pick one with --pick",
+        ));
+    }
+    let selection = clients(args);
+    let picks: Vec<Pick> = drafts
+        .iter()
+        .map(|draft| {
+            let mut server = draft.server.clone();
+            if let Some(id) = &args.id {
+                server.id.clone_from(id);
+            }
+            let body = &mut server.body;
+            if args.display_name.is_some() {
+                body.display_name.clone_from(&args.display_name);
+            }
+            if args.description.is_some() {
+                body.description.clone_from(&args.description);
+            }
+            if !args.tags.is_empty() {
+                body.tags = Some(args.tags.clone());
+            }
+            server.enable = selection.clone().map(|clients| Enable {
+                clients: Some(clients),
+                ..Enable::default()
+            });
+            Pick {
+                key: draft.key.clone(),
+                server,
+            }
+        })
+        .collect();
+    let decisions = decisions(answer, moved, args.allow_dangerous);
+    let saved = match mcp_source::save(
+        &store,
+        &sx,
+        &ctx.apply_env(),
+        &mut resolved,
+        &picks,
+        &decisions,
+    ) {
+        Ok(saved) => saved,
+        Err(err) if err.code() == ErrorCode::ScanBlocked => {
+            blocked(ctx, &err, &resolved, &picks);
+            return Ok(EXIT_SCAN_BLOCKED);
+        }
+        Err(err) => return Err(err),
+    };
+    if ctx.json {
+        let mut doc = resolved_json(&resolved);
+        doc["schema"] = json!(JSON_SCHEMA);
+        doc["saved"] = json!(saved.ids);
+        doc["commit"] = json!(saved.commit.as_ref().map(ToString::to_string));
+        doc["apply"] = json!(
+            saved
+                .apply
+                .as_ref()
+                .map(|report| report_json(report, saved.commit.as_ref()))
+        );
+        print_json(&doc);
+    } else {
+        print_drafts(ctx, &resolved);
+        println!();
+        println!(
+            "Added server {} (commit {}).",
+            saved.ids.join(", "),
+            saved.commit.as_ref().map_or("none", |c| c.short())
+        );
+        if let Some(report) = &saved.apply {
+            print_report(report, saved.commit.as_ref());
+        }
+    }
+    Ok(saved.apply.as_ref().map_or(0, apply_exit_code))
+}
+
+/// A save the scan blocked: the findings, then the error.
+fn blocked(ctx: &Context, err: &CoreError, resolved: &Resolved, picks: &[Pick]) {
+    let scans: Vec<&ScanReport> = resolved
+        .drafts()
+        .iter()
+        .filter(|draft| picks.iter().any(|pick| pick.key == draft.key))
+        .map(|draft| &draft.scan)
+        .collect();
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "error": error_json(err),
+            "scans": scans.iter().map(|scan| scan_json(scan)).collect::<Vec<_>>(),
+        }));
+    } else {
+        for scan in scans {
+            print_scan(scan, "");
+        }
+        eprintln!("error[{}]: {err}", err.code());
+        eprintln!(
+            "Nothing was saved. Review the findings; to save anyway, run again with --allow-dangerous."
+        );
+    }
+}
+
+fn file_json(change: &FileChange) -> Value {
+    json!({"path": change.path, "kind": change.kind.as_str(), "script": change.script})
+}
+
+/// Ids of the servers added with --from.
+fn source_servers(store: &Store<'_>) -> Result<Vec<String>, CoreError> {
+    Ok(store
+        .servers()?
+        .into_iter()
+        .filter_map(|ServerEntry { id, document }| {
+            let has_source = document.ok()?.value().body.meta.as_ref()?.source.is_some();
+            has_source.then_some(id)
+        })
+        .collect())
+}
+
+/// `loadout server update [ID] [--check]`.
+fn update(
+    ctx: &Context,
+    id: Option<&str>,
+    check_only: bool,
+    trust_source: Option<TrustSourceArg>,
+    allow_dangerous: bool,
+) -> Result<u8, CoreError> {
+    let store = super::require_store(ctx, "server")?;
+    let ids = match id {
+        Some(id) => {
+            ids::check(IdKind::Server, id)?;
+            vec![id.to_owned()]
+        }
+        None => source_servers(&store)?,
+    };
+    let sx = sx(ctx);
+    let ax = ctx.apply_env();
+    let mut answers = Answers::default();
+    let mut code = 0u8;
+    let mut rows = Vec::new();
+    for id in &ids {
+        // One server's failure is its row; the others are still checked.
+        let check = match mcp_source::check_update(&store, &sx, id) {
+            Ok(check) => check,
+            Err(err) => {
+                if !ctx.json {
+                    println!("{id}: failed\n  [{}] {}", err.code(), err.message());
+                }
+                rows.push(json!({ "id": id, "status": "failed", "error": error_json(&err) }));
+                code = 1;
+                continue;
+            }
+        };
+        let mut row = json!({
+            "id": id,
+            "status": check.status.as_str(),
+            "current": check.current,
+            "latest": check.latest,
+            "changes": check.changes.iter().map(|c| json!({"field": c.field, "old": c.old, "new": c.new})).collect::<Vec<_>>(),
+            "files": check.files.iter().map(file_json).collect::<Vec<_>>(),
+            "launch_lines": check.server.as_ref().map(lines_json),
+            "runs_repo_code": check.runs_repo_code,
+            "setup": check.setup,
+            "setup_again": check.setup_again,
+            "checkout_out_of_date": check.checkout_out_of_date,
+            "scan": check.scan.as_ref().map(scan_json),
+            "error": check.error.as_ref().map(error_json),
+            "commit": Value::Null,
+        });
+        if !ctx.json {
+            print_check(ctx, &check);
+        }
+        if matches!(
+            check.status,
+            UpdateStatus::Unreachable | UpdateStatus::Blocked
+        ) {
+            code = 1;
+        }
+        if check_only || check.status != UpdateStatus::Available {
+            rows.push(row);
+            continue;
+        }
+        let answer = match &check.trust {
+            Some(trust) => trust_answer(ctx, &mut answers, &store, &trust.source, trust_source)?,
+            None => Answer::NotNeeded,
+        };
+        let moved = match &check.moved_trust {
+            Some(trust) => Some(trust_answer(
+                ctx,
+                &mut answers,
+                &store,
+                &trust.source,
+                trust_source,
+            )?),
+            None => None,
+        };
+        match mcp_source::update(
+            &store,
+            &sx,
+            &ax,
+            id,
+            check.latest.as_deref(),
+            &decisions(answer, moved, allow_dangerous),
+        ) {
+            Ok(updated) => {
+                row["status"] = json!("updated");
+                row["commit"] = json!(updated.commit.as_ref().map(ToString::to_string));
+                if let Some(report) = &updated.apply {
+                    code = code.max(apply_exit_code(report));
+                    if !ctx.json {
+                        print_report(report, updated.commit.as_ref());
+                    }
+                }
+                if !ctx.json {
+                    println!("Updated server {id}.");
+                }
+            }
+            Err(err) if err.code() == ErrorCode::ScanBlocked => {
+                row["status"] = json!("blocked");
+                row["error"] = error_json(&err);
+                if !ctx.json {
+                    eprintln!("error[{}]: {err}", err.code());
+                }
+                if code == 0 {
+                    code = EXIT_SCAN_BLOCKED;
+                }
+            }
+            Err(err) => {
+                row["status"] = json!("failed");
+                row["error"] = error_json(&err);
+                if !ctx.json {
+                    eprintln!("error[{}]: {err}", err.code());
+                }
+                code = 1;
+            }
+        }
+        rows.push(row);
+    }
+    if ctx.json {
+        print_json(&json!({ "schema": JSON_SCHEMA, "servers": rows }));
+    } else if ids.is_empty() {
+        println!("No server was added from a git repository or folder.");
+    }
+    Ok(code)
+}
+
+fn print_check(ctx: &Context, check: &mcp_source::UpdateCheck) {
+    let status = check.status.as_str();
+    println!("{}: {status}", check.id);
+    for change in &check.changes {
+        println!(
+            "  {}: {} -> {}",
+            change.field,
+            change.old.as_deref().unwrap_or("(none)"),
+            change.new.as_deref().unwrap_or("(none)")
+        );
+    }
+    for file in &check.files {
+        let script = if file.script { "  (runs code)" } else { "" };
+        println!("  {} {}{script}", file.kind.as_str(), file.path);
+    }
+    if check.setup_again {
+        println!("  The update replaces the checkout: run the setup steps again afterwards:");
+        for step in &check.setup {
+            println!("    {}", setup_line(ctx, step));
+        }
+    }
+    if check.checkout_out_of_date {
+        println!(
+            "  This machine's checkout is missing or out of date; run `loadout server checkout {}`.",
+            check.id
+        );
+    }
+    if let Some(scan) = &check.scan {
+        print_scan(scan, "  ");
+    }
+    if let Some(err) = &check.error {
+        println!("  [{}] {}", err.code(), err.message());
+    }
+}
+
+/// `loadout server checkout <ID>`: fetches the repository at the commit
+/// the server file names, then the trust prompt (the requested source and
+/// a redirect target) and the scan gate, like `add --from`.
+fn checkout(
+    ctx: &Context,
+    id: &str,
+    trust_source: Option<TrustSourceArg>,
+    allow_dangerous: bool,
+) -> Result<u8, CoreError> {
+    let store = super::require_store(ctx, "server")?;
+    ids::check(IdKind::Server, id)?;
+    let sx = sx(ctx);
+    let dir: PathBuf = mcp_source::checkout_dir(&sx, id);
+    let Some(prepared) = mcp_source::prepare_checkout(&store, &sx, id)? else {
+        if ctx.json {
+            print_json(
+                &json!({ "schema": JSON_SCHEMA, "server": id, "checkout": super::path_json(&dir), "changed": false }),
+            );
+        } else {
+            println!("The checkout of {id} is up to date.");
+        }
+        return Ok(0);
+    };
+    if !ctx.json {
+        print_scan(prepared.scan(), "");
+    }
+    let mut answers = Answers::default();
+    let answer = match prepared.trust_source() {
+        Some(source) => trust_answer(ctx, &mut answers, &store, source, trust_source)?,
+        None => Answer::NotNeeded,
+    };
+    let moved = match prepared.moved_source() {
+        Some(source) => Some(trust_answer(
+            ctx,
+            &mut answers,
+            &store,
+            source,
+            trust_source,
+        )?),
+        None => None,
+    };
+    let scan = prepared.scan().clone();
+    let report = match mcp_source::restore_checkout(
+        &store,
+        &sx,
+        &ctx.apply_env(),
+        prepared,
+        &decisions(answer, moved, allow_dangerous),
+    ) {
+        Ok(report) => report,
+        Err(err) if err.code() == ErrorCode::ScanBlocked => {
+            if ctx.json {
+                print_json(&json!({
+                    "schema": JSON_SCHEMA,
+                    "error": error_json(&err),
+                    "scans": [scan_json(&scan)],
+                }));
+            } else {
+                eprintln!("error[{}]: {err}", err.code());
+                eprintln!(
+                    "Nothing was checked out. Review the findings; to go ahead anyway, run again with --allow-dangerous."
+                );
+            }
+            return Ok(EXIT_SCAN_BLOCKED);
+        }
+        Err(err) => return Err(err),
+    };
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "server": id,
+            "checkout": super::path_json(&dir),
+            "changed": true,
+            "scan": scan_json(&scan),
+            "apply": report.as_ref().map(|r| report_json(r, None)),
+        }));
+    } else {
+        println!("Checkout of {id} is in {}.", dir.display());
+        if let Some(report) = &report {
+            print_report(report, None);
+        }
+    }
+    Ok(report.as_ref().map_or(0, apply_exit_code))
 }

@@ -40,7 +40,10 @@ use crate::fs::Fs;
 use crate::paths::{LoadoutHome, normalize, plain};
 use crate::remote::git::Runner;
 
-pub use install::{InstallRequest, Installed, Naming, Source, UpdateCheck, UpdateStatus, Updated};
+pub use install::{
+    Decisions, InstallRequest, Installed, Naming, Prepared, Source, UpdateCheck, UpdateStatus,
+    Updated,
+};
 pub use link::{LinkKind, LinkResult, LinkStatus, SkillLedger, SkillLink, SyncReport};
 pub use store::StoreSkill;
 
@@ -203,15 +206,96 @@ fn plain_target(link: &Path, target: PathBuf) -> PathBuf {
 /// escapes is `invalid_path` (SPEC 17). More than [`MAX_SKILL_BYTES`] is
 /// `invalid_value`.
 pub fn read_folder(fs: &dyn Fs, dir: &Path) -> Result<SkillFiles, CoreError> {
+    Ok(read_folder_skipping(fs, dir, &[])?.0)
+}
+
+/// [`read_folder`] leaving out the folders named `skip` (at any depth,
+/// case-insensitive; links named so too): their contents are neither read
+/// nor counted. Returns the files and the relative paths of the folders
+/// left out. MCP sources skip dependency and build folders (#5).
+pub(crate) fn read_folder_skipping(
+    fs: &dyn Fs,
+    dir: &Path,
+    skip: &[&str],
+) -> Result<(SkillFiles, Vec<String>), CoreError> {
+    let mut files = SkillFiles::new();
+    let mut skip = SkipDirs {
+        names: skip,
+        skipped: Vec::new(),
+    };
+    walk_folder(fs, dir, &mut skip, &mut |relative, path, _| {
+        let bytes = fs
+            .read(path)
+            .map_err(|err| io_error("cannot read file", path, &err))?;
+        let read = bytes.len() as u64;
+        files.insert(relative, bytes);
+        Ok(read)
+    })?;
+    Ok((files, skip.skipped))
+}
+
+/// Folders a walk leaves out by name, and the ones it left out.
+struct SkipDirs<'a> {
+    names: &'a [&'a str],
+    skipped: Vec<String>,
+}
+
+/// What [`summarize_folder`] found in a skill folder.
+#[derive(Debug, Clone, Default)]
+pub struct FolderSummary {
+    /// Total size of the files, from their metadata.
+    pub bytes: u64,
+    /// The bytes of the top-level [`SKILL_FILE`], when there is one.
+    pub skill_file: Option<Vec<u8>>,
+}
+
+/// A skill folder as [`read_folder`] sees it (the same files, checks and
+/// errors), without reading the contents: sizes come from file metadata,
+/// every other file is opened for reading (so one this account cannot
+/// read, or one another process holds without read sharing, is the same
+/// `cannot read file` error) but not read, and only [`SKILL_FILE`] is
+/// read. Listings use it (#16); anything that copies, hashes or compares
+/// content uses [`read_folder`].
+pub fn summarize_folder(fs: &dyn Fs, dir: &Path) -> Result<FolderSummary, CoreError> {
+    let mut skill_file = None;
+    let mut skip = SkipDirs {
+        names: &[],
+        skipped: Vec::new(),
+    };
+    let bytes = walk_folder(fs, dir, &mut skip, &mut |relative, path, len| {
+        if relative != SKILL_FILE {
+            std::fs::File::open(path).map_err(|err| io_error("cannot read file", path, &err))?;
+            return Ok(len);
+        }
+        let bytes = fs
+            .read(path)
+            .map_err(|err| io_error("cannot read file", path, &err))?;
+        let read = bytes.len() as u64;
+        skill_file = Some(bytes);
+        Ok(read)
+    })?;
+    Ok(FolderSummary { bytes, skill_file })
+}
+
+/// Called by [`walk`] for each file: its relative path, its path and its
+/// size from metadata; returns the bytes it counts towards the total.
+type OnFile<'a> = dyn FnMut(String, &Path, u64) -> Result<u64, CoreError> + 'a;
+
+/// Walks `dir` as [`read_folder`] describes; the total counted.
+fn walk_folder(
+    fs: &dyn Fs,
+    dir: &Path,
+    skip: &mut SkipDirs<'_>,
+    on_file: &mut OnFile<'_>,
+) -> Result<u64, CoreError> {
     confine(fs, dir)?;
     let root = fs
         .canonicalize(dir)
         .map_err(|err| io_error("cannot resolve folder", dir, &err))?;
-    let mut files = SkillFiles::new();
     let mut total = 0u64;
     let mut visited = vec![root.clone()];
-    walk(fs, &root, dir, "", &mut files, &mut total, &mut visited)?;
-    Ok(files)
+    walk(fs, &root, dir, "", skip, on_file, &mut total, &mut visited)?;
+    Ok(total)
 }
 
 /// Whether a `.git` folder or file is anywhere below `dir` (links are not
@@ -235,12 +319,14 @@ pub(crate) fn has_nested_git(fs: &dyn Fs, dir: &Path) -> Result<bool, CoreError>
     Ok(false)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk(
     fs: &dyn Fs,
     root: &Path,
     dir: &Path,
     prefix: &str,
-    files: &mut SkillFiles,
+    skip: &mut SkipDirs<'_>,
+    on_file: &mut OnFile<'_>,
     total: &mut u64,
     visited: &mut Vec<PathBuf>,
 ) -> Result<(), CoreError> {
@@ -264,6 +350,15 @@ fn walk(
         } else {
             format!("{prefix}/{name}")
         };
+        if skip
+            .names
+            .iter()
+            .any(|skipped| name.eq_ignore_ascii_case(skipped))
+            && fs.is_dir(&path)
+        {
+            skip.skipped.push(relative);
+            continue;
+        }
         let is_dir = match entry(fs, &path)? {
             Entry::Missing => continue,
             Entry::Link(_) => {
@@ -294,7 +389,7 @@ fn walk(
             Entry::File => false,
         };
         if is_dir {
-            walk(fs, root, &path, &relative, files, total, visited)?;
+            walk(fs, root, &path, &relative, skip, on_file, total, visited)?;
         } else {
             // The size first: a huge file is refused before it is read.
             let len = std::fs::metadata(&path)
@@ -303,14 +398,10 @@ fn walk(
             if *total + len > MAX_SKILL_BYTES {
                 return Err(too_large(&path));
             }
-            let bytes = fs
-                .read(&path)
-                .map_err(|err| io_error("cannot read file", &path, &err))?;
-            *total += bytes.len() as u64;
+            *total += on_file(relative, &path, len)?;
             if *total > MAX_SKILL_BYTES {
                 return Err(too_large(&path));
             }
-            files.insert(relative, bytes);
         }
     }
     Ok(())

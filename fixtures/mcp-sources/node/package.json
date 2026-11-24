@@ -1,0 +1,6 @@
+{
+  "name": "@acme/clock-mcp",
+  "version": "0.1.0",
+  "description": "Tells the time",
+  "bin": { "clock-mcp": "index.js" }
+}

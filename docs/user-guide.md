@@ -261,7 +261,11 @@ always starts at User. The pages:
   trust**). Each card counts the client's entries not managed by Loadout,
   and **Manage** lists them with **Import...**.
 - **Install**: Skill (Git or Local folder or `.zip`/`.skill` archive) and
-  MCP (Manual form or Paste config).
+  MCP (**Form or paste**, or **From Git or folder**). Skills are fetched and
+  scanned first and shown in a review (files, source, trust state and the
+  built-in scan's findings) before **Install**; see
+  [Servers from a Git repository or folder in the app](#servers-from-a-git-repository-or-folder-in-the-app)
+  for MCP.
 - **Import**: bring in what your clients already have: MCP servers,
   skill folders, project folders, and the SkillDock migration (see
   [Importing in the app](#importing-in-the-app)).
@@ -272,7 +276,8 @@ always starts at User. The pages:
   state and conflicts.
 - **Settings**: App Preferences (Appearance, the not-managed notice),
   Versioning & Backup (remotes), Migration (a link to the Import page),
-  Secrets, and Updates (see [Updates](#updates)).
+  Secrets, Sources (see [Source trust](#source-trust)) and Updates (see
+  [Updates](#updates)).
 - **About**: version, app identifier, repository and data directory.
 
 A **pending changes** pill appears in the header when changes wait for
@@ -409,6 +414,7 @@ Exit codes:
 | 5 | Blocked by missing secrets |
 | 6 | Timed out waiting for the store lock |
 | 7 | A project manifest needs `loadout project trust` |
+| 8 | The built-in scan blocked an install or update (`--allow-dangerous` overrides it) |
 
 Commands that edit the store and apply at once (`server add`, `server rm`,
 `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`,
@@ -458,6 +464,118 @@ hold references:
 On Windows, clients that start servers without a shell (Claude Desktop)
 get `npx` and other `.cmd` launchers wrapped as `cmd /c npx ...`
 automatically; the store keeps the portable `npx`.
+
+### Servers from a Git repository or folder
+
+`loadout server add --from <GIT-URL|PATH>` proposes servers from a Git
+repository (https, ssh, `file://` or a bare repository; `--ref` picks a
+branch, tag or commit, `--path` a folder inside it) or a local folder. It
+reads, in this order: `server.json` (MCP Registry: npm, PyPI, NuGet and OCI
+packages become `npx`, `uvx`, `dnx` and `docker run` commands pinned to the
+package version; remotes become http or sse servers), `manifest.json`
+(MCPB/DXT bundles), committed client configs (`.mcp.json`, `mcp.json`,
+`.vscode/mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`,
+`.omp/mcp.json`, `claude_desktop_config.json`) and, only when none of those
+give a server, the repository itself as the server (`package.json` with a
+`bin`, `pyproject.toml` scripts, a `Dockerfile`), pinned to the commit:
+`npx -y github:<owner>/<repo>#<sha>`, `uvx --from git+<url>@<sha> <script>`.
+Identical definitions found in several files are proposed once.
+
+```
+loadout server add --from https://github.com/acme/weather --dry-run
+loadout server add --from https://github.com/acme/weather --pick weather --client claude-code
+```
+
+- Nothing runs while proposing: git clones shallow into
+  `LOADOUT_HOME/cache/mcp-sources` and the clone is removed afterwards
+  (leftovers of an interrupted run are removed after an hour).
+  Dependency and build folders (`node_modules`, `.venv`, `venv`,
+  `__pycache__`, `target`, `dist`, `build`) are not read or scanned; the
+  output lists them. `--dry-run` lists the proposed servers, every launch
+  line (an OS-specific command too), what they need and the scan findings,
+  and saves nothing.
+- With one proposed server it is saved; with several, choose with `--pick
+  <KEY|ID>` (repeatable) or `--all`. A positional `ID` renames the one
+  server saved; `--client`, `--all-detected`, `--display-name`,
+  `--description` and `--tag` apply to what is saved.
+- **Secrets are never copied.** A secret the file declares becomes a
+  `${secret:ALIAS}` reference; a literal that looks like a secret in a
+  committed config (or in a client-specific setting such as omp's `auth`)
+  is replaced by a reference or left out, and its value is dropped. Set
+  the secrets afterwards (`loadout secrets set ALIAS`).
+- A registry package without a version is marked **Not pinned**: each start
+  can run different code. A package from another registry runs from that
+  registry (`--registry=...`, `--index-url=...`).
+- A server that runs code from the repository (the repository as a
+  package, a bundle's own files, a committed config that starts a file of
+  the repository) runs that code every time a client starts it. When it
+  runs from the repository's files, the clone is kept at
+  `LOADOUT_HOME/servers/<id>` on this machine only (never synced) and the
+  command names it as `${loadout_home}/servers/<id>`. Its client entries
+  are blocked while that copy is missing or at another commit (after
+  another machine updated the server, for example): run `loadout server
+  checkout <ID>`, which asks the same trust question and runs the same scan
+  as adding it (`--allow-dangerous` for a server you saved anyway).
+  `server rm` removes the copy.
+- A server added from a folder belongs to this machine: on your other
+  machines its entries are blocked ("added from a folder on another
+  machine"). Setup steps (`npm install`, `docker build`) are printed with
+  the real paths; run them yourself. A Docker server's image is named
+  `loadout-local/<id>:...` and never pulled: build it first.
+- Saving goes through the source trust question (see [Source
+  trust](#source-trust); a local folder is asked about too) and the
+  built-in scan: a dangerous verdict saves nothing (exit code 8) unless
+  you pass `--allow-dangerous`. Without a terminal, pass
+  `--trust-source[=once|repo|owner|host]`.
+- The server file records where it came from (`[meta.source]`: URL or
+  folder, folder inside the repository, ref, commit, file and converter).
+  `loadout server update [ID] --check` reads the source again and lists
+  the fields that would change (and the changed files of a checkout);
+  `loadout server update [ID]` applies it, keeping the server's id, your
+  values for environment variables and headers that still exist, and
+  your secret names. A checkout is replaced only once the update is
+  committed; run its setup steps again afterwards.
+
+### Servers from a Git repository or folder in the app
+
+**Install > MCP > From Git or folder** proposes servers from a Git
+repository (URL, with an optional folder in it and a branch, tag or
+commit) or a folder you pick. Loadout reads `server.json` (MCP Registry),
+`manifest.json` (MCPB/DXT bundles), committed client configs (`.mcp.json`,
+`.vscode/mcp.json`, `.cursor/mcp.json`, ...) and, when none of those
+exist, `package.json`, `pyproject.toml` or a `Dockerfile` (the repository
+is the server). **Find servers** fetches and scans; nothing runs and
+nothing is saved yet.
+
+- Each proposed server shows where it came from (file, entry, converter),
+  every command line it launches with (the base one and each
+  operating-system override), **Not pinned** when the command names no
+  version or commit, what it needs (secrets to set after saving, values the
+  file held that Loadout did not keep, setup steps such as `docker build`
+  that you run yourself) and its scan findings. Dependency and build folders
+  (`node_modules`, `dist`, ...) are not read or scanned; the review names
+  them.
+- A server that runs code from the repository says so: "This server runs
+  code from this repository every time a client starts it." Its command is
+  pinned to the reviewed commit.
+- Tick the servers to add. **Review and edit** opens one in the usual
+  server form (ID, command, environment, clients, ...). **Enable for**
+  picks the clients of every proposed server at once.
+- **Save** asks the source's trust question first when needed (below),
+  then the scan gate: a dangerous verdict saves only through **Save
+  anyway**, after you tick that you read the findings. **Discard** drops
+  the review and its temporary clone.
+- A saved server's details on the MCP page have **Check for update**. An
+  update opens a review with each field that changes (now and after), every
+  new command line, the setup steps (and a reminder to run them again when
+  the update replaces the local copy), changed files of its checkout
+  (scripts marked), the trust state and the scan, then **Update** (or
+  **Update anyway**).
+- A server that runs from a copy of its repository is not given to clients
+  while that copy is missing or out of date on this machine. **Restore
+  copy** fetches and scans the copy the server file names and shows it in a
+  review: **Restore** asks the trust question when needed, and a dangerous
+  verdict restores only through **Restore anyway**.
 
 ## Clients and apply
 
@@ -572,9 +690,11 @@ only after the check, is reported the same way, and the other files of
 the run still apply. To have Loadout manage such a file again, make it
 writable for your account (or ask whoever manages that folder). The CLI
 checks on every run; the app keeps its answer for a file until the file
-watcher sees a change in that folder, so when only the permissions
-changed and the app still shows the lock, restart the app (tracked in
-[#23](https://github.com/DailenG/agent-loadout/issues/23)).
+watcher sees a change in that folder. When only the permissions changed
+and the app still shows the lock (or no longer should), click
+**Refresh** on any page: the app forgets its cached answers and checks
+every file and folder again. Switching back to the app after five
+minutes or more does the same.
 
 ## Projects and trust
 
@@ -805,7 +925,9 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
 [adapters.md](adapters.md).
 
 - Install: `loadout skills add <git URL|folder|archive> [--path DIR] [--ref REF] [--id ID]`.
-  A GitHub `/tree/<ref>/<path>` URL selects one folder.
+  A GitHub `/tree/<ref>/<path>` URL selects one folder. The first install
+  from a git source asks whether you trust it (see
+  [Source trust](#source-trust)).
 - Enable: `loadout skills enable ID [--client C]...` (default: every
   detected client); `--project PATH` enables it in a project's manifest
   instead.
@@ -815,6 +937,8 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
 - `loadout skills update [ID] [--check]` updates git skills;
   `loadout skills rm ID` removes a skill and the links and copies Loadout
   made.
+- Every install and update is scanned first by Loadout's built-in
+  scanner (see [below](#the-built-in-scan)).
 - `loadout skills scan` classifies each client skill folder: managed,
   unmanaged (a real folder), or mismatch (a link to something else).
   `loadout skills import CLIENT NAME` brings an unmanaged folder into the
@@ -851,6 +975,145 @@ Code, oh-my-pi, Codex, Pi, GitHub Copilot and Cursor; the folders are in
 
 Loadout never overwrites or removes a folder it does not own: a real
 folder or a foreign link with the same name is reported and left alone.
+
+### The built-in scan
+
+Skills feed instructions straight to your agent and can ship scripts it
+runs, so Loadout scans every skill it installs or updates, offline, with
+its own rules. Nothing is sent anywhere. The rules look for:
+
+- downloading and running code (`curl | sh`, also across a `\` line
+  continuation, through `env` or `tee`; `iwr | iex`; download to a file
+  and run it; `eval` of a download), encoded payloads that are decoded and
+  run, reverse shells;
+- reading or uploading SSH keys, cloud or git credentials or browser
+  passwords in a file that also calls the network (`cat ~/.ssh/id_rsa |
+  curl`, `curl -F @~/.ssh/...`, `tar ~/.ssh | curl -T`, `scp` of a key;
+  as a warning, `.env` files or tool tokens with network calls);
+  request-capture and paste services;
+- hidden text: invisible Unicode tag characters (a real England,
+  Scotland or Wales flag is fine), runs of variation selectors,
+  zero-width characters, bidirectional controls, and HTML comments
+  (invisible when rendered) that hold instructions for the agent;
+- prompt injection ("ignore all previous instructions"), telling the agent
+  to hide what it does from you, turning off permission prompts
+  (`--dangerously-skip-permissions` and similar), acting without asking,
+  and changing agent memory or configuration files (`CLAUDE.md`,
+  `AGENTS.md`, agent settings, MCP configs, Loadout's own scan rules);
+- native executables and libraries, found by their first bytes (ELF, PE,
+  Mach-O, WebAssembly) whatever their name, which cannot be reviewed by
+  reading them.
+
+**Prose and code.** In a skill's Markdown, a command or phrase in a
+sentence (outside a fenced code block) is a `warning`: "Install uv with
+`curl -LsSf https://astral.sh/uv/install.sh | sh`", "never disable the
+safety checks" or "treat 'ignore previous instructions' as untrusted"
+describe something. The same command in a fenced code block (```` ``` ````)
+or in a script file is something to run, and stays `dangerous`. Hidden
+text and HTML-comment directives are dangerous anywhere.
+
+**What is read.** Files are typed by their first bytes, not their names:
+a "`logo.png`" that holds a script is scanned as a script. UTF-16 files
+(what Windows PowerShell writes by default) are decoded first. Images,
+fonts, archives, media and native binaries are not read as text; the
+scan lists them in one `info` finding (`not-content-scanned`). Only the
+first 4 MiB of a file are scanned; a larger file gets a
+`not-fully-scanned` warning, never a silent pass.
+
+Each finding has a severity (`info`, `warning` or `dangerous`), the rule,
+the file and line, and the matched text: secrets masked (token formats,
+URL passwords, values of `API_KEY=...`, `Authorization: ...`, `--token
+...` and other credential-named settings, and random-looking strings),
+invisible characters spelled out such as `\u{200B}` or `[hidden: ...]`.
+The verdict is the worst finding: `clean`, `warning` or `dangerous`.
+
+- **`dangerous` blocks.** `loadout skills add` installs nothing, prints
+  the findings and exits with code 8; review them and run again with
+  `--allow-dangerous` only if you trust the content. `loadout skills
+  update` leaves such a skill as it is (`blocked`), applies the others and
+  exits with code 8; `--check` shows the findings of each available update
+  first. In the app, the install review, the skill update review and the
+  MCP draft and update reviews list the findings (severity, rule,
+  `file:line`, message and excerpt); a dangerous verdict hides **Install**
+  / **Update** / **Save** and offers **Install anyway** / **Update
+  anyway** / **Save anyway**, enabled only after you tick "I read the
+  findings and want to go ahead anyway".
+- **Warnings and info** are shown with the result and never block.
+- Importing a client's unmanaged folder and vendoring an agents CLI skill
+  report findings but never block: that content is already on this
+  machine.
+- Trusting a source never skips the scan. A clean verdict means no rule
+  matched, not that the skill is safe: still read what you install.
+- Results are cached by content in `cache/scan`, so unchanged content is
+  not scanned again.
+- The rules are data (`scan-rules.toml`, versioned). A custom rules file
+  saved as `state/scan-rules.toml` in the data folder is merged in: it may
+  add rules or raise a built-in rule's severity, never remove or lower
+  one (such entries are skipped with a warning). The built-in rules
+  always run, and the result says "custom rules in use". A file that does
+  not load is reported with every scan.
+
+### Source trust
+
+Only install from sources you trust. Skills and MCP servers can run
+commands and read your files. Loadout treats trust in a source as a
+decision you make and it records, like trusting a project.
+
+- **The first install from a git source asks.** A terminal prompt shows
+  the source (`github.com/example-org/skills`), whether it is official
+  (`github.com/anthropics`, `github.com/modelcontextprotocol`), and which
+  skills you already installed from it, then offers **Trust this time
+  only**, **Always trust this source**, or **Cancel**. "Always" asks what
+  it covers: the repository (the default), every repository of its owner,
+  or, on a host that isn't a public service such as github.com, every
+  repository on the host.
+- **Trust is never implicit.** Without a terminal (a script, `--json`), an
+  untrusted source fails with `source_trust_required` unless you pass
+  `--trust-source` (this time only) or `--trust-source=repo|owner|host`
+  (always); write it with `=`. `--yes` never answers the trust prompt.
+  The flag and `loadout source trust` are explicit opt-ins that need no
+  terminal, so a coding agent with shell access can run them too: only
+  use them, or let an agent use them, for a source you trust. Keeping
+  agents from approving trust is tracked in
+  [#8](https://github.com/DailenG/agent-loadout/issues/8).
+- **A block wins.** A blocked source is refused (`source_blocked`) even
+  when an owner or host above it is trusted, and even with
+  `--trust-source`.
+- **Updates still ask when something changed.** A trusted source's update
+  check still shows the changed files (scripts and other executable files
+  are marked), and the scan still runs. If the repository's history was
+  rewritten (a force-push removed the commit you installed) or it was
+  renamed or transferred (the host redirects it elsewhere), its trust
+  lapses and the next update asks again. A source you never trusted asks
+  on every install and update, including skills installed before 0.5.0.
+- **Managing trust:** `loadout source ls` lists trusted and blocked
+  sources with when, where and how each decision was made;
+  `loadout source trust <URL|KEY> [--scope repo|owner|host]`,
+  `loadout source block <URL|KEY> [--scope ...]` and
+  `loadout source untrust <KEY>` change them. Keys look like
+  `github.com/acme/skills` (a repository), `github.com/acme/*` (an owner)
+  or `git.example.com/*` (a host). Untrusting never uninstalls anything;
+  the next install or update from that source asks again. Decisions live
+  in `store/sources.toml` and sync with your remotes.
+- Local folders and archives you pick aren't asked about (they're already
+  on this machine; the scan still runs). A git repository given by a local
+  path or `file://` URL is asked about like any other source.
+- **In the app** the same question is a dialog, asked when you press
+  **Install**, **Update** or **Save** in a review: **Trust this time
+  only** (the default; nothing is recorded), **Always trust**
+  *repository*, **Always trust everything from** *owner* (or, on a
+  self-hosted server, everything on it), or **Cancel** (nothing happens).
+  It says why it asks (first time, not trusted, or trust lapsed after a
+  force-push or move) and marks official sources without skipping the
+  question. MCP servers from a picked folder are asked about too, at the
+  repository scope only.
+- **Settings > Sources** lists every decision: trusted or blocked, for a
+  repository, an owner or a host, when, how (the app, a prompt,
+  `--trust-source` or `loadout source`) and on which machine, with a note
+  when trust lapsed. **Revoke** (or **Unblock**) removes a decision, so the
+  next install or update asks again; **Block** turns a trust into a block;
+  **Block a source...** blocks a URL you have no decision for yet. None of
+  these uninstall anything.
 
 ## Migrating from SkillDock
 

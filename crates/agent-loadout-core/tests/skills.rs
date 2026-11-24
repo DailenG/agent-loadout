@@ -20,11 +20,15 @@ use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind}
 use agent_loadout_core::remote::git::SystemRunner;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, EntryClass};
-use agent_loadout_core::skills::install::{self, InstallRequest, Naming, Source, UpdateStatus};
+use agent_loadout_core::skills::install::{
+    self, Decisions, InstallRequest, Naming, Source, UpdateStatus,
+};
 use agent_loadout_core::skills::link::{self, LinkMethod, SkillLedger};
 use agent_loadout_core::skills::{
     self, LinkKind, LinkStatus, SkillsEnv, SyncReport, frontmatter, store,
 };
+use agent_loadout_core::sources::{self, SourceRef, SourceScope, TrustGrant, TrustVia};
+use agent_loadout_core::store::Store;
 use agent_loadout_core::{Env, ErrorCode};
 use agent_loadout_testkit::git_env::{git_vars, init_bare, system_git_or_skip, with_git_vars};
 use support::{Fx, copy_dir, fixtures, git_commit, git_init, host_os};
@@ -506,6 +510,12 @@ fn an_untrusted_project_is_left_alone() {
     assert!(copy.join(skills::MARKER_FILE).is_file());
 }
 
+/// Always trusts the git source `url` (#24), as the user would once.
+fn trust_source(store: &Store<'_>, url: &str) {
+    let source = SourceRef::from_git_url(url).unwrap();
+    sources::trust(store, &source, SourceScope::Repo, TrustVia::CliCommand).unwrap();
+}
+
 /// Runs the system git with the test kit's isolated environment.
 fn git_run(fx: &Fx, git: &Path, cwd: &Path, args: &[&str]) {
     let status = fx
@@ -555,6 +565,7 @@ fn git_install_update_and_an_unreachable_upstream() {
     let store = fx.store();
     let (bare, work) = upstream(&fx, &git);
     let url = bare.to_string_lossy().into_owned();
+    trust_source(&store, &url);
 
     // The repository holds two skills: without a path the install asks.
     let source = Source::parse(&url, &fx.fs);
@@ -626,7 +637,7 @@ fn git_install_update_and_an_unreachable_upstream() {
             .contains("v2")
     );
 
-    let updated = install::update(&store, &sx, "alpha").unwrap();
+    let updated = install::update(&store, &sx, "alpha", &Decisions::default()).unwrap();
     assert!(updated.commit.is_some());
     assert_eq!(
         fx.log()[0].summary,
@@ -650,7 +661,7 @@ fn git_install_update_and_an_unreachable_upstream() {
         ErrorCode::SourceUnreachable
     );
     let commits = fx.commit_count();
-    let err = install::update(&store, &sx, "alpha").unwrap_err();
+    let err = install::update(&store, &sx, "alpha", &Decisions::default()).unwrap_err();
     assert_eq!(err.code(), ErrorCode::SourceUnreachable);
     assert_eq!(fx.commit_count(), commits);
     assert_eq!(
@@ -662,7 +673,7 @@ fn git_install_update_and_an_unreachable_upstream() {
     assert!(skill.problems.is_empty(), "{:?}", skill.problems);
 
     // A clone that cannot be reached at install is source_unreachable too.
-    let gone = InstallRequest::new(Source::Git {
+    let mut gone = InstallRequest::new(Source::Git {
         url: fx
             .th
             .root()
@@ -672,6 +683,7 @@ fn git_install_update_and_an_unreachable_upstream() {
         git_ref: None,
         path: None,
     });
+    gone.decisions.trust = Some(TrustGrant::Once);
     let err = install::install(&store, &sx, &gone).unwrap_err();
     assert_eq!(err.code(), ErrorCode::SourceUnreachable);
 
@@ -1167,6 +1179,7 @@ fn a_skill_folder_linked_in_a_repository_is_never_installed() {
     let sx = sx(&fx, &env);
     let store = fx.store();
     let url = bare.to_string_lossy().into_owned();
+    trust_source(&store, &url);
     let request = InstallRequest::new(Source::parse(&url, &fx.fs));
     let err = install::install(&store, &sx, &request).unwrap_err();
     assert_eq!(err.code(), ErrorCode::NotFound, "{err}");
@@ -1194,6 +1207,55 @@ fn files_over_the_limit_are_refused_before_reading() {
     let err = install::install(&fx.store(), &sx(&fx, &env), &request).unwrap_err();
     assert_eq!(err.code(), ErrorCode::InvalidValue);
     assert!(err.message().contains("100 MB"), "{err}");
+}
+
+/// Listings size a skill from file metadata and read only `SKILL.md`
+/// (#16), with the same files, checks and errors as a full read.
+#[test]
+fn a_listing_sees_a_folder_as_a_full_read_does_without_reading_it() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let src = source(&fx, "repo-conventions");
+    dir_link(&src.join("references"), &src.join("linked"));
+    let files = skills::read_folder(&fx.fs, &src).unwrap();
+    let summary = skills::summarize_folder(&fx.fs, &src).unwrap();
+    assert_eq!(summary.bytes, skills::files_size(&files));
+    assert_eq!(summary.skill_file.as_ref(), files.get(skills::SKILL_FILE));
+
+    // The store listing reports the same size as the stored content.
+    let installed = install::install(
+        &fx.store(),
+        &sx(&fx, &env),
+        &InstallRequest::new(Source::Local(src.clone())),
+    )
+    .unwrap();
+    let listed = store::list(&fx.store()).unwrap();
+    let skill = listed
+        .iter()
+        .find(|skill| skill.id == installed.id)
+        .unwrap();
+    let content = store::read_content(&fx.store(), &installed.id).unwrap();
+    assert_eq!(skill.bytes, skills::files_size(&content));
+    assert!(
+        skill.frontmatter.is_some() && skill.problems.is_empty(),
+        "{skill:#?}"
+    );
+
+    // A link that escapes and a file over the limit fail alike.
+    let outside = fx.th.root().join("private");
+    fx.write(&outside.join("token.txt"), "not part of the skill\n");
+    dir_link(&outside, &src.join("escaping"));
+    let read = skills::read_folder(&fx.fs, &src).unwrap_err();
+    let summarized = skills::summarize_folder(&fx.fs, &src).unwrap_err();
+    assert_eq!(summarized.code(), ErrorCode::InvalidPath);
+    assert_eq!(summarized.message(), read.message());
+
+    let big = source(&fx, "plain-notes");
+    let file = std::fs::File::create(big.join("huge.bin")).unwrap();
+    file.set_len(skills::MAX_SKILL_BYTES + 1).unwrap();
+    drop(file);
+    let err = skills::summarize_folder(&fx.fs, &big).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::InvalidValue);
 }
 
 #[test]

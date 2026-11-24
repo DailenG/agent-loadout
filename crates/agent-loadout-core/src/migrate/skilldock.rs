@@ -809,7 +809,7 @@ pub fn map_record(record: &Record, id: &str, aliases: &mut Aliases) -> Result<Ma
     body.meta = Some(Meta {
         homepage,
         origin: Some(ORIGIN.to_owned()),
-        extra: toml::Table::new(),
+        ..Meta::default()
     });
     let mut unknown_clients = Vec::new();
     for client in &record.enabled_app_ids {

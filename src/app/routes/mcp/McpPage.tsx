@@ -14,6 +14,7 @@ import { useNotifications } from "@/app/components/notifications";
 import { ReadOnlyBadge } from "@/app/components/ReadOnlyBadge";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
 import { useEventCallback } from "@/app/components/useEventCallback";
+import { useVirtualList, VirtualSlot } from "@/app/components/useVirtualSlots";
 import type { ImportTarget } from "@/app/routes/import/model";
 import { useScopeUnmanaged, UnmanagedSection } from "@/app/routes/import/UnmanagedSection";
 import { useActiveScope } from "@/app/scope/ActiveScope";
@@ -33,6 +34,7 @@ import { AddIcon, DeleteIcon, EditIcon, McpServerMonogram, PasteIcon, PowerToggl
 import { ProjectServersView, useProjectServers, writableLayers } from "./ProjectServers";
 import type { ProjectDialogState } from "./ProjectServerDialog";
 import { ServerEditDialog, type EditTab } from "./ServerEditDialog";
+import { McpSourceUpdate } from "./McpSourceUpdate";
 
 export type McpPageProps = {
   /** Opens the Pending changes drawer (drift is resolved there). */
@@ -46,6 +48,10 @@ export type McpPageProps = {
 type DialogState =
   | { mode: "create"; focusPaste: boolean }
   | { mode: "edit"; serverId: string; tab: EditTab };
+
+/** Heights of a list card and a grid card never rendered yet (#17), in pixels. */
+const LIST_CARD_ESTIMATE = 68;
+const GRID_CARD_ESTIMATE = 150;
 
 const TRANSPORT_LABELS = {
   stdio: "mcp.transport.stdio",
@@ -378,6 +384,7 @@ const McpServerCard = memo(function McpServerCard({
               </div>
             </dl>
           </section>
+          {row.origin?.startsWith("source:") ? <McpSourceUpdate serverId={row.id} name={name} /> : null}
           <section>
             <div className="skill-card__section-header">
               <h4>{t("mcp.card.enableApps")}</h4>
@@ -511,6 +518,9 @@ export function McpPage({ onOpenPending, onOpenInstall, onOpenImport }: McpPageP
       [row.id, row.displayName ?? "", row.launch].some((field) => field.toLowerCase().includes(needle)),
     );
   }, [list, deferredQuery]);
+  // Only the cards near the viewport render (#17); an open or busy card always does. A view switch
+  // starts the remembered heights afresh.
+  const slots = useVirtualList(LIST_CARD_ESTIMATE, [expandedId, deleteConfirmingId, deletingId, bulkId], viewMode);
 
   const handleDelete = useEventCallback(async (row: ServerRow) => {
     if (deletingId) {
@@ -646,24 +656,35 @@ export function McpPage({ onOpenPending, onOpenInstall, onOpenImport }: McpPageP
       {servers.isPending ? <p className="mcp-page-loading">{t("mcp.loading")}</p> : null}
 
       <section className={`mcp-server-list card-list${viewMode === "grid" ? " tool-card-grid" : ""}`}>
-        {filtered.map((row) => (
-          <McpServerCard
+        {filtered.map((row, index) => (
+          <VirtualSlot
             key={row.id}
-            row={row}
-            clients={clients}
-            isGrid={viewMode === "grid"}
-            isExpanded={expandedId === row.id && !row.invalid}
-            isBulk={bulkId === row.id}
-            isDeleteConfirming={deleteConfirmingId === row.id}
-            isDeleting={deletingId === row.id}
-            anyDeleting={Boolean(deletingId)}
-            deleteActionRef={deleteActionRef}
-            onExpandedChange={setExpandedId}
-            onDelete={handleDelete}
-            onToggleAll={handleToggleAll}
-            onEdit={handleEdit}
-            onOpenPending={onOpenPending}
-          />
+            list={slots}
+            id={row.id}
+            index={index}
+            label={serverName(row)}
+            className="virtual-slot"
+            estimate={viewMode === "grid" ? GRID_CARD_ESTIMATE : LIST_CARD_ESTIMATE}
+          >
+            {() => (
+              <McpServerCard
+                row={row}
+                clients={clients}
+                isGrid={viewMode === "grid"}
+                isExpanded={expandedId === row.id && !row.invalid}
+                isBulk={bulkId === row.id}
+                isDeleteConfirming={deleteConfirmingId === row.id}
+                isDeleting={deletingId === row.id}
+                anyDeleting={Boolean(deletingId)}
+                deleteActionRef={deleteActionRef}
+                onExpandedChange={setExpandedId}
+                onDelete={handleDelete}
+                onToggleAll={handleToggleAll}
+                onEdit={handleEdit}
+                onOpenPending={onOpenPending}
+              />
+            )}
+          </VirtualSlot>
         ))}
         {list && filtered.length === 0 ? (
           <div className="panel-card empty-state">

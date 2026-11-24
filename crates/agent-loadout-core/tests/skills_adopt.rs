@@ -718,6 +718,118 @@ fn a_renamed_skill_skips_an_id_a_folder_uses() {
     assert!(!is_link(&unrelated) && fx.read(&unrelated.join("SKILL.md")).contains("Something"));
 }
 
+/// Denies this account reading `file`'s data (Windows: a deny ACE for
+/// Everyone on read data through `icacls`; Unix: mode 000). `false`, after
+/// undoing it, where the file still reads (root, or no `icacls`): the
+/// caller skips.
+fn deny_read(file: &Path) -> bool {
+    if cfg!(windows) {
+        let denied = std::process::Command::new("icacls")
+            .arg(file)
+            .args(["/deny", "*S-1-1-0:(RD)"])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !denied {
+            return false;
+        }
+    } else {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
+    }
+    if std::fs::read(file).is_ok() {
+        allow_read(file);
+        return false;
+    }
+    true
+}
+
+fn allow_read(file: &Path) {
+    if cfg!(windows) {
+        let _ = std::process::Command::new("icacls")
+            .arg(file)
+            .args(["/remove:d", "*S-1-1-0"])
+            .stdout(std::process::Stdio::null())
+            .status();
+    } else {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644));
+        }
+    }
+}
+
+/// A store skill with a file this account cannot read (#16 review): the
+/// listing reports it and never distributes it, and adopting a folder that
+/// would be renamed onto its id takes the next free id instead of failing.
+#[test]
+fn an_unreadable_store_file_is_listed_and_adopt_skips_its_id() {
+    let fx = Fx::new();
+    let env = fx.env.clone();
+    let sx = sx(&fx, &env);
+    let store = fx.store();
+    let source = skill(&fx, &fx.th.root().join("src"), "diff-omp", "In the store.");
+    agent_loadout_core::skills::install::install(
+        &store,
+        &sx,
+        &agent_loadout_core::skills::InstallRequest::new(
+            agent_loadout_core::skills::Source::Local(source),
+        ),
+    )
+    .unwrap();
+    let locked = store::content_dir(&store, "diff-omp")
+        .unwrap()
+        .join("scripts")
+        .join("run.sh");
+    if !deny_read(&locked) {
+        eprintln!("skipped: this account reads the file anyway");
+        return;
+    }
+    let listed = store::list(&store);
+    skill(&fx, &claude_skills(&fx), "diff", "Claude's version.");
+    skill(&fx, &omp_skills(&fx), "diff", "omp's version.");
+    let scan = adopt::scan(Some(&store), &sx, Scope::User, None, None);
+    let report = scan.and_then(|scan| {
+        let claude = scan
+            .candidate("diff")
+            .unwrap()
+            .variants
+            .iter()
+            .find(|variant| variant.clients().any(|client| client == "claude-code"))
+            .unwrap()
+            .hash
+            .clone();
+        adopt::adopt(
+            &store,
+            &sx,
+            Scope::User,
+            None,
+            None,
+            &[AdoptChoice {
+                name: "diff".to_owned(),
+                action: AdoptAction::Both { primary: claude },
+            }],
+        )
+    });
+    allow_read(&locked);
+
+    let listed = listed.unwrap();
+    let locked_skill = listed.iter().find(|skill| skill.id == "diff-omp").unwrap();
+    assert!(!locked_skill.has_content, "{locked_skill:#?}");
+    assert!(
+        locked_skill
+            .problems
+            .iter()
+            .any(|err| err.message().contains("cannot read file")),
+        "{locked_skill:#?}"
+    );
+    assert_eq!(report.unwrap().added, ["diff", "diff-omp-2"]);
+}
+
 // The scan cache of the unmanaged-entry notice (#3, #9).
 
 fn cursor_skills(fx: &Fx) -> PathBuf {

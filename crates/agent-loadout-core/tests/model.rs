@@ -17,6 +17,7 @@ use agent_loadout_core::model::secrets::SecretCatalog;
 use agent_loadout_core::model::server::Server;
 use agent_loadout_core::model::settings::Settings;
 use agent_loadout_core::model::skill_meta::SkillMeta;
+use agent_loadout_core::model::sources::SourcesFile;
 use agent_loadout_core::model::{
     Severity, StoreDocument, StoreFile, StoreModel, TomlDocument, json_schema, validate_store_file,
 };
@@ -196,6 +197,7 @@ fn typed_rewrite_without_the_original_document_keeps_every_value() {
             StoreFile::Secrets => check::<SecretCatalog>(&text, &relative),
             StoreFile::Clients => check::<ClientPrefsFile>(&text, &relative),
             StoreFile::Settings => check::<Settings>(&text, &relative),
+            StoreFile::Sources => check::<SourcesFile>(&text, &relative),
             StoreFile::SkillMeta { .. } => check::<SkillMeta>(&text, &relative),
             StoreFile::Project { .. } => check::<ProjectManifest>(&text, &relative),
             StoreFile::Machine { .. } => check::<MachineOverlay>(&text, &relative),
@@ -469,6 +471,7 @@ fn json_schemas_match_docs() {
             json_schema::<ClientPrefsFile>(),
         ),
         (Settings::SCHEMA_NAME, json_schema::<Settings>()),
+        (SourcesFile::SCHEMA_NAME, json_schema::<SourcesFile>()),
         (SkillMeta::SCHEMA_NAME, json_schema::<SkillMeta>()),
         (
             ProjectManifest::SCHEMA_NAME,
@@ -506,6 +509,7 @@ fn json_schemas_match_docs() {
         SecretCatalog::SCHEMA_NAME,
         ClientPrefsFile::SCHEMA_NAME,
         Settings::SCHEMA_NAME,
+        SourcesFile::SCHEMA_NAME,
         SkillMeta::SCHEMA_NAME,
         ProjectManifest::SCHEMA_NAME,
         MachineOverlay::SCHEMA_NAME,

@@ -561,6 +561,9 @@ pub fn render_for(
             format!("{} has no MCP config", spec.display_name),
         )
     })?;
+    // A server from a Git repository or folder (#5) runs only where its
+    // code is what the server file names.
+    crate::mcp_source::runnable(cx.fs, cx.loadout_home, server)?;
     let overlay = desired.overlay.as_ref().filter(|_| target.overlay);
     let fields = effective_fields(server, cx.env, overlay);
     let transport = fields.transport.ok_or_else(|| {

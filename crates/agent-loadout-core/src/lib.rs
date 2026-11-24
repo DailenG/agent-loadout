@@ -15,12 +15,15 @@ pub mod formats;
 pub mod fs;
 pub mod layering;
 pub mod local_settings;
+pub mod mcp_source;
 pub mod migrate;
 pub mod model;
 pub mod paths;
 pub mod remote;
+pub mod scan;
 pub mod secrets;
 pub mod skills;
+pub mod sources;
 pub mod store;
 
 pub use env::{Clock, Env, EnvBuilder, FixedClock, KnownFolder, Os, SystemClock};

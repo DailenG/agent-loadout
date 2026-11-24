@@ -344,6 +344,11 @@ export function McpImportSection({ target, onOpenPending }: McpImportSectionProp
     queryFn: async () => unwrap(await commands.listServers()),
   });
   const projects = useProjectList();
+  // Which clients have a private project target comes from the adapter table.
+  const tools = useQuery({
+    queryKey: storeQueryKeys.tools,
+    queryFn: async () => unwrap(await commands.listTools()),
+  });
   const [filter, setFilter] = useState<SourceFilter>("all");
   const [state, setState] = useState<ImportState>({ choices: {}, ids: {}, secrets: {} });
   const [reviewing, setReviewing] = useState(false);
@@ -354,11 +359,13 @@ export function McpImportSection({ target, onOpenPending }: McpImportSectionProp
   const names = useMemo<ImportNames>(() => {
     const clients = new Map(servers.data?.clients.map((client) => [client.id, client.name]) ?? []);
     const rows = new Map(projects.data?.map((row) => [row.id, row]) ?? []);
+    const privateTargets = new Set(tools.data?.filter((tool) => tool.privateProjectTarget).map((tool) => tool.id) ?? []);
     return {
       client: (id) => clients.get(id) ?? id,
       project: (id) => (id ? rows.get(id) : undefined),
+      privateTarget: (client) => privateTargets.has(client),
     };
-  }, [servers.data, projects.data]);
+  }, [servers.data, projects.data, tools.data]);
   const shown = useMemo(() => candidates.filter((candidate) => matchesFilter(candidate, filter)), [candidates, filter]);
   // Only what is on screen is imported or checked: a filter never hides a blocking field.
   const plan = useMemo(() => planImport(shown, state, target, storeIds), [shown, state, target, storeIds]);

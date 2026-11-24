@@ -37,6 +37,8 @@ export const storeQueryKeys = {
   /** Prefix of `["list_skill_files", id]` and `["read_skill_file", id, file]`. */
   skillFiles: ["list_skill_files"],
   skillFile: ["read_skill_file"],
+  /** Settings > Sources: installs and updates can record trust (M42). */
+  sources: ["list_sources"],
 } as const;
 
 /**

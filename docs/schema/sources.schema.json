@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loadout source trust (store/sources.toml)",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "Schema version; always 1.",
+      "type": "integer",
+      "format": "int64",
+      "const": 1
+    },
+    "sources": {
+      "description": "Decisions by source key.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/SourceRecord"
+      }
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "$defs": {
+    "Lapse": {
+      "description": "A trust that no longer admits the source until the user decides again.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detail": {
+          "description": "`moved`: the source key the repository moved to.",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/LapseReason"
+        }
+      },
+      "required": [
+        "reason",
+        "at"
+      ]
+    },
+    "LapseReason": {
+      "description": "Why trust lapsed.",
+      "oneOf": [
+        {
+          "description": "The followed branch no longer contains the commit installed last\n(force-push).",
+          "type": "string",
+          "const": "history_rewritten"
+        },
+        {
+          "description": "The repository was renamed or transferred (the host redirects).",
+          "type": "string",
+          "const": "moved"
+        }
+      ]
+    },
+    "SourceDecision": {
+      "description": "Trust a source, or never trust it (a block wins over any trust).",
+      "type": "string",
+      "enum": [
+        "trust",
+        "block"
+      ]
+    },
+    "SourceRecord": {
+      "description": "One decision about one source key.",
+      "type": "object",
+      "properties": {
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "decision": {
+          "$ref": "#/$defs/SourceDecision"
+        },
+        "lapsed": {
+          "$ref": "#/$defs/Lapse"
+        },
+        "machine": {
+          "description": "Label of the machine that decided.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Must fit the key: `repo` (`host/owner/repo`, `file:///...`),\n`owner` (`host/owner`), `host` (`host`).",
+          "$ref": "#/$defs/SourceScope"
+        },
+        "url": {
+          "description": "The URL the decision was made for, without userinfo.",
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/TrustVia"
+        }
+      },
+      "required": [
+        "decision",
+        "scope",
+        "decided_at"
+      ]
+    },
+    "SourceScope": {
+      "description": "How much a record covers: one repository, every repository of one owner\n(user or organization), or every repository on one host.",
+      "type": "string",
+      "enum": [
+        "repo",
+        "owner",
+        "host"
+      ]
+    },
+    "TrustVia": {
+      "description": "Where a decision was made: never by an agent on its own (#24).",
+      "oneOf": [
+        {
+          "description": "The app's trust dialog or Settings > Sources.",
+          "type": "string",
+          "const": "app"
+        },
+        {
+          "description": "An interactive `loadout` prompt.",
+          "type": "string",
+          "const": "cli-prompt"
+        },
+        {
+          "description": "`--trust-source` on a non-interactive command.",
+          "type": "string",
+          "const": "cli-flag"
+        },
+        {
+          "description": "`loadout source trust|block`.",
+          "type": "string",
+          "const": "cli-command"
+        }
+      ]
+    }
+  }
+}

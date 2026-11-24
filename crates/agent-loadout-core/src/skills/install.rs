@@ -20,11 +20,15 @@ use crate::model::ids::{self, IdKind};
 use crate::model::settings::NewItemEnable;
 use crate::model::skill_meta::{SkillEnable, SkillMeta, SkillSource, SkillSourceKind};
 use crate::remote::git::{Invocation, RunOutput, locate};
+use crate::scan::{self, ScanReport, Scanner};
 use crate::skills::link::{SyncReport, sync};
 use crate::skills::store::{self, content_dir, missing_skill_file, not_found};
 use crate::skills::{
     Entry, MAX_ARCHIVE_FILE_BYTES, MAX_ARCHIVE_FILES, MAX_ARCHIVE_TOTAL_BYTES, SKILL_FILE,
     SkillFiles, SkillsEnv, check_name, confine, entry, frontmatter, io_error, read_folder, slug,
+};
+use crate::sources::{
+    self, SourceChange, SourceChangeKind, SourceRef, TrustCheck, TrustGrant, TrustVia,
 };
 use crate::store::{CommitId, Operation, Store};
 
@@ -124,6 +128,30 @@ pub struct Naming {
     pub rename_if_taken: bool,
 }
 
+/// The user's choices for an install or update (SPEC 12.4, 17): what the
+/// gates before the store commit may let through. The default lets
+/// nothing through that needs a decision.
+#[derive(Debug, Clone, Default)]
+pub struct Decisions {
+    /// Install or update even when the built-in scan's verdict is
+    /// `dangerous` ("Install anyway", `--allow-dangerous`); without it,
+    /// such content is refused with `scan_blocked`.
+    pub allow_dangerous: bool,
+    /// The user's answer to the source trust prompt (#24) for the source
+    /// asked for; `None` lets only a trusted git source through
+    /// (`source_trust_required` otherwise). A block is never let through
+    /// (`source_blocked`).
+    pub trust: Option<TrustGrant>,
+    /// The user's separate answer for the repository the host redirected
+    /// to, when it moved to another key ([`Prepared::moved_to`],
+    /// [`UpdateCheck::moved_trust`]): [`Decisions::trust`] never carries
+    /// over to a location the user did not see. `None` lets only a
+    /// trusted target through.
+    pub moved_trust: Option<TrustGrant>,
+    /// Where those answers were given; recorded with "always trust".
+    pub via: TrustVia,
+}
+
 /// An install.
 #[derive(Debug, Clone)]
 pub struct InstallRequest {
@@ -133,6 +161,7 @@ pub struct InstallRequest {
     /// Branch or tag of a git source (overrides the URL's).
     pub git_ref: Option<String>,
     pub naming: Naming,
+    pub decisions: Decisions,
 }
 
 impl InstallRequest {
@@ -142,6 +171,7 @@ impl InstallRequest {
             path: None,
             git_ref: None,
             naming: Naming::default(),
+            decisions: Decisions::default(),
         }
     }
 }
@@ -160,9 +190,12 @@ pub struct Installed {
     /// Links made for a new skill enabled by `new_skill_enable`.
     pub report: Option<SyncReport>,
     pub warnings: Vec<CoreError>,
+    /// The built-in scan of the installed content (SPEC 17).
+    pub scan: ScanReport,
 }
 
 /// The content to commit and where it came from.
+#[derive(Debug)]
 struct Fetched {
     files: SkillFiles,
     /// Folder or archive name, repository name: the name when the
@@ -172,14 +205,90 @@ struct Fetched {
     source: SkillSource,
     /// The clone to keep as `cache/skill-sources/<id>`.
     clone: Option<PathBuf>,
+    /// Where the host redirected a git URL (a renamed or transferred
+    /// repository).
+    redirect: Option<String>,
 }
 
-/// Installs a skill into the store (one commit).
-pub fn install(
-    store: &Store<'_>,
-    sx: &SkillsEnv<'_>,
-    request: &InstallRequest,
-) -> Result<Installed, CoreError> {
+/// A fetched and scanned source waiting for the user's decisions
+/// ([`prepare`], then [`install_prepared`]). A git source's temporary
+/// clone is removed when this is dropped without being installed.
+#[derive(Debug)]
+pub struct Prepared {
+    fetched: Fetched,
+    name: String,
+    scan: ScanReport,
+    /// Installed: another [`install_prepared`] is refused.
+    spent: bool,
+    /// The source the user asked for, which the trust gate admits (git
+    /// sources).
+    trust_source: Option<SourceRef>,
+    /// Where the host redirected it, when that is another repository: the
+    /// gate admits it too, with its own answer.
+    moved_to: Option<SourceRef>,
+    /// The host moved the repository the URL names.
+    source_change: Option<SourceChange>,
+}
+
+impl Prepared {
+    /// Frontmatter `name`, else the folder, archive or repository name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The files that would be installed, by relative path.
+    pub fn files(&self) -> &SkillFiles {
+        &self.fetched.files
+    }
+
+    /// Where the content comes from (the git commit for a git source).
+    pub fn source(&self) -> &SkillSource {
+        &self.fetched.source
+    }
+
+    /// The built-in scan of [`Prepared::files`].
+    pub fn scan(&self) -> &ScanReport {
+        &self.scan
+    }
+
+    /// The source the trust gate admits (#24): a git source's repository
+    /// as the user named it; `None` for a local folder or archive (picked
+    /// on this machine, not gated). A redirect never replaces it.
+    pub fn trust_source(&self) -> Option<&SourceRef> {
+        self.trust_source.as_ref()
+    }
+
+    /// The repository the host redirected the URL to, when it has another
+    /// key: the gate admits it too, on [`Decisions::moved_trust`].
+    pub fn moved_to(&self) -> Option<&SourceRef> {
+        self.moved_to.as_ref()
+    }
+
+    /// The repository the URL names moved ([`SourceChangeKind::Moved`]).
+    pub fn source_change(&self) -> Option<&SourceChange> {
+        self.source_change.as_ref()
+    }
+}
+
+impl Drop for Prepared {
+    fn drop(&mut self) {
+        if let Some(clone) = self.fetched.clone.take() {
+            // The clone lives below `LOADOUT_HOME/cache`; a leftover is
+            // re-creatable and replaced by the next install of that id.
+            let _ = std::fs::remove_dir_all(clone);
+        }
+    }
+}
+
+/// Fetches a source (a git source into a temporary clone) and scans it,
+/// without touching the store: what the install review shows. Callers
+/// refuse a blocked git source first ([`sources::refuse_blocked`]), so a
+/// blocked source is never contacted.
+pub fn prepare(sx: &SkillsEnv<'_>, request: &InstallRequest) -> Result<Prepared, CoreError> {
+    let requested = match &request.source {
+        Source::Git { url, .. } => Some(SourceRef::from_git_url(url)?),
+        Source::Local(_) => None,
+    };
     let fetched = match &request.source {
         Source::Local(path) => fetch_local(sx.fs, path)?,
         Source::Git { url, git_ref, path } => {
@@ -188,17 +297,128 @@ pub fn install(
             fetch_git(sx, url, git_ref, path)?
         }
     };
-    let result = commit_install(store, sx, &request.naming, &fetched);
-    if let (Ok(installed), Some(clone)) = (&result, &fetched.clone) {
-        keep_clone(sx, clone, &installed.id)?;
-    } else if let Some(clone) = &fetched.clone {
-        let _ = remove_dir(sx.fs, clone);
+    let moved_to = requested.as_ref().and_then(|requested| {
+        let redirect = fetched.redirect.as_deref()?;
+        sources::detect::target_of(requested, redirect)
+    });
+    let source_change = moved_to.as_ref().map(sources::detect::moved_to);
+    let scan = Scanner::new(sx.fs, sx.home).scan_files(&fetched.files);
+    let name = fetched
+        .files
+        .get(SKILL_FILE)
+        .and_then(|text| {
+            frontmatter::parse(&String::from_utf8_lossy(text))
+                .ok()
+                .flatten()
+        })
+        .and_then(|fm| fm.name().map(str::to_owned))
+        .unwrap_or_else(|| fetched.base_name.clone());
+    Ok(Prepared {
+        fetched,
+        name,
+        scan,
+        spent: false,
+        trust_source: requested,
+        moved_to,
+        source_change,
+    })
+}
+
+/// Installs prepared content into the store (one commit) when the
+/// decisions let it through: a git source must be trusted, or
+/// [`Decisions::trust`] carries the user's answer (`source_trust_required`
+/// or `source_blocked` otherwise, #24), and so must the repository it
+/// moved to, on [`Decisions::moved_trust`]; then a `dangerous` scan
+/// verdict needs [`Decisions::allow_dangerous`] (`scan_blocked`
+/// otherwise). On an error `prepared` stays usable, so the review can ask
+/// the user and try again with other decisions; once installed it is
+/// spent (`invalid_value` on another try).
+pub fn install_prepared(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    prepared: &mut Prepared,
+    naming: &Naming,
+    decisions: &Decisions,
+) -> Result<Installed, CoreError> {
+    if prepared.spent {
+        return Err(CoreError::new(
+            ErrorCode::InvalidValue,
+            "this reviewed content is already installed",
+        ));
     }
-    result
+    admit_with_move(
+        store,
+        prepared.trust_source.as_ref(),
+        prepared.moved_to.as_ref(),
+        decisions,
+    )?;
+    scan::gate(&prepared.scan, decisions.allow_dangerous)?;
+    let mut installed =
+        commit_install(store, sx, naming, &prepared.fetched, prepared.scan.clone())?;
+    // Committed: the review is spent even if what follows fails, so a
+    // retry never installs a second copy.
+    prepared.spent = true;
+    if let Some(clone) = prepared.fetched.clone.take()
+        && let Err(err) = keep_clone(sx, &clone, &installed.id)
+    {
+        let _ = remove_dir(sx.fs, &clone);
+        installed.warnings.push(err);
+    }
+    Ok(installed)
+}
+
+/// The trust gate of a git source and the repository it moved to: both
+/// are checked before either "always" is recorded.
+fn admit_with_move(
+    store: &Store<'_>,
+    requested: Option<&SourceRef>,
+    moved_to: Option<&SourceRef>,
+    decisions: &Decisions,
+) -> Result<(), CoreError> {
+    let Some(requested) = requested else {
+        return Ok(());
+    };
+    sources::would_admit(store, requested, decisions.trust)?;
+    if let Some(target) = moved_to {
+        sources::would_admit(store, target, decisions.moved_trust)?;
+    }
+    sources::admit(store, requested, decisions.trust, decisions.via)?;
+    if let Some(target) = moved_to {
+        sources::admit(store, target, decisions.moved_trust, decisions.via)?;
+    }
+    Ok(())
+}
+
+/// Installs a skill into the store (one commit): [`prepare`], then
+/// [`install_prepared`] with the request's decisions. A git source the
+/// gate would refuse is refused before anything is fetched; a repository
+/// it moved to needs [`Decisions::moved_trust`] or its own trust.
+pub fn install(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    request: &InstallRequest,
+) -> Result<Installed, CoreError> {
+    if let Source::Git { url, .. } = &request.source {
+        sources::would_admit(
+            store,
+            &SourceRef::from_git_url(url)?,
+            request.decisions.trust,
+        )?;
+    }
+    let mut prepared = prepare(sx, request)?;
+    install_prepared(
+        store,
+        sx,
+        &mut prepared,
+        &request.naming,
+        &request.decisions,
+    )
 }
 
 /// Installs already-read content (agents CLI vendoring, tool folder
-/// imports). `source.kind` says where it came from.
+/// imports). `source.kind` says where it came from. The content is
+/// already on this machine, in a folder a client reads, so the scan is
+/// reported and never blocks.
 pub(crate) fn install_files(
     store: &Store<'_>,
     sx: &SkillsEnv<'_>,
@@ -213,8 +433,10 @@ pub(crate) fn install_files(
         base_name,
         source,
         clone: None,
+        redirect: None,
     };
-    commit_install(store, sx, naming, &fetched)
+    let scan = Scanner::new(sx.fs, sx.home).scan_files(&fetched.files);
+    commit_install(store, sx, naming, &fetched, scan)
 }
 
 fn commit_install(
@@ -222,6 +444,7 @@ fn commit_install(
     sx: &SkillsEnv<'_>,
     naming: &Naming,
     fetched: &Fetched,
+    scan: ScanReport,
 ) -> Result<Installed, CoreError> {
     let Some(skill_md) = fetched.files.get(SKILL_FILE) else {
         return Err(CoreError::new(
@@ -294,8 +517,16 @@ fn commit_install(
     })?;
     let id = committed.value;
     warnings.extend(store::total_size_warning(store));
+    // The store commit is done: a sync that fails now (lock timeout,
+    // ledger I/O) is a warning, and the next apply or sync makes the links.
     let report = if enable_new {
-        Some(sync(store, sx)?)
+        match sync(store, sx) {
+            Ok(report) => Some(report),
+            Err(err) => {
+                warnings.push(err);
+                None
+            }
+        }
     } else {
         None
     };
@@ -307,6 +538,7 @@ fn commit_install(
         source_commit: fetched.source.commit.clone(),
         report,
         warnings,
+        scan,
     })
 }
 
@@ -365,6 +597,7 @@ fn fetch_local(fs: &dyn Fs, path: &Path) -> Result<Fetched, CoreError> {
             extra: toml::Table::new(),
         },
         clone: None,
+        redirect: None,
     })
 }
 
@@ -559,7 +792,7 @@ fn sources_dir(sx: &SkillsEnv<'_>) -> PathBuf {
 
 /// Git on `PATH`. Program lookup reads the real file system, as the
 /// programs live outside any confined view (a test's temp root).
-fn git_path(sx: &SkillsEnv<'_>) -> Result<PathBuf, CoreError> {
+pub(crate) fn git_path(sx: &SkillsEnv<'_>) -> Result<PathBuf, CoreError> {
     locate(sx.env, &crate::fs::RealFs).ok_or_else(|| {
         CoreError::new(
             ErrorCode::ToolNotFound,
@@ -582,7 +815,11 @@ const REPOSITORY_VARS: [&str; 9] = [
     "GIT_TERMINAL_PROMPT",
 ];
 
-fn run_git(
+/// Git's messages in English whatever the user's locale: the redirect
+/// warning is read from them (#24).
+const LOCALE: [(&str, &str); 2] = [("LC_ALL", "C"), ("LANGUAGE", "C")];
+
+pub(crate) fn run_git(
     sx: &SkillsEnv<'_>,
     git: &Path,
     cwd: &Path,
@@ -594,11 +831,17 @@ fn run_git(
         .filter(|(name, _)| {
             !REPOSITORY_VARS
                 .iter()
+                .chain(LOCALE.iter().map(|(var, _)| var))
                 .any(|var| name.eq_ignore_ascii_case(var))
         })
         .map(|(name, value)| (OsString::from(name), value.to_owned()))
         .collect();
     env.push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+    env.extend(
+        LOCALE
+            .iter()
+            .map(|(var, value)| (OsString::from(var), OsString::from(value))),
+    );
     let invocation = Invocation {
         program: git.to_path_buf(),
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -622,25 +865,27 @@ fn git_message(output: &RunOutput) -> String {
         .to_owned()
 }
 
-fn unreachable(url: &str, output: &RunOutput) -> CoreError {
+/// `source_unreachable`, without the credentials a URL (or git's message
+/// about it) can carry.
+pub(crate) fn unreachable(url: &str, output: &RunOutput) -> CoreError {
     CoreError::new(
         ErrorCode::SourceUnreachable,
-        format!(
+        SourceRef::redact_userinfo(&format!(
             "the source {url} cannot be reached: {}",
             git_message(output)
-        ),
+        )),
     )
 }
 
-fn git_failed(what: &str, output: &RunOutput) -> CoreError {
+pub(crate) fn git_failed(what: &str, output: &RunOutput) -> CoreError {
     CoreError::new(
         ErrorCode::GitError,
-        format!("{what}: {}", git_message(output)),
+        SourceRef::redact_userinfo(&format!("{what}: {}", git_message(output))),
     )
 }
 
 /// A relative `/`-separated path inside a repository.
-fn check_repo_path(path: &str) -> Result<String, CoreError> {
+pub(crate) fn check_repo_path(path: &str) -> Result<String, CoreError> {
     let trimmed = path.trim_matches('/');
     let valid = !trimmed.is_empty()
         && trimmed.split('/').all(|part| {
@@ -657,7 +902,7 @@ fn check_repo_path(path: &str) -> Result<String, CoreError> {
     }
 }
 
-fn check_ref(git_ref: &str) -> Result<(), CoreError> {
+pub(crate) fn check_ref(git_ref: &str) -> Result<(), CoreError> {
     let valid = !git_ref.is_empty()
         && !git_ref.starts_with('-')
         && !git_ref.contains("..")
@@ -674,7 +919,7 @@ fn check_ref(git_ref: &str) -> Result<(), CoreError> {
     }
 }
 
-fn check_url(url: &str) -> Result<(), CoreError> {
+pub(crate) fn check_url(url: &str) -> Result<(), CoreError> {
     if url.is_empty() || url.starts_with('-') || url.contains(['\n', '\r']) {
         return Err(CoreError::new(
             ErrorCode::InvalidValue,
@@ -684,7 +929,7 @@ fn check_url(url: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn is_remote_url(url: &str) -> bool {
+pub(crate) fn is_remote_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     ["https://", "http://", "ssh://", "git://"]
         .iter()
@@ -692,26 +937,48 @@ fn is_remote_url(url: &str) -> bool {
         || is_scp_like(url)
 }
 
-/// Clones `url` into `dir` (which must not exist): sparse to `path` when
-/// given. Returns the commit checked out and the branch followed.
-fn clone(
+/// A fresh clone.
+pub(crate) struct Cloned {
+    pub(crate) commit: String,
+    /// The branch followed.
+    pub(crate) branch: Option<String>,
+    /// Where the host redirected the URL (a renamed or transferred
+    /// repository).
+    pub(crate) redirect: Option<String>,
+}
+
+/// The URL git contacts for `url`: a remote URL rebuilt from its parsed
+/// parts ([`SourceRef::fetch_url`]), so what git contacts is exactly what
+/// the trust gate checked; a local path or `file://` URL as it is.
+pub(crate) fn fetch_url(url: &str) -> Result<String, CoreError> {
+    if !is_remote_url(url) {
+        return Ok(url.to_owned());
+    }
+    Ok(SourceRef::from_git_url(url)?.fetch_url(url))
+}
+
+/// Clones `url` (from its [`fetch_url`]) into `dir` (which must not
+/// exist): sparse to `path` when given. Without `--quiet`, so git reports
+/// an HTTP redirect.
+pub(crate) fn clone(
     sx: &SkillsEnv<'_>,
     git: &Path,
     url: &str,
     git_ref: Option<&str>,
     path: Option<&str>,
     dir: &Path,
-) -> Result<(String, Option<String>), CoreError> {
+) -> Result<Cloned, CoreError> {
     check_url(url)?;
     if let Some(git_ref) = git_ref {
         check_ref(git_ref)?;
     }
+    let fetch = fetch_url(url)?;
     let parent = dir.parent().expect("a clone folder has a parent");
     confine(sx.fs, dir)?;
     sx.fs
         .create_dir_all(parent)
         .map_err(|err| io_error("cannot create directory", parent, &err))?;
-    let mut args: Vec<&OsStr> = vec![OsStr::new("clone"), OsStr::new("--quiet")];
+    let mut args: Vec<&OsStr> = vec![OsStr::new("clone"), OsStr::new("--no-progress")];
     if path.is_some() {
         args.push(OsStr::new("--no-checkout"));
     }
@@ -721,12 +988,13 @@ fn clone(
     if let Some(git_ref) = git_ref {
         args.extend([OsStr::new("--branch"), OsStr::new(git_ref)]);
     }
-    args.extend([OsStr::new("--"), OsStr::new(url), dir.as_os_str()]);
+    args.extend([OsStr::new("--"), OsStr::new(&fetch), dir.as_os_str()]);
     let output = run_git(sx, git, parent, &args)?;
     if !output.success {
         let _ = remove_dir(sx.fs, dir);
         return Err(unreachable(url, &output));
     }
+    let redirect = sources::detect::redirect_target(&fetch, &output.stderr);
     if let Some(path) = path {
         let pattern = format!("/{path}/");
         let steps: [&[&str]; 2] = [
@@ -763,10 +1031,19 @@ fn clone(
                 .filter(|branch| !branch.is_empty())
         }
     };
-    Ok((commit, branch))
+    Ok(Cloned {
+        commit,
+        branch,
+        redirect,
+    })
 }
 
-fn rev_parse(sx: &SkillsEnv<'_>, git: &Path, dir: &Path, rev: &str) -> Result<String, CoreError> {
+pub(crate) fn rev_parse(
+    sx: &SkillsEnv<'_>,
+    git: &Path,
+    dir: &Path,
+    rev: &str,
+) -> Result<String, CoreError> {
     let output = run_git(
         sx,
         git,
@@ -796,7 +1073,11 @@ fn fetch_git(
         ".tmp-{}",
         ids::new_ulid(sx.env.now())?.to_ascii_lowercase()
     ));
-    let (commit, branch) = clone(sx, &git, url, git_ref.as_deref(), path.as_deref(), &temp)?;
+    let Cloned {
+        commit,
+        branch,
+        redirect,
+    } = clone(sx, &git, url, git_ref.as_deref(), path.as_deref(), &temp)?;
     let read = || -> Result<(SkillFiles, Option<String>), CoreError> {
         match &path {
             Some(path) => {
@@ -853,10 +1134,11 @@ fn fetch_git(
             extra: toml::Table::new(),
         },
         clone: Some(temp),
+        redirect,
     })
 }
 
-fn join_rel(base: &Path, relative: &str) -> PathBuf {
+pub(crate) fn join_rel(base: &Path, relative: &str) -> PathBuf {
     relative
         .split('/')
         .fold(base.to_path_buf(), |path, part| path.join(part))
@@ -873,7 +1155,7 @@ fn keep_clone(sx: &SkillsEnv<'_>, clone: &Path, id: &str) -> Result<(), CoreErro
     std::fs::rename(clone, &target).map_err(|err| io_error("cannot move the clone", &target, &err))
 }
 
-fn remove_dir(fs: &dyn Fs, dir: &Path) -> Result<(), CoreError> {
+pub(crate) fn remove_dir(fs: &dyn Fs, dir: &Path) -> Result<(), CoreError> {
     if fs.exists(dir) {
         fs.remove_dir_all(dir)
             .map_err(|err| io_error("cannot remove folder", dir, &err))?;
@@ -887,11 +1169,56 @@ pub fn forget_source(sx: &SkillsEnv<'_>, id: &str) -> Result<(), CoreError> {
     remove_dir(sx.fs, &sources_dir(sx).join(id))
 }
 
+/// Removes temporary clones (`cache/skill-sources/.tmp-*`) not changed
+/// for `older_than`: left by an install review the app never finished (it
+/// ends without dropping its state) or by a process that crashed. A clone
+/// still in use by another process is younger than that. Returns how many
+/// were removed; failures are skipped (the next sweep tries again).
+pub fn sweep_temp_clones(sx: &SkillsEnv<'_>, older_than: std::time::Duration) -> usize {
+    let dir = sources_dir(sx);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    let now = sx.env.now();
+    entries
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(".tmp-"))
+        .filter(|entry| {
+            entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| {
+                    now.duration_since(modified).unwrap_or_default() >= older_than
+                })
+        })
+        .filter(|entry| std::fs::remove_dir_all(entry.path()).is_ok())
+        .count()
+}
+
 /// One file that differs between the store copy and the source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileChange {
     pub path: String,
     pub kind: ChangeKind,
+    /// An added or modified file that looks executable (a script or
+    /// binary by extension, or text starting with `#!`): highlighted in
+    /// the update review (#24).
+    pub script: bool,
+}
+
+/// File extensions of scripts and binaries an agent or a hook could run.
+const SCRIPT_EXTENSIONS: [&str; 20] = [
+    "sh", "bash", "zsh", "fish", "ps1", "psm1", "bat", "cmd", "py", "js", "mjs", "cjs", "ts", "rb",
+    "pl", "php", "exe", "dll", "so", "dylib",
+];
+
+/// Whether `path` (with content `bytes`) looks executable.
+pub fn looks_executable(path: &str, bytes: &[u8]) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let by_extension = name.rsplit_once('.').is_some_and(|(stem, extension)| {
+        !stem.is_empty() && SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+    });
+    by_extension || bytes.starts_with(b"#!")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -921,6 +1248,8 @@ pub enum UpdateStatus {
     /// The source cannot be reached or no longer holds the skill
     /// (`source_unreachable`); the store copy is intact.
     Unreachable,
+    /// A block covers the source (`source_blocked`): it was not contacted.
+    Blocked,
 }
 
 impl UpdateStatus {
@@ -930,6 +1259,7 @@ impl UpdateStatus {
             UpdateStatus::Available => "available",
             UpdateStatus::NotTracked => "not_tracked",
             UpdateStatus::Unreachable => "source_unreachable",
+            UpdateStatus::Blocked => "source_blocked",
         }
     }
 }
@@ -947,15 +1277,65 @@ pub struct UpdateCheck {
     /// shows here too).
     pub changes: Vec<FileChange>,
     pub error: Option<CoreError>,
+    /// The built-in scan of the source's content now, when an update is
+    /// available (SPEC 17): what the update review shows.
+    pub scan: Option<ScanReport>,
+    /// The trust check of the skill's git source (#24): an update needs
+    /// trust (or the user's answer) like an install.
+    pub trust: Option<TrustCheck>,
+    /// What changed about the source since the last fetch (force-push,
+    /// moved); trust in it lapsed when it was trusted.
+    pub source_change: Option<SourceChange>,
+    /// The trust check of the repository the source moved to, when the
+    /// host redirected it to another key: the update needs its trust too
+    /// ([`Decisions::moved_trust`]), and moves the skill's URL there.
+    pub moved_trust: Option<TrustCheck>,
+}
+
+/// The latest content of a git skill, and what changed about its source.
+struct Latest {
+    commit: String,
+    files: SkillFiles,
+    change: Option<SourceChange>,
+    /// The repository the host redirected the source to (another key).
+    moved_to: Option<SourceRef>,
+}
+
+/// In a cache clone's `.git`: the URL of the repository the last fetch
+/// was redirected to, so a reviewed update knows where the content it
+/// writes came from without fetching again.
+const MOVED_MARKER: &str = "loadout-moved-to";
+
+/// The redirect target the last fetch into the cache clone `dir` saw.
+fn moved_marker(sx: &SkillsEnv<'_>, dir: &Path, url: &str) -> Option<SourceRef> {
+    let requested = SourceRef::from_git_url(url).ok()?;
+    let target = sx
+        .fs
+        .read_to_string(&dir.join(".git").join(MOVED_MARKER))
+        .ok()?;
+    sources::detect::target_of(&requested, target.trim())
+}
+
+fn set_moved_marker(
+    sx: &SkillsEnv<'_>,
+    dir: &Path,
+    target: Option<&SourceRef>,
+) -> Result<(), CoreError> {
+    let marker = dir.join(".git").join(MOVED_MARKER);
+    let result = match target {
+        Some(target) => sx.fs.write(&marker, target.url().as_bytes()),
+        None if sx.fs.exists(&marker) => sx.fs.remove_file(&marker),
+        None => Ok(()),
+    };
+    result.map_err(|err| io_error("cannot write", &marker, &err))
 }
 
 /// The latest content of a git skill: the cache clone fetched (re-cloned
-/// when missing) and checked out at the source's head.
-fn latest(
-    sx: &SkillsEnv<'_>,
-    id: &str,
-    source: &SkillSource,
-) -> Result<(String, SkillFiles), CoreError> {
+/// when missing) and checked out at the source's head. A redirect to
+/// another repository is [`SourceChangeKind::Moved`]; a head that no
+/// longer contains the commit installed last is
+/// [`SourceChangeKind::HistoryRewritten`] (#24).
+fn latest(sx: &SkillsEnv<'_>, id: &str, source: &SkillSource) -> Result<Latest, CoreError> {
     let url = source
         .url
         .as_deref()
@@ -963,12 +1343,14 @@ fn latest(
     let git = git_path(sx)?;
     let path = source.path.as_deref().map(check_repo_path).transpose()?;
     let dir = sources_dir(sx).join(id);
-    let commit = if sx.fs.exists(&dir.join(".git")) {
-        let mut args: Vec<&OsStr> = vec![OsStr::new("fetch"), OsStr::new("--quiet")];
+    let fetch = fetch_url(url)?;
+    let (commit, redirect) = if sx.fs.exists(&dir.join(".git")) {
+        // Without `--quiet`, so git reports an HTTP redirect.
+        let mut args: Vec<&OsStr> = vec![OsStr::new("fetch"), OsStr::new("--no-progress")];
         if is_remote_url(url) {
             args.extend([OsStr::new("--depth"), OsStr::new("1")]);
         }
-        args.extend([OsStr::new("--"), OsStr::new(url)]);
+        args.extend([OsStr::new("--"), OsStr::new(&fetch)]);
         if let Some(git_ref) = &source.git_ref {
             check_ref(git_ref)?;
             args.push(OsStr::new(git_ref));
@@ -977,6 +1359,7 @@ fn latest(
         if !output.success {
             return Err(unreachable(url, &output));
         }
+        let redirect = sources::detect::redirect_target(&fetch, &output.stderr);
         let commit = rev_parse(sx, &git, &dir, "FETCH_HEAD")?;
         let output = run_git(
             sx,
@@ -995,18 +1378,42 @@ fn latest(
                 &output,
             ));
         }
-        commit
+        (commit, redirect)
     } else {
         remove_dir(sx.fs, &dir)?;
-        clone(
+        let cloned = clone(
             sx,
             &git,
             url,
             source.git_ref.as_deref(),
             path.as_deref(),
             &dir,
-        )?
-        .0
+        )?;
+        (cloned.commit, cloned.redirect)
+    };
+    let moved_to = SourceRef::from_git_url(url)
+        .ok()
+        .and_then(|requested| sources::detect::target_of(&requested, redirect.as_deref()?));
+    set_moved_marker(sx, &dir, moved_to.as_ref())?;
+    let change = match &moved_to {
+        Some(target) => Some(sources::detect::moved_to(target)),
+        None => match &source.commit {
+            Some(old) => {
+                let in_clone = |args: &[&OsStr]| run_git(sx, &git, &dir, args);
+                sources::detect::history_rewritten(
+                    &in_clone,
+                    &fetch,
+                    source.git_ref.as_deref(),
+                    old,
+                    &commit,
+                )?
+                .then_some(SourceChange {
+                    kind: SourceChangeKind::HistoryRewritten,
+                    detail: None,
+                })
+            }
+            None => None,
+        },
     };
     let skill_dir = match &path {
         Some(path) => join_rel(&dir, path),
@@ -1015,10 +1422,15 @@ fn latest(
     if !sx.fs.exists(&skill_dir.join(SKILL_FILE)) {
         return Err(CoreError::new(
             ErrorCode::SourceUnreachable,
-            format!("the source {url} no longer holds the skill"),
+            SourceRef::redact_userinfo(&format!("the source {url} no longer holds the skill")),
         ));
     }
-    Ok((commit, read_in_clone(sx.fs, &dir, &skill_dir)?))
+    Ok(Latest {
+        commit,
+        files: read_in_clone(sx.fs, &dir, &skill_dir)?,
+        change,
+        moved_to,
+    })
 }
 
 /// [`read_folder`] of a skill folder inside a clone, refused with
@@ -1043,28 +1455,37 @@ fn read_in_clone(fs: &dyn Fs, clone: &Path, dir: &Path) -> Result<SkillFiles, Co
 fn changes(old: &SkillFiles, new: &SkillFiles) -> Vec<FileChange> {
     let mut out = Vec::new();
     for (path, bytes) in new {
-        match old.get(path) {
-            None => out.push(FileChange {
-                path: path.clone(),
-                kind: ChangeKind::Added,
-            }),
-            Some(before) if before != bytes => out.push(FileChange {
-                path: path.clone(),
-                kind: ChangeKind::Modified,
-            }),
-            Some(_) => {}
-        }
+        let kind = match old.get(path) {
+            None => ChangeKind::Added,
+            Some(before) if before != bytes => ChangeKind::Modified,
+            Some(_) => continue,
+        };
+        out.push(FileChange {
+            path: path.clone(),
+            kind,
+            script: looks_executable(path, bytes),
+        });
     }
     for path in old.keys() {
         if !new.contains_key(path) {
             out.push(FileChange {
                 path: path.clone(),
                 kind: ChangeKind::Removed,
+                script: false,
             });
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
+}
+
+/// The trust gate's view of a git skill source; `None` for a URL that
+/// names no source (a hand-edited one).
+fn source_ref(source: &SkillSource) -> Option<SourceRef> {
+    source
+        .url
+        .as_deref()
+        .and_then(|url| SourceRef::from_git_url(url).ok())
 }
 
 fn git_source(store: &Store<'_>, id: &str) -> Result<Option<SkillSource>, CoreError> {
@@ -1078,7 +1499,10 @@ fn git_source(store: &Store<'_>, id: &str) -> Result<Option<SkillSource>, CoreEr
 }
 
 /// Checks a git skill for an update (SPEC 12.4). Touches only the cache
-/// clone; an unreachable source is reported, not an error.
+/// clone; an unreachable source is reported, not an error, and a blocked
+/// one is reported without contacting it. A force-push or a move of a
+/// trusted source makes its trust lapse (one store commit,
+/// [`sources::lapse`]); that is the only store change a check makes.
 pub fn check_update(
     store: &Store<'_>,
     sx: &SkillsEnv<'_>,
@@ -1092,23 +1516,59 @@ pub fn check_update(
             latest: None,
             changes: Vec::new(),
             error: None,
+            scan: None,
+            trust: None,
+            source_change: None,
+            moved_trust: None,
         });
     };
     let current = source.commit.clone();
-    let (commit, files) = match latest(sx, id, &source) {
+    let gated = source_ref(&source);
+    let not_fetched = |status, err: CoreError| -> Result<UpdateCheck, CoreError> {
+        Ok(UpdateCheck {
+            id: id.to_owned(),
+            status,
+            current: current.clone(),
+            latest: None,
+            changes: Vec::new(),
+            error: Some(err),
+            scan: None,
+            trust: gated
+                .as_ref()
+                .map(|source| sources::check(store, source))
+                .transpose()?,
+            source_change: None,
+            moved_trust: None,
+        })
+    };
+    if let Some(gated) = &gated
+        && let Err(err) = sources::refuse_blocked(store, gated)
+    {
+        return not_fetched(UpdateStatus::Blocked, err);
+    }
+    let Latest {
+        commit,
+        files,
+        change,
+        moved_to,
+    } = match latest(sx, id, &source) {
         Ok(latest) => latest,
         Err(err) if err.code() == ErrorCode::SourceUnreachable => {
-            return Ok(UpdateCheck {
-                id: id.to_owned(),
-                status: UpdateStatus::Unreachable,
-                current,
-                latest: None,
-                changes: Vec::new(),
-                error: Some(err),
-            });
+            return not_fetched(UpdateStatus::Unreachable, err);
         }
         Err(err) => return Err(err),
     };
+    if let (Some(gated), Some(change)) = (&gated, &change) {
+        sources::lapse(store, gated, change)?;
+    }
+    let trust = gated
+        .as_ref()
+        .map(|source| sources::check(store, source))
+        .transpose()?;
+    let moved_trust = moved_to
+        .as_ref()
+        .map(|target| sources::check(store, target))
+        .transpose()?;
     let stored = store::read_content(store, id)?;
     let changes = changes(&stored, &files);
     let status = if changes.is_empty() && current.as_deref() == Some(commit.as_str()) {
@@ -1116,6 +1576,8 @@ pub fn check_update(
     } else {
         UpdateStatus::Available
     };
+    let scan = (status == UpdateStatus::Available)
+        .then(|| Scanner::new(sx.fs, sx.home).scan_files(&files));
     Ok(UpdateCheck {
         id: id.to_owned(),
         status,
@@ -1123,6 +1585,10 @@ pub fn check_update(
         latest: Some(commit),
         changes,
         error: None,
+        scan,
+        trust,
+        source_change: change,
+        moved_trust,
     })
 }
 
@@ -1164,21 +1630,41 @@ pub struct Updated {
     pub commit: Option<CommitId>,
     /// Copies rewritten with the new content.
     pub report: SyncReport,
+    /// The built-in scan of the new content (SPEC 17).
+    pub scan: ScanReport,
 }
 
 /// Updates a git skill: the source's latest content replaces the store
 /// copy in one commit (`skill: update <id> to <sha>`), then owned copies
-/// follow ([`sync`]). `source_unreachable` leaves everything as it is;
-/// `not_found`/`invalid_value` for skills that are not git skills.
-pub fn update(store: &Store<'_>, sx: &SkillsEnv<'_>, id: &str) -> Result<Updated, CoreError> {
+/// follow ([`sync`]). A blocked source is refused (`source_blocked`)
+/// before it is contacted; `source_unreachable` leaves everything as it
+/// is; `not_found`/`invalid_value` for skills that are not git skills;
+/// `scan_blocked` for content the decisions do not let through.
+pub fn update(
+    store: &Store<'_>,
+    sx: &SkillsEnv<'_>,
+    id: &str,
+    decisions: &Decisions,
+) -> Result<Updated, CoreError> {
     let Some(source) = git_source(store, id)? else {
         return Err(CoreError::new(
             ErrorCode::InvalidValue,
             format!("skill {id:?} has no git source to update from; add it again to replace it"),
         ));
     };
-    let (commit, files) = latest(sx, id, &source)?;
-    commit_update(store, sx, id, source, commit, files)
+    if let Some(gated) = source_ref(&source) {
+        sources::refuse_blocked(store, &gated)?;
+    }
+    let Latest {
+        commit,
+        files,
+        change,
+        moved_to,
+    } = latest(sx, id, &source)?;
+    if let (Some(gated), Some(change)) = (source_ref(&source), &change) {
+        sources::lapse(store, &gated, change)?;
+    }
+    commit_update(store, sx, id, source, commit, files, moved_to, decisions)
 }
 
 /// Updates a git skill to `expected`, the source commit the user reviewed
@@ -1191,6 +1677,7 @@ pub fn update_reviewed(
     sx: &SkillsEnv<'_>,
     id: &str,
     expected: &str,
+    decisions: &Decisions,
 ) -> Result<Updated, CoreError> {
     let Some(source) = git_source(store, id)? else {
         return Err(CoreError::new(
@@ -1214,11 +1701,19 @@ pub fn update_reviewed(
         return Err(changed());
     }
     let files = cached_latest(store, sx, id)?.ok_or_else(changed)?;
-    commit_update(store, sx, id, source, head, files)
+    let moved_to = source
+        .url
+        .as_deref()
+        .and_then(|url| moved_marker(sx, &dir, url));
+    commit_update(store, sx, id, source, head, files, moved_to, decisions)
 }
 
 /// Writes `files` (the source at `commit`) as the store copy of `id` in one
-/// commit, then lets owned copies follow.
+/// commit, then lets owned copies follow; nothing is written when the
+/// decisions do not let the content through. The source and the
+/// repository it moved to (`moved_to`) both pass the trust gate; then the
+/// skill's URL follows the move, so the next check fetches from there.
+#[allow(clippy::too_many_arguments)]
 fn commit_update(
     store: &Store<'_>,
     sx: &SkillsEnv<'_>,
@@ -1226,7 +1721,16 @@ fn commit_update(
     source: SkillSource,
     commit: String,
     files: SkillFiles,
+    moved_to: Option<SourceRef>,
+    decisions: &Decisions,
 ) -> Result<Updated, CoreError> {
+    // Source trust first (#24), then the scan's gate.
+    if let Some(url) = source.url.as_deref() {
+        let requested = SourceRef::from_git_url(url)?;
+        admit_with_move(store, Some(&requested), moved_to.as_ref(), decisions)?;
+    }
+    let scan = Scanner::new(sx.fs, sx.home).scan_files(&files);
+    scan::gate(&scan, decisions.allow_dangerous)?;
     let stored = store::read_content(store, id)?;
     let changes = changes(&stored, &files);
     let short = &commit[..commit.len().min(7)];
@@ -1237,6 +1741,9 @@ fn commit_update(
         let mut meta = store::read_meta(tx, id)?.unwrap_or_else(|| SkillMeta::new(id));
         if let Some(source) = meta.source.as_mut() {
             source.commit = Some(commit.clone());
+            if let Some(target) = &moved_to {
+                source.url = Some(target.url().to_owned());
+            }
         }
         let skill_md = files
             .get(SKILL_FILE)
@@ -1258,5 +1765,6 @@ fn commit_update(
         changes,
         commit: committed.commit,
         report,
+        scan,
     })
 }

@@ -59,10 +59,12 @@ export const SCAN_ALL: ImportScope = { kind: "all" };
 /** Query key of the scan; not a drift key, so a window focus never reshuffles open choices. */
 export const IMPORT_SCAN_KEY = ["scan_import", "all"] as const;
 
-/** Names for client and project ids. */
+/** Names for client and project ids, and what the review needs to know about a client. */
 export type ImportNames = {
   client: (id: string) => string;
   project: (id: string | null) => ProjectRow | undefined;
+  /** The client has a private project target (`ToolInfo.privateProjectTarget`). */
+  privateTarget: (client: string) => boolean;
 };
 
 /** The unmanaged summary's scope for the sidebar scope: user files, or one project's files. */
@@ -344,14 +346,6 @@ export function projectsOf(variant: ImportVariant): ImportSource[] {
   });
 }
 
-/**
- * Clients with a private project target besides the shared file
- * (`project_local` in the core adapter table: Claude Code's `~/.claude.json`
- * per project, Devin's `.devin/mcp_config.local.json`). For them a private
- * manifest entry is written to that target, not over the shared entry.
- */
-const PRIVATE_TARGET_CLIENTS: ReadonlySet<string> = new Set(["claude-code", "devin"]);
-
 /** Where "Add to project manifest" writes a definition found in one project's files. */
 export type ManifestPlacement = {
   /** The clients whose files hold it there: the entry is enabled for them only. */
@@ -367,12 +361,22 @@ export type ManifestPlacement = {
   sharedAvailable: boolean;
 };
 
-export function manifestPlacement(variant: ImportVariant, projectId: string, project: ProjectRow | undefined): ManifestPlacement {
+/**
+ * `hasPrivateTarget(client)`: the client has a private project target next to
+ * its shared file (`ToolInfo.privateProjectTarget`, from the adapter table),
+ * where a private manifest entry is written instead of over the shared entry.
+ */
+export function manifestPlacement(
+  variant: ImportVariant,
+  projectId: string,
+  project: ProjectRow | undefined,
+  hasPrivateTarget: (client: string) => boolean,
+): ManifestPlacement {
   const sources = variant.sources.filter((source) => source.projectId === projectId);
   const clients = [...new Set(sources.map((source) => source.client))];
   const inShared = sources.filter((source) => source.scope === "project");
   const sharedAvailable = project?.layout === "shared" || project?.layout === "shared_and_local";
-  const offersChoice = inShared.some((source) => PRIVATE_TARGET_CLIENTS.has(source.client));
+  const offersChoice = inShared.some((source) => hasPrivateTarget(source.client));
   // An entry in a shared file is managed through the shared manifest (the user asked for that entry).
   const layer: ManifestLayerKind = inShared.length > 0 && sharedAvailable ? "shared" : "local";
   return { clients, layer, offersChoice, sharedAvailable };

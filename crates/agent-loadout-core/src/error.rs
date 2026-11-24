@@ -225,6 +225,13 @@ pub enum ErrorCode {
     /// A skill's source (git repository or folder) cannot be reached or no
     /// longer holds the skill (SPEC 12.4). The store copy is left intact.
     SourceUnreachable,
+    /// An install or update from a source the user has not trusted, without
+    /// the user's answer to the trust prompt (#24). Nothing was written;
+    /// ask the user (app dialog, interactive prompt, `--trust-source`).
+    SourceTrustRequired,
+    /// A block in `sources.toml` matches the source (#24); nothing is
+    /// fetched or written until the block is removed.
+    SourceBlocked,
     /// The desktop app's update check or install failed, or updates are
     /// turned off or not part of this build (SPEC 16.4).
     UpdateFailed,
@@ -234,6 +241,19 @@ pub enum ErrorCode {
     /// time (SPEC 8.2, #4). The target is blocked and left as it is; the
     /// rest of the run goes on. [`CoreError::read_only`] gives the kind.
     ReadOnlyTarget,
+    /// The built-in scan's verdict on a skill (or MCP server source) is
+    /// `dangerous` (SPEC 17); nothing is installed or updated unless the
+    /// user explicitly chooses to install anyway (`--allow-dangerous`).
+    ScanBlocked,
+    /// A server added from a Git repository runs from this machine's
+    /// checkout (`<LOADOUT_HOME>/servers/<id>`), which is missing or not at
+    /// the commit the server file names (#5). The entry is blocked until
+    /// `loadout server checkout <id>` (or the app's Restore) brings it to
+    /// that commit; the old code never runs with the new command.
+    CheckoutOutOfDate,
+    /// A server added from a local folder on another machine (#5): the
+    /// folder is that machine's, so the entry is blocked here.
+    FolderOnOtherMachine,
 }
 
 impl ErrorCode {
@@ -308,8 +328,13 @@ impl ErrorCode {
             ErrorCode::ClientEnableRequired => "client_enable_required",
             ErrorCode::RestartRequired => "restart_required",
             ErrorCode::SourceUnreachable => "source_unreachable",
+            ErrorCode::SourceTrustRequired => "source_trust_required",
+            ErrorCode::SourceBlocked => "source_blocked",
             ErrorCode::UpdateFailed => "update_failed",
             ErrorCode::ReadOnlyTarget => "read_only_target",
+            ErrorCode::ScanBlocked => "scan_blocked",
+            ErrorCode::CheckoutOutOfDate => "checkout_out_of_date",
+            ErrorCode::FolderOnOtherMachine => "folder_on_other_machine",
         }
     }
 }

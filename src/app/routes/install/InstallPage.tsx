@@ -10,27 +10,37 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
+import { useTrustPrompt } from "@/app/components/TrustDialog";
 import { useNotifications } from "@/app/components/notifications";
-import { t } from "@/i18n/en";
-import type { PickedSkillSource, SkillInstalled, SkillSourcePick } from "@/ipc/bindings";
-import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
+import { errorMessage, t, type MessageKey } from "@/i18n/en";
+import type { PickedSkillSource, SkillInstallReview, SkillSourcePick } from "@/ipc/bindings";
+import { IpcFailure, unwrap, useTransport, type CommandResult } from "@/ipc/transport";
 import { AddIcon, PasteIcon } from "../mcp/icons";
 import { ServerEditDialog } from "../mcp/ServerEditDialog";
 import { useSkillActions } from "../skills/actions";
 import { failureText } from "../skills/labels";
 import { useRenameConfirm } from "../skills/useRenameConfirm";
+import { McpSourcePanel } from "./McpSourcePanel";
+import { SkillReviewDialog } from "./SkillReviewDialog";
 
 export type InstallCategory = "skill" | "mcp";
 export type InstallTab = "git" | "local";
+/** MCP: the form or paste box, or drafts from a Git repository or folder (M42). */
+export type McpInstallTab = "manual" | "source";
 
 const CATEGORIES: { key: InstallCategory; label: "install.category.skill" | "install.category.mcp" }[] = [
   { key: "skill", label: "install.category.skill" },
   { key: "mcp", label: "install.category.mcp" },
 ];
 
-const TABS: { key: InstallTab; label: "install.tab.git" | "install.tab.local" }[] = [
+const TABS: { key: InstallTab; label: MessageKey }[] = [
   { key: "git", label: "install.tab.git" },
   { key: "local", label: "install.tab.local" },
+];
+
+const MCP_TABS: { key: McpInstallTab; label: MessageKey }[] = [
+  { key: "manual", label: "install.mcp.tab.manual" },
+  { key: "source", label: "install.mcp.tab.source" },
 ];
 
 function CategoryIcon({ category }: { category: InstallCategory }) {
@@ -50,7 +60,10 @@ function CategoryIcon({ category }: { category: InstallCategory }) {
   );
 }
 
-function TabIcon({ tab }: { tab: InstallTab }) {
+function TabIcon({ tab }: { tab: InstallTab | McpInstallTab }) {
+  if (tab === "manual") {
+    return <AddIcon />;
+  }
   if (tab === "local") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -76,28 +89,92 @@ function optional(value: string): string | null {
   return value.trim() || null;
 }
 
-type InstallRunner = (renameIfTaken: boolean) => Promise<SkillInstalled>;
+type ReviewLoader = () => Promise<CommandResult<SkillInstallReview>>;
 
 /**
- * Runs an install; on `already_exists` asks, then installs as `<id>-2`
- * (SPEC 12.1). Resolves to the result, or null when the user declined or
- * it failed (the action reported why).
+ * Install through the review (M40, M42): fetch and scan, show the review,
+ * then install exactly that content. Install asks the trust question first
+ * when the source needs it; a taken id asks, then installs as `<id>-2`
+ * (SPEC 12.1). Closing the review without installing discards it.
  */
-function useInstallFlow() {
-  const { confirmRename, dialog } = useRenameConfirm();
+function useReviewInstall(onView: () => void) {
+  const { commands } = useTransport();
+  const { notify } = useNotifications();
+  const actions = useSkillActions();
+  const { confirmRename, dialog: renameDialog } = useRenameConfirm();
+  const { resolveTrust, dialog: trustDialog } = useTrustPrompt();
+  const [open, setOpen] = useState<{ review: SkillInstallReview; id: string | null; onDone: () => void } | null>(null);
+  const [isInstalling, setIsInstalling] = useState(false);
 
-  async function runInstall(install: InstallRunner): Promise<SkillInstalled | null> {
+  /** Fetches and scans; resolves once the review is shown (or failed, with a toast). */
+  async function review(load: ReviewLoader, id: string | null, onDone: () => void) {
     try {
-      return await install(false);
+      setOpen({ review: unwrap(await load()), id, onDone });
     } catch (error) {
-      if (!(error instanceof IpcFailure) || error.code !== "already_exists" || !(await confirmRename())) {
-        return null;
-      }
+      notify({ tone: "error", message: failureText(error) });
     }
-    return install(true).catch(() => null);
   }
 
-  return { runInstall, dialog };
+  function close() {
+    // An install in flight completes in the backend: closing now would discard a review that still installs.
+    if (isInstalling) {
+      return;
+    }
+    if (open) {
+      void commands.discardSkillReview(open.review.token);
+    }
+    setOpen(null);
+  }
+
+  async function install(allowDangerous: boolean) {
+    if (!open) {
+      return;
+    }
+    const { review: current, id, onDone } = open;
+    const answer = await resolveTrust(current, () =>
+      notify({ tone: "error", message: errorMessage("source_blocked") }),
+    );
+    if (!answer) {
+      return;
+    }
+    setIsInstalling(true);
+    const run = (renameIfTaken: boolean) =>
+      actions.installReviewed(current.token, id, renameIfTaken, allowDangerous, answer, onView);
+    try {
+      try {
+        await run(false);
+      } catch (error) {
+        if (!(error instanceof IpcFailure) || error.code !== "already_exists" || !(await confirmRename())) {
+          return;
+        }
+        await run(true);
+      }
+      // Installed: the backend consumed the review.
+      setOpen(null);
+      onDone();
+    } catch {
+      // Reported by the action; the review stays for a retry.
+    } finally {
+      setIsInstalling(false);
+    }
+  }
+
+  const dialog = (
+    <>
+      {open ? (
+        <SkillReviewDialog
+          review={open.review}
+          isInstalling={isInstalling}
+          onInstall={(allowDangerous) => void install(allowDangerous)}
+          onClose={close}
+        />
+      ) : null}
+      {trustDialog}
+      {renameDialog}
+    </>
+  );
+
+  return { review, dialog };
 }
 
 type PanelProps = {
@@ -106,8 +183,8 @@ type PanelProps = {
 };
 
 function GitInstallPanel({ onView }: PanelProps) {
-  const actions = useSkillActions();
-  const { runInstall, dialog } = useInstallFlow();
+  const { commands } = useTransport();
+  const { review, dialog } = useReviewInstall(onView);
   const [url, setUrl] = useState("");
   const [path, setPath] = useState("");
   const [gitRef, setGitRef] = useState("");
@@ -117,15 +194,12 @@ function GitInstallPanel({ onView }: PanelProps) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setIsInstalling(true);
-    const done = await runInstall((renameIfTaken) =>
-      actions.installGit(url.trim(), optional(path), optional(gitRef), optional(id), renameIfTaken, onView),
-    );
-    if (done) {
+    await review(() => commands.reviewGitSkill(url.trim(), optional(path), optional(gitRef)), optional(id), () => {
       setUrl("");
       setPath("");
       setGitRef("");
       setId("");
-    }
+    });
     setIsInstalling(false);
   }
 
@@ -201,8 +275,7 @@ function GitInstallPanel({ onView }: PanelProps) {
 function LocalInstallPanel({ onView }: PanelProps) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
-  const actions = useSkillActions();
-  const { runInstall, dialog } = useInstallFlow();
+  const { review, dialog } = useReviewInstall(onView);
   const [picked, setPicked] = useState<PickedSkillSource | null>(null);
   const [id, setId] = useState("");
   const [isInstalling, setIsInstalling] = useState(false);
@@ -224,13 +297,10 @@ function LocalInstallPanel({ onView }: PanelProps) {
       return;
     }
     setIsInstalling(true);
-    const done = await runInstall((renameIfTaken) =>
-      actions.installLocal(picked.token, optional(id), renameIfTaken, onView),
-    );
-    if (done) {
+    await review(() => commands.reviewLocalSkill(picked.token), optional(id), () => {
       setPicked(null);
       setId("");
-    }
+    });
     setIsInstalling(false);
   }
 
@@ -363,6 +433,9 @@ export type InstallPageProps = {
 export function InstallPage({ onOpenSkills }: InstallPageProps) {
   const [category, setCategory] = useState<InstallCategory>("skill");
   const [tab, setTab] = useState<InstallTab>("git");
+  const [mcpTab, setMcpTab] = useState<McpInstallTab>("manual");
+  const tabs = category === "skill" ? TABS : MCP_TABS;
+  const selectedTab = category === "skill" ? tab : mcpTab;
 
   return (
     <div className="market-route">
@@ -391,32 +464,38 @@ export function InstallPage({ onOpenSkills }: InstallPageProps) {
         </div>
       </HeaderToolbar>
       <section className="market-shell">
+        <div className="market-tab-row" role="tablist" aria-label={t("install.tabs.aria")}>
+          {tabs.map((entry) => {
+            const selected = entry.key === selectedTab;
+            return (
+              <button
+                key={entry.key}
+                className={`market-tab${selected ? " is-selected" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() =>
+                  category === "skill" ? setTab(entry.key as InstallTab) : setMcpTab(entry.key as McpInstallTab)
+                }
+              >
+                <span className="market-tab__icon">
+                  <TabIcon tab={entry.key} />
+                </span>
+                <span>{t(entry.label)}</span>
+              </button>
+            );
+          })}
+        </div>
         {category === "skill" ? (
-          <>
-            <div className="market-tab-row" role="tablist" aria-label={t("install.tabs.aria")}>
-              {TABS.map((entry) => {
-                const selected = entry.key === tab;
-                return (
-                  <button
-                    key={entry.key}
-                    className={`market-tab${selected ? " is-selected" : ""}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    onClick={() => setTab(entry.key)}
-                  >
-                    <span className="market-tab__icon">
-                      <TabIcon tab={entry.key} />
-                    </span>
-                    <span>{t(entry.label)}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {tab === "git" ? <GitInstallPanel onView={onOpenSkills} /> : <LocalInstallPanel onView={onOpenSkills} />}
-          </>
-        ) : (
+          tab === "git" ? (
+            <GitInstallPanel onView={onOpenSkills} />
+          ) : (
+            <LocalInstallPanel onView={onOpenSkills} />
+          )
+        ) : mcpTab === "manual" ? (
           <McpInstallPanel />
+        ) : (
+          <McpSourcePanel />
         )}
       </section>
     </div>

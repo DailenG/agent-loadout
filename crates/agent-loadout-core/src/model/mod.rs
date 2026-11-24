@@ -19,6 +19,7 @@ pub mod secrets;
 pub mod server;
 pub mod settings;
 pub mod skill_meta;
+pub mod sources;
 pub mod validate;
 
 use std::ops::Range;

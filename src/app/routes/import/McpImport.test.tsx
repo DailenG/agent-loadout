@@ -12,7 +12,7 @@ import type {
   ProjectServerList,
   ServerDraft,
 } from "@/ipc/bindings";
-import { MOCK_CHANGE, MOCK_CLIENTS, MOCK_SERVER_LIST, ok, type MockTransportOptions } from "@/test/mockTransport";
+import { MOCK_CHANGE, MOCK_CLIENTS, MOCK_SERVER_LIST, MOCK_TOOLS, ok, type MockTransportOptions } from "@/test/mockTransport";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import { McpImportSection } from "./McpImportSection";
 import type { ImportTarget } from "./model";
@@ -495,6 +495,20 @@ describe("MCP import", () => {
       from: "linear",
       clients: { allDetected: false, clients: ["claude-code"] },
     });
+  });
+
+  it("offers Shared or Private only for a client whose ToolInfo has a private project target", async () => {
+    // The same Claude Code entry in the shared .mcp.json, but the tools list says no private target.
+    const { user } = renderSection([LINEAR], {
+      applyImport: async () => ok({ ...APPLIED, imported: [], definitionOnly: ["linear"], secrets: [] }),
+      listTools: async () => ok(MOCK_TOOLS.map((tool) => ({ ...tool, privateProjectTarget: false }))),
+    });
+    await screen.findByRole("article", { name: "linear" });
+    const dialog = await review(user);
+    await user.click(within(dialog).getByRole("button", { name: "Import (1)" }));
+    const result = await screen.findByRole("dialog", { name: t("import.result.title") });
+    expect(within(result).getByRole("button", { name: "Add linear to the manifest of web-shop" })).toBeInTheDocument();
+    expect(within(result).queryByRole("group", { name: "Which manifest of web-shop" })).toBeNull();
   });
 
   it("suggests a lowercase id for an uppercase name", async () => {

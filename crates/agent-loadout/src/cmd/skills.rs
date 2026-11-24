@@ -12,19 +12,25 @@ use agent_loadout_core::model::applied::Scope;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
 use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
+use agent_loadout_core::scan::ScanReport;
 use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, ClientDir};
-use agent_loadout_core::skills::install::{self, InstallRequest, Source, UpdateStatus};
+use agent_loadout_core::skills::install::{
+    self, Decisions, FileChange, InstallRequest, Source, UpdateCheck, UpdateStatus,
+};
 use agent_loadout_core::skills::link::{self, LinkResult, SkillLedger};
 use agent_loadout_core::skills::{self, LinkKind, Naming, StoreSkill, SyncReport, store};
+use agent_loadout_core::sources::{self, SourceChange, SourceRef, TrustCheck, TrustState};
 use agent_loadout_core::store::{CommitId, Store};
 use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+use super::source::{Answer, Answers, TrustSourceArg};
 use super::{
-    Context, EXIT_UNRESOLVED, JSON_SCHEMA, error_json, path_json, print_json, require_store,
+    Context, EXIT_SCAN_BLOCKED, EXIT_UNRESOLVED, JSON_SCHEMA, error_json, path_json, print_json,
+    require_store,
 };
 
 static RUNNER: SystemRunner = SystemRunner {
@@ -43,7 +49,10 @@ enum SkillsCommand {
     /// is on).
     Ls,
     /// Install a skill from a git URL, a local folder, or a .zip/.skill
-    /// archive. With --yes, a taken id becomes <id>-2.
+    /// archive. With --yes, a taken id becomes <id>-2. A git source you
+    /// have not trusted asks first (a terminal prompt, or --trust-source).
+    /// The built-in scan runs first; a dangerous verdict installs nothing
+    /// (exit 8) unless --allow-dangerous.
     Add {
         /// Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), or
         /// a local folder or archive.
@@ -57,6 +66,24 @@ enum SkillsCommand {
         /// Skill id [default: from the SKILL.md name].
         #[arg(long)]
         id: Option<String>,
+        /// Install even when the built-in scan finds dangerous content
+        /// (review the findings first).
+        #[arg(long)]
+        allow_dangerous: bool,
+        /// Trust the git source without the prompt: once (this install
+        /// only), or always for the repo, its owner or its host
+        /// (`--trust-source=repo`; the value needs the `=`). Only for a
+        /// source you trust: skills can run commands and read your files.
+        /// --yes never answers the trust prompt.
+        #[arg(
+            long,
+            value_enum,
+            value_name = "ONCE|REPO|OWNER|HOST",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "once"
+        )]
+        trust_source: Option<TrustSourceArg>,
     },
     /// Remove a store skill and its owned links and copies; with --agents,
     /// remove an agents CLI skill through the `skills` CLI.
@@ -70,15 +97,38 @@ enum SkillsCommand {
     Enable(EnableArgs),
     /// Disable a skill for clients (user scope), or in a project.
     Disable(EnableArgs),
-    /// Update git skills (all, or ID); --check only reports.
+    /// Update git skills (all, or ID); --check only reports. A source you
+    /// have not trusted (or whose trust lapsed after a force-push or a
+    /// move) asks first. Each new content is scanned first; a dangerous
+    /// one is not applied (exit 8) unless --allow-dangerous.
     Update {
         id: Option<String>,
-        /// Report available updates; change nothing.
+        /// Report available updates; update no skill. A trusted source
+        /// found force-pushed or moved still has its trust lapse (one
+        /// store commit), so the next install or update from it asks.
         #[arg(long)]
         check: bool,
         /// ID names an agents CLI skill, updated through the `skills` CLI.
         #[arg(long, requires = "id", conflicts_with = "check")]
         agents: bool,
+        /// Apply updates even when the built-in scan finds dangerous
+        /// content (review the findings first, with --check).
+        #[arg(long, conflicts_with_all = ["check", "agents"])]
+        allow_dangerous: bool,
+        /// Trust the git sources without the prompt: once (this update
+        /// only), or always for the repo, its owner or its host
+        /// (`--trust-source=repo`; the value needs the `=`, so
+        /// `--trust-source repo` updates the skill `repo` once).
+        #[arg(
+            long,
+            value_enum,
+            value_name = "ONCE|REPO|OWNER|HOST",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "once",
+            conflicts_with_all = ["check", "agents"]
+        )]
+        trust_source: Option<TrustSourceArg>,
     },
     /// Classify the client skill folders: managed, unmanaged, mismatch.
     Scan {
@@ -199,7 +249,18 @@ pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
             path,
             git_ref,
             id,
-        } => add(ctx, &sx, source, path, git_ref, id),
+            allow_dangerous,
+            trust_source,
+        } => add(
+            ctx,
+            &sx,
+            source,
+            path,
+            git_ref,
+            id,
+            *allow_dangerous,
+            *trust_source,
+        ),
         SkillsCommand::Rm { id, agents: true } => agents(ctx, &sx, CliAction::Remove, id),
         SkillsCommand::Rm { id, agents: false } => {
             let store = require_store(ctx, "there is no skill to remove")?;
@@ -218,7 +279,20 @@ pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
             agents: true,
             ..
         } => agents(ctx, &sx, CliAction::Update, id),
-        SkillsCommand::Update { id, check, .. } => update(ctx, &sx, id.as_deref(), *check),
+        SkillsCommand::Update {
+            id,
+            check,
+            allow_dangerous,
+            trust_source,
+            ..
+        } => update(
+            ctx,
+            &sx,
+            id.as_deref(),
+            *check,
+            *allow_dangerous,
+            *trust_source,
+        ),
         SkillsCommand::Scan { project } => scan(ctx, &sx, project.as_deref()),
         SkillsCommand::Import {
             client,
@@ -303,6 +377,7 @@ fn naming(ctx: &Context, id: &Option<String>) -> Naming {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add(
     ctx: &Context,
     sx: &skills::SkillsEnv<'_>,
@@ -310,6 +385,8 @@ fn add(
     path: &Option<String>,
     git_ref: &Option<String>,
     id: &Option<String>,
+    allow_dangerous: bool,
+    trust_source: Option<TrustSourceArg>,
 ) -> Result<u8, CoreError> {
     let mut source = Source::parse(source, sx.fs);
     if let Source::Local(local) = &source {
@@ -326,8 +403,206 @@ fn add(
     request.path.clone_from(path);
     request.git_ref.clone_from(git_ref);
     request.naming = naming(ctx, id);
-    let installed = install::install(&store, sx, &request)?;
-    installed_out(ctx, &installed)
+    let mut answers = Answers::default();
+    let asked = match &request.source {
+        Source::Git { url, .. } => {
+            let asked = SourceRef::from_git_url(url)?;
+            let answer = answers.decide(ctx, Some(&store), &asked, trust_source)?;
+            if answer == Answer::Cancelled {
+                return Err(super::source::cancelled(&asked));
+            }
+            Some((asked, answer))
+        }
+        Source::Local(_) => None,
+    };
+    let (trust, via) = asked
+        .as_ref()
+        .map_or((None, Default::default()), |(_, answer)| answer.grant());
+    // A blocked source is refused before it is contacted.
+    if let Some((asked, _)) = &asked {
+        sources::would_admit(&store, asked, trust)?;
+    }
+    request.decisions = Decisions {
+        allow_dangerous,
+        trust,
+        moved_trust: None,
+        via,
+    };
+    let mut prepared = install::prepare(sx, &request)?;
+    // The host redirected a moved repository: the gate asks about where
+    // the content really comes from too. --trust-source answers only for
+    // the source named on the command line.
+    if let (Some((asked, _)), Some(target)) = (&asked, prepared.moved_to()) {
+        if !ctx.json {
+            eprintln!("note: {} moved to {}", asked.key(), target.key());
+        }
+        let answer = answers.decide(ctx, Some(&store), target, None)?;
+        if answer == Answer::Cancelled {
+            return Err(super::source::cancelled(target));
+        }
+        request.decisions.moved_trust = answer.grant().0;
+    }
+    match install::install_prepared(
+        &store,
+        sx,
+        &mut prepared,
+        &request.naming,
+        &request.decisions,
+    ) {
+        Ok(installed) => installed_out(ctx, &installed),
+        Err(err) if err.code() == ErrorCode::ScanBlocked => {
+            blocked_out(ctx, &err, prepared.scan());
+            Ok(EXIT_SCAN_BLOCKED)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// A changed file, for `--json` (`script`: looks executable, #24).
+fn change_json(change: &FileChange) -> Value {
+    json!({
+        "path": change.path,
+        "kind": change.kind.as_str(),
+        "script": change.script,
+    })
+}
+
+/// The trust check of a git skill's source, for `--json`.
+fn trust_json(check: &TrustCheck) -> Value {
+    let (state, reason) = match &check.state {
+        TrustState::Trusted { .. } => ("trusted", None),
+        TrustState::Blocked { .. } => ("blocked", None),
+        TrustState::Ask { reason, .. } => ("ask", Some(reason.as_str())),
+    };
+    json!({
+        "source": check.source.key(),
+        "state": state,
+        "reason": reason,
+        "official": check.official,
+        "insecure": check.source.is_insecure(),
+    })
+}
+
+fn source_change_json(change: &SourceChange) -> Value {
+    json!({ "kind": change.kind.as_str(), "detail": change.detail })
+}
+
+/// The trust answers an available update needs, for its source and for
+/// the repository it moved to: nothing for a trusted source (and a blocked
+/// one, which the gate refuses), else the flag or the prompt, asked once
+/// per source in a run. The flag answers only for the skill's own source,
+/// never for a repository it moved to.
+fn update_answer(
+    ctx: &Context,
+    store: &Store<'_>,
+    answers: &mut Answers,
+    checked: &UpdateCheck,
+    flag: Option<TrustSourceArg>,
+) -> Result<Decisions, CoreError> {
+    let Some(trust) = &checked.trust else {
+        return Ok(Decisions::default());
+    };
+    if let Some(change) = &checked.source_change
+        && !ctx.json
+    {
+        let what = match &change.detail {
+            Some(detail) => format!("moved to {detail}"),
+            None => "its history was rewritten (force-push)".to_owned(),
+        };
+        eprintln!("note: {} {what}; its trust lapsed", trust.source.key());
+    }
+    let answer = answers.decide(ctx, Some(store), &trust.source, flag)?;
+    if answer == Answer::Cancelled {
+        return Err(super::source::cancelled(&trust.source));
+    }
+    let (trust, via) = answer.grant();
+    let mut decisions = Decisions {
+        trust,
+        via,
+        ..Decisions::default()
+    };
+    if let Some(moved) = &checked.moved_trust {
+        let answer = answers.decide(ctx, Some(store), &moved.source, None)?;
+        if answer == Answer::Cancelled {
+            return Err(super::source::cancelled(&moved.source));
+        }
+        decisions.moved_trust = answer.grant().0;
+    }
+    Ok(decisions)
+}
+
+/// The scan of an install or update, for `--json`.
+pub(super) fn scan_json(report: &ScanReport) -> Value {
+    json!({
+        "verdict": report.verdict.as_str(),
+        "rules_version": report.rules_version,
+        "custom_rules": report.custom_rules,
+        "cached": report.cached,
+        "warnings": report.warnings,
+        "findings": report.findings.iter().map(|finding| json!({
+            "scanner": finding.scanner,
+            "rule": finding.rule,
+            "severity": finding.severity.as_str(),
+            "file": finding.file,
+            "line": finding.line,
+            "message": finding.message,
+            "excerpt": finding.excerpt,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// The findings of a scan, one per line, after the rule-loading warnings
+/// (on stderr) and a note when custom rules are in use; nothing for a
+/// clean scan with the built-in rules.
+pub(super) fn print_scan(report: &ScanReport, indent: &str) {
+    for warning in &report.warnings {
+        eprintln!("warning[scan_rules]: {warning}");
+    }
+    if report.custom_rules {
+        println!("{indent}Scan: custom rules in use (state/scan-rules.toml)");
+    }
+    if report.findings.is_empty() {
+        return;
+    }
+    let count = report.findings.len();
+    let plural = if count == 1 { "" } else { "s" };
+    println!(
+        "{indent}Scan: {} ({count} finding{plural})",
+        report.verdict.as_str()
+    );
+    for finding in &report.findings {
+        let place = match (&finding.file, finding.line) {
+            (Some(file), Some(line)) => format!("{file}:{line}"),
+            (Some(file), None) => file.clone(),
+            _ => String::from("-"),
+        };
+        println!(
+            "{indent}  {:<9} {:<26} {place}  {}",
+            finding.severity.as_str(),
+            finding.rule,
+            finding.message
+        );
+        if let Some(excerpt) = &finding.excerpt {
+            println!("{indent}    > {excerpt}");
+        }
+    }
+}
+
+/// An install the scan blocked: its findings, then the error.
+fn blocked_out(ctx: &Context, err: &CoreError, report: &ScanReport) {
+    if ctx.json {
+        print_json(&json!({
+            "schema": JSON_SCHEMA,
+            "error": error_json(err),
+            "scan": scan_json(report),
+        }));
+    } else {
+        print_scan(report, "");
+        eprintln!("error[{}]: {err}", err.code());
+        eprintln!(
+            "Nothing was installed. Review the findings; to install anyway, run again with --allow-dangerous."
+        );
+    }
 }
 
 fn installed_out(ctx: &Context, installed: &skills::Installed) -> Result<u8, CoreError> {
@@ -347,6 +622,7 @@ fn installed_out(ctx: &Context, installed: &skills::Installed) -> Result<u8, Cor
             "commit": installed.commit.as_ref().map(CommitId::as_str),
             "links": installed.report.as_ref().map(report_json),
             "warnings": installed.warnings.iter().map(error_json).collect::<Vec<_>>(),
+            "scan": scan_json(&installed.scan),
         }));
     } else {
         let renamed = installed
@@ -355,6 +631,7 @@ fn installed_out(ctx: &Context, installed: &skills::Installed) -> Result<u8, Cor
             .map(|wanted| format!(" ({wanted} was taken)"))
             .unwrap_or_default();
         println!("Added skill {}{renamed}.", installed.id);
+        print_scan(&installed.scan, "");
         if let Some(report) = &installed.report {
             print_links(report);
         }
@@ -615,73 +892,119 @@ fn update(
     sx: &skills::SkillsEnv<'_>,
     id: Option<&str>,
     check: bool,
+    allow_dangerous: bool,
+    trust_source: Option<TrustSourceArg>,
 ) -> Result<u8, CoreError> {
     let store: Store<'_> = require_store(ctx, "there is no skill to update")?;
     let ids: Vec<String> = match id {
         Some(id) => vec![id.to_owned()],
         None => store::ids(&store)?,
     };
-    let mut results = Vec::new();
+    let mut answers = Answers::default();
+    // Each result with the scan the human output prints.
+    let mut results: Vec<(Value, Option<ScanReport>)> = Vec::new();
     let mut failed = false;
+    let mut blocked = false;
     let mut attention = false;
     for id in &ids {
+        let checked = install::check_update(&store, sx, id)?;
         if check {
-            let checked = install::check_update(&store, sx, id)?;
             failed |= checked.status == UpdateStatus::Unreachable;
-            results.push(json!({
-                "id": checked.id,
-                "status": checked.status.as_str(),
-                "current": checked.current,
-                "latest": checked.latest,
-                "changes": checked.changes.iter().map(|change| json!({
-                    "path": change.path,
-                    "kind": change.kind.as_str(),
-                })).collect::<Vec<_>>(),
-                "error": checked.error.as_ref().map(error_json),
-            }));
+            results.push((
+                json!({
+                    "id": checked.id,
+                    "status": checked.status.as_str(),
+                    "current": checked.current,
+                    "latest": checked.latest,
+                    "changes": checked.changes.iter().map(change_json).collect::<Vec<_>>(),
+                    "error": checked.error.as_ref().map(error_json),
+                    "scan": checked.scan.as_ref().map(scan_json),
+                    "trust": checked.trust.as_ref().map(trust_json),
+                    "source_change": checked.source_change.as_ref().map(source_change_json),
+                    "moved_trust": checked.moved_trust.as_ref().map(trust_json),
+                }),
+                checked.scan,
+            ));
             continue;
         }
-        let checked = install::check_update(&store, sx, id)?;
         match checked.status {
             UpdateStatus::NotTracked | UpdateStatus::UpToDate => {
-                results.push(json!({ "id": id, "status": checked.status.as_str() }));
+                results.push((json!({ "id": id, "status": checked.status.as_str() }), None));
             }
-            UpdateStatus::Unreachable => {
+            UpdateStatus::Unreachable | UpdateStatus::Blocked => {
                 failed = true;
-                results.push(json!({
-                    "id": id,
-                    "status": checked.status.as_str(),
-                    "error": checked.error.as_ref().map(error_json),
-                }));
-            }
-            UpdateStatus::Available => match install::update(&store, sx, id) {
-                Ok(updated) => {
-                    attention |= updated.report.needs_attention();
-                    results.push(json!({
+                results.push((
+                    json!({
                         "id": id,
-                        "status": "updated",
-                        "from": updated.from,
-                        "to": updated.to,
-                        "commit": updated.commit.as_ref().map(CommitId::as_str),
-                        "changes": updated.changes.iter().map(|change| json!({
-                            "path": change.path,
-                            "kind": change.kind.as_str(),
-                        })).collect::<Vec<_>>(),
-                        "links": report_json(&updated.report),
-                    }));
+                        "status": checked.status.as_str(),
+                        "error": checked.error.as_ref().map(error_json),
+                    }),
+                    None,
+                ));
+            }
+            // The content the check fetched and scanned is the content
+            // written: no second fetch between the scan and the update.
+            UpdateStatus::Available => {
+                match update_answer(ctx, &store, &mut answers, &checked, trust_source).and_then(
+                    |answered| {
+                        let decisions = Decisions {
+                            allow_dangerous,
+                            ..answered
+                        };
+                        install::update_reviewed(
+                            &store,
+                            sx,
+                            id,
+                            checked.latest.as_deref().unwrap_or_default(),
+                            &decisions,
+                        )
+                    },
+                ) {
+                    Ok(updated) => {
+                        attention |= updated.report.needs_attention();
+                        results.push((
+                        json!({
+                            "id": id,
+                            "status": "updated",
+                            "from": updated.from,
+                            "to": updated.to,
+                            "commit": updated.commit.as_ref().map(CommitId::as_str),
+                            "changes": updated.changes.iter().map(change_json).collect::<Vec<_>>(),
+                            "links": report_json(&updated.report),
+                            "scan": scan_json(&updated.scan),
+                        }),
+                        Some(updated.scan),
+                    ));
+                    }
+                    Err(err) if err.code() == ErrorCode::ScanBlocked => {
+                        blocked = true;
+                        results.push((
+                            json!({
+                                "id": id,
+                                "status": "blocked",
+                                "latest": checked.latest,
+                                "error": error_json(&err),
+                                "scan": checked.scan.as_ref().map(scan_json),
+                            }),
+                            checked.scan,
+                        ));
+                    }
+                    Err(err) => {
+                        failed = true;
+                        results.push((
+                            json!({ "id": id, "status": "failed", "error": error_json(&err) }),
+                            None,
+                        ));
+                    }
                 }
-                Err(err) => {
-                    failed = true;
-                    results
-                        .push(json!({ "id": id, "status": "failed", "error": error_json(&err) }));
-                }
-            },
+            }
         }
     }
     if ctx.json {
-        print_json(&json!({ "schema": JSON_SCHEMA, "skills": results }));
+        let skills: Vec<&Value> = results.iter().map(|(result, _)| result).collect();
+        print_json(&json!({ "schema": JSON_SCHEMA, "skills": skills }));
     } else {
-        for result in &results {
+        for (result, scan) in &results {
             let status = result["status"].as_str().unwrap_or_default();
             let id = result["id"].as_str().unwrap_or_default();
             match result["error"]["message"].as_str() {
@@ -698,12 +1021,23 @@ fn update(
                     change["path"].as_str().unwrap_or_default()
                 );
             }
+            if let Some(scan) = scan {
+                print_scan(scan, "  ");
+            }
+        }
+        if blocked {
+            eprintln!(
+                "A dangerous update was not applied. Review the findings; to apply it anyway, run again with --allow-dangerous."
+            );
         }
     }
     // Each skill is reported; a source that cannot be reached (or a failed
-    // update) fails the run at the end.
+    // update) fails the run at the end, then an update the scan blocked.
     if failed {
         return Ok(1);
+    }
+    if blocked {
+        return Ok(EXIT_SCAN_BLOCKED);
     }
     Ok(if attention { EXIT_UNRESOLVED } else { 0 })
 }

@@ -16,7 +16,8 @@ use agent_loadout_core::apply::render::{DesiredState, Detected, RenderCx, native
 use agent_loadout_core::apply::{
     EntryPlan, EntryState, Plan, ScopeFilter, TargetPlan, Touched, instant_apply,
 };
-use agent_loadout_core::formats::{Document, Format};
+use agent_loadout_core::formats::Document;
+use agent_loadout_core::mcp_source::{id_from_name, snippet};
 use agent_loadout_core::model::TomlDocument;
 use agent_loadout_core::model::applied::Scope as TargetScope;
 use agent_loadout_core::model::clients::ClientSelection;
@@ -661,7 +662,7 @@ pub fn draft_of(server: &Server) -> ServerDraft {
 
 /// Writes the Form's fields into `server`, keeping everything the Form does
 /// not show (`os`, `client`, `meta`, unknown keys).
-fn apply_draft(server: &mut Server, draft: &ServerDraft) -> Result<(), CoreError> {
+pub(super) fn apply_draft(server: &mut Server, draft: &ServerDraft) -> Result<(), CoreError> {
     let body = &mut server.body;
     body.display_name = non_empty(&draft.display_name);
     body.description = non_empty(&draft.description);
@@ -890,10 +891,18 @@ pub fn remove(core: &Core, ids_to_remove: &[String]) -> CmdResult<ChangeResult> 
             operation.entity(format!("server/{id}"))
         });
     let ax = core.apply_env();
-    let committed = store.transaction(operation, |tx| {
+    // Machine-local checkouts of source servers (#5) go with the server:
+    // moved aside under the store lock, deleted once the removal commits.
+    let mut removal = None;
+    let result = store.transaction(operation, |tx| {
         unique.iter().try_for_each(|id| tx.remove_server(id))?;
+        removal = Some(super::mcp_source::set_aside_checkouts(core, &unique)?);
         instant_apply(tx, &ax, &Touched::Servers(unique.clone()))
-    })?;
+    });
+    if let Some(removal) = removal {
+        removal.finish(core.fs.as_ref(), result.is_ok());
+    }
+    let committed = result?;
     Ok(ChangeResult::new(
         &core.env,
         committed.commit.as_ref(),
@@ -1047,30 +1056,6 @@ pub fn preview(core: &Core, draft: &ServerDraft) -> CmdResult<Vec<ClientPreview>
         .collect())
 }
 
-/// A store id from a native entry name: lower case, other characters
-/// become `-`.
-fn id_from_name(name: &str) -> String {
-    let mut id: String = name
-        .trim()
-        .chars()
-        .map(|c| {
-            let c = c.to_ascii_lowercase();
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    id = id.trim_matches(|c| matches!(c, '-' | '.' | '_')).to_owned();
-    id.truncate(64);
-    if id.is_empty() {
-        "server".to_owned()
-    } else {
-        id
-    }
-}
-
 fn draft_from_fields(id: String, fields: &ServerFields, tools: Option<&ToolFilter>) -> ServerDraft {
     ServerDraft {
         id,
@@ -1092,37 +1077,13 @@ fn draft_from_fields(id: String, fields: &ServerFields, tools: Option<&ToolFilte
     }
 }
 
-fn parse_any(text: &str) -> Option<Document> {
-    [Format::Jsonc, Format::Toml, Format::Yaml]
-        .into_iter()
-        .find_map(|format| Document::parse(text.as_bytes(), format).ok())
-}
-
-fn same_family(a: Format, b: Format) -> bool {
-    let family = |format: Format| match format {
-        Format::Toml => 1,
-        Format::Yaml => 2,
-        _ => 0,
-    };
-    family(a) == family(b)
-}
-
-fn convert_entries(
-    doc: &Document,
-    spec: &AdapterSpec,
-    container: &[&str],
-    names: &[String],
-) -> Vec<ConvertedServer> {
-    names
+fn convert_entries(entries: &snippet::Entries) -> Vec<ConvertedServer> {
+    let spec = entries.spec;
+    entries
+        .entries
         .iter()
-        .map(|name| {
-            let converted = doc
-                .get(container, name)
-                .and_then(|value| {
-                    value.ok_or_else(|| CoreError::new(ErrorCode::NotFound, "entry vanished"))
-                })
-                .and_then(|value| server_from_native(spec, name, &value));
-            match converted {
+        .map(
+            |(name, value)| match server_from_native(spec, name, value) {
                 Ok(def) => ConvertedServer {
                     name: name.clone(),
                     source_client: spec.id.to_owned(),
@@ -1139,8 +1100,8 @@ fn convert_entries(
                     draft: None,
                     problem: Some(err.into()),
                 },
-            }
-        })
+            },
+        )
         .collect()
 }
 
@@ -1149,69 +1110,14 @@ fn convert_entries(
 /// makes its entry `needs_secret_extraction` (SPEC 11.7) instead of a draft,
 /// so no pasted secret comes back.
 pub fn convert(core: &Core, text: &str) -> CmdResult<Vec<ConvertedServer>> {
-    let doc = parse_any(text).ok_or_else(|| {
+    let doc = snippet::parse_any(text).ok_or_else(|| {
         CoreError::new(
             ErrorCode::ParseError,
             "the snippet is not JSON, JSONC, TOML or YAML",
         )
     })?;
-    let os = core.os();
-    for spec in ADAPTERS.iter().copied() {
-        let Some(mcp) = spec.mcp.as_ref() else {
-            continue;
-        };
-        if !same_family(mcp.format, doc.format()) {
-            continue;
-        }
-        let Ok(keys) = mcp.container.keys(os, None) else {
-            continue;
-        };
-        if keys.is_empty() {
-            continue;
-        }
-        let container: Vec<&str> = keys.iter().map(String::as_str).collect();
-        if let Ok(names) = doc.list(&container)
-            && !names.is_empty()
-        {
-            return Ok(convert_entries(&doc, spec, &container, &names));
-        }
-    }
-    // No client container: a bare map of entries, or one entry. JSON reads
-    // with Claude Code's mapper, TOML with Codex's.
-    let fallback = match doc.format() {
-        Format::Toml => "codex",
-        _ => "claude-code",
-    };
-    let spec = adapter(fallback).expect("adapter in the table");
-    let names = doc.list(&[]).unwrap_or_default();
-    let is_entry = |value: &agent_loadout_core::formats::NativeValue| {
-        value
-            .as_object()
-            .is_some_and(|map| map.contains_key("command") || map.contains_key("url"))
-    };
-    if names.iter().any(|name| name == "command" || name == "url") {
-        let mut wrapped = Document::empty(doc.format());
-        let mut root = agent_loadout_core::formats::NativeMap::new();
-        for name in &names {
-            if let Ok(Some(value)) = doc.get(&[], name) {
-                root.insert(name.clone(), value);
-            }
-        }
-        wrapped.upsert(&[], "server", &root.into())?;
-        return Ok(convert_entries(&wrapped, spec, &[], &["server".to_owned()]));
-    }
-    let entries: Vec<String> = names
-        .into_iter()
-        .filter(|name| matches!(doc.get(&[], name), Ok(Some(value)) if is_entry(&value)))
-        .collect();
-    if entries.is_empty() {
-        return Err(CoreError::new(
-            ErrorCode::UnexpectedShape,
-            "the snippet holds no MCP server entry",
-        )
-        .into());
-    }
-    Ok(convert_entries(&doc, spec, &[], &entries))
+    let entries = snippet::entries(&doc, core.os(), None)?;
+    Ok(convert_entries(&entries))
 }
 
 /// Secret aliases for the Form's reference picker (names only).

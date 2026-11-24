@@ -35,7 +35,7 @@ pub struct RestoreArgs {
     #[arg(value_name = "REV|TAG", required_unless_present_any = ["files", "from"])]
     rev: Option<String>,
     /// Restore only this entity (repeatable): server/<id>, secrets,
-    /// clients, settings, project/<id>, skill/<id>, machine/<id>.
+    /// clients, settings, sources, project/<id>, skill/<id>, machine/<id>.
     #[arg(long = "path", value_name = "ENTITY", conflicts_with_all = ["files", "from"])]
     paths: Vec<String>,
     /// Apply the restored state.

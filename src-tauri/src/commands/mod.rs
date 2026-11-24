@@ -13,20 +13,25 @@ pub mod discover;
 pub mod effective;
 pub mod history;
 pub mod import;
+pub mod mcp_source;
 pub mod migrate;
 pub mod project_servers;
 pub mod projects;
 pub mod remotes;
 pub mod resolve;
+pub mod scan;
 pub mod secrets;
 pub mod servers;
 pub mod skills;
+pub mod sources;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_discover;
 #[cfg(test)]
 mod tests_import;
+#[cfg(test)]
+mod tests_mcp_source;
 #[cfg(test)]
 mod tests_migrate;
 #[cfg(test)]
@@ -36,7 +41,11 @@ mod tests_project_servers;
 #[cfg(test)]
 mod tests_read_only;
 #[cfg(test)]
+mod tests_scan;
+#[cfg(test)]
 mod tests_skills;
+#[cfg(test)]
+mod tests_sources;
 #[cfg(test)]
 mod tests_versioning;
 #[cfg(test)]
@@ -59,6 +68,7 @@ use agent_loadout_core::model::applied::{ApplyOutcome, Scope as TargetScope};
 use agent_loadout_core::paths::{self, HomeSource, LoadoutHome};
 use agent_loadout_core::secrets::delivery::DeliveryEnv;
 use agent_loadout_core::secrets::providers::keyring::{KeyringBackend, OsKeyring};
+use agent_loadout_core::skills::install::Prepared;
 use agent_loadout_core::store::{CommitId, Store};
 use agent_loadout_core::{CoreError, Env, ErrorCode, Fs, Os, RealFs, brand};
 use serde::{Deserialize, Serialize};
@@ -156,13 +166,44 @@ pub struct AppState {
     /// Folders the user picked in the OS dialog, by the token the frontend
     /// got for each: the absolute path never crosses IPC (SPEC 17).
     picked: Mutex<HashMap<String, PathBuf>>,
+    /// Fetched and scanned skills waiting for the install review's
+    /// decision (SPEC 17), by token; a git source's temporary clone goes
+    /// with each.
+    reviews: Mutex<Reviews>,
+}
+
+/// One install review, shared with the install running on a worker
+/// thread: it stays in the store until the install succeeds, so any
+/// failure (including one of the worker itself) keeps it for a retry.
+pub(crate) type SharedReview = Arc<Mutex<Prepared>>;
+
+/// Install reviews kept, at most [`Reviews::MAX`]: the oldest is evicted
+/// (its temporary clone removed off the async thread) when another
+/// arrives. Clones the app never cleaned up are swept at startup.
+#[derive(Default)]
+struct Reviews {
+    next: u64,
+    items: Vec<(String, SharedReview)>,
+}
+
+impl Reviews {
+    const MAX: usize = 8;
 }
 
 impl AppState {
     pub fn from_process() -> Self {
+        let core = Core::from_process().map(Arc::new);
+        if let Ok(core) = &core {
+            let core = Arc::clone(core);
+            std::thread::spawn(move || {
+                skills::sweep_review_clones(&core);
+                mcp_source::sweep_clones(&core);
+            });
+        }
         Self {
-            core: Core::from_process().map(Arc::new),
+            core,
             picked: Mutex::new(HashMap::new()),
+            reviews: Mutex::new(Reviews::default()),
         }
     }
 
@@ -185,6 +226,50 @@ impl AppState {
             code: ErrorCode::NotFound,
             message: "the picked folder is not known any more; pick it again".to_owned(),
         })
+    }
+
+    fn reviews(&self) -> std::sync::MutexGuard<'_, Reviews> {
+        self.reviews.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// Keeps an install review; returns its token and the reviews evicted
+    /// to stay within [`Reviews::MAX`] (drop them off the async thread).
+    fn remember_review(&self, prepared: Prepared) -> (String, Vec<SharedReview>) {
+        let mut reviews = self.reviews();
+        reviews.next += 1;
+        let token = format!("review-{}", reviews.next);
+        reviews
+            .items
+            .push((token.clone(), Arc::new(Mutex::new(prepared))));
+        let over = reviews.items.len().saturating_sub(Reviews::MAX);
+        let evicted = reviews
+            .items
+            .drain(..over)
+            .map(|(_, review)| review)
+            .collect();
+        (token, evicted)
+    }
+
+    /// The review under `token` (it stays in the store).
+    fn review(&self, token: &str) -> Result<SharedReview, IpcError> {
+        self.reviews()
+            .items
+            .iter()
+            .find(|(known, _)| known == token)
+            .map(|(_, review)| Arc::clone(review))
+            .ok_or_else(|| IpcError {
+                code: ErrorCode::NotFound,
+                message: "the install review is not known any more; review the source again"
+                    .to_owned(),
+            })
+    }
+
+    /// Takes the review under `token` out of the store, if any (drop it
+    /// off the async thread).
+    fn forget_review(&self, token: &str) -> Option<SharedReview> {
+        let mut reviews = self.reviews();
+        let index = reviews.items.iter().position(|(known, _)| known == token)?;
+        Some(reviews.items.remove(index).1)
     }
 }
 

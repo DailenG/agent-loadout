@@ -22,6 +22,7 @@ fn all() -> HistoryFilter {
         scope: HistoryScope::All,
         entity: None,
         limit: None,
+        before: None,
     }
 }
 
@@ -141,6 +142,7 @@ fn the_user_filter_lists_the_user_scope_commits() {
         scope,
         entity: None,
         limit: None,
+        before: None,
     };
     let user = history::history(&fx.core, &filter(HistoryScope::User)).unwrap();
     assert!(
@@ -167,6 +169,7 @@ fn a_limit_lists_the_newest_commits_as_a_first_page() {
         scope,
         entity: None,
         limit,
+        before: None,
     };
     let ids =
         |entries: Vec<history::HistoryEntry>| entries.into_iter().map(|e| e.id).collect::<Vec<_>>();
@@ -183,6 +186,25 @@ fn a_limit_lists_the_newest_commits_as_a_first_page() {
     // `Projects` filters after the walk, so a limit never cuts its matches short.
     let projects = history::history(&fx.core, &filter(HistoryScope::Projects, Some(1))).unwrap();
     assert!(projects.is_empty(), "{projects:?}");
+
+    // "Load more": the next page after the last shown commit.
+    let next = ids(history::history(
+        &fx.core,
+        &HistoryFilter {
+            before: Some(page[1].clone()),
+            ..filter(HistoryScope::All, Some(2))
+        },
+    )
+    .unwrap());
+    assert_eq!(next, everything[2..everything.len().min(4)]);
+    let bad = history::history(
+        &fx.core,
+        &HistoryFilter {
+            before: Some("not-a-commit".to_owned()),
+            ..filter(HistoryScope::All, Some(2))
+        },
+    );
+    assert!(bad.is_err());
 }
 
 #[test]

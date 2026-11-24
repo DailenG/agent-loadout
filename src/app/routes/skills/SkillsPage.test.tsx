@@ -4,6 +4,7 @@ import { expectModalKeyboard } from "@/app/components/modalKeyboard";
 import { t } from "@/i18n/en";
 import type { ProjectRow, SkillInfo, SkillList, SkillScope, ToolSkillDir } from "@/ipc/bindings";
 import {
+  MOCK_SCAN_CLEAN,
   MOCK_SKILL_CHANGE,
   MOCK_SKILL_CLIENTS,
   MOCK_SKILL_INSTALLED,
@@ -205,10 +206,13 @@ describe("SkillsPage", () => {
             status: "available",
             current: "3f2a9c1aa",
             latest: "9b8c7d6ee",
-            changes: [{ path: "SKILL.md", kind: "modified" }],
+            changes: [{ path: "SKILL.md", kind: "modified", script: false }],
             error: null,
+            scan: null,
+            trust: null,
+            movedTrust: null,
           },
-          { id: "repo-notes", status: "not_tracked", current: null, latest: null, changes: [], error: null },
+          { id: "repo-notes", status: "not_tracked", current: null, latest: null, changes: [], error: null, scan: null, trust: null, movedTrust: null },
         ]),
       skillUpdateDiff: async (_id, file) => ok({ path: file, before: "# Alpha\n", after: "# Alpha v2\n", binary: false }),
     });
@@ -229,12 +233,39 @@ describe("SkillsPage", () => {
     await user.click(within(dialog).getByRole("button", { name: "Update" }));
     // The update names the commit the preview showed.
     await waitFor(() =>
-      expect(transport.invocations).toContainEqual({ command: "updateSkill", args: ["alpha", "9b8c7d6ee"] }),
+      expect(transport.invocations).toContainEqual({ command: "updateSkill", args: ["alpha", "9b8c7d6ee", false, null, null] }),
     );
     // The card's entry is cleared: no stale "Update available" or Update (1).
     await waitFor(() => expect(within(alpha).queryByText("Update available")).toBeNull());
     expect(screen.queryByRole("button", { name: "Update (1)" })).toBeNull();
     expect(screen.getByRole("button", { name: "Check updates" })).toBeInTheDocument();
+  });
+
+  it("words a scan refusal of an update as an update", async () => {
+    const { user } = renderPage({
+      checkSkillUpdates: async () =>
+        ok([
+          {
+            id: "alpha",
+            status: "available",
+            current: "3f2a9c1aa",
+            latest: "9b8c7d6ee",
+            changes: [],
+            error: null,
+            scan: null,
+            trust: null,
+            movedTrust: null,
+          },
+        ]),
+      updateSkill: async () => mockIpcError({ code: "scan_blocked", message: "dangerous" }),
+    });
+    await screen.findByRole("article", { name: "alpha" });
+    await user.click(screen.getByRole("button", { name: "Check updates" }));
+    const alpha = screen.getByRole("article", { name: "alpha" });
+    await user.click(await within(alpha).findByRole("button", { name: "Preview the update of alpha" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Update alpha" })).getByRole("button", { name: "Update" }));
+    expect(await screen.findByText(/Nothing was updated; review the findings, and update anyway only if you trust it\./)).toBeInTheDocument();
+    expect(screen.queryByText(/install anyway/i)).toBeNull();
   });
 
   it("Update all keeps only the failed entries", async () => {
@@ -243,14 +274,17 @@ describe("SkillsPage", () => {
       status: "available" as const,
       current: "1111111",
       latest,
-      changes: [{ path: "SKILL.md", kind: "modified" as const }],
+      changes: [{ path: "SKILL.md", kind: "modified" as const, script: false }],
       error: null,
+      scan: null,
+      trust: null,
+      movedTrust: null,
     });
     const { user, transport } = renderPage({
       checkSkillUpdates: async () => ok([check("alpha", "aaaaaaa"), check("repo-notes", "bbbbbbb")]),
       updateSkill: async (id, latest) =>
         id === "alpha"
-          ? ok({ id, from: null, to: latest, commit: MOCK_SKILL_CHANGE.commit, changes: [], links: MOCK_SKILL_CHANGE.links })
+          ? ok({ id, from: null, to: latest, commit: MOCK_SKILL_CHANGE.commit, changes: [], links: MOCK_SKILL_CHANGE.links, scan: MOCK_SCAN_CLEAN })
           : mockIpcError({ code: "entry_changed", message: "changed" }),
     });
     await screen.findByRole("article", { name: "alpha" });
@@ -258,8 +292,8 @@ describe("SkillsPage", () => {
     await user.click(await screen.findByRole("button", { name: "Update (2)" }));
     expect(await screen.findByRole("button", { name: "Update (1)" })).toBeInTheDocument();
     expect(transport.invocations.filter((call) => call.command === "updateSkill").map((call) => call.args)).toEqual([
-      ["alpha", "aaaaaaa"],
-      ["repo-notes", "bbbbbbb"],
+      ["alpha", "aaaaaaa", false, null, null],
+      ["repo-notes", "bbbbbbb", false, null, null],
     ]);
     expect(within(screen.getByRole("article", { name: "alpha" })).queryByText("Update available")).toBeNull();
     expect(within(screen.getByRole("article", { name: "repo-notes" })).getByText("Update available")).toBeInTheDocument();

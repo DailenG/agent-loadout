@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.acme/weather",
+  "title": "Weather",
+  "description": "Forecasts for any city",
+  "version": "1.2.0",
+  "websiteUrl": "https://acme.example/weather",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@acme/weather-mcp",
+      "version": "1.2.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "WEATHER_API_KEY", "description": "API key from acme.example", "isRequired": true, "isSecret": true },
+        { "name": "WEATHER_UNITS", "default": "metric" }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.acme.example/weather",
+      "headers": [
+        { "name": "Authorization", "value": "Bearer {token}", "isRequired": true,
+          "variables": { "token": { "isSecret": true, "description": "Access token" } } }
+      ]
+    }
+  ]
+}

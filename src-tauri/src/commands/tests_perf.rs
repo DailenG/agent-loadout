@@ -17,8 +17,15 @@
 //! cargo test --release --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture perf_planner
 //! ```
 //!
-//! `PERF_OUT` names a folder for `backend.json` (`planner.json` for the
-//! quick variant).
+//! [`perf_skills`] is the quick variant for skills (#16): 300 skills staged
+//! in one commit, 150 of them enabled, the same client files and servers:
+//!
+//! ```text
+//! cargo test --release --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture perf_skills
+//! ```
+//!
+//! `PERF_OUT` names a folder for `backend.json` (`planner.json` and
+//! `skills.json` for the quick variants).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -334,6 +341,7 @@ fn perf_baseline_commands() {
         scope: HistoryScope::All,
         entity: None,
         limit: None,
+        before: None,
     };
 
     let mut out = Vec::new();
@@ -631,25 +639,178 @@ fn perf_planner() {
         eprintln!("| {name} | {} |", ms(*d));
     }
     print_table(&out);
-    if let Some(dir) = std::env::var_os("PERF_OUT") {
-        let json: Vec<_> = out
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "name": t.name,
-                    "runs": t.runs,
-                    "minMs": ms(t.min),
-                    "medianMs": ms(t.median),
-                    "maxMs": ms(t.max),
-                    "bytes": t.bytes,
-                })
+    write_out(&out, "planner.json");
+}
+
+/// `out` as JSON in `$PERF_OUT/<file>`, when `PERF_OUT` is set.
+fn write_out(out: &[Timing], file: &str) {
+    let Some(dir) = std::env::var_os("PERF_OUT") else {
+        return;
+    };
+    let json: Vec<_> = out
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "name": t.name,
+                "runs": t.runs,
+                "minMs": ms(t.min),
+                "medianMs": ms(t.median),
+                "maxMs": ms(t.max),
+                "bytes": t.bytes,
             })
+        })
+        .collect();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        Path::new(&dir).join(file),
+        serde_json::to_string_pretty(&json).unwrap(),
+    )
+    .unwrap();
+}
+
+/// Projects of [`perf_skills`]; each enables [`PROJECT_SKILLS`] skills.
+const SKILL_PROJECTS: usize = 2;
+const PROJECT_SKILLS: usize = 20;
+
+/// The store files of synthetic skill `i`: the content of [`skill_folder`]
+/// and metadata enabling every third skill for `clients` and every sixth
+/// (offset 1) for all detected clients.
+fn staged_skill(i: usize, clients: &[&str]) -> Vec<(String, String)> {
+    let id = format!("skill-{i:03}");
+    let enable = if i.is_multiple_of(3) {
+        let list: Vec<String> = clients.iter().map(|c| format!("{c:?}")).collect();
+        format!("\n[enable]\nclients = [{}]\n", list.join(", "))
+    } else if i % 6 == 1 {
+        "\n[enable]\nclients = \"all-detected\"\n".to_owned()
+    } else {
+        String::new()
+    };
+    vec![
+        (
+            format!("skills/{id}/SKILL.md"),
+            format!(
+                "---\nname: {id}\ndescription: Synthetic skill {i} for the performance baseline.\n---\n\n# Skill {i}\n\n{}",
+                "Some instructions for the agent.\n".repeat(40)
+            ),
+        ),
+        (
+            format!("skills/{id}/scripts/check.sh"),
+            "echo ok\n".to_owned(),
+        ),
+        (
+            format!("skill-meta/{id}.toml"),
+            format!(
+                "schema = 1\nid = \"{id}\"\nname = \"{id}\"\n\n[source]\nkind = \"local\"\n{enable}"
+            ),
+        ),
+    ]
+}
+
+/// The quick skills benchmark (#16): 300 skills staged in one commit (100
+/// enabled for 3 clients, 50 for all detected, linked by one sync), the 21
+/// client files and 200 servers of [`perf_planner`], and 2 trusted projects
+/// that enable 20 skills each. Times the Skills page's listings and one
+/// install and one enable at that size, in instant mode.
+#[test]
+#[ignore = "skills benchmark; run on demand (docs/perf)"]
+fn perf_skills() {
+    let fx = Fx::new();
+    let core = &fx.core;
+    drop(fx.store());
+    let mut setup = Vec::new();
+
+    let started = Instant::now();
+    let detected = client_files(core);
+    let files: Vec<(String, String)> = (0..SERVERS)
+        .map(|i| {
+            (
+                format!("servers/server-{i:03}.toml"),
+                server_toml(i, &detected, "initial"),
+            )
+        })
+        .collect();
+    stage(core, &files);
+    apply::run(core, None).unwrap();
+    record(&mut setup, "client files + 200 servers + apply", started);
+
+    let skill_clients: Vec<&str> = ["claude-code", "codex", "omp"].to_vec();
+    let started = Instant::now();
+    let files: Vec<(String, String)> = (0..SKILLS)
+        .flat_map(|i| staged_skill(i, &skill_clients))
+        .collect();
+    stage(core, &files);
+    record(&mut setup, "stage 300 skills (one commit)", started);
+
+    // The first sync makes every link; later syncs find them in place.
+    let owned: Vec<String> = skill_clients.iter().map(|c| (*c).to_owned()).collect();
+    let started = Instant::now();
+    skills::set_clients(core, "skill-000", &owned, true, None).unwrap();
+    record(&mut setup, "first sync (links for 150 skills)", started);
+
+    let started = Instant::now();
+    let mut project_ids = Vec::new();
+    for i in 0..SKILL_PROJECTS {
+        let root = fx.th.projects().join(format!("project-{i}"));
+        std::fs::create_dir_all(root.join(".loadout")).unwrap();
+        let enable: Vec<String> = (0..PROJECT_SKILLS)
+            .map(|n| format!("\"skill-{:03}\"", n * 7 + i))
             .collect();
-        std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            Path::new(&dir).join("planner.json"),
-            serde_json::to_string_pretty(&json).unwrap(),
+            root.join(".loadout/project.toml"),
+            format!(
+                "{}\n[skills]\nenable = [{}]\n",
+                project_manifest(i),
+                enable.join(", ")
+            ),
         )
         .unwrap();
+        let added = projects::add(core, &root).unwrap();
+        let hash = projects::review(core, &added.id).unwrap().hash;
+        projects::trust(core, &added.id, &hash).unwrap();
+        project_ids.push(added.id);
     }
+    record(
+        &mut setup,
+        "add 2 projects (trusted, 20 skills each)",
+        started,
+    );
+
+    let user = SkillScope::User;
+    let in_project = SkillScope::Project {
+        id: project_ids[0].clone(),
+    };
+    let mut out = Vec::new();
+    time(&mut out, "list_skills (user)", || {
+        skills::list(core, &user).unwrap()
+    });
+    time(&mut out, "list_skills (project)", || {
+        skills::list(core, &in_project).unwrap()
+    });
+    time(&mut out, "list_skill_tool_dirs (user)", || {
+        skills::tool_dirs(core, &user).unwrap()
+    });
+    let mut next = SKILLS;
+    time(&mut out, "install_local_skill (one more at 300)", || {
+        let folder = skill_folder(&fx.th.projects(), next);
+        next += 1;
+        skills::install_local(core, &folder, None, false).unwrap()
+    });
+    let mut toggle = 0usize;
+    time(&mut out, "set_skill_clients (one skill, 3 clients)", || {
+        toggle += 1;
+        skills::set_clients(core, "skill-002", &owned, toggle % 2 == 1, None).unwrap()
+    });
+
+    eprintln!(
+        "\nstore: {SERVERS} servers, {} skills, {SKILL_PROJECTS} projects, {} commits, {} clients with files",
+        next,
+        fx.commits(),
+        detected.len()
+    );
+    eprintln!("\n| Setup step | ms |\n|---|---|");
+    for (name, d) in &setup {
+        eprintln!("| {name} | {} |", ms(*d));
+    }
+    print_table(&out);
+    write_out(&out, "skills.json");
 }

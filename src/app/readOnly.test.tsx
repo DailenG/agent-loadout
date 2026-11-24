@@ -292,6 +292,7 @@ describe("Tools cards", () => {
     readOnly: false,
     userFiles: [{ path: "~/.cursor/mcp.json", exists: true, readOnly: ACL }],
     projectFiles: ["<P>/.cursor/mcp.json", "<P>/.mcp.json"],
+    privateProjectTarget: false,
     transports: { stdio: true, http: true, sse: false },
     envRefs: true,
     restartRequired: false,

@@ -8,8 +8,12 @@ import { useInvalidateStore } from "@/app/apply/changeNotice";
 import { useNotifications } from "@/app/components/notifications";
 import { t } from "@/i18n/en";
 import type { SkillChange, SkillInstalled, SkillMethod, SkillScope } from "@/ipc/bindings";
+import type { TrustAnswer } from "@/app/components/TrustDialog";
 import { IpcFailure, unwrap, useTransport } from "@/ipc/transport";
 import { failureText, syncMessage } from "./labels";
+
+/** No trust answer: a source that needs one is refused (`source_trust_required`). */
+const NO_ANSWER: TrustAnswer = { trust: null, movedTrust: null };
 
 export function useSkillActions() {
   const { commands } = useTransport();
@@ -20,7 +24,7 @@ export function useSkillActions() {
     async <T,>(
       call: () => Promise<T>,
       done: (value: T) => string | null,
-      options: { quietTaken?: boolean; onView?: () => void } = {},
+      options: { quietTaken?: boolean; onView?: () => void; scanBlocked?: string } = {},
     ): Promise<T> => {
       try {
         const value = await call();
@@ -36,7 +40,8 @@ export function useSkillActions() {
       } catch (error) {
         // A taken id is a question for the user (SPEC 12.1), not a failure.
         if (!(options.quietTaken && error instanceof IpcFailure && error.code === "already_exists")) {
-          notify({ tone: "error", message: failureText(error) });
+          const scanBlocked = error instanceof IpcFailure && error.code === "scan_blocked" ? options.scanBlocked : undefined;
+          notify({ tone: "error", message: scanBlocked ?? failureText(error) });
         }
         throw error;
       } finally {
@@ -99,10 +104,14 @@ export function useSkillActions() {
           async () => unwrap(await commands.setSkillTags(id, tags)),
           () => t("skill.card.tag.saved", { name }),
         ),
-      /** Updates to `latest`, the source commit the preview showed. */
-      update: (id: string, name: string, latest: string) =>
+      /** Updates to `latest`, the source commit the preview showed. A
+       * dangerous scan verdict is refused (`scan_blocked`) unless
+       * `allowDangerous` ("Update anyway"); an untrusted source (or the
+       * repository it moved to) is refused (`source_trust_required`) unless
+       * `answer` carries the trust dialog's answers. */
+      update: (id: string, name: string, latest: string, allowDangerous = false, answer: TrustAnswer = NO_ANSWER) =>
         run(
-          async () => unwrap(await commands.updateSkill(id, latest)),
+          async () => unwrap(await commands.updateSkill(id, latest, allowDangerous, answer.trust, answer.movedTrust)),
           (updated) => {
             const message = t("skill.card.success.updated", { name });
             if (updated.links.needsAttention) {
@@ -111,6 +120,7 @@ export function useSkillActions() {
             }
             return message;
           },
+          { scanBlocked: t("scan.gate.updateBlocked") },
         ),
       revealSkill: (id: string) => run(async () => unwrap(await commands.revealSkillFolder(id)), () => null),
       revealTool: (client: string, scope: SkillScope) =>
@@ -137,24 +147,23 @@ export function useSkillActions() {
           async () => unwrap(await commands.runAgentsSkillCli(action, name)),
           () => t("skills.agents.done", { name }),
         ),
-      installGit: (
-        url: string,
-        path: string | null,
-        gitRef: string | null,
+      /** Installs exactly the reviewed content (`review_git_skill` / `review_local_skill`). */
+      installReviewed: (
+        token: string,
         id: string | null,
         renameIfTaken: boolean,
+        allowDangerous: boolean,
+        answer: TrustAnswer,
         onView?: () => void,
       ) =>
         run(
-          async () => unwrap(await commands.installGitSkill(url, path, gitRef, id, renameIfTaken)),
+          async () =>
+            unwrap(
+              await commands.installReviewedSkill(token, id, renameIfTaken, allowDangerous, answer.trust, answer.movedTrust),
+            ),
           installed,
           { quietTaken: true, onView },
         ),
-      installLocal: (token: string, id: string | null, renameIfTaken: boolean, onView?: () => void) =>
-        run(async () => unwrap(await commands.installLocalSkill(token, id, renameIfTaken)), installed, {
-          quietTaken: true,
-          onView,
-        }),
     }),
     [changed, commands, installed, notify, run],
   );

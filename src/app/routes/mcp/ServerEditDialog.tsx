@@ -339,15 +339,16 @@ function ServerEditor(props: ServerEditorProps) {
   );
 }
 
-type ServerFormProps = {
+export type ServerFormProps = {
   clients: readonly ClientInfo[];
   draft: ServerDraft;
-  mode: "create" | "edit";
+  /** `draft`: a proposed server under review (M42): the id is editable, no paste box. */
+  mode: "create" | "edit" | "draft";
   focusPaste: boolean;
   onChange: (update: (draft: ServerDraft) => ServerDraft) => void;
 };
 
-function ServerForm({ clients, draft, mode, focusPaste, onChange }: ServerFormProps) {
+export function ServerForm({ clients, draft, mode, focusPaste, onChange }: ServerFormProps) {
   const { commands } = useTransport();
   const aliases = useQuery({
     queryKey: ["list_secret_aliases"],

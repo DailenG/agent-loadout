@@ -8,6 +8,127 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Added
+
+- Built-in offline scanner: every skill install and update is scanned
+  locally with Loadout's own rules, shipped as data (`scan/rules.toml`,
+  versioned; a custom `state/scan-rules.toml` can add rules or raise
+  severities, never remove or lower one, and results then say "custom
+  rules in use"): download-and-run idioms (`curl | sh` also across line
+  continuations, `env` and `tee`; download then run; `iwr | iex`),
+  encoded payloads, reverse shells, credential reads and uploads next to
+  network calls, hidden Unicode (tag characters, variation selectors,
+  zero-width and bidi characters) and HTML-comment instructions, prompt
+  injection, turned off safety prompts, agent memory and config edits,
+  native binaries (by their first bytes), and for MCP server commands
+  unpinned packages, Git URLs and images. In Markdown prose (outside
+  fenced code blocks) mentions of installers, safety prompts or "ignore
+  previous instructions" are warnings; in code blocks and scripts they
+  are dangerous. Files are typed by their bytes, UTF-16 is decoded, files
+  read by name only are listed (`not-content-scanned`) and only the first
+  4 MiB of a file are scanned (`not-fully-scanned`). Findings carry
+  severity, rule, file, line and an excerpt with secrets masked; the
+  verdict is the worst finding. A `dangerous` verdict blocks the install
+  or update (`scan_blocked`, exit code 8) unless you pass
+  `--allow-dangerous`; `loadout skills add` and `skills update` (also
+  `--check`) print the findings, and `--json` adds `scan`. Results are
+  cached by content hash in `cache/scan`. App: install and update results
+  carry the scan, and a new install review (`review_git_skill`,
+  `review_local_skill`, `install_reviewed_skill`, `discard_skill_review`)
+  shows findings before anything is installed; `update_skill` takes
+  `allowDangerous` (#25).
+- Source trust: installing or updating a skill from a git source you
+  have not trusted asks first: **Trust this time only**, **Always trust
+  this source** (the repository, its owner, or a self-hosted host), or
+  cancel. Decisions live in `store/sources.toml` and sync with your
+  remotes; a block wins over any trust. Without a terminal (scripts,
+  agents, `--json`) an untrusted source fails with `source_trust_required`
+  unless you pass `--trust-source[=once|repo|owner|host]`; `--yes` never
+  answers it. A force-pushed, renamed or transferred repository makes its
+  trust lapse, and the update check marks new or changed executable files.
+  New: `loadout source ls|trust|block|untrust`; app commands
+  `list_sources`, `check_source_trust`, `revoke_source`, `block_source`,
+  `block_source_url`, and a `trust` answer on `install_git_skill`,
+  `install_reviewed_skill` and `update_skill`. Git skills installed before
+  this release ask once on their next update. Sources over plain `http://`
+  or `git://` get their own keys and are never admitted by HTTPS or SSH
+  trust; a redirect (a renamed or transferred repository) only adds a
+  question for the new location, and a blocked source is never contacted
+  (#24).
+- MCP servers from a Git repository or a local folder:
+  `loadout server add --from <GIT-URL|PATH> [--path] [--ref] [--pick]
+  [--all] [--dry-run]` proposes servers from `server.json` (MCP Registry
+  packages and remotes), an MCPB/DXT `manifest.json`, committed client
+  configs (`.mcp.json`, `.vscode/mcp.json`, `.cursor/mcp.json`, ...) or,
+  without any of those, the repository itself (`package.json` bin,
+  `pyproject.toml` scripts, `Dockerfile`), with commands pinned to the
+  package version or commit (a version-less registry package is marked
+  not pinned; `registryBaseUrl` is honored; a repository's Docker image is
+  `loadout-local/<id>:...`, run with `--pull=never`). Nothing runs while
+  proposing; dependency and build folders are not read or scanned;
+  identical definitions are proposed once; secrets become references and
+  secret values in committed files are dropped. Saving goes through source
+  trust (local folders too) and the built-in scan of every launch line, OS
+  overrides included. A server that runs from the repository's files
+  keeps a machine-local clone in `LOADOUT_HOME/servers/<id>`; while that
+  copy is missing or at another commit the server's entries are blocked
+  (`checkout_out_of_date`) until `loadout server checkout <ID>` restores it
+  behind the same gates. A folder's server runs only on the machine that
+  added it (`folder_on_other_machine`). The server file records only where
+  it came from (`[meta.source]`, origin `source:git` or `source:local`).
+  `loadout server update [ID] [--check]` reads the source again and shows
+  the fields that change, keeping the id and secret names; a checkout is
+  replaced only once the update commits. App commands
+  `review_mcp_git_source`, `review_mcp_local_source`,
+  `save_mcp_source_drafts`, `discard_mcp_source_review`,
+  `check_mcp_source_update`, `update_mcp_source_server`,
+  `review_mcp_checkout`, `restore_mcp_checkout` (#5).
+- App: the trust dialog (**Trust this time only**, **Always trust** the
+  repository or its owner, or a self-hosted host, **Cancel**; official
+  sources marked) is shared by Install skill from Git, skill updates and
+  MCP servers from Git or a folder. Install skill (Git and Local) now
+  fetches and scans first and shows a review (source, trust state, files,
+  findings) before installing; the skill update review marks executable
+  files and shows the trust state and findings. Findings show severity,
+  rule, `file:line`, message and excerpt everywhere; a dangerous verdict
+  needs an explicit **Install anyway** / **Update anyway** / **Save
+  anyway** (#24, #25).
+- App: **Install > MCP > From Git or folder** (Git URL with optional
+  folder and ref, or a picked folder): proposed servers with where they
+  came from, the exact command, needed secrets and setup steps, the
+  plain "This server runs code from this repository every time a client
+  starts it" note for repository-as-server drafts, and their findings;
+  edit each one in the server form, pick clients, save. Every launch line
+  (OS overrides included) is shown, and an unpinned command is marked.
+  Servers from a source get **Check for update** on the MCP page with a
+  field-by-field review, and **Restore copy** for a missing or out-of-date
+  checkout, reviewed and gated like an install (#5).
+- App: **Settings > Sources** lists trusted and blocked sources with what
+  each decision means, and offers Revoke, Unblock, Block and **Block a
+  source...** by URL (#24).
+
+### Changed
+
+- Skill listings no longer read every skill's files: sizes come from file
+  metadata and only `SKILL.md` is read; client detection runs once per
+  listing or sync instead of once per skill, and link bookkeeping uses
+  sets. `list_skills`, `loadout skills ls` and every install and enable
+  get faster as the store grows (#16; numbers in
+  `docs/perf/2026-11-23-baseline.md` section 11).
+- Long lists in the app: Skills and MCP render only the cards near the
+  visible area (each card keeps its place and its name in the list, so
+  screen readers and find-in-page still reach it); History loads 200
+  commits at a time, and "Load more" fetches only the next page (#17).
+- The import review reads whether a client has a private project target
+  from the Tools data (`ToolInfo.privateProjectTarget`, from the adapter
+  table) instead of a list of its own (#22).
+
+### Fixed
+
+- Refresh now checks file and folder permissions again: a change of only
+  the permissions shows without restarting the app. Switching back to the
+  app after five minutes or more does the same (#23).
+
 ## [0.4.0] - 2026-11-23
 
 ### Added

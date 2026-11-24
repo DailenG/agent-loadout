@@ -7,6 +7,7 @@
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useMemo, useState } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
+import { useRecheckTargets } from "@/app/apply/driftTriggers";
 import { recommendedFirst } from "@/app/clients";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { useNotifications } from "@/app/components/notifications";
@@ -97,12 +98,13 @@ type ToolCardProps = {
 /** Reads the fetching state itself, so a refetch re-renders this button and not every card. */
 function ToolsRefreshButton() {
   const queryClient = useQueryClient();
+  const recheckTargets = useRecheckTargets();
   const isFetching = useIsFetching({ queryKey: storeQueryKeys.tools }) > 0;
   return (
     <button
       className={`ghost-button tools-refresh-button${isFetching ? " is-loading" : ""}`}
       type="button"
-      onClick={() => void queryClient.refetchQueries({ queryKey: storeQueryKeys.tools })}
+      onClick={() => void recheckTargets().then(() => queryClient.refetchQueries({ queryKey: storeQueryKeys.tools }))}
       disabled={isFetching}
       aria-label={t("tools.refresh")}
     >

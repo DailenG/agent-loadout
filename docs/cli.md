@@ -16,6 +16,8 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout server show`](#loadout-server-show)
   - [`loadout server add`](#loadout-server-add)
   - [`loadout server rm`](#loadout-server-rm)
+  - [`loadout server update`](#loadout-server-update)
+  - [`loadout server checkout`](#loadout-server-checkout)
 - [`loadout skills`](#loadout-skills)
   - [`loadout skills ls`](#loadout-skills-ls)
   - [`loadout skills add`](#loadout-skills-add)
@@ -28,6 +30,11 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout skills trash`](#loadout-skills-trash)
   - [`loadout skills vendor`](#loadout-skills-vendor)
   - [`loadout skills adopt`](#loadout-skills-adopt)
+- [`loadout source`](#loadout-source)
+  - [`loadout source ls`](#loadout-source-ls)
+  - [`loadout source trust`](#loadout-source-trust)
+  - [`loadout source block`](#loadout-source-block)
+  - [`loadout source untrust`](#loadout-source-untrust)
 - [`loadout project`](#loadout-project)
   - [`loadout project init`](#loadout-project-init)
   - [`loadout project add`](#loadout-project-add)
@@ -89,6 +96,7 @@ Commands:
   doctor         Check the installation and report problems
   server         Manage MCP servers in the store
   skills         Skills: install, enable for clients and projects, update, scan
+  source         Trusted and blocked install sources: list, trust, block, untrust
   project        Project manifests: create, register, trust, share, list, forget
   history        List store commits
   status         Show the state of every owned and desired entry
@@ -143,11 +151,13 @@ Manage MCP servers in the store
 Usage: loadout server [OPTIONS] <COMMAND>
 
 Commands:
-  ls    List servers
-  show  Print a server definition
-  add   Add a server
-  rm    Remove servers; several ids make one commit
-  help  Print this message or the help of the given subcommand(s)
+  ls        List servers
+  show      Print a server definition
+  add       Add a server, or (--from) draft servers from a git repository or a local folder
+  rm        Remove servers; several ids make one commit
+  update    Update servers added with --from (all, or ID) to what their source gives now; --check only reports
+  checkout  Re-create or bring up to date this machine's checkout of a server added with --from that runs from its repository (`LOADOUT_HOME/servers/<ID>`), at the commit its file names. The same gates as `add --from`: source trust, then the scan
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
@@ -190,29 +200,91 @@ Options:
 ## `loadout server add`
 
 ```text
-Add a server
+Add a server, or (--from) draft servers from a git repository or a local folder
 
-Usage: loadout server add [OPTIONS] <ID> [-- <COMMAND>...]
+Usage: loadout server add [OPTIONS] [ID] [-- <COMMAND>...]
 
 Arguments:
-  <ID>          Server id: 1 to 64 characters from a-z, 0-9, '.', '_', '-'
-  [COMMAND]...  Command and arguments of a stdio server, after `--`
+  [ID]
+          Server id: 1 to 64 characters from a-z, 0-9, '.', '_', '-'. With --from: the id of the one draft saved [default: from its name]
+
+  [COMMAND]...
+          Command and arguments of a stdio server, after `--`
 
 Options:
-      --home <PATH>                  Data directory to use instead of LOADOUT_HOME or the per-OS default
-      --url <URL>                    Endpoint of an http or sse server
-      --json                         Print machine-readable JSON to stdout
-      --transport <TRANSPORT>        Transport [default: stdio, or http with --url] [possible values: stdio, http, sse]
-      --env <KEY=VALUE>              Environment variable of a stdio server; the value may be a reference such as ${secret:ALIAS} and is never a secret itself
-      --yes                          Answer yes to confirmations (rolling back an older apply run)
-      --header <NAME=VALUE>          HTTP header of an http or sse server; the value may hold references
-      --cwd <CWD>                    Working directory of a stdio server
-      --display-name <DISPLAY_NAME>  
-      --description <DESCRIPTION>    
-      --tag <TAG>                    Tag (repeatable)
-      --client <CLIENT>              Enable at system scope for this client (repeatable)
-      --all-detected                 Enable at system scope for every detected client
-  -h, --help                         Print help
+      --home <PATH>
+          Data directory to use instead of LOADOUT_HOME or the per-OS default
+
+      --url <URL>
+          Endpoint of an http or sse server
+
+      --json
+          Print machine-readable JSON to stdout
+
+      --transport <TRANSPORT>
+          Transport [default: stdio, or http with --url]
+          
+          [possible values: stdio, http, sse]
+
+      --env <KEY=VALUE>
+          Environment variable of a stdio server; the value may be a reference such as ${secret:ALIAS} and is never a secret itself
+
+      --yes
+          Answer yes to confirmations (rolling back an older apply run)
+
+      --header <NAME=VALUE>
+          HTTP header of an http or sse server; the value may hold references
+
+      --cwd <CWD>
+          Working directory of a stdio server
+
+      --display-name <DISPLAY_NAME>
+          
+
+      --description <DESCRIPTION>
+          
+
+      --tag <TAG>
+          Tag (repeatable)
+
+      --client <CLIENT>
+          Enable at system scope for this client (repeatable)
+
+      --all-detected
+          Enable at system scope for every detected client
+
+      --from <GIT-URL|PATH>
+          Draft servers from a git repository (https, ssh, file://, a bare repository) or a local folder: server.json, an MCPB manifest.json, committed client configs, or the repository as a package
+
+      --path <PATH>
+          Folder inside the git repository
+
+      --ref <REF>
+          Branch, tag or commit of the git repository
+
+      --pick <KEY|ID>
+          The draft to save, by key or id (repeatable) [default: the only draft]
+
+      --all
+          Save every draft
+
+      --dry-run
+          List the drafts, their inputs and scan findings; save nothing (the clone is removed)
+
+      --trust-source [<ONCE|REPO|OWNER|HOST>]
+          Answer the source trust prompt up front: once (this save only), or always for the repo, its owner or its host. Only for a source you trust: a server drafted from it runs its commands. --yes never answers the trust prompt
+
+          Possible values:
+          - once:  Install or update this time only
+          - repo:  Always trust this repository
+          - owner: Always trust every repository of this owner
+          - host:  Always trust every repository on this host (not for public hosts such as github.com)
+
+      --allow-dangerous
+          Save even when the built-in scan finds dangerous content (review the findings first, with --dry-run)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `loadout server rm`
@@ -232,6 +304,83 @@ Options:
   -h, --help         Print help
 ```
 
+## `loadout server update`
+
+```text
+Update servers added with --from (all, or ID) to what their source gives now; --check only reports
+
+Usage: loadout server update [OPTIONS] [ID]
+
+Arguments:
+  [ID]
+          
+
+Options:
+      --check
+          Report available updates; change nothing
+
+      --home <PATH>
+          Data directory to use instead of LOADOUT_HOME or the per-OS default
+
+      --json
+          Print machine-readable JSON to stdout
+
+      --trust-source [<ONCE|REPO|OWNER|HOST>]
+          Answer the source trust prompt up front (see `server add`)
+
+          Possible values:
+          - once:  Install or update this time only
+          - repo:  Always trust this repository
+          - owner: Always trust every repository of this owner
+          - host:  Always trust every repository on this host (not for public hosts such as github.com)
+
+      --allow-dangerous
+          Update even when the built-in scan finds dangerous content
+
+      --yes
+          Answer yes to confirmations (rolling back an older apply run)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `loadout server checkout`
+
+```text
+Re-create or bring up to date this machine's checkout of a server added with --from that runs from its repository (`LOADOUT_HOME/servers/<ID>`), at the commit its file names. The same gates as `add --from`: source trust, then the scan
+
+Usage: loadout server checkout [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          
+
+Options:
+      --home <PATH>
+          Data directory to use instead of LOADOUT_HOME or the per-OS default
+
+      --trust-source [<ONCE|REPO|OWNER|HOST>]
+          Answer the source trust prompt up front (see `server add`)
+
+          Possible values:
+          - once:  Install or update this time only
+          - repo:  Always trust this repository
+          - owner: Always trust every repository of this owner
+          - host:  Always trust every repository on this host (not for public hosts such as github.com)
+
+      --allow-dangerous
+          Check out even when the built-in scan finds dangerous content
+
+      --json
+          Print machine-readable JSON to stdout
+
+      --yes
+          Answer yes to confirmations (rolling back an older apply run)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## `loadout skills`
 
 ```text
@@ -241,11 +390,11 @@ Usage: loadout skills [OPTIONS] <COMMAND>
 
 Commands:
   ls       List store skills (and the agents CLI's skills when compatibility is on)
-  add      Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2
+  add      Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2. A git source you have not trusted asks first (a terminal prompt, or --trust-source). The built-in scan runs first; a dangerous verdict installs nothing (exit 8) unless --allow-dangerous
   rm       Remove a store skill and its owned links and copies; with --agents, remove an agents CLI skill through the `skills` CLI
   enable   Enable a skill for clients (user scope), or in a project
   disable  Disable a skill for clients (user scope), or in a project
-  update   Update git skills (all, or ID); --check only reports
+  update   Update git skills (all, or ID); --check only reports. A source you have not trusted (or whose trust lapsed after a force-push or a move) asks first. Each new content is scanned first; a dangerous one is not applied (exit 8) unless --allow-dangerous
   scan     Classify the client skill folders: managed, unmanaged, mismatch
   import   Import an unmanaged folder of a client's skill folder into the store
   trash    Move an unmanaged or mismatched entry of a client's skill folder to the trash (backups/trash), never deleting it
@@ -277,21 +426,47 @@ Options:
 ## `loadout skills add`
 
 ```text
-Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2
+Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2. A git source you have not trusted asks first (a terminal prompt, or --trust-source). The built-in scan runs first; a dangerous verdict installs nothing (exit 8) unless --allow-dangerous
 
 Usage: loadout skills add [OPTIONS] <SOURCE>
 
 Arguments:
-  <SOURCE>  Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), or a local folder or archive
+  <SOURCE>
+          Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), or a local folder or archive
 
 Options:
-      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
-      --path <PATH>  Skill folder inside a git repository
-      --json         Print machine-readable JSON to stdout
-      --ref <REF>    Branch or tag of a git repository
-      --id <ID>      Skill id [default: from the SKILL.md name]
-      --yes          Answer yes to confirmations (rolling back an older apply run)
-  -h, --help         Print help
+      --home <PATH>
+          Data directory to use instead of LOADOUT_HOME or the per-OS default
+
+      --path <PATH>
+          Skill folder inside a git repository
+
+      --json
+          Print machine-readable JSON to stdout
+
+      --ref <REF>
+          Branch or tag of a git repository
+
+      --id <ID>
+          Skill id [default: from the SKILL.md name]
+
+      --yes
+          Answer yes to confirmations (rolling back an older apply run)
+
+      --allow-dangerous
+          Install even when the built-in scan finds dangerous content (review the findings first)
+
+      --trust-source[=<ONCE|REPO|OWNER|HOST>]
+          Trust the git source without the prompt: once (this install only), or always for the repo, its owner or its host (`--trust-source=repo`; the value needs the `=`). Only for a source you trust: skills can run commands and read your files. --yes never answers the trust prompt
+
+          Possible values:
+          - once:  Install or update this time only
+          - repo:  Always trust this repository
+          - owner: Always trust every repository of this owner
+          - host:  Always trust every repository on this host (not for public hosts such as github.com)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `loadout skills rm`
@@ -359,20 +534,44 @@ Options:
 ## `loadout skills update`
 
 ```text
-Update git skills (all, or ID); --check only reports
+Update git skills (all, or ID); --check only reports. A source you have not trusted (or whose trust lapsed after a force-push or a move) asks first. Each new content is scanned first; a dangerous one is not applied (exit 8) unless --allow-dangerous
 
 Usage: loadout skills update [OPTIONS] [ID]
 
 Arguments:
-  [ID]  
+  [ID]
+          
 
 Options:
-      --check        Report available updates; change nothing
-      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
-      --agents       ID names an agents CLI skill, updated through the `skills` CLI
-      --json         Print machine-readable JSON to stdout
-      --yes          Answer yes to confirmations (rolling back an older apply run)
-  -h, --help         Print help
+      --check
+          Report available updates; update no skill. A trusted source found force-pushed or moved still has its trust lapse (one store commit), so the next install or update from it asks
+
+      --home <PATH>
+          Data directory to use instead of LOADOUT_HOME or the per-OS default
+
+      --agents
+          ID names an agents CLI skill, updated through the `skills` CLI
+
+      --json
+          Print machine-readable JSON to stdout
+
+      --allow-dangerous
+          Apply updates even when the built-in scan finds dangerous content (review the findings first, with --check)
+
+      --yes
+          Answer yes to confirmations (rolling back an older apply run)
+
+      --trust-source[=<ONCE|REPO|OWNER|HOST>]
+          Trust the git sources without the prompt: once (this update only), or always for the repo, its owner or its host (`--trust-source=repo`; the value needs the `=`, so `--trust-source repo` updates the skill `repo` once)
+
+          Possible values:
+          - once:  Install or update this time only
+          - repo:  Always trust this repository
+          - owner: Always trust every repository of this owner
+          - host:  Always trust every repository on this host (not for public hosts such as github.com)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `loadout skills scan`
@@ -467,6 +666,94 @@ Options:
       --pick <NAME=CLIENT>  For a name with several contents: adopt the content in CLIENT's folder (or `store`, the store's copy) as NAME; folders with other content are kept (repeatable)
       --both <NAME=CLIENT>  Adopt CLIENT's content (or `store`) as NAME and every other content as NAME-<client> (repeatable)
   -h, --help                Print help
+```
+
+## `loadout source`
+
+```text
+Trusted and blocked install sources: list, trust, block, untrust
+
+Usage: loadout source [OPTIONS] <COMMAND>
+
+Commands:
+  ls       List trusted and blocked sources
+  trust    Always trust a source: a git URL, or a source key (host/owner/repo, host/owner/*, host/*)
+  block    Never trust a source (a block wins over any trust)
+  untrust  Remove the trust or block of a source key. Nothing is uninstalled; the next install or update from it asks again
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout source ls`
+
+```text
+List trusted and blocked sources
+
+Usage: loadout source ls [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout source trust`
+
+```text
+Always trust a source: a git URL, or a source key (host/owner/repo, host/owner/*, host/*)
+
+Usage: loadout source trust [OPTIONS] <URL|KEY>
+
+Arguments:
+  <URL|KEY>  
+
+Options:
+      --home <PATH>    Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --scope <SCOPE>  What a URL's trust covers [default: repo] [possible values: repo, owner, host]
+      --json           Print machine-readable JSON to stdout
+      --yes            Answer yes to confirmations (rolling back an older apply run)
+  -h, --help           Print help
+```
+
+## `loadout source block`
+
+```text
+Never trust a source (a block wins over any trust)
+
+Usage: loadout source block [OPTIONS] <URL|KEY>
+
+Arguments:
+  <URL|KEY>  
+
+Options:
+      --home <PATH>    Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --scope <SCOPE>  What a URL's block covers [default: repo] [possible values: repo, owner, host]
+      --json           Print machine-readable JSON to stdout
+      --yes            Answer yes to confirmations (rolling back an older apply run)
+  -h, --help           Print help
+```
+
+## `loadout source untrust`
+
+```text
+Remove the trust or block of a source key. Nothing is uninstalled; the next install or update from it asks again
+
+Usage: loadout source untrust [OPTIONS] <KEY>
+
+Arguments:
+  <KEY>  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
 ```
 
 ## `loadout project`
@@ -775,7 +1062,7 @@ Arguments:
 
 Options:
       --home <PATH>               Data directory to use instead of LOADOUT_HOME or the per-OS default
-      --path <ENTITY>             Restore only this entity (repeatable): server/<id>, secrets, clients, settings, project/<id>, skill/<id>, machine/<id>
+      --path <ENTITY>             Restore only this entity (repeatable): server/<id>, secrets, clients, settings, sources, project/<id>, skill/<id>, machine/<id>
       --apply                     Apply the restored state
       --json                      Print machine-readable JSON to stdout
       --files <APPLY-ID>          Restore client files from the backups of this apply run instead

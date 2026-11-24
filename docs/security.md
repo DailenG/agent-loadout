@@ -123,6 +123,60 @@ outside the skill, and limited in size and file count. Loadout never
 replaces a skill folder it does not own; such folders are reported as
 unmanaged or mismatched and can be imported or moved to the trash.
 
+Every skill install and update is scanned offline by Loadout's built-in
+rules (`crates/agent-loadout-core/src/scan/rules.toml`): remote code
+execution idioms, credential reads next to network calls, hidden Unicode
+and HTML-comment instructions, prompt injection, disabled safety prompts
+and native binaries. A `dangerous` verdict blocks unless you explicitly
+install anyway (`--allow-dangerous`, **Install anyway**); trusting a
+source never skips the scan. No content leaves the machine. The scan is a
+second opinion, not a guarantee: patterns can be evaded, so read what you
+install. A custom rules file at `state/scan-rules.toml` is merged into the
+built-in rules: it can add rules or raise a severity, never remove or
+lower a built-in rule, and every result says "custom rules in use". An
+instruction to write that file is itself flagged (`agent-config-write`).
+
+Trust in a git source is an explicit, recorded decision
+(`store/sources.toml`, #24). Trust is never implicit: the first install or
+update from a source asks, `--yes` never answers that question, and a run
+without a terminal (a script, `--json`) fails with `source_trust_required`
+instead of trusting. Two explicit opt-ins do work without a terminal:
+`loadout source trust <URL|KEY>` and `--trust-source` on `skills add` and
+`skills update`. A coding agent that can run shell commands can run them
+too, so they don't stop an agent you've given a shell; they make the
+decision deliberate and recorded (`via = "cli-command"` or `"cli-flag"` in
+`sources.toml`). Keeping agents from approving trust on their own is the
+narrower scope of [#8](https://github.com/DailenG/agent-loadout/issues/8).
+A block wins over any trust. Trust lapses, and the next update asks again,
+when the repository's history is rewritten (the installed commit is no
+longer in the followed branch) or the host redirects it to another
+repository (renamed or transferred). A redirect can only add a question,
+never answer one. Trust never skips the scan.
+
+## MCP servers from a Git repository or folder
+
+`loadout server add --from` and the app's **From Git or folder** run
+nothing while they propose servers: git clones shallow into a temporary
+folder (repositories cannot install git hooks, submodules are not fetched)
+and the files are only read and scanned. A blocked source is not
+contacted at all. A saved server, though, runs its command every time a
+client starts it, and a server that is the repository itself (`npx -y
+github:owner/repo#<sha>`, a clone kept in `LOADOUT_HOME/servers/<id>`)
+runs that repository's code, including npm and pip install scripts. So
+every save and update goes through source trust (git sources and local
+folders alike) and then the built-in scan of the files and of the exact
+command line saved, and commands are pinned to the reviewed commit or
+package version. Secret values are never copied from a source: declared
+secrets become references, and a literal that looks like a secret in a
+committed config is replaced by a reference and dropped. Dependency and
+build folders (`node_modules`, `dist`, `.venv`, ...) are not scanned, so a
+server that runs from `dist/` relies on the repository you trusted. A
+Docker draft's image is local only (`loadout-local/...`, never pulled). A
+checkout runs only at the commit its server file names: a stale copy
+(another machine updated the server) blocks the server's entries until
+`loadout server checkout` restores it behind the same gates, and a
+folder's server never runs on another machine.
+
 ## Desktop app
 
 - A strict Content Security Policy; no remote content is loaded.

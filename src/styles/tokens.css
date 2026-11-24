@@ -19754,3 +19754,460 @@ button.settings-form-item:disabled {
   align-items: center;
 }
 /* end M38 */
+
+/* M43: list slots (#17). A slot holds one card or row; while its content is
+   not rendered it keeps a height and nothing else. */
+.virtual-slot {
+  min-width: 0;
+  list-style: none;
+}
+/* end M43 */
+
+/* M42: scan findings, trust dialog and summary, install and update reviews,
+   MCP from Git or folder, Settings > Sources. Text uses the status text
+   tokens (4.5:1 on surfaces and soft fills, M28c). */
+.scan-findings {
+  display: grid;
+  gap: 8px;
+}
+
+.scan-findings__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.scan-findings__header h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--heading);
+}
+
+.scan-findings__count,
+.scan-findings__empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.scan-findings__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scan-finding {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.scan-finding__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.scan-finding__rule {
+  font-size: 0.76rem;
+  color: var(--heading);
+}
+
+.scan-finding__location {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.scan-finding__message {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--heading);
+}
+
+.scan-finding__excerpt,
+.mcp-draft__launch,
+.mcp-draft__setup {
+  display: block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.74rem;
+  color: var(--heading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.scan-gate {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: rgba(220, 38, 38, 0.06);
+  color: var(--danger-text);
+  font-size: 0.8rem;
+}
+
+.scan-gate p {
+  margin: 0;
+}
+
+.scan-gate__ack,
+.trust-dialog__choice,
+.mcp-source-kind__option,
+.mcp-draft__pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.scan-gate__ack span {
+  color: var(--heading);
+  font-weight: 500;
+}
+
+.trust-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.trust-dialog__source,
+.trust-summary__head,
+.sources-list__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.trust-dialog__source code {
+  font-size: 0.9rem;
+  color: var(--heading);
+  overflow-wrap: anywhere;
+}
+
+.trust-dialog__copy {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--heading);
+}
+
+.trust-dialog__copy p {
+  margin: 0;
+}
+
+.trust-dialog__choices {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.trust-dialog__choices legend {
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.trust-dialog__choice {
+  padding: 8px 10px;
+  border: 1px solid var(--line-control);
+  border-radius: 10px;
+}
+
+.trust-dialog__choice.is-selected {
+  border-color: var(--focus-ring);
+  background: var(--accent-soft);
+}
+
+.trust-dialog__choice-copy {
+  display: grid;
+  gap: 2px;
+  font-size: 0.8rem;
+  color: var(--heading);
+  overflow-wrap: anywhere;
+}
+
+.trust-summary {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.trust-summary p {
+  margin: 0;
+}
+
+.trust-summary__label,
+.source-review__facts dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.source-review,
+.skill-update-review,
+.mcp-source-review {
+  display: grid;
+  gap: 12px;
+}
+
+.skill-update-review {
+  flex: 0 1 auto;
+  align-content: start;
+  padding: 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* The update review adds a row (trust and scan) between the header and the diff. */
+.skill-file-dialog__editor:has(> .skill-update-review) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.source-review h4,
+.mcp-source-review h4,
+.mcp-source-review__heading {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  color: var(--heading);
+}
+
+.source-review__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0;
+}
+
+.source-review__facts dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.source-review__files ul,
+.source-review__changed-files,
+.mcp-source-skipped ul,
+.mcp-draft__needs {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+  color: var(--heading);
+}
+
+.source-review__files li,
+.source-review__changed-files li,
+.mcp-source-skipped li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-review__files li span {
+  color: var(--muted);
+}
+
+.mcp-source-review {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.mcp-source-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.mcp-source-kind__option {
+  align-items: center;
+  font-size: 0.82rem;
+  color: var(--heading);
+}
+
+.mcp-source-folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.mcp-draft-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcp-draft {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.mcp-draft.is-picked {
+  border-color: var(--focus-ring);
+}
+
+.mcp-draft__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-draft__pick {
+  align-items: center;
+  margin-right: auto;
+  color: var(--heading);
+}
+
+.mcp-draft__provenance {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.mcp-draft__origin {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.mcp-draft__setup {
+  margin-top: 4px;
+}
+
+.runs-repo-code {
+  margin: 0;
+  font-weight: 500;
+}
+
+.mcp-source-review__actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mcp-source-update {
+  display: grid;
+  gap: 4px;
+}
+
+.mcp-update-diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  color: var(--heading);
+}
+
+.mcp-update-diff th,
+.mcp-update-diff td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.mcp-update-diff thead th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.mcp-update-diff__old code {
+  color: var(--danger-text);
+}
+
+.mcp-update-diff__new code {
+  color: var(--success-text);
+}
+
+.sources-meaning {
+  display: grid;
+  gap: 4px;
+}
+
+.sources-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sources-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.sources-list__copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.sources-list__copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sources-list__title code {
+  color: var(--heading);
+  overflow-wrap: anywhere;
+}
+
+.sources-list__copy .sources-list__lapse {
+  color: var(--warning-text);
+}
+
+.sources-list__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mcp-launch-lines {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.mcp-launch-lines dt {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.mcp-launch-lines dd {
+  margin: 0;
+}
+/* end M42 */

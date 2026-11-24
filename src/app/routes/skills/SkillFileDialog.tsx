@@ -8,7 +8,10 @@ import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useId, useState, type ReactNode } from "react";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
 import { Modal } from "@/app/components/Modal";
-import { t } from "@/i18n/en";
+import { DangerousGate, isDangerous, ScanFindings } from "@/app/components/ScanFindings";
+import { TrustSummary, useTrustPrompt, type TrustAnswer } from "@/app/components/TrustDialog";
+import { useNotifications } from "@/app/components/notifications";
+import { errorMessage, t } from "@/i18n/en";
 import type { SkillFileChange, SkillInfo, SkillUpdateCheck } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
 import { CHANGE_KIND_KEYS, failureText, fileTreeRows, formatSize } from "./labels";
@@ -20,10 +23,12 @@ type FileItemProps = {
   path: string;
   selected: boolean;
   badge?: string;
+  /** An added or modified file that looks executable (M39): marked in the update review. */
+  script?: boolean;
   onSelect: () => void;
 };
 
-function FileItem({ path, selected, badge, onSelect }: FileItemProps) {
+function FileItem({ path, selected, badge, script = false, onSelect }: FileItemProps) {
   const parts = path.split("/");
   return (
     <button
@@ -36,6 +41,11 @@ function FileItem({ path, selected, badge, onSelect }: FileItemProps) {
     >
       <span className="skill-file-dialog__tree-label">{parts[parts.length - 1]}</span>
       {badge ? <span className="skill-file-dialog__language-badge">{badge}</span> : null}
+      {script ? (
+        <span className="status-badge tone-warning" title={t("skill.update.scriptHint")}>
+          {t("skill.update.script")}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -154,72 +164,120 @@ type SkillUpdateDialogProps = {
   skill: SkillInfo;
   check: SkillUpdateCheck;
   isUpdating: boolean;
-  onUpdate: () => void;
+  /** `allowDangerous` only through "Update anyway"; `answer` holds the trust dialog's answers when the sources needed them. */
+  onUpdate: (allowDangerous: boolean, answer: TrustAnswer) => void;
   onClose: () => void;
 };
 
-/** The update preview (SPEC 12.4): each changed file's diff, then Update. */
+/**
+ * The update preview (SPEC 12.4): each changed file's diff (executable-looking
+ * files marked), the source's trust state and the built-in scan of the new
+ * content (M42), then Update. An untrusted or lapsed source asks first; a
+ * dangerous verdict updates only through "Update anyway".
+ */
 export function SkillUpdateDialog({ skill, check, isUpdating, onUpdate, onClose }: SkillUpdateDialogProps) {
   const { commands } = useTransport();
+  const { notify } = useNotifications();
+  const { resolveTrust, dialog: trustDialog } = useTrustPrompt();
   const [selected, setSelected] = useState<SkillFileChange | null>(check.changes[0] ?? null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const dangerous = isDangerous(check.scan);
+  const blocked = check.trust?.state.kind === "blocked" || check.movedTrust?.state.kind === "blocked";
   const diff = useQuery({
     queryKey: ["skill_update_diff", skill.id, check.latest, selected?.path],
     queryFn: async () => unwrap(await commands.skillUpdateDiff(skill.id, selected!.path)),
     enabled: selected !== null,
   });
 
+  async function update(allowDangerous: boolean) {
+    const answer = await resolveTrust(check, () =>
+      notify({ tone: "error", message: errorMessage("source_blocked") }),
+    );
+    if (answer) {
+      onUpdate(allowDangerous, answer);
+    }
+  }
+
   return (
-    <DialogShell
-      title={t("skill.update.title", { name: skill.name })}
-      onClose={onClose}
-      sidebar={treeItems(
-        check.changes.map((change) => change.path),
-        (path) => {
-          const change = check.changes.find((item) => item.path === path)!;
-          return (
-            <FileItem
-              key={change.path}
-              path={change.path}
-              badge={t(CHANGE_KIND_KEYS[change.kind])}
-              selected={change.path === selected?.path}
-              onSelect={() => setSelected(change)}
-            />
-          );
-        },
-      )}
-      footer={
-        <>
-          <button className="secondary-button" type="button" onClick={onClose}>
-            {t("skill.update.cancel")}
-          </button>
-          <button className="primary-button" type="button" disabled={isUpdating} onClick={onUpdate}>
-            {isUpdating ? t("skills.updating") : t("skill.update.confirm")}
-          </button>
-        </>
-      }
-    >
-      <div className="skill-file-dialog__editor-header">
-        <div className="skill-file-dialog__file-identity">
-          <span>{t("skill.update.description", { commit: (check.latest ?? "").slice(0, 7) })}</span>
+    <>
+      <DialogShell
+        title={t("skill.update.title", { name: skill.name })}
+        onClose={onClose}
+        sidebar={treeItems(
+          check.changes.map((change) => change.path),
+          (path) => {
+            const change = check.changes.find((item) => item.path === path)!;
+            return (
+              <FileItem
+                key={change.path}
+                path={change.path}
+                badge={t(CHANGE_KIND_KEYS[change.kind])}
+                script={change.script}
+                selected={change.path === selected?.path}
+                onSelect={() => setSelected(change)}
+              />
+            );
+          },
+        )}
+        footer={
+          <>
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {t("skill.update.cancel")}
+            </button>
+            {dangerous ? (
+              <button
+                className="secondary-button danger-button"
+                type="button"
+                disabled={isUpdating || blocked || !acknowledged}
+                onClick={() => void update(true)}
+              >
+                {isUpdating ? t("skills.updating") : t("skill.update.anyway")}
+              </button>
+            ) : (
+              <button className="primary-button" type="button" disabled={isUpdating || blocked} onClick={() => void update(false)}>
+                {isUpdating ? t("skills.updating") : t("skill.update.confirm")}
+              </button>
+            )}
+          </>
+        }
+      >
+        <div className="skill-file-dialog__editor-header">
+          <div className="skill-file-dialog__file-identity">
+            <span>{t("skill.update.description", { commit: (check.latest ?? "").slice(0, 7) })}</span>
+          </div>
         </div>
-      </div>
-      {check.changes.length === 0 ? (
-        <div className="skill-file-dialog__empty">{t("skill.update.none")}</div>
-      ) : diff.isError ? (
-        <div className="skill-file-dialog__empty" role="alert">{failureText(diff.error)}</div>
-      ) : diff.isPending ? (
-        <div className="skill-file-dialog__empty">{t("skill.update.loading")}</div>
-      ) : diff.data.binary ? (
-        <div className="skill-file-dialog__empty">{t("skill.update.binary")}</div>
-      ) : (
-        <Suspense fallback={<div className="skill-file-dialog__empty">{t("skill.update.loading")}</div>}>
-          <SkillDiffView
-            before={diff.data.before ?? ""}
-            after={diff.data.after ?? ""}
-            ariaLabel={t("skill.diff.aria", { path: diff.data.path })}
-          />
-        </Suspense>
-      )}
-    </DialogShell>
+        <div className="skill-update-review">
+          {check.trust ? <TrustSummary info={check.trust} /> : null}
+          {check.movedTrust ? <TrustSummary info={check.movedTrust} label={t("trust.summary.moved")} /> : null}
+          {blocked ? <p className="dialog-error" role="alert">{errorMessage("source_blocked")}</p> : null}
+          {check.scan ? <ScanFindings scan={check.scan} /> : null}
+          {dangerous ? (
+            <DangerousGate
+              acknowledged={acknowledged}
+              onChange={setAcknowledged}
+              description={t("scan.gate.updateDescription")}
+            />
+          ) : null}
+        </div>
+        {check.changes.length === 0 ? (
+          <div className="skill-file-dialog__empty">{t("skill.update.none")}</div>
+        ) : diff.isError ? (
+          <div className="skill-file-dialog__empty" role="alert">{failureText(diff.error)}</div>
+        ) : diff.isPending ? (
+          <div className="skill-file-dialog__empty">{t("skill.update.loading")}</div>
+        ) : diff.data.binary ? (
+          <div className="skill-file-dialog__empty">{t("skill.update.binary")}</div>
+        ) : (
+          <Suspense fallback={<div className="skill-file-dialog__empty">{t("skill.update.loading")}</div>}>
+            <SkillDiffView
+              before={diff.data.before ?? ""}
+              after={diff.data.after ?? ""}
+              ariaLabel={t("skill.diff.aria", { path: diff.data.path })}
+            />
+          </Suspense>
+        )}
+      </DialogShell>
+      {trustDialog}
+    </>
   );
 }

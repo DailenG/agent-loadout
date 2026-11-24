@@ -17,7 +17,8 @@
 //! `skill_links` (see [`SkillLedger`]), next to the MCP entries, so the
 //! ledger stays the one record of what Loadout owns on this machine.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::OnceCell;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -31,7 +32,9 @@ use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
 use crate::layering::git::ProjectRepo;
 use crate::layering::projects::{mirror, this_overlay};
-use crate::layering::{Project, ProjectStatus, TrustStore, known_projects, same_folder, same_path};
+use crate::layering::{
+    Project, ProjectStatus, TrustStore, known_projects, path_key, same_folder, same_path,
+};
 use crate::model::applied::Scope;
 use crate::model::clients::ClientSelection;
 use crate::model::ids::{self, IdKind};
@@ -426,38 +429,79 @@ fn link_method(sx: &SkillsEnv<'_>) -> LinkMethod {
     }
 }
 
-/// Client ids of a selection that have skill folders; others are warnings.
-fn resolve_clients(
-    sx: &SkillsEnv<'_>,
-    selection: &ClientSelection,
-    what: &str,
-    warnings: &mut Vec<CoreError>,
-) -> Vec<&'static str> {
-    match selection {
-        ClientSelection::AllDetected => CLIENT_SKILLS
-            .iter()
-            .filter(|entry| {
-                crate::adapters::adapter(entry.client)
-                    .is_some_and(|spec| detect(spec, sx.env, sx.fs, sx.registry).detected())
-            })
-            .map(|entry| entry.client)
-            .collect(),
-        ClientSelection::List(ids) => {
-            let mut out = Vec::new();
-            for id in ids {
-                match client_skills(id) {
-                    Some(entry) => {
-                        if !out.contains(&entry.client) {
-                            out.push(entry.client);
+/// Which clients with skill folders (table 7.6) are detected, probed once
+/// on first need and kept for one operation (a sync, a listing): a store
+/// of 300 skills enabled for `all-detected` would otherwise run every
+/// client's detection 300 times (#16). Make a new one per operation, so a
+/// client installed since is seen.
+pub struct DetectedClients<'a> {
+    sx: SkillsEnv<'a>,
+    detected: OnceCell<Vec<&'static str>>,
+}
+
+impl<'a> DetectedClients<'a> {
+    pub fn new(sx: &SkillsEnv<'a>) -> Self {
+        Self {
+            sx: *sx,
+            detected: OnceCell::new(),
+        }
+    }
+
+    /// The detected clients, in table order.
+    pub fn clients(&self) -> &[&'static str] {
+        self.detected.get_or_init(|| {
+            CLIENT_SKILLS
+                .iter()
+                .filter(|entry| {
+                    crate::adapters::adapter(entry.client).is_some_and(|spec| {
+                        detect(spec, self.sx.env, self.sx.fs, self.sx.registry).detected()
+                    })
+                })
+                .map(|entry| entry.client)
+                .collect()
+        })
+    }
+
+    /// Whether `client` (a client with a skill folder) is detected.
+    pub fn is_detected(&self, client: &str) -> bool {
+        self.clients().contains(&client)
+    }
+
+    /// The client ids of `selection` that have skill folders, `all-detected`
+    /// resolved with the detection probes (for listings; unknown clients
+    /// are left out).
+    pub fn selected(&self, selection: &ClientSelection) -> Vec<&'static str> {
+        let mut ignored = Vec::new();
+        self.resolve(selection, "", &mut ignored)
+    }
+
+    /// Client ids of a selection that have skill folders; others are
+    /// warnings.
+    fn resolve(
+        &self,
+        selection: &ClientSelection,
+        what: &str,
+        warnings: &mut Vec<CoreError>,
+    ) -> Vec<&'static str> {
+        match selection {
+            ClientSelection::AllDetected => self.clients().to_vec(),
+            ClientSelection::List(ids) => {
+                let mut out = Vec::new();
+                for id in ids {
+                    match client_skills(id) {
+                        Some(entry) => {
+                            if !out.contains(&entry.client) {
+                                out.push(entry.client);
+                            }
                         }
+                        None => warnings.push(CoreError::new(
+                            no_skills(id).code(),
+                            format!("{what}: {id:?} has no skill folder Loadout writes; skipped"),
+                        )),
                     }
-                    None => warnings.push(CoreError::new(
-                        no_skills(id).code(),
-                        format!("{what}: {id:?} has no skill folder Loadout writes; skipped"),
-                    )),
                 }
+                out
             }
-            out
         }
     }
 }
@@ -470,16 +514,16 @@ fn desired(
 ) -> Result<(Vec<Desired>, Vec<String>), CoreError> {
     let mut out: Vec<Desired> = Vec::new();
     let skills = store::list(store)?;
-    let has_content = |id: &str| {
-        skills
-            .iter()
-            .any(|skill| skill.id == id && skill.has_content)
-    };
-    let push = |out: &mut Vec<Desired>, desired: Desired| {
-        if !out
-            .iter()
-            .any(|known| same_path(&known.path, &desired.path))
-        {
+    let with_content: HashSet<&str> = skills
+        .iter()
+        .filter(|skill| skill.has_content)
+        .map(|skill| skill.id.as_str())
+        .collect();
+    let detected = DetectedClients::new(sx);
+    // The first desired entry for a path wins (user scope before projects).
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut push = |out: &mut Vec<Desired>, desired: Desired| {
+        if seen.insert(path_key(&desired.path)) {
             out.push(desired);
         }
     };
@@ -507,7 +551,7 @@ fn desired(
             _ => link_method(sx),
         };
         let what = format!("skill {:?}", skill.id);
-        for client in resolve_clients(sx, selection, &what, &mut report.warnings) {
+        for client in detected.resolve(selection, &what, &mut report.warnings) {
             let dir = skills_dir(sx.env, client, Scope::User, None)?;
             push(
                 &mut out,
@@ -542,14 +586,14 @@ fn desired(
         }
         evaluated.push(known.id.clone());
         let what = format!("project {:?}", known.id);
-        let clients = resolve_clients(sx, &wanted.clients, &what, &mut report.warnings);
+        let clients = detected.resolve(&wanted.clients, &what, &mut report.warnings);
         let method = if wanted.share {
             LinkMethod::Copy
         } else {
             link_method(sx)
         };
         for id in &wanted.enable {
-            if !ids::is_valid(IdKind::Skill, id) || !has_content(id) {
+            if !ids::is_valid(IdKind::Skill, id) || !with_content.contains(id.as_str()) {
                 report.warnings.push(CoreError::new(
                     ErrorCode::NotFound,
                     format!("{what} enables skill {id:?}, which is not in the store"),
@@ -584,14 +628,6 @@ pub struct ProjectSkills {
     pub enable: Vec<String>,
     pub share: bool,
     pub clients: ClientSelection,
-}
-
-/// The client ids of `selection` that have skill folders, `all-detected`
-/// resolved with the detection probes (for listings; unknown clients are
-/// left out).
-pub fn selected_clients(sx: &SkillsEnv<'_>, selection: &ClientSelection) -> Vec<&'static str> {
-    let mut ignored = Vec::new();
-    resolve_clients(sx, selection, "", &mut ignored)
 }
 
 /// `[skills]` of `project` as links are made from it.
@@ -656,15 +692,14 @@ pub fn sync(store: &Store<'_>, sx: &SkillsEnv<'_>) -> Result<SyncReport, CoreErr
         report.results.push(result);
     }
 
-    let wanted_paths: Vec<&PathBuf> = wanted.iter().map(|desired| &desired.path).collect();
+    let wanted_paths: HashSet<String> = wanted
+        .iter()
+        .map(|desired| path_key(&desired.path))
+        .collect();
     let stale: Vec<SkillLink> = ledger
         .links
         .iter()
-        .filter(|link| {
-            !wanted_paths
-                .iter()
-                .any(|path| same_path(path, Path::new(&link.path)))
-        })
+        .filter(|link| !wanted_paths.contains(&path_key(Path::new(&link.path))))
         .filter(|link| match link.scope {
             Scope::User => true,
             Scope::Project | Scope::ProjectLocal => link
@@ -1500,10 +1535,10 @@ fn next_selection(
             if enabled {
                 return current;
             }
-            let mut ignored = Vec::new();
-            resolve_clients(sx, &ClientSelection::AllDetected, "", &mut ignored)
-                .into_iter()
-                .map(str::to_owned)
+            DetectedClients::new(sx)
+                .clients()
+                .iter()
+                .map(|client| (*client).to_owned())
                 .collect()
         }
         None => BTreeSet::new(),

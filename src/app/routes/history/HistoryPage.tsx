@@ -2,16 +2,17 @@
 // scope and entity, with per-commit actions (Show diff, Undo this apply,
 // Restore this version, Restore entity..., Tag, Download zip), user tags,
 // the client file backups tab, and the remotes and conflicts strip. The list
-// loads in pages of `HISTORY_PAGE_SIZE` with "Load more".
+// loads in pages of `HISTORY_PAGE_SIZE` with "Load more" (a cursor, `before`).
 
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { memo, useCallback, useId, useState } from "react";
 import { storeQueryKeys, useInvalidateStore, useUndoApply } from "@/app/apply/changeNotice";
 import { AppSelect, type AppSelectOption } from "@/app/components/AppSelect";
 import { collapsibleAction, HEADER_ACTION_LABEL, HeaderToolbar } from "@/app/components/HeaderSlots";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { SearchFieldIcon } from "@/app/components/SearchFieldIcon";
+import { useEventCallback } from "@/app/components/useEventCallback";
 import { CommitDetailPanel } from "@/app/routes/history/CommitDetailPanel";
 import { FileBackupsTab } from "@/app/routes/history/FileBackupsTab";
 import {
@@ -50,39 +51,46 @@ const SCOPE_OPTIONS: AppSelectOption<HistoryScope>[] = (["all", "user", "project
 
 type Dialog = { kind: "tag" | "restore" | "restoreEntity"; entry: HistoryEntry };
 
-/** Commits per page: a large store has thousands, and every row is rendered. */
-export const HISTORY_PAGE_SIZE = 100;
+/** Commits per page: a large store has thousands. */
+export const HISTORY_PAGE_SIZE = 200;
 
-/** The scope and entity the user picked; the page adds the limit. */
-type ListFilter = Omit<HistoryFilter, "limit">;
+/** The scope and entity the user picked; the page adds the limit and the cursor. */
+type ListFilter = Omit<HistoryFilter, "limit" | "before">;
 
 type RowProps = {
   entry: HistoryEntry;
   selected: boolean;
+  /** The diff of this row is open (only a selected row has one). */
   diffOpen: boolean;
   busy: boolean;
-  onSelect: () => void;
+  /** Stable across renders and taking the entry, so the memoized row re-renders only when its own props change. */
+  onSelectEntry: (entry: HistoryEntry) => void;
   onToggleDiff: () => void;
-  onUndo: () => void;
-  onDialog: (kind: Dialog["kind"]) => void;
-  onZip: () => void;
+  onUndoEntry: (entry: HistoryEntry) => void;
+  onDialogEntry: (kind: Dialog["kind"], entry: HistoryEntry) => void;
+  onZipEntry: (entry: HistoryEntry) => void;
   onDeleteTag: (name: string) => void;
 };
 
-function HistoryRow({
+/** A row's content; its `li` is the virtual slot (#17). */
+const HistoryRow = memo(function HistoryRow({
   entry,
   selected,
   diffOpen,
   busy,
-  onSelect,
+  onSelectEntry,
   onToggleDiff,
-  onUndo,
-  onDialog,
-  onZip,
+  onUndoEntry,
+  onDialogEntry,
+  onZipEntry,
   onDeleteTag,
 }: RowProps) {
+  const onSelect = () => onSelectEntry(entry);
+  const onUndo = () => onUndoEntry(entry);
+  const onDialog = (kind: Dialog["kind"]) => onDialogEntry(kind, entry);
+  const onZip = () => onZipEntry(entry);
   return (
-    <li className={`panel-card history-row${selected ? " is-selected" : ""}`} aria-label={entry.summary}>
+    <>
       <div className="history-row__head">
         <button className="history-row__main" type="button" aria-pressed={selected} onClick={onSelect}>
           <span className="history-row__summary">{entry.summary}</span>
@@ -148,31 +156,24 @@ function HistoryRow({
         </div>
       ) : null}
       {selected && diffOpen ? <CommitDetailPanel commitId={entry.id} /> : null}
-    </li>
+    </>
   );
-}
+});
 
 function ChangesTab({ filter, onOpenPending }: { filter: ListFilter; onOpenPending: () => void }) {
   const { commands } = useTransport();
   const { notify } = useNotifications();
   const invalidate = useInvalidateStore();
   const undo = useUndoApply();
-  // A new filter starts again at the first page.
-  const filterKey = `${filter.scope}\n${filter.entity ?? ""}`;
-  const [shownFilterKey, setShownFilterKey] = useState(filterKey);
-  const [pages, setPages] = useState(1);
-  if (shownFilterKey !== filterKey) {
-    setShownFilterKey(filterKey);
-    setPages(1);
-  }
-  const shown = pages * HISTORY_PAGE_SIZE;
-  // One commit more than shown tells whether "Load more" has anything to load.
-  const request: HistoryFilter = { ...filter, limit: shown + 1 };
-  const history = useQuery({
-    queryKey: [...storeQueryKeys.history, request],
-    queryFn: async () => unwrap(await commands.listHistory(request)),
-    // "Load more" keeps the loaded rows on screen while the longer page loads.
-    placeholderData: pages > 1 ? keepPreviousData : undefined,
+  // A new filter is a new query, so it starts again at the first page. Each page asks for one commit
+  // more than it shows, to know whether "Load more" has anything to load, and the next page starts
+  // after the last commit shown (`before`), so loading more never fetches the loaded pages again.
+  const history = useInfiniteQuery({
+    queryKey: [...storeQueryKeys.history, filter],
+    queryFn: async ({ pageParam }) =>
+      unwrap(await commands.listHistory({ ...filter, limit: HISTORY_PAGE_SIZE + 1, before: pageParam })),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => (last.length > HISTORY_PAGE_SIZE ? last[HISTORY_PAGE_SIZE - 1].id : undefined),
   });
   const [selectedId, setSelectedId] = useState("");
   const [diffOpen, setDiffOpen] = useState(false);
@@ -223,8 +224,22 @@ function ChangesTab({ filter, onOpenPending }: { filter: ListFilter; onOpenPendi
   }
 
   const filtered = filter.scope !== "all" || filter.entity !== null;
-  const rows = (history.data ?? []).slice(0, shown);
-  const hasMore = (history.data?.length ?? 0) > shown;
+  const pages = history.data?.pages ?? [];
+  const rows = pages.flatMap((page) => page.slice(0, HISTORY_PAGE_SIZE));
+  const hasMore = history.hasNextPage;
+  // Rows are plain list items, loaded 200 at a time (#17): nothing mounts or unmounts while scrolling,
+  // and neither virtualization nor `content-visibility` beat that (perf section 11). Memoized rows with
+  // stable callbacks keep a selection or a page load from re-rendering the others.
+  const handleSelect = useCallback((entry: HistoryEntry) => {
+    setSelectedId((current) => (current === entry.id ? "" : entry.id));
+    setDiffOpen(false);
+  }, []);
+  const handleToggleDiff = useCallback(() => setDiffOpen((current) => !current), []);
+  const handleUndoEntry = useEventCallback((entry: HistoryEntry) => void handleUndo(entry, false));
+  const handleDialog = useCallback((kind: Dialog["kind"], entry: HistoryEntry) => setDialog({ kind, entry }), []);
+  const handleZip = useEventCallback((entry: HistoryEntry) => zip.mutate(entry));
+  const handleDeleteTag = useEventCallback((name: string) => removeTag.mutate(name));
+  const busy = undoing || removeTag.isPending || zip.isPending;
   return (
     <>
       {history.isPending ? <p className="history-note">{t("history.loading")}</p> : null}
@@ -245,35 +260,50 @@ function ChangesTab({ filter, onOpenPending }: { filter: ListFilter; onOpenPendi
       ) : null}
       {rows.length > 0 ? (
         <ul className="history-list" aria-label={t("history.list.aria")}>
-          {rows.map((entry) => (
-            <HistoryRow
-              key={entry.id}
-              entry={entry}
-              selected={entry.id === selectedId}
-              diffOpen={diffOpen}
-              busy={undoing || removeTag.isPending || zip.isPending}
-              onSelect={() => {
-                setSelectedId(entry.id === selectedId ? "" : entry.id);
-                setDiffOpen(false);
-              }}
-              onToggleDiff={() => setDiffOpen((current) => !current)}
-              onUndo={() => void handleUndo(entry, false)}
-              onDialog={(kind) => setDialog({ kind, entry })}
-              onZip={() => zip.mutate(entry)}
-              onDeleteTag={(name) => removeTag.mutate(name)}
-            />
-          ))}
+          {rows.map((entry) => {
+            const selected = entry.id === selectedId;
+            return (
+              <li
+                key={entry.id}
+                className={`panel-card history-row${selected ? " is-selected" : ""}`}
+                aria-label={entry.summary}
+              >
+                <HistoryRow
+                  entry={entry}
+                  selected={selected}
+                  diffOpen={selected && diffOpen}
+                  busy={busy}
+                  onSelectEntry={handleSelect}
+                  onToggleDiff={handleToggleDiff}
+                  onUndoEntry={handleUndoEntry}
+                  onDialogEntry={handleDialog}
+                  onZipEntry={handleZip}
+                  onDeleteTag={handleDeleteTag}
+                />
+              </li>
+            );
+          })}
         </ul>
+      ) : null}
+      {pages.length > 1 ? (
+        <p className="sr-only" role="status">
+          {t("history.shown", { count: rows.length })}
+        </p>
       ) : null}
       {hasMore ? (
         <div className="history-load-more">
+          {/* `aria-disabled` while loading: the button keeps the focus, so the keyboard can load more again. */}
           <button
             className="secondary-button secondary-button--compact"
             type="button"
-            disabled={history.isPlaceholderData}
-            onClick={() => setPages((current) => current + 1)}
+            aria-disabled={history.isFetchingNextPage}
+            onClick={() => {
+              if (!history.isFetchingNextPage) {
+                void history.fetchNextPage();
+              }
+            }}
           >
-            {history.isPlaceholderData ? t("history.loading") : t("history.loadMore")}
+            {history.isFetchingNextPage ? t("history.loading") : t("history.loadMore")}
           </button>
         </div>
       ) : null}

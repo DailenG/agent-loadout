@@ -526,6 +526,32 @@ fn tools_list_user_files_from_the_adapter_table() {
     );
 }
 
+/// `privateProjectTarget` comes from the adapter table's `project_local`
+/// (#22): the import UI reads it instead of a list of its own.
+#[test]
+fn tools_report_a_private_project_target_from_the_adapter_table() {
+    let fx = Fx::new();
+    let tools = tools::list(&fx.core).unwrap();
+    let with_private: Vec<&str> = tools
+        .iter()
+        .filter(|tool| tool.private_project_target)
+        .map(|tool| tool.id.as_str())
+        .collect();
+    let expected: Vec<&str> = agent_loadout_core::adapters::ADAPTERS
+        .iter()
+        .filter(|spec| {
+            spec.mcp
+                .as_ref()
+                .is_some_and(|mcp| !mcp.project_local.is_empty())
+        })
+        .map(|spec| spec.id)
+        .collect();
+    assert_eq!(with_private, expected);
+    assert!(with_private.contains(&"claude-code"));
+    assert!(with_private.contains(&"devin"));
+    assert!(!with_private.contains(&"cursor"));
+}
+
 /// `[omp] profiles` in `clients.toml`.
 #[test]
 fn open_folder_follows_the_listed_profile() {

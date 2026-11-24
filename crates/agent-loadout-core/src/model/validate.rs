@@ -19,6 +19,7 @@ use crate::model::secrets::SecretCatalog;
 use crate::model::server::Server;
 use crate::model::settings::Settings;
 use crate::model::skill_meta::SkillMeta;
+use crate::model::sources::SourcesFile;
 use crate::secrets::grammar::{SecretRef, parse_template};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -266,6 +267,8 @@ pub enum StoreFile {
     Clients,
     /// `settings.toml`
     Settings,
+    /// `sources.toml`
+    Sources,
     /// `skill-meta/<id>.toml`
     SkillMeta { id: String },
     /// `projects/<id>/project.toml` or `projects/<id>/project.local.toml`
@@ -292,6 +295,7 @@ impl StoreFile {
             ["secrets.toml"] => Some(Self::Secrets),
             ["clients.toml"] => Some(Self::Clients),
             ["settings.toml"] => Some(Self::Settings),
+            ["sources.toml"] => Some(Self::Sources),
             ["servers", name] => stem(name, ".toml").map(|id| Self::Server { id }),
             ["skill-meta", name] => stem(name, ".toml").map(|id| Self::SkillMeta { id }),
             ["projects", id, "project.toml"] => Some(Self::Project {
@@ -319,6 +323,7 @@ pub enum StoreDocument {
     Secrets(TomlDocument<SecretCatalog>),
     Clients(TomlDocument<ClientPrefsFile>),
     Settings(TomlDocument<Settings>),
+    Sources(TomlDocument<SourcesFile>),
     SkillMeta(TomlDocument<SkillMeta>),
     Project(TomlDocument<ProjectManifest>),
     Machine(TomlDocument<MachineOverlay>),
@@ -333,6 +338,7 @@ impl StoreDocument {
             StoreFile::Secrets => Self::Secrets(TomlDocument::parse(text)?),
             StoreFile::Clients => Self::Clients(TomlDocument::parse(text)?),
             StoreFile::Settings => Self::Settings(TomlDocument::parse(text)?),
+            StoreFile::Sources => Self::Sources(TomlDocument::parse(text)?),
             StoreFile::SkillMeta { .. } => Self::SkillMeta(TomlDocument::parse(text)?),
             StoreFile::Project { .. } => Self::Project(TomlDocument::parse(text)?),
             StoreFile::Machine { .. } => Self::Machine(TomlDocument::parse(text)?),
@@ -351,7 +357,9 @@ impl StoreDocument {
             StoreFile::Machine { machine_id } | StoreFile::Applied { machine_id } => {
                 Some(machine_id.clone())
             }
-            StoreFile::Secrets | StoreFile::Clients | StoreFile::Settings => None,
+            StoreFile::Secrets | StoreFile::Clients | StoreFile::Settings | StoreFile::Sources => {
+                None
+            }
         };
         let name = name(file);
         let name = name.as_deref();
@@ -360,6 +368,7 @@ impl StoreDocument {
             Self::Secrets(doc) => doc.value().validate(),
             Self::Clients(doc) => doc.value().validate(),
             Self::Settings(doc) => doc.value().validate(),
+            Self::Sources(doc) => doc.value().validate(),
             Self::SkillMeta(doc) => doc.value().validate(name),
             Self::Project(doc) => {
                 let local = matches!(file, StoreFile::Project { local: true, .. });
@@ -384,6 +393,7 @@ impl StoreDocument {
             Self::Secrets(doc) => doc.to_text(),
             Self::Clients(doc) => doc.to_text(),
             Self::Settings(doc) => doc.to_text(),
+            Self::Sources(doc) => doc.to_text(),
             Self::SkillMeta(doc) => doc.to_text(),
             Self::Project(doc) => doc.to_text(),
             Self::Machine(doc) => doc.to_text(),

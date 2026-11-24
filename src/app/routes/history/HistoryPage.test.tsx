@@ -153,7 +153,7 @@ describe("HistoryPage", () => {
     expect(within(older).getByText(t("history.outcome.partial"))).toBeInTheDocument();
     expect(within(older).getByText(/laptop/)).toBeInTheDocument();
     // The first page asks one commit more, to know whether "Load more" is needed.
-    expect(argsOf(transport, "listHistory")[0]).toEqual([{ scope: "all", entity: null, limit: HISTORY_PAGE_SIZE + 1 }]);
+    expect(argsOf(transport, "listHistory")[0]).toEqual([{ scope: "all", entity: null, limit: HISTORY_PAGE_SIZE + 1, before: null }]);
     expect(screen.queryByRole("button", { name: t("history.loadMore") })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: t("history.tag.delete", { name: "pre-change" }) }));
@@ -167,18 +167,18 @@ describe("HistoryPage", () => {
     await user.click(await screen.findByRole("option", { name: t("history.scope.user") }));
     await waitFor(() =>
       expect(argsOf(transport, "listHistory")).toContainEqual([
-        { scope: "user", entity: null, limit: HISTORY_PAGE_SIZE + 1 },
+        { scope: "user", entity: null, limit: HISTORY_PAGE_SIZE + 1, before: null },
       ]),
     );
     await user.type(screen.getByRole("searchbox", { name: t("history.toolbar.entity") }), "server/github{Enter}");
     await waitFor(() =>
       expect(argsOf(transport, "listHistory")).toContainEqual([
-        { scope: "user", entity: "server/github", limit: HISTORY_PAGE_SIZE + 1 },
+        { scope: "user", entity: "server/github", limit: HISTORY_PAGE_SIZE + 1, before: null },
       ]),
     );
   });
 
-  it("loads the list a page at a time", async () => {
+  it("loads the list a page at a time after the last shown commit, and keeps the focus on Load more", async () => {
     const many = Array.from({ length: HISTORY_PAGE_SIZE * 2 + 5 }, (_, index) => ({
       ...SERVER_EDIT,
       id: index.toString(16).padStart(40, "0"),
@@ -186,17 +186,30 @@ describe("HistoryPage", () => {
       tags: [],
     }));
     const { user, transport } = renderPage({
-      commands: { listHistory: async (filter) => ok(many.slice(0, filter.limit ?? many.length)) },
+      commands: {
+        listHistory: async (filter) => {
+          const start = filter.before ? many.findIndex((entry) => entry.id === filter.before) + 1 : 0;
+          return ok(many.slice(start, start + (filter.limit ?? many.length)));
+        },
+      },
     });
     await screen.findByRole("listitem", { name: "commit 0" });
     expect(screen.getAllByRole("listitem")).toHaveLength(HISTORY_PAGE_SIZE);
+    expect(screen.queryByRole("status")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: t("history.loadMore") }));
+    const loadMore = screen.getByRole("button", { name: t("history.loadMore") });
+    await user.click(loadMore);
     await screen.findByRole("listitem", { name: `commit ${HISTORY_PAGE_SIZE * 2 - 1}` });
     expect(screen.getAllByRole("listitem")).toHaveLength(HISTORY_PAGE_SIZE * 2);
-    expect(argsOf(transport, "listHistory").at(-1)).toEqual([{ scope: "all", entity: null, limit: HISTORY_PAGE_SIZE * 2 + 1 }]);
+    // The next page starts after the last shown commit; the loaded ones are not asked for again.
+    expect(argsOf(transport, "listHistory").at(-1)).toEqual([
+      { scope: "all", entity: null, limit: HISTORY_PAGE_SIZE + 1, before: many[HISTORY_PAGE_SIZE - 1].id },
+    ]);
+    expect(screen.getByRole("status")).toHaveTextContent(t("history.shown", { count: HISTORY_PAGE_SIZE * 2 }));
+    // The button keeps the focus, so Enter loads the next page from the keyboard.
+    expect(screen.getByRole("button", { name: t("history.loadMore") })).toHaveFocus();
 
-    await user.click(screen.getByRole("button", { name: t("history.loadMore") }));
+    await user.keyboard("{Enter}");
     await screen.findByRole("listitem", { name: `commit ${HISTORY_PAGE_SIZE * 2 + 4}` });
     expect(screen.getAllByRole("listitem")).toHaveLength(many.length);
     expect(screen.queryByRole("button", { name: t("history.loadMore") })).toBeNull();

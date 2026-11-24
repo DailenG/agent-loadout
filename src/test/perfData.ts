@@ -175,6 +175,7 @@ function buildTools(): ToolInfo[] {
       { path: `~/.config/${id}/settings.json`, exists: false, readOnly: null },
     ],
     projectFiles: [`<P>/.${id}/mcp.json`],
+    privateProjectTarget: id === "claude-code" || id === "devin",
     transports: { stdio: true, http: index % 2 === 0, sse: index % 4 === 0 },
     envRefs: index % 2 === 1,
     restartRequired: index % 3 === 1,
@@ -427,7 +428,10 @@ export function buildPerfDataset(): MockTransportOptions {
       const project = byProject.get(id);
       return project ? ok(buildMatrix(project, clients, servers)) : notFound(id);
     },
-    listHistory: async (filter) => ok(filter.limit == null ? history : history.slice(0, filter.limit)),
+    listHistory: async (filter) => {
+      const start = filter.before ? history.findIndex((entry) => entry.id === filter.before) + 1 : 0;
+      return ok(history.slice(start, filter.limit == null ? undefined : start + filter.limit));
+    },
     listTags: async () => ok(tags),
     listSkills: async (scope) => {
       const project = scope.kind === "project" ? byProject.get(scope.id) : undefined;

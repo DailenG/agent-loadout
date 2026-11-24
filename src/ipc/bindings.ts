@@ -24,12 +24,39 @@ export const commands = {
 	previewServer: (draft: ServerDraft, options?: InvokeOptions) => typedError<ClientPreview[], IpcError>(__TAURI_INVOKE("preview_server", { draft }, options)),
 	convertSnippet: (text: string, options?: InvokeOptions) => typedError<ConvertedServer[], IpcError>(__TAURI_INVOKE("convert_snippet", { text }, options)),
 	listSecretAliases: (options?: InvokeOptions) => typedError<string[], IpcError>(__TAURI_INVOKE("list_secret_aliases", undefined, options)),
+	reviewMcpGitSource: (url: string, path: string | null, gitRef: string | null, options?: InvokeOptions) => typedError<McpSourceReview, IpcError>(__TAURI_INVOKE("review_mcp_git_source", { url, path, gitRef }, options)),
+	/**
+	 *  Reads the folder picked under `token` (`pick_skill_source` with
+	 *  `kind: "folder"`).
+	 */
+	reviewMcpLocalSource: (token: string, options?: InvokeOptions) => typedError<McpSourceReview, IpcError>(__TAURI_INVOKE("review_mcp_local_source", { token }, options)),
+	/**
+	 *  Saves the picked drafts. On an error (`source_trust_required`,
+	 *  `scan_blocked`, `already_exists`, ...) the review is kept for a retry,
+	 *  unless it was discarded meanwhile; on success it is spent.
+	 */
+	saveMcpSourceDrafts: (token: string, picks: McpDraftPick[], trust: TrustGrantArg | null, movedTrust: TrustGrantArg | null, allowDangerous: boolean, options?: InvokeOptions) => typedError<McpSourceSaved, IpcError>(__TAURI_INVOKE("save_mcp_source_drafts", { token, picks, trust, movedTrust, allowDangerous }, options)),
+	/**  Drops a review and its temporary clone (the dialog closed). */
+	discardMcpSourceReview: (token: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("discard_mcp_source_review", { token }, options)),
+	checkMcpSourceUpdate: (id: string, options?: InvokeOptions) => typedError<McpUpdateCheck, IpcError>(__TAURI_INVOKE("check_mcp_source_update", { id }, options)),
+	updateMcpSourceServer: (id: string, latest: string | null, trust: TrustGrantArg | null, movedTrust: TrustGrantArg | null, allowDangerous: boolean, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("update_mcp_source_server", { id, latest, trust, movedTrust, allowDangerous }, options)),
+	/**
+	 *  Fetches and scans what this machine's checkout of `id` should hold;
+	 *  `null` when it is up to date. Discard with `discard_mcp_source_review`.
+	 */
+	reviewMcpCheckout: (id: string, options?: InvokeOptions) => typedError<McpCheckoutReview | null, IpcError>(__TAURI_INVOKE("review_mcp_checkout", { id }, options)),
+	/**
+	 *  Puts the reviewed checkout in place, behind the trust answers and the
+	 *  scan gate; the review is spent either way (review again to retry).
+	 */
+	restoreMcpCheckout: (token: string, trust: TrustGrantArg | null, movedTrust: TrustGrantArg | null, allowDangerous: boolean, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("restore_mcp_checkout", { token, trust, movedTrust, allowDangerous }, options)),
 	pendingPlan: (options?: InvokeOptions) => typedError<PendingPlan, IpcError>(__TAURI_INVOKE("pending_plan", undefined, options)),
 	runApply: (files: FileRef[] | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("run_apply", { files }, options)),
 	listAppliedRuns: (options?: InvokeOptions) => typedError<AppliedRun[], IpcError>(__TAURI_INVOKE("list_applied_runs", undefined, options)),
 	undoApply: (applyId: string, confirmed: boolean, options?: InvokeOptions) => typedError<UndoResult, IpcError>(__TAURI_INVOKE("undo_apply", { applyId, confirmed }, options)),
 	pendingStoreChanges: (options?: InvokeOptions) => typedError<PendingStoreChange[], IpcError>(__TAURI_INVOKE("pending_store_changes", undefined, options)),
 	discardPending: (entities: string[] | null, options?: InvokeOptions) => typedError<DiscardResult, IpcError>(__TAURI_INVOKE("discard_pending", { entities }, options)),
+	recheckTargets: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("recheck_targets", undefined, options)),
 	listTools: (options?: InvokeOptions) => typedError<ToolInfo[], IpcError>(__TAURI_INVOKE("list_tools", undefined, options)),
 	/**  Opens the folder of `client`'s user MCP file. */
 	revealToolFolder: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("reveal_tool_folder", { client }, options)),
@@ -109,6 +136,11 @@ export const commands = {
 	listOpEnvironment: (id: string, options?: InvokeOptions) => typedError<OpEnvironmentNames, IpcError>(__TAURI_INVOKE("list_op_environment", { id }, options)),
 	mapOpEnvironment: (id: string, names: string[], account: string | null, options?: InvokeOptions) => typedError<MapResult, IpcError>(__TAURI_INVOKE("map_op_environment", { id, names, account }, options)),
 	setOpAccount: (account: string | null, options?: InvokeOptions) => typedError<ChangeResult, IpcError>(__TAURI_INVOKE("set_op_account", { account }, options)),
+	listSources: (options?: InvokeOptions) => typedError<SourceRecordInfo[], IpcError>(__TAURI_INVOKE("list_sources", undefined, options)),
+	checkSourceTrust: (url: string, options?: InvokeOptions) => typedError<SourceTrustInfo, IpcError>(__TAURI_INVOKE("check_source_trust", { url }, options)),
+	revokeSource: (id: string, options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("revoke_source", { id }, options)),
+	blockSource: (id: string, options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("block_source", { id }, options)),
+	blockSourceUrl: (url: string, scope: SourceScope, options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("block_source_url", { url, scope }, options)),
 	listSkills: (scope: SkillScope, options?: InvokeOptions) => typedError<SkillList, IpcError>(__TAURI_INVOKE("list_skills", { scope }, options)),
 	listSkillToolDirs: (scope: SkillScope, options?: InvokeOptions) => typedError<ToolSkillDir[], IpcError>(__TAURI_INVOKE("list_skill_tool_dirs", { scope }, options)),
 	/**
@@ -118,7 +150,27 @@ export const commands = {
 	 */
 	pickSkillSource: (kind: SkillSourcePick, options?: InvokeOptions) => typedError<PickedSkillSource | null, IpcError>(__TAURI_INVOKE("pick_skill_source", { kind }, options)),
 	installLocalSkill: (token: string, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_local_skill", { token, id, renameIfTaken }, options)),
-	installGitSkill: (url: string, path: string | null, gitRef: string | null, id: string | null, renameIfTaken: boolean, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_git_skill", { url, path, gitRef, id, renameIfTaken }, options)),
+	installGitSkill: (url: string, path: string | null, gitRef: string | null, id: string | null, renameIfTaken: boolean, trust: TrustGrantArg | null, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_git_skill", { url, path, gitRef, id, renameIfTaken, trust }, options)),
+	/**
+	 *  Fetches and scans a git source for the install review; nothing goes
+	 *  into the store. The review stays in the app under its token.
+	 */
+	reviewGitSkill: (url: string, path: string | null, gitRef: string | null, options?: InvokeOptions) => typedError<SkillInstallReview, IpcError>(__TAURI_INVOKE("review_git_skill", { url, path, gitRef }, options)),
+	/**
+	 *  Reads and scans the folder or archive picked under `token` (from
+	 *  `pick_skill_source`) for the install review.
+	 */
+	reviewLocalSkill: (token: string, options?: InvokeOptions) => typedError<SkillInstallReview, IpcError>(__TAURI_INVOKE("review_local_skill", { token }, options)),
+	/**
+	 *  Installs the reviewed content. The review stays in the store until
+	 *  the install succeeds: on any error (`scan_blocked`, a trust error,
+	 *  `already_exists`, a worker failure) the dialog can ask and try again
+	 *  under the same token. Once the store commit is made the review is
+	 *  spent (a sync failure after it is a warning of the result).
+	 */
+	installReviewedSkill: (token: string, id: string | null, renameIfTaken: boolean, allowDangerous: boolean, trust: TrustGrantArg | null, movedTrust: TrustGrantArg | null, options?: InvokeOptions) => typedError<SkillInstalled, IpcError>(__TAURI_INVOKE("install_reviewed_skill", { token, id, renameIfTaken, allowDangerous, trust, movedTrust }, options)),
+	/**  Drops a review and its temporary clone (the dialog closed). */
+	discardSkillReview: (token: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("discard_skill_review", { token }, options)),
 	setSkillClients: (id: string, clients: string[], enabled: boolean, method: SkillMethod | null, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_clients", { id, clients, enabled, method }, options)),
 	setSkillMethod: (id: string, method: SkillMethod, options?: InvokeOptions) => typedError<SkillChange, IpcError>(__TAURI_INVOKE("set_skill_method", { id, method }, options)),
 	planSkilldockMigration: (options?: InvokeOptions) => typedError<MigrationReport, IpcError>(__TAURI_INVOKE("plan_skilldock_migration", undefined, options)),
@@ -129,7 +181,7 @@ export const commands = {
 	setSkillTags: (id: string, tags: string[], options?: InvokeOptions) => typedError<string | null, IpcError>(__TAURI_INVOKE("set_skill_tags", { id, tags }, options)),
 	checkSkillUpdates: (ids: string[], options?: InvokeOptions) => typedError<SkillUpdateCheck[], IpcError>(__TAURI_INVOKE("check_skill_updates", { ids }, options)),
 	skillUpdateDiff: (id: string, file: string, options?: InvokeOptions) => typedError<SkillFileDiff, IpcError>(__TAURI_INVOKE("skill_update_diff", { id, file }, options)),
-	updateSkill: (id: string, latest: string, options?: InvokeOptions) => typedError<SkillUpdated, IpcError>(__TAURI_INVOKE("update_skill", { id, latest }, options)),
+	updateSkill: (id: string, latest: string, allowDangerous: boolean, trust: TrustGrantArg | null, movedTrust: TrustGrantArg | null, options?: InvokeOptions) => typedError<SkillUpdated, IpcError>(__TAURI_INVOKE("update_skill", { id, latest, allowDangerous, trust, movedTrust }, options)),
 	listSkillFiles: (id: string, options?: InvokeOptions) => typedError<SkillFileEntry[], IpcError>(__TAURI_INVOKE("list_skill_files", { id }, options)),
 	readSkillFile: (id: string, file: string, options?: InvokeOptions) => typedError<SkillFileText, IpcError>(__TAURI_INVOKE("read_skill_file", { id, file }, options)),
 	/**  Opens the store folder of skill `id`. */
@@ -899,6 +951,17 @@ export type ErrorCode =
  */
 "source_unreachable" | 
 /**
+ *  An install or update from a source the user has not trusted, without
+ *  the user's answer to the trust prompt (#24). Nothing was written;
+ *  ask the user (app dialog, interactive prompt, `--trust-source`).
+ */
+"source_trust_required" | 
+/**
+ *  A block in `sources.toml` matches the source (#24); nothing is
+ *  fetched or written until the block is removed.
+ */
+"source_blocked" | 
+/**
  *  The desktop app's update check or install failed, or updates are
  *  turned off or not part of this build (SPEC 16.4).
  */
@@ -910,7 +973,26 @@ export type ErrorCode =
  *  time (SPEC 8.2, #4). The target is blocked and left as it is; the
  *  rest of the run goes on. [`CoreError::read_only`] gives the kind.
  */
-"read_only_target";
+"read_only_target" | 
+/**
+ *  The built-in scan's verdict on a skill (or MCP server source) is
+ *  `dangerous` (SPEC 17); nothing is installed or updated unless the
+ *  user explicitly chooses to install anyway (`--allow-dangerous`).
+ */
+"scan_blocked" | 
+/**
+ *  A server added from a Git repository runs from this machine's
+ *  checkout (`<LOADOUT_HOME>/servers/<id>`), which is missing or not at
+ *  the commit the server file names (#5). The entry is blocked until
+ *  `loadout server checkout <id>` (or the app's Restore) brings it to
+ *  that commit; the old code never runs with the new command.
+ */
+"checkout_out_of_date" | 
+/**
+ *  A server added from a local folder on another machine (#5): the
+ *  folder is that machine's, so the entry is blocked here.
+ */
+"folder_on_other_machine";
 
 /**
  *  `env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`; refs stay refs,
@@ -1002,6 +1084,11 @@ export type HistoryFilter = {
 	 */
 	entity: string | null,
 	limit: number | null,
+	/**
+	 *  A page after this commit (its full id): the commits older than it,
+	 *  as "Load more" asks for them. `null` starts at the newest.
+	 */
+	before: string | null,
 };
 
 /**
@@ -1296,6 +1383,191 @@ export type MatrixRow = {
 	 *  whose own layers coexist (Cursor) can have several.
 	 */
 	cells: MatrixCell[],
+};
+
+/**  What restoring this machine's checkout of a server would put in place. */
+export type McpCheckoutReview = {
+	token: string,
+	id: string,
+	/**  The commit the server file names. */
+	commit: string,
+	trust: SourceTrustInfo | null,
+	movedTrust: SourceTrustInfo | null,
+	/**  The repository's files and the server's saved launch lines. */
+	scan: ScanResult,
+};
+
+/**  One proposed server. */
+export type McpDraft = {
+	/**  Names the draft in `save_mcp_source_drafts`. */
+	key: string,
+	kind: McpDraftKind,
+	/**  The file it came from, relative to the folder. */
+	file: string,
+	/**  `registry`, `bundle`, `client:<id>`, `npm`, `python`, `docker`. */
+	converter: string,
+	entry: string | null,
+	/**  The editor's Form (no clients chosen yet). */
+	draft: ServerDraft,
+	/**  The exact command line or URL, as saved (the base definition). */
+	launch: string,
+	/**  Every launch line: the base, then each OS override as it runs there. */
+	launchLines: McpLaunchLine[],
+	inputs: McpDraftInput[],
+	/**  It runs code from the source every time a client starts it. */
+	runsRepoCode: boolean,
+	/**  It runs from a machine-local clone of the repository. */
+	checkout: boolean,
+	/**  The command names a version or commit; false: "not pinned". */
+	pinned: boolean,
+	/**
+	 *  Steps the user runs first (`docker build ...`); never run by
+	 *  Loadout. Paths under their placeholder roots.
+	 */
+	setup: string[],
+	/**  Other files with an identical definition. */
+	alsoIn: string[],
+	/**  The folder's files and every launch line. */
+	scan: ScanResult,
+};
+
+/**  A value the user provides after saving. */
+export type McpDraftInput = {
+	/**
+	 *  `env.NAME`, `headers.NAME`, `args[N]`, `url`, `command`, each also
+	 *  `os.<name>.`-prefixed for an override, or `client.<id>.<key>`.
+	 */
+	field: string,
+	description: string | null,
+	/**
+	 *  The draft holds `${secret:alias}`: set that secret (a passthrough
+	 *  value has no alias: it was left out).
+	 */
+	secret: boolean,
+	required: boolean,
+	alias: string | null,
+	/**  The file held a literal value here; it was not kept. */
+	valueDropped: boolean,
+};
+
+export type McpDraftKind = "registry" | "bundle" | "client_config" | "package";
+
+/**  One draft to save, as the editor has it. */
+export type McpDraftPick = {
+	key: string,
+	draft: ServerDraft,
+};
+
+/**  A launch field an update changes (values as stored: references only). */
+export type McpFieldChange = {
+	/**
+	 *  `transport`, `command`, `args`, `url`, `cwd`, `env.NAME`,
+	 *  `headers.NAME`, each also `os.<name>.`-prefixed.
+	 */
+	field: string,
+	old: string | null,
+	new: string | null,
+};
+
+/**  One launch line: the base definition (`os` null) or an OS override. */
+export type McpLaunchLine = {
+	/**  `windows`, `macos`, `linux`; null for the base definition. */
+	os: string | null,
+	line: string,
+};
+
+/**  A definition the source holds that cannot be drafted. */
+export type McpSkipped = {
+	file: string,
+	entry: string | null,
+	problem: IpcError,
+};
+
+/**  Where the drafts come from. */
+export type McpSourceInfo = {
+	kind: McpSourceKind,
+	/**  The git URL, userinfo masked. */
+	url: string | null,
+	/**
+	 *  A local folder under its placeholder root (`~/code/weather`), or
+	 *  `…/<name>` outside the home folder.
+	 */
+	folder: string | null,
+	/**  The folder inside the repository. */
+	path: string | null,
+	gitRef: string | null,
+	commit: string | null,
+};
+
+export type McpSourceKind = "git" | "local";
+
+/**  The review of a source. */
+export type McpSourceReview = {
+	token: string,
+	source: McpSourceInfo,
+	drafts: McpDraft[],
+	skipped: McpSkipped[],
+	/**
+	 *  Dependency and build folders not read or scanned (`node_modules`,
+	 *  `dist`, ...): shown as an info note.
+	 */
+	skippedFolders: string[],
+	/**  The trust dialog's view of the source (git sources and folders). */
+	trust: SourceTrustInfo | null,
+	/**
+	 *  The trust dialog's view of where the host redirected the repository,
+	 *  when that is another source (asked too; `trust` stays the requested
+	 *  source).
+	 */
+	movedTrust: SourceTrustInfo | null,
+	/**  The folder's files. */
+	scan: ScanResult,
+};
+
+/**  What a save did. */
+export type McpSourceSaved = {
+	ids: string[],
+	change: ChangeResult,
+	/**
+	 *  The scan the gate checked: the folder's files and every saved
+	 *  launch line.
+	 */
+	scan: ScanResult,
+};
+
+/**  The update check of a source server. */
+export type McpUpdateCheck = {
+	id: string,
+	status: SkillUpdateStatus,
+	current: string | null,
+	/**
+	 *  The source's commit, or a folder's content hash: pass it back as
+	 *  `latest` to `update_mcp_source_server`.
+	 */
+	latest: string | null,
+	changes: McpFieldChange[],
+	/**  Changed files of a checkout. */
+	files: SkillFileChange[],
+	/**  The new command line or URL (the base definition). */
+	launch: string | null,
+	/**  Every new launch line, OS overrides included. */
+	launchLines: McpLaunchLine[],
+	runsRepoCode: boolean,
+	/**  The new version's setup steps. */
+	setup: string[],
+	/**  The update replaces the checkout: run the setup steps again. */
+	setupAgain: boolean,
+	/**
+	 *  This machine's checkout is missing or not at the commit the server
+	 *  file names: its entries are blocked (`checkout_out_of_date`) until
+	 *  `review_mcp_checkout` and `restore_mcp_checkout`.
+	 */
+	checkoutOutOfDate: boolean,
+	scan: ScanResult | null,
+	trust: SourceTrustInfo | null,
+	/**  Where the host redirected the repository, when another source. */
+	movedTrust: SourceTrustInfo | null,
+	error: IpcError | null,
 };
 
 /**
@@ -2050,6 +2322,51 @@ export type ReviewedFile = {
 	diff: string | null,
 };
 
+/**  One thing a rule matched. */
+export type ScanFinding = {
+	/**  `builtin` for Loadout's own scanner. */
+	scanner: string,
+	rule: string,
+	severity: ScanSeverity,
+	/**
+	 *  Relative to the skill (or repository) root; `null` for a command
+	 *  line.
+	 */
+	file: string | null,
+	line: number | null,
+	/**  English; the frontend may localize by `rule`. */
+	message: string,
+	/**
+	 *  The matched text, shortened, secret-shaped tokens masked, invisible
+	 *  characters spelled out.
+	 */
+	excerpt: string | null,
+};
+
+/**  A scan's verdict and findings. */
+export type ScanResult = {
+	verdict: ScanVerdict,
+	findings: ScanFinding[],
+	rulesVersion: number,
+	/**  From the cache (the same content was scanned before). */
+	cached: boolean,
+	/**
+	 *  A custom rules file (`state/scan-rules.toml`) was merged into the
+	 *  built-in rules ("custom rules in use").
+	 */
+	customRules: boolean,
+	/**  Problems loading the rules (English); the built-in rules ran. */
+	warnings: string[],
+};
+
+export type ScanSeverity = "info" | "warning" | "dangerous";
+
+/**
+ *  The worst finding: `dangerous` blocks an install or update unless the
+ *  user chooses to install anyway.
+ */
+export type ScanVerdict = "clean" | "warning" | "dangerous";
+
 export type SecretDestinationKind = "keyring" | "onepassword" | "env";
 
 /**  Where a fix writes the reference. */
@@ -2206,6 +2523,8 @@ export type SkillEntryClass = "managed" | "unmanaged" | "mismatch";
 export type SkillFileChange = {
 	path: string,
 	kind: SkillFileChangeKind,
+	/**  An added or modified file that looks executable (#24): highlight it. */
+	script: boolean,
 };
 
 export type SkillFileChangeKind = "added" | "modified" | "removed";
@@ -2281,6 +2600,35 @@ export type SkillInfo = {
 	problems: IpcError[],
 };
 
+/**
+ *  Fetched and scanned content before install (SPEC 12.4, 17): what the
+ *  install review shows. Nothing is in the store yet.
+ */
+export type SkillInstallReview = {
+	/**
+	 *  Names this content in `install_reviewed_skill` and
+	 *  `discard_skill_review`.
+	 */
+	token: string,
+	name: string,
+	files: SkillFileEntry[],
+	source: SkillReviewSource,
+	scan: ScanResult,
+	/**
+	 *  The trust dialog's view of a git source (#24); `null` for a local
+	 *  folder or archive. An untrusted source needs the dialog's answer in
+	 *  `install_reviewed_skill`.
+	 */
+	trust: SourceTrustInfo | null,
+	/**
+	 *  The trust dialog's view of the repository the host redirected the
+	 *  URL to, when it moved to another repository; `null` otherwise. It
+	 *  needs its own answer (`movedTrust` in `install_reviewed_skill`)
+	 *  unless it is trusted: `trust`'s answer never carries over.
+	 */
+	movedTrust: SourceTrustInfo | null,
+};
+
 /**  An install (or import, or vendoring) into the store. */
 export type SkillInstalled = {
 	id: string,
@@ -2291,6 +2639,8 @@ export type SkillInstalled = {
 	renamedFrom: string | null,
 	links: SkillSync | null,
 	warnings: IpcError[],
+	/**  The built-in scan of what was installed. */
+	scan: ScanResult,
 };
 
 /**  An entry Loadout owns in a client skill folder. */
@@ -2366,6 +2716,21 @@ export type SkillProject = {
 };
 
 /**
+ *  Where reviewed content comes from. A local source shows no path (it
+ *  stays in the backend under the pick token).
+ */
+export type SkillReviewSource = {
+	kind: SkillOrigin,
+	/**  Git URL, userinfo masked. */
+	url: string | null,
+	/**  The skill folder inside the repository. */
+	path: string | null,
+	gitRef: string | null,
+	/**  The commit that would be installed. */
+	commit: string | null,
+};
+
+/**
  *  The scope the Skills page shows (SPEC 13.7: project scope shows the
  *  project-enabled skills).
  */
@@ -2406,9 +2771,26 @@ export type SkillUpdateCheck = {
 	latest: string | null,
 	changes: SkillFileChange[],
 	error: IpcError | null,
+	/**  The built-in scan of the new content, when an update is available. */
+	scan: ScanResult | null,
+	/**
+	 *  The trust check of a git skill's source (#24), with what changed
+	 *  about it (force-push, moved); `null` for other skills. An untrusted
+	 *  source needs the dialog's answer in `update_skill`.
+	 */
+	trust: SourceTrustInfo | null,
+	/**
+	 *  The trust check of the repository the source moved to, when the
+	 *  host redirected it to another repository; `null` otherwise. It
+	 *  needs its own answer (`movedTrust` in `update_skill`) unless it is
+	 *  trusted; the update then moves the skill's URL there.
+	 */
+	movedTrust: SourceTrustInfo | null,
 };
 
 export type SkillUpdateStatus = "up_to_date" | "available" | "not_tracked" | "source_unreachable" | 
+/**  A block covers the source; it was not contacted (see the error). */
+"source_blocked" | 
 /**
  *  The check itself failed for this skill (see the error); other
  *  skills are still checked.
@@ -2423,7 +2805,75 @@ export type SkillUpdated = {
 	commit: string | null,
 	changes: SkillFileChange[],
 	links: SkillSync,
+	/**  The built-in scan of the new content. */
+	scan: ScanResult,
 };
+
+export type SourceAskReason = "first_time" | "not_trusted" | "lapsed";
+
+/**  What changed about a source since its last fetch. */
+export type SourceChange = {
+	kind: SourceLapseReason,
+	detail: string | null,
+};
+
+export type SourceDecidedVia = "app" | "cli-prompt" | "cli-flag" | "cli-command";
+
+export type SourceDecisionKind = "trust" | "block";
+
+/**  Why trust lapsed, and when. */
+export type SourceLapse = {
+	reason: SourceLapseReason,
+	at: string,
+	/**  `moved`: where the repository moved to. */
+	detail: string | null,
+};
+
+export type SourceLapseReason = "history_rewritten" | "moved";
+
+/**  One row of Settings > Sources. */
+export type SourceRecordInfo = {
+	/**  Opaque handle for revoke and block; never a path. */
+	id: string,
+	display: string,
+	scope: SourceScope,
+	decision: SourceDecisionKind,
+	decidedAt: string,
+	via: SourceDecidedVia | null,
+	machine: string | null,
+	lapse: SourceLapse | null,
+	official: boolean,
+};
+
+/**  What a trust decision covers. */
+export type SourceScope = "repo" | "owner" | "host";
+
+/**  One scope "always trust" offers, with the key it would record. */
+export type SourceScopeOption = {
+	scope: SourceScope,
+	display: string,
+};
+
+/**  What the trust dialog shows about a source. */
+export type SourceTrustInfo = {
+	/**  The repository key; a local source under its placeholder root. */
+	display: string,
+	official: boolean,
+	/**  Narrowest first; `repo` is the default. */
+	scopes: SourceScopeOption[],
+	state: SourceTrustState,
+	installedSkills: string[],
+	/**  Set by update checks and install reviews. */
+	change: SourceChange | null,
+	/**
+	 *  Fetched over plain `http://` or `git://`: unencrypted, so anyone on
+	 *  the network path can change what arrives.
+	 */
+	insecure: boolean,
+};
+
+/**  Where the store's decisions leave a source. */
+export type SourceTrustState = { kind: "trusted"; scope: SourceScope; display: string; decidedAt: string } | { kind: "blocked"; scope: SourceScope; display: string; decidedAt: string } | { kind: "ask"; reason: SourceAskReason; lapse: SourceLapse | null };
 
 /**
  *  A sync tool whose folder holds a folder remote: supported, since each
@@ -2477,6 +2927,14 @@ export type ToolInfo = {
 	 *  for a user file keyed by project.
 	 */
 	projectFiles: string[],
+	/**
+	 *  The client has a private project target next to the shared project
+	 *  file (`project_local` in the adapter table: Claude Code's
+	 *  `~/.claude.json` per project, Devin's `.devin/mcp_config.local.json`),
+	 *  so a private manifest entry goes there instead of over the shared
+	 *  entry (#22).
+	 */
+	privateProjectTarget: boolean,
 	transports: Transports,
 	/**  The client expands environment references (`${env:NAME}`) itself. */
 	envRefs: boolean,
@@ -2518,6 +2976,12 @@ export type Transports = {
 	http: boolean,
 	sse: boolean,
 };
+
+/**
+ *  The trust dialog's answer: "Trust this time only" or "Always trust
+ *  this source" at a scope.
+ */
+export type TrustGrantArg = { kind: "once" } | { kind: "always"; scope: SourceScope };
 
 /**  The trust review of a project: what trusting it would accept. */
 export type TrustReview = {

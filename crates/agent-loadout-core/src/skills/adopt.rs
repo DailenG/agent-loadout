@@ -745,7 +745,11 @@ fn resolve_id(
             None => None,
             Some(skill) => Some(
                 skill.has_content
-                    && content_hash(&store::read_content(store, id)?) == item.variant.hash,
+                    // A store copy that cannot be read now (a lock, an ACL)
+                    // is not the same content: the variant gets `-2`, as the
+                    // scan (`stored`) counts it without content.
+                    && store::read_content(store, id)
+                        .is_ok_and(|content| content_hash(&content) == item.variant.hash),
             ),
         })
     };

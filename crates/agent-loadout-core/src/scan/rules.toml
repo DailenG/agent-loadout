@@ -1,0 +1,255 @@
+# Built-in scanner rules (SPEC 17, #25). Loadout's own rules, under its
+# license; they run offline on every skill install and update and on every
+# MCP server drafted from a Git repository or folder.
+#
+# Data, not code: a rule is a pattern (regular expression, `regex` crate
+# syntax: linear time, no look-around, no back-references; `\b` is an
+# ASCII word boundary) with a severity. Raise `version` with every change.
+# A custom rules file at `<LOADOUT_HOME>/state/scan-rules.toml` is merged
+# in: it may add rules or raise a built-in rule's severity, never remove or
+# lower one (docs/security.md); scan results then say custom rules are in
+# use.
+#
+# Fields of a rule:
+#   id        kebab-case, unique; shown with each finding
+#   severity  "info" | "warning" | "dangerous" ("dangerous" blocks an install
+#             unless the user chooses to install anyway)
+#   message   one sentence for the user
+#   targets   what `pattern` runs on: "markdown" (.md, .markdown, .mdx, .txt,
+#             .rst, .adoc, files without an extension and without `#!`),
+#             "code" (every other text file), "command" (an MCP server's
+#             command line: the command and its arguments joined by spaces).
+#             Default ["markdown", "code"].
+#   pattern   content pattern; each match is a finding (file, line, excerpt)
+#   path      pattern on the file's relative path (`/`-separated): limits a
+#             content rule to those files, or, without `pattern`, the file
+#             itself is the finding
+#   unless    a match whose own text also matches this is not a finding
+#   requires  patterns that must all match somewhere in the same file (or
+#             command line) too: "reads credentials" AND "calls the network"
+#   prose     severity of a match in Markdown prose, outside fenced code
+#             blocks (lower than `severity`): describing a command in a
+#             sentence is not the same as a command to run
+#
+# Files are typed by their first bytes, not their names: images, fonts,
+# archives and media get path rules only (and are listed in a
+# `not-content-scanned` info finding); native executables (ELF, PE,
+# Mach-O, WebAssembly) are `native-binary` whatever their name; every other
+# file is scanned as text: UTF-8 (BOM removed) or UTF-16 by its BOM or NUL
+# pattern, invalid bytes replaced, so a script cannot hide by holding one
+# bad byte. Only the first 4 MiB of a file are scanned; a larger file gets
+# a `not-fully-scanned` warning.
+
+schema = 1
+version = 2
+
+# --- Remote code: download and run ---------------------------------------
+
+[[rule]]
+id = "pipe-to-shell"
+severity = "dangerous"
+prose = "warning"
+targets = ["markdown", "code", "command"]
+message = "Downloads a script and pipes it straight into a shell or interpreter."
+pattern = '''(?i)\b(?:curl|wget)\b(?:[^\n|;\\]|\\\r?\n|\\.)*\|(?:\s*tee\b[^\n|]*\|)*\s*(?:sudo\s+(?:-\S+\s+)*)?(?:(?:/usr)?/bin/)?(?:env\s+(?:-\S+\s+)*)?(?:(?:/usr)?/bin/)?(?:(?:ba|z|k|da|fi)?sh|python[0-9.]*|node|perl|ruby|php)\b'''
+
+[[rule]]
+id = "download-then-run"
+severity = "dangerous"
+prose = "warning"
+targets = ["markdown", "code", "command"]
+message = "Downloads a script to a file and runs it right away."
+pattern = '''(?i)\b(?:curl\b[^\n]*?\s(?:-[a-z]*o|--output)\s*\S+|wget\b[^\n]*?\s(?:-[a-z]*o|--output-document)\s*\S+)[^\n]*?(?:&&|;|\|\|)\s*(?:sudo\s+)?(?:(?:ba|z|k)?sh\s|python[0-9.]*\s|chmod\s+\+x\s|\./|pwsh\s|powershell\s)'''
+
+[[rule]]
+id = "shell-runs-download"
+severity = "dangerous"
+prose = "warning"
+targets = ["markdown", "code", "command"]
+message = "Runs the output of a download as shell code."
+pattern = '''(?i)\b(?:ba|z|k)?sh\s+(?:-\w+\s+)*-c\s+["']?\$\(\s*(?:curl|wget)\b|(?:\b(?:ba|z|k)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b|\beval\s+["']?\$\(\s*(?:curl|wget)\b'''
+
+[[rule]]
+id = "powershell-download-exec"
+severity = "dangerous"
+prose = "warning"
+targets = ["markdown", "code", "command"]
+message = "Downloads PowerShell code and runs it (iwr | iex and similar)."
+pattern = '''(?i)\b(?:iwr|irm|invoke-webrequest|invoke-restmethod|curl|wget)\b[^\n|;]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\b[\s(]*(?:new-object\s+(?:system\.)?net\.webclient|iwr\b|irm\b|invoke-webrequest\b|invoke-restmethod\b)|\.downloadstring\s*\([^\n]*\)[^\n]*\|\s*(?:iex|invoke-expression)\b'''
+
+[[rule]]
+id = "script-download-exec"
+severity = "dangerous"
+targets = ["markdown", "code", "command"]
+message = "Downloads code and runs it with exec or eval."
+pattern = '''(?i)\b(?:exec|eval)\s*\(\s*(?:await\s+)?\(?\s*(?:await\s+)?(?:urllib\.request\.urlopen|urlopen|requests\.get|httpx\.get|fetch|axios\.get|https?\.get|uri\.open|net::http\.get)\s*\(|\bnew\s+function\s*\(\s*await\s+\(?\s*await\s+fetch\s*\('''
+
+[[rule]]
+id = "encoded-payload-exec"
+severity = "dangerous"
+targets = ["markdown", "code", "command"]
+message = "Decodes an encoded payload and runs it."
+pattern = '''(?i)\bbase64\s+(?:-d|--decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|k)?sh\b|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s-(?:e|ec|en|enc|enco|encodedcommand)\s+[A-Za-z0-9+/=]{20,}|\b(?:iex|invoke-expression)\b[^\n]*\bfrombase64string\b|assembly\]::load\w*\s*\([^\n]*\bfrombase64string\b|\bfrombase64string\b[^\n]*\b(?:iex|invoke-expression)\b|\b(?:exec|eval)\s*\(\s*(?:base64\.b64decode|b64decode|base64\.decodebytes|atob|buffer\.from\s*\([^)\n]*base64)'''
+
+[[rule]]
+id = "long-encoded-blob"
+severity = "warning"
+message = "Holds a long encoded blob that cannot be reviewed by reading it (possibly an obfuscated payload)."
+pattern = '''(?:^|[^A-Za-z0-9+/,=_-])[A-Za-z0-9+/]{400,}={0,2}'''
+
+[[rule]]
+id = "reverse-shell"
+severity = "dangerous"
+targets = ["markdown", "code", "command"]
+message = "Looks like a reverse shell: hands a shell to a remote machine."
+pattern = '''(?i)/dev/(?:tcp|udp)/[^\s/]+/\d+|\b(?:nc|ncat|netcat)(?:\.exe)?\b[^\n]*\s-(?:e|c)\s+["']?(?:/bin/|/usr/bin/)?(?:(?:ba|z|k)?sh|cmd(?:\.exe)?|powershell(?:\.exe)?)\b|\bmkfifo\b[^\n]*\|\s*(?:nc|ncat|netcat)\b|\bos\.dup2\s*\(\s*\w+\.fileno\(\)|\bnet\.sockets\.tcpclient\b[^\n]*\bgetstream\b|\bsocat\b[^\n]*\bexec:[^\n]*\b(?:ba|z)?sh\b'''
+
+# --- Credentials and exfiltration -----------------------------------------
+
+[[rule]]
+id = "credential-exfiltration"
+severity = "dangerous"
+message = "Reads or uploads SSH keys, cloud or git credentials, or browser passwords, and calls the network in the same file."
+pattern = '''(?im)\b(?:cat|type|more|less|head|tail|get-content|gc|base64|xxd|cp|copy|copy-item|tar|zip|7z|readfile(?:sync)?|read_text|read_bytes|readalltext|readallbytes|open|curl|wget|scp|rsync|sftp|invoke-webrequest|invoke-restmethod|iwr|irm)\b[^\n]{0,120}?(?:\bid_(?:rsa|ed25519|ecdsa|dsa)(?:[^.\w]|$)|\.ssh(?:[\\/]|\b)|\.aws(?:[\\/]|\b)|\.git-credentials\b|\.netrc\b|\.docker[\\/]+config\.json|\.kube[\\/]+config\b|\.config[\\/]+gh[\\/]+hosts\.yml|\.claude[\\/]+\.credentials\.json|\.codex[\\/]+auth\.json|\.gnupg\b)|\bsecurity\s+(?:find-generic-password|find-internet-password|dump-keychain)\b|\bcmdkey\s+/list\b|(?:google[\\/ ]+chrome|microsoft[\\/ ]+edge|brave-browser)[^\n]{0,60}?(?:login data|cookies|local state)|\b(?:logins\.json|key4\.db|cookies\.sqlite)\b'''
+# A key passed with `-i` (scp/rsync over ssh) is used, not sent.
+unless = '''(?i)\s-i\s*["']?[^\s"']*$'''
+requires = ['''(?i)\b(?:curl|wget|invoke-webrequest|invoke-restmethod|iwr|irm|requests\.(?:post|put|get|request)|httpx\.(?:post|put|get|client|asyncclient)|urllib\.request|urlopen|axios|xmlhttprequest|net\.webclient|uploadstring|uploadfile|nc|ncat|netcat|scp|sftp|rsync|ftp|smtplib|sendmail)\b|\bfetch\s*\(''']
+
+[[rule]]
+id = "credential-file-network"
+severity = "warning"
+message = "Reads .env files or tool credentials and calls the network in the same file; check where the values go."
+pattern = '''(?i)(?:^|[\s"'`=(/\\:])\.env(?:\.[a-z0-9_-]+)?\b|\.npmrc\b|\.pypirc\b|\bgh\s+auth\s+token\b|\.config[\\/]+gcloud\b|\.azure[\\/]'''
+requires = ['''(?i)\b(?:curl|wget|invoke-webrequest|invoke-restmethod|iwr|irm|requests\.(?:post|put|get|request)|httpx\.(?:post|put|get|client|asyncclient)|urllib\.request|urlopen|axios|xmlhttprequest|net\.webclient|uploadstring|uploadfile|nc|ncat|netcat|scp|ftp|smtplib|sendmail)\b|\bfetch\s*\(''']
+
+[[rule]]
+id = "exfil-endpoint"
+severity = "warning"
+targets = ["markdown", "code", "command"]
+message = "Mentions a request-capture, tunnel or paste service often used to collect stolen data."
+pattern = '''(?i)\b(?:webhook\.site|requestbin\.(?:com|net)|pipedream\.net|[\w-]+\.ngrok(?:-free)?\.(?:io|app|dev)|ngrok\.io|interact\.sh|[\w-]+\.oast\.(?:fun|live|me|online|pro|site)|burpcollaborator\.net|canarytokens\.(?:com|org)|transfer\.sh|hastebin\.com)\b|\bdiscord(?:app)?\.com/api/webhooks|\bapi\.telegram\.org/bot|\bpastebin\.com/raw'''
+
+# --- Hidden text and prompt injection --------------------------------------
+
+[[rule]]
+id = "hidden-unicode-tags"
+severity = "dangerous"
+targets = ["markdown", "code", "command"]
+message = "Holds invisible Unicode tag characters: text the agent reads and you do not see."
+pattern = '''\x{1F3F4}?[\x{E0000}-\x{E007F}]+'''
+# A well-formed subdivision flag (England, Scotland, Wales): black flag,
+# 2 to 6 tag letters or digits, cancel tag.
+unless = '''^\x{1F3F4}[\x{E0030}-\x{E0039}\x{E0061}-\x{E007A}]{2,6}\x{E007F}$'''
+
+[[rule]]
+id = "variation-selector-run"
+severity = "dangerous"
+targets = ["markdown", "code", "command"]
+message = "Holds a run of invisible variation selectors, a way to smuggle hidden data after a visible character."
+pattern = '''[\x{FE00}-\x{FE0F}\x{E0100}-\x{E01EF}]{2,}'''
+
+[[rule]]
+id = "bidi-control-code"
+severity = "dangerous"
+targets = ["code", "command"]
+message = "Holds bidirectional control characters that make code read differently from how it runs."
+pattern = '''[\x{202A}-\x{202E}\x{2066}-\x{2069}]'''
+
+[[rule]]
+id = "bidi-control-text"
+severity = "warning"
+targets = ["markdown"]
+message = "Holds bidirectional control characters that can reorder what you see."
+pattern = '''[\x{202A}-\x{202E}\x{2066}-\x{2069}]'''
+
+[[rule]]
+id = "zero-width-run"
+severity = "dangerous"
+targets = ["markdown", "code", "command"]
+message = "Holds a run of zero-width characters, a way to hide text or data."
+pattern = '''[\x{200B}-\x{200D}\x{2060}-\x{2064}\x{FEFF}\x{180E}]{3,}'''
+
+[[rule]]
+id = "zero-width-char"
+severity = "warning"
+targets = ["markdown", "code", "command"]
+message = "Holds a zero-width character you cannot see."
+pattern = '''[\x{200B}\x{2060}-\x{2064}\x{FEFF}\x{180E}]'''
+
+[[rule]]
+id = "html-comment-directive"
+severity = "dangerous"
+targets = ["markdown"]
+message = "An HTML comment (invisible when rendered) holds instructions for the agent."
+pattern = '''(?ism)<!--(?:[^-]|-[^-]|--[^>])*?(?:\bignore\s+(?:all\s+|any\s+|the\s+|your\s+)*(?:previous|prior|above|earlier|preceding|other)\b|\bdisregard\s+(?:all\s+|any\s+|the\s+|your\s+)*(?:previous|prior|above|instructions|rules)|\bdo\s+not\s+(?:tell|inform|mention|reveal|show)\b|\b(?:system|developer)\s+prompt\b|\bas\s+an?\s+(?:ai|assistant|agent|llm|language\s+model)\b|\byou\s+are\s+now\b|\bnew\s+instructions\b|\b(?:curl|wget|iwr|irm|invoke-webrequest)\s|\bexfiltrat|^\s*(?:assistant|system)\s*:)(?:[^-]|-[^-]|--[^>])*?-->'''
+
+[[rule]]
+id = "instruction-override"
+severity = "dangerous"
+prose = "warning"
+message = "Tells the agent to ignore its previous instructions or rules (prompt injection)."
+pattern = '''(?i)\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+|of\s+)*(?:previous|prior|above|earlier|preceding|existing|system|original|safety)\s+(?:instructions?|prompts?|rules|directives|guidelines|guardrails|context|messages?)\b|\byou\s+are\s+now\s+(?:in\s+)?(?:dan|developer\s+mode|jailbreak(?:ed)?|unrestricted|unfiltered|god\s+mode)\b|\bfrom\s+now\s+on,?\s+you\s+(?:will\s+)?(?:ignore|disregard|have\s+no\s+(?:rules|restrictions))\b'''
+
+[[rule]]
+id = "conceal-from-user"
+severity = "dangerous"
+targets = ["markdown"]
+message = "Tells the agent to hide what it does from you."
+pattern = '''(?i)\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|notify|alert|reveal\s+(?:this\s+|it\s+)?to|mention\s+(?:this\s+|it\s+)?to|show\s+(?:this\s+|it\s+)?to)\s+the\s+user\b|\bwithout\s+(?:telling|informing|notifying|alerting)\s+the\s+user\b|\b(?:hide|conceal)\s+(?:this|it|these|that|the\s+\w+)\s+from\s+the\s+user\b|\bkeep\s+(?:this|it)\s+(?:secret|hidden)\s+from\s+the\s+user\b|\bthe\s+user\s+(?:must|should)\s+not\s+(?:know|see|find\s+out)\b'''
+
+# --- Safety prompts and agent configuration -------------------------------
+
+[[rule]]
+id = "disable-safety-prompts"
+severity = "dangerous"
+prose = "warning"
+targets = ["markdown", "code", "command"]
+message = "Turns off the agent's permission or safety prompts."
+pattern = '''(?i)--dangerously-skip-permissions\b|--dangerously-bypass-approvals-and-sandbox\b|\bbypasspermissions\b|--yolo\b|--allow-all-tools\b|\bapproval_policy\s*=\s*["']never["']|\bsandbox_mode\s*=\s*["']danger-full-access["']|\b(?:disable|turn\s+off|bypass|skip|suppress|ignore)\s+(?:all\s+|the\s+|any\s+|your\s+)*(?:safety|security|permission|approval|confirmation)\s+(?:prompts?|checks?|dialogs?|warnings?|requests?|guardrails?|rules)\b'''
+
+[[rule]]
+id = "auto-approve-actions"
+severity = "warning"
+targets = ["markdown"]
+message = "Tells the agent to act without asking you first."
+pattern = '''(?i)\bwithout\s+(?:asking|confirming\s+with|prompting|consulting|checking\s+with)\s+(?:the\s+user|me|them)\b|\bauto[- ]?approve\b|\b(?:never|do\s+not|don'?t)\s+ask\s+(?:the\s+user\s+)?(?:for\s+)?(?:permission|confirmation|approval)\b'''
+
+[[rule]]
+id = "agent-config-write"
+severity = "warning"
+message = "Changes agent memory, instructions or configuration files (CLAUDE.md, AGENTS.md, agent settings, MCP configs)."
+pattern = '''(?i)\b(?:write|append|add|insert|modify|edit|update|overwrite|replace|change|create|remove|delete|save|set-content|add-content|out-file|tee|cp|copy|mv|move)\b[^\n]{0,80}?(?:\b(?:claude|agents|gemini|memory|copilot-instructions)\.md\b|\.cursorrules\b|\.cursor[\\/]+(?:rules|mcp\.json)|\.claude[\\/]+(?:settings(?:\.local)?\.json|commands|agents|hooks)|\.claude\.json\b|\.codex[\\/]+(?:config\.toml|agents\.md)|\.gemini[\\/]+settings\.json|\.mcp\.json\b|\.vscode[\\/]+mcp\.json|\.omp[\\/]|\.pi[\\/]+agent|scan-rules\.toml\b|loadout[\\/]+state\b)|>>?\s*["']?[^\s"'|;&]*(?:\b(?:claude|agents|gemini|memory|copilot-instructions)\.md\b|\.cursorrules\b|\.claude[\\/]+settings(?:\.local)?\.json|\.codex[\\/]+config\.toml|\.mcp\.json\b|scan-rules\.toml\b)'''
+
+# --- Files ----------------------------------------------------------------
+
+[[rule]]
+id = "native-binary"
+severity = "warning"
+message = "Ships a native executable, library or installer, which cannot be reviewed by reading it."
+path = '''(?i)\.(?:exe|dll|so|dylib|scr|msi|appimage|jar|deb|rpm|pkg|node|pyd|wasm|bin)$'''
+
+# --- MCP server commands --------------------------------------------------
+
+[[rule]]
+id = "mcp-unpinned-package"
+severity = "warning"
+targets = ["command"]
+message = "Runs a package without a pinned version, so each start can run different code."
+pattern = '''(?i)(?:^|[\s\\/])(?:npx|bunx|pnpx|(?:pnpm|yarn|bun)(?:\.cmd|\.exe)?\s+(?:dlx|x))(?:\.cmd|\.exe)?(?:\s+-{1,2}[a-z][\w-]*(?:=\S+)?)*\s+(?:@[\w.-]+/)?[a-z0-9_][\w.-]*(?:@(?:latest|next|\*|x|[~^]\S*))?(?:\s|$)|(?:^|[\s\\/])(?:uvx|uv(?:\.exe)?\s+tool\s+run|pipx(?:\.exe)?\s+run)(?:\.exe)?(?:\s+-{1,2}[a-z][\w-]*(?:=\S+)?)*\s+[a-z0-9][\w.\[\],-]*(?:\s|$)'''
+unless = '''(?i)(?:--python|-p|--with|--index-url|--extra-index-url|--index|--cache-dir)\s+\S+\s*$'''
+
+[[rule]]
+id = "mcp-unpinned-git"
+severity = "warning"
+targets = ["command"]
+message = "Runs code from a Git repository that is not pinned to a commit."
+pattern = '''(?i)\bgit\+(?:https?|ssh|git|file)://\S+|(?:^|[\s\\/])(?:npx|bunx|pnpx)(?:\.cmd|\.exe)?(?:\s+-{1,2}[a-z][\w-]*(?:=\S+)?)*\s+(?:github:|gitlab:|bitbucket:)?[a-z0-9_][\w.-]*/[\w.-]+(?:#\S+)?(?:\s|$)'''
+unless = '''(?i)[@#][0-9a-f]{7,40}(?:#\S*)?\s*$'''
+
+[[rule]]
+id = "mcp-unpinned-image"
+severity = "warning"
+targets = ["command"]
+message = "Runs a container image that is not pinned to a digest."
+pattern = '''(?i)(?:^|[\s\\/])(?:docker|podman)(?:\.exe)?\s+(?:container\s+)?run\b.*'''
+unless = '''(?i)@sha256:[0-9a-f]{64}'''

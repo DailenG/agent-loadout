@@ -11,7 +11,7 @@ use crate::model::skill_meta::SkillMeta;
 use crate::skills::frontmatter::{self, Frontmatter};
 use crate::skills::link::remove_link;
 use crate::skills::{
-    Entry, SKILL_FILE, SkillFiles, WARN_TOTAL_BYTES, entry, files_size, io_error, read_folder,
+    Entry, SKILL_FILE, SkillFiles, WARN_TOTAL_BYTES, entry, io_error, read_folder, summarize_folder,
 };
 use crate::store::{Store, StoreRead, Transaction};
 
@@ -315,7 +315,8 @@ pub fn ids(store: &Store<'_>) -> Result<Vec<String>, CoreError> {
     Ok(ids)
 }
 
-/// Every skill in the store.
+/// Every skill in the store. Contents are not read: sizes come from file
+/// metadata and only `SKILL.md` is parsed (#16).
 pub fn list(store: &Store<'_>) -> Result<Vec<StoreSkill>, CoreError> {
     ids(store)?.into_iter().map(|id| load(store, &id)).collect()
 }
@@ -345,10 +346,10 @@ fn load(store: &Store<'_>, id: &str) -> Result<StoreSkill, CoreError> {
     let mut bytes = 0;
     let mut frontmatter = None;
     if has_content {
-        match read_folder(fs, &dir) {
-            Ok(files) => {
-                bytes = files_size(&files);
-                match files.get(SKILL_FILE) {
+        match summarize_folder(fs, &dir) {
+            Ok(summary) => {
+                bytes = summary.bytes;
+                match &summary.skill_file {
                     Some(text) => match frontmatter::parse(&String::from_utf8_lossy(text)) {
                         Ok(parsed) => frontmatter = parsed,
                         Err(err) => problems.push(err.with_path(dir.join(SKILL_FILE))),
@@ -357,8 +358,8 @@ fn load(store: &Store<'_>, id: &str) -> Result<StoreSkill, CoreError> {
                 }
             }
             Err(err) => {
-                // Unreadable (a link that escapes, too large): never
-                // distributed.
+                // Unreadable (a file this account cannot read, a link that
+                // escapes, too large): never distributed.
                 has_content = false;
                 problems.push(err);
             }
@@ -427,7 +428,12 @@ pub fn free_id(read: &Transaction<'_>, base: &str) -> Result<String, CoreError> 
 
 /// A warning when the store's skills together pass [`WARN_TOTAL_BYTES`].
 pub fn total_size_warning(store: &Store<'_>) -> Option<CoreError> {
-    let total: u64 = list(store).ok()?.iter().map(|skill| skill.bytes).sum();
+    size_warning(&list(store).ok()?)
+}
+
+/// [`total_size_warning`] for skills already listed.
+pub fn size_warning(skills: &[StoreSkill]) -> Option<CoreError> {
+    let total: u64 = skills.iter().map(|skill| skill.bytes).sum();
     (total > WARN_TOTAL_BYTES).then(|| {
         CoreError::new(
             ErrorCode::InvalidValue,

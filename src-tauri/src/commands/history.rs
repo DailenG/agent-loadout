@@ -48,6 +48,9 @@ pub struct HistoryFilter {
     /// changing its files.
     pub entity: Option<String>,
     pub limit: Option<u32>,
+    /// A page after this commit (its full id): the commits older than it,
+    /// as "Load more" asks for them. `null` starts at the newest.
+    pub before: Option<String>,
 }
 
 /// The apply a commit recorded (`Loadout-Apply`).
@@ -385,6 +388,11 @@ pub fn history(core: &Core, filter: &HistoryFilter) -> CmdResult<Vec<HistoryEntr
         .map(str::trim)
         .filter(|entity| !entity.is_empty());
     let limit = filter.limit.map(|n| n as usize);
+    let before = filter
+        .before
+        .as_deref()
+        .map(CommitId::from_text)
+        .transpose()?;
     let entries = store.log(&LogFilter {
         entity: entity.map(str::to_owned),
         scope: match filter.scope {
@@ -398,6 +406,7 @@ pub fn history(core: &Core, filter: &HistoryFilter) -> CmdResult<Vec<HistoryEntr
         } else {
             limit
         },
+        before,
     })?;
     let marks = Marks::load(core, &store)?;
     Ok(entries

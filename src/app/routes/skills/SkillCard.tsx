@@ -13,6 +13,7 @@ import { Modal } from "@/app/components/Modal";
 import { toolLogoUrl } from "@/app/components/ToolLogo";
 import { errorMessage, t } from "@/i18n/en";
 import type { SkillClient, SkillInfo, SkillProject, SkillUpdateCheck } from "@/ipc/bindings";
+import type { TrustAnswer } from "@/app/components/TrustDialog";
 import { DeleteIcon, PowerToggleIcon, RefreshIcon } from "../mcp/icons";
 import { useSkillActions } from "./actions";
 import { OpenFolderIcon, SkillMonogram, ViewFileIcon } from "./icons";
@@ -48,6 +49,11 @@ export type SkillCardProps = {
   onUpdated: (skillId: string) => void;
   /** Every tag in the store, for the tag editor's suggestions. */
   allTags: string[];
+  /**
+   * Called with `true` while the card has a dialog or the tag editor open, or a toggle, update or delete
+   * under way, and `false` after: the list keeps such a card rendered (#17). Stable, like `onExpandedChange`.
+   */
+  onActiveChange?: (skillId: string, active: boolean) => void;
 };
 
 // Memoized: a refetch or a search keystroke re-renders only the cards whose props changed.
@@ -68,6 +74,15 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
   const deleteActionRef = useRef<HTMLButtonElement | null>(null);
   const tagActionRef = useRef<HTMLButtonElement | null>(null);
   const tagEditorRef = useRef<HTMLDivElement | null>(null);
+  const active = isBulkUpdating || isDeleteConfirming || isDeleting || isUpdating || dialog !== null || showTagEditor;
+  const { onActiveChange } = props;
+  useEffect(() => {
+    if (!active || !onActiveChange) {
+      return;
+    }
+    onActiveChange(skill.id, true);
+    return () => onActiveChange(skill.id, false);
+  }, [active, onActiveChange, skill.id]);
 
   const enabledClients = orderByRecommended(
     project
@@ -171,10 +186,10 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
     }
   }
 
-  async function handleUpdate() {
+  async function handleUpdate(allowDangerous: boolean, answer: TrustAnswer) {
     setIsUpdating(true);
     try {
-      await actions.update(skill.id, skill.name, update?.latest ?? "");
+      await actions.update(skill.id, skill.name, update?.latest ?? "", allowDangerous, answer);
       setDialog(null);
       props.onUpdated(skill.id);
     } catch {
@@ -250,6 +265,8 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
 
   const updateBadge = updateAvailable ? (
     <span className="status-badge tone-positive">{t("skill.card.update.available")}</span>
+  ) : update?.status === "source_blocked" ? (
+    <span className="status-badge tone-danger">{t("skill.card.update.blocked")}</span>
   ) : unreachable ? (
     <span className="status-badge tone-warning">{t("skill.card.update.unreachable")}</span>
   ) : null;
@@ -655,7 +672,7 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
           skill={skill}
           check={update}
           isUpdating={isUpdating}
-          onUpdate={() => void handleUpdate()}
+          onUpdate={(allowDangerous, answer) => void handleUpdate(allowDangerous, answer)}
           onClose={() => setDialog(null)}
         />
       ) : null}

@@ -15,6 +15,12 @@ export type SettingsDialogProps = {
   /** Id of the text in `children` that says what a confirmation asks. */
   describedBy?: string;
   wide?: boolean;
+  /** Renders into `<body>`: for dialogs opened from inside a card that clips fixed children. */
+  portal?: boolean;
+  /** `dialog` for read-and-review surfaces: focus starts on the dialog, not on its first field. */
+  initialFocus?: "field" | "dialog";
+  /** False while a write is in flight: Escape, the backdrop and the close button do nothing. */
+  dismissible?: boolean;
   children: ReactNode;
   actions: ReactNode;
 };
@@ -27,6 +33,9 @@ export function SettingsDialog({
   role = "dialog",
   describedBy,
   wide = false,
+  portal = false,
+  initialFocus = "field",
+  dismissible = true,
   children,
   actions,
 }: SettingsDialogProps) {
@@ -38,6 +47,9 @@ export function SettingsDialog({
       role={role}
       labelledBy={titleId}
       describedBy={describedBy}
+      portal={portal}
+      initialFocus={initialFocus}
+      dismissible={dismissible}
       onClose={onClose}
     >
       <div className="tool-manage-dialog__header">
@@ -45,7 +57,13 @@ export function SettingsDialog({
           <h3 id={titleId}>{title}</h3>
           {subtitle ? <p title={subtitle}>{subtitle}</p> : null}
         </div>
-        <button className="tool-manage-dialog__close" type="button" onClick={onClose} aria-label={closeLabel}>
+        <button
+          className="tool-manage-dialog__close"
+          type="button"
+          onClick={onClose}
+          aria-label={closeLabel}
+          disabled={!dismissible}
+        >
           ×
         </button>
       </div>

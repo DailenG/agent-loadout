@@ -22,6 +22,7 @@ pub fn run(ctx: &Context, args: &HistoryArgs) -> Result<(), CoreError> {
         entity: args.entity.clone(),
         scope: None,
         limit: args.limit,
+        before: None,
     };
     let entries = match ctx.open_store()? {
         Some(store) => store.log(&filter)?,

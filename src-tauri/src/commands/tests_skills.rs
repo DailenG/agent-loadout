@@ -10,6 +10,7 @@ use super::skills::{
     self, SkillEntryClass, SkillFileChangeKind, SkillLinkMethod, SkillLinkStatus, SkillScope,
     SkillUpdateStatus,
 };
+use super::sources::{SourceScope, TrustGrantArg};
 use super::tests::Fx;
 use super::{FileScope, projects};
 
@@ -229,7 +230,7 @@ fn git_installs_take_urls_not_paths() {
         folder.to_string_lossy().into_owned(),
         "repo-notes".to_owned(),
     ] {
-        let err = skills::install_git(&fx.core, &url, None, None, None, false).unwrap_err();
+        let err = skills::install_git(&fx.core, &url, None, None, None, false, None).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidValue, "{url}");
     }
     assert_eq!(commits(&fx), 0);
@@ -474,6 +475,9 @@ fn git_skill_update_check_diff_and_update() {
         None,
         Some("alpha".to_owned()),
         false,
+        Some(TrustGrantArg::Always {
+            scope: SourceScope::Repo,
+        }),
     )
     .unwrap();
     assert_eq!(installed.id, "alpha");
@@ -519,7 +523,7 @@ fn git_skill_update_check_diff_and_update() {
     write(&work.join("skills").join("alpha").join("SKILL.md"), &v3);
     push("v3");
     let before = commits(&fx);
-    let updated = skills::update(&fx.core, "alpha", &reviewed).unwrap();
+    let updated = skills::update(&fx.core, "alpha", &reviewed, false, None, None).unwrap();
     assert!(updated.commit.is_some());
     assert_eq!(updated.to, reviewed);
     assert_eq!(commits(&fx), before + 1);
@@ -533,11 +537,11 @@ fn git_skill_update_check_diff_and_update() {
     let newest = checks[0].latest.clone().unwrap();
     assert_ne!(newest, reviewed);
     let before = commits(&fx);
-    let err = skills::update(&fx.core, "alpha", &reviewed).unwrap_err();
+    let err = skills::update(&fx.core, "alpha", &reviewed, false, None, None).unwrap_err();
     assert_eq!(err.code, ErrorCode::EntryChanged);
     assert_no_root(&fx, &err.message);
     assert_eq!(commits(&fx), before, "nothing written");
-    skills::update(&fx.core, "alpha", &newest).unwrap();
+    skills::update(&fx.core, "alpha", &newest, false, None, None).unwrap();
     let text = skills::read_file(&fx.core, "alpha", "SKILL.md")
         .unwrap()
         .text
@@ -562,7 +566,7 @@ fn a_failed_check_does_not_fail_the_others() {
     assert_eq!(checks[0].error.as_ref().unwrap().code, ErrorCode::NotFound);
     assert_eq!(checks[1].status, SkillUpdateStatus::NotTracked);
     // A reviewed update of a skill without a git source is refused.
-    let err = skills::update(&fx.core, "repo-notes", "0123abc").unwrap_err();
+    let err = skills::update(&fx.core, "repo-notes", "0123abc", false, None, None).unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidValue);
 }
 

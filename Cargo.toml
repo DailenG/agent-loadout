@@ -41,6 +41,10 @@ keyring = "4"
 # cannot appear hangs forever). The version keyring already uses.
 secret-service = { version = "5", features = ["crypto-rust"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+# Built-in scanner rules (SPEC 17, #25): the rules ship as data, so their
+# patterns need an engine with linear-time matching (no backtracking, so a
+# rule cannot hang on crafted content). Already in the tree.
+regex = "1"
 # YAML span splice (SPEC 7.2): saphyr's event parser, whose events carry
 # source spans.
 saphyr-parser = "0.4"
@@ -65,6 +69,10 @@ tempfile = "3"
 rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
 toml = "1"
 toml_edit = "0.25"
+# Git source URLs (#24): parsed as git/curl parse them (WHATWG), so a source
+# key names the host and path git contacts. The version the app already
+# pulls in through Tauri.
+url = "2"
 windows-permissions = "0.2"
 # Job Objects for `loadout exec` on Windows (SPEC 11.5): a safe wrapper, so
 # the workspace keeps `unsafe_code = "forbid"`.

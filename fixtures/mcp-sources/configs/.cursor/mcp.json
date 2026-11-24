@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "notes": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": { "NOTES_API_KEY": "not-a-real-key-123", "NOTES_LOG": "info" }
+    }
+  }
+}

@@ -174,6 +174,7 @@ The GUI watches target files, manifests and skill dirs with `notify` (debounced 
     secrets.toml                  secret reference catalog: aliases -> refs (§5.3)
     clients.toml                  per-client preferences (§5.4)
     settings.toml                 portable UI and behavior preferences
+    sources.toml                  source trust decisions by key (repo, owner/*, host/*), §17
     skills/<id>/...               managed skill content (SKILL.md + files, no .git)
     skill-meta/<id>.toml          skill metadata: source, tags, enablement (§12)
     projects/<project-id>/
@@ -187,6 +188,7 @@ The GUI watches target files, manifests and skill dirs with `notify` (debounced 
     ledger.key                    32-byte HMAC key for ledger hashes (or stored in OS keyring)
     remotes.toml                  remotes for this machine (§9.6)
     trust.json                    trusted project manifests (path, id, content hash)
+    scan-rules.toml               optional custom scanner rules (§17), merged into the built-in ones: add rules or raise severities only
     local-settings.toml           window geometry, default editor path, feature flags, sync-root override
     unmanaged-seen.json           unmanaged entries acknowledged on this machine (§8.6)
     merge/                        in-progress pull merge state (§9.9)
@@ -199,6 +201,7 @@ The GUI watches target files, manifests and skill dirs with `notify` (debounced 
   cache/
     skill-sources/<id>/           upstream clones for update checks (re-creatable)
     tools/<server-id>.json        last MCP tool discovery result
+    scan/<key>.json               built-in scan results by content hash, rules and build (§17; re-creatable)
   imports/
     skilldock-backup.git          bare copy of SkillDock's backup repo (migration, §15)
   logs/loadout.log                rotating, redacted
@@ -257,7 +260,25 @@ native_name = "github-mcp"
 
 [meta]
 homepage = "https://github.com/github/github-mcp-server"
-origin = "imported:cursor"          # manual | imported:<client> | migrated:skilldock | catalog:<source>
+origin = "imported:cursor"          # manual | imported:<client> | migrated:skilldock | catalog:<source> | source:git | source:local
+```
+
+A server drafted from a Git repository or folder (`loadout server add --from`, Install > MCP > From Git or folder, #5)
+records its provenance, and only that, in the synced file; the clone a server may run from is machine-local:
+
+```toml
+[meta.source]
+kind = "git"                        # git | local
+url = "https://github.com/acme/weather"   # git; a password or token in an http(s) URL is removed
+# folder = "${home}/code/weather"   # local
+path = "servers/weather"            # folder inside the repository (optional)
+ref = "main"                        # branch, tag or commit followed (optional)
+commit = "<40 hex>"                 # git: the resolved commit
+file = "server.json"                # the file the definition came from
+converter = "registry"              # registry | bundle | client:<id> | npm | python | docker
+entry = "packages[0]"               # which definition of the file (optional)
+checkout = true                     # runs from <LOADOUT_HOME>/servers/<id> (optional)
+# machine = "<machine id>"          # local: the machine the folder belongs to; blocked elsewhere
 ```
 
 Remote example:
@@ -1072,6 +1093,7 @@ method = "link"                        # link | copy
 - Git install: clone into `cache/skill-sources/<id>` with the system git (sparse checkout for `/tree/<ref>/<path>` URLs, as SkillDock), copy the skill dir into the store, commit `skill: add <id> from <url>@<sha>`.
 - Local install: folder, `.zip` or `.skill` (zip-slip and symlink-escape checks).
 - Update check: `git fetch` in the cache clone; show file diff (CodeMirror merge view, ported from `SkillDiffView`); update copies the new content into the store and commits. Local edits to a store skill are visible as store history.
+- Every install and update is scanned by the built-in scanner (§17) before the store commit; the update check scans the new content, and the update writes exactly the content checked (`update_reviewed`). A `dangerous` verdict blocks (`scan_blocked`) unless the user overrides it explicitly (`--allow-dangerous`, "Install anyway"). The app reviews before installing: the source is fetched and scanned (`review_git_skill`, `review_local_skill`), then the reviewed content is installed (`install_reviewed_skill`). Imports of unmanaged folders and agents CLI vendoring report findings without blocking (the content is already on the machine).
 - Agents CLI (`~/.agents/skills`, `~/.agents/.skill-lock.json`): scanned read-only when compatibility is on (default on for new installs, like SkillDock). Update/remove via the `skills` CLI only if installed; never `npx --yes`. "Vendor into store" converts one into a store skill.
 
 ### 12.5 Tool skill directories
@@ -1243,9 +1265,11 @@ The filter is not a scope (History is cross-scope): **All**, **User** (commits o
 | `loadout tag <NAME> [REV] [-m MSG]`, `loadout tag --list`, `loadout tag --delete NAME` | Tags |
 | `loadout remote add folder <NAME> <PATH> [--mode repo-per-machine\|mirror\|archive]` / `add git <NAME> <URL> [--auth system\|gh\|token] [--username U]` / `ls` / `rm` / `push [NAME]` / `pull [NAME]` / `machines NAME` | Remotes (none by default); `machines` lists a folder remote's machine subfolders |
 | `loadout server ls\|show\|add\|edit\|rm <ID>`, `loadout server enable\|disable <ID> --client C... [--project PATH [--shared]]` | Server CRUD and enablement (project writes default to the private layer) |
+| `loadout server add [ID] --from <GIT-URL\|PATH> [--path DIR] [--ref REF] [--pick KEY\|ID]... [--all] [--dry-run] [--trust-source[=once\|repo\|owner\|host]] [--allow-dangerous]`, `loadout server update [ID] [--check]`, `loadout server checkout <ID>` | Servers from a Git repository or folder (#5): drafts from `server.json`, MCPB `manifest.json`, committed client configs, or the repository as a package, pinned to the commit; trust and scan gates before the save (exit 8 when the scan blocked); `update` reads the source again and diffs the definition; `checkout` re-creates this machine's clone |
 | `loadout project init [PATH] [--shared] [--name NAME]`, `share ID [--server NAME]...`, `add PATH`, `ls`, `rm ID`, `trust PATH`, `discover [--add ID]... [--all]` | Projects; init is private unless `--shared`; `share` moves private servers (all, or each `--server`) into `project.toml`; `trust` shows the manifests (or their diff against the content last trusted) and trusts them; `discover` lists folders the clients know and adds the chosen ones untrusted (§13.3) |
 | `loadout import [--scan] [--client C] [--scope system\|project\|all] [--project ID] [--only] [--pick NAME=CLIENT]... [--as NAME=CLIENT]... [--skip NAME]... [--extract NAME[:FIELD]=keyring\|op://...\|op-env://...\|env:VAR]... [NAME...]`, `loadout adopt [ENTRY...] [--all-identical]` | Import (§8.6: `--pick` takes one definition of a conflict, `--as` imports it as `NAME-CLIENT`; §11.7: `--extract` sends literal secrets to a destination) and adopt |
 | `loadout skills ls\|add <URL\|PATH>\|rm\|enable\|disable\|update\|scan\|import\|trash\|vendor`, `loadout skills adopt [NAME...] [--all] [--tool C] [--project PATH] [--pick NAME=CLIENT\|store]... [--both NAME=CLIENT\|store]...` | Skills; `adopt` without a name or choice lists the candidates (§12.5) |
+| `loadout source ls`, `trust <URL\|KEY> [--scope repo\|owner\|host]`, `block <URL\|KEY> [--scope ...]`, `untrust <KEY>`; `skills add\|update --trust-source[=once\|repo\|owner\|host]` | Source trust (§17, #24): list and change decisions; untrust removes a trust or block and uninstalls nothing. Without a terminal an untrusted git source fails with `source_trust_required` unless `--trust-source` is given; `--yes` never answers the trust prompt |
 | `loadout secrets ls\|check\|providers\|set <ALIAS> [--keyring]\|map-op-env <ENV-ID> [--account A]\|op-account [A] [--clear]\|service-account set\|clear` | Secrets |
 | `loadout env --export [--shell ...] [--aliases ...]` | Print exports (§11.6) |
 | `loadout secret get --ref REF`, `loadout secret-header NAME=TEMPLATE...` | Internal, for client command hooks (omp/Pi `!command`, Claude Code `headersHelper`): print one resolved value or header JSON to stdout; never logged |
@@ -1256,7 +1280,7 @@ The filter is not a scope (History is cross-scope): **All**, **User** (commits o
 | `loadout --identify` | Prints `dev.dailen.loadout <version>` (used by `doctor` and adapters to detect a foreign `loadout` binary) |
 | `loadout completions <shell>` | Shell completions |
 
-Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout; 7 a project manifest needs `loadout project trust` (untrusted or changed since trusted; checked after 1, 4 and 5). A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`, `project rm`, `project share`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `project trust` exits the same way over the trusted project's own targets only: another project that still waits for trust does not fail it (#10). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
+Exit codes: 0 ok; 1 error; 2 usage; 3 pending or drift (`--check`, `--exit-code`); 4 unresolved conflicts; 5 blocked by missing secrets; 6 lock timeout; 7 a project manifest needs `loadout project trust` (untrusted or changed since trusted; checked after 1, 4 and 5); 8 the built-in scan blocked an install or update (`scan_blocked`, §17; `skills update` exits 1 first when another skill failed). A store edit that applies instantly (`server add`, `server rm`, `secrets set`, `secrets map-op-env`, `secrets op-account`, `project init`, `project rm`, `project share`) is committed and then exits like `loadout apply` would for its apply run (gate V1 FB-5). `project trust` exits the same way over the trusted project's own targets only: another project that still waits for trust does not fail it (#10). `--json` output schemas are versioned (`"schema": 1`) and snapshot-tested.
 
 ---
 
@@ -1329,6 +1353,9 @@ Paths and Overlay title bar as SkillDock; unsigned DMG from CI; no notarization 
 - Project manifests can define stdio commands, so binding a folder is like running its code. Trust is per manifest content hash (`state/trust.json`: `{schema, projects: [{id, path, hash}]}`, `hash` = SHA-256 over both files with an absent-file marker); a changed manifest (e.g. after `git pull`) shows its diff (`loadout project trust PATH`) and needs re-trust before project apply. Until then every target of that project plans as `blocked: trust_required` (apply exits 7) while user scope and other projects apply normally.
 - Tauri: CSP on, minimal capabilities, every command validates paths (must be inside known targets, project roots or `LOADOUT_HOME`).
 - Zip-slip and symlink-escape checks on skill import (SkillDock's `marketplace_package.rs` limits kept: 500 files, 5 MB per file, 20 MB total for archives).
+- Source trust (#24): installing or updating from a git source (remote, `file://` or a local repository path) needs a recorded trust in `store/sources.toml` (`[sources."<key>"]`: `decision = trust|block`, `scope = repo|owner|host`, `decided_at`, `via`, `machine`, `url`, optional `lapsed = {reason, at, detail}`) or the user's answer: the app dialog, an interactive CLI prompt, or `--trust-source` (never `--yes`, never an agent on its own). Keys: `host/path` (repo; GitHub keeps `owner/repo`, case-insensitive hosts lowercased, userinfo and default ports dropped), `host/owner/*`, `host/*` (never trusted for public hosts such as github.com), `file:///<path>`. Any matching block wins; otherwise the most specific record decides. A trusted source lapses (asks again) when an update fetch finds the installed commit is no longer an ancestor of the new head (shallow clones are deepened first) or git reports an HTTP redirect to another key. Local folders and archives are not gated; the scan still runs. Contract: `docs/milestones/M39.md`.
+- Built-in offline scanner (#25, `agent_loadout_core::scan`): Loadout's own rules, shipped as data (`scan/rules.toml`, `schema = 1`, integer `version`). A custom `state/scan-rules.toml` is merged in: new rule ids are added, a built-in id may only raise that rule's severity (its pattern is ignored); built-in rules are never removed or lowered (such entries are skipped with a warning), and reports carry `custom_rules` ("custom rules in use") and every rules-loading warning. Each rule is a `regex` pattern (linear time; `\b` is compiled as an ASCII word boundary so non-ASCII text never forces the slow engine) with `severity` (`info`, `warning`, `dangerous`), `message`, `targets` (`markdown`, `code`, `command`), optional `path`, `unless`, `requires` and `prose` (the lower severity of a match in Markdown prose outside fenced code blocks; pipe-to-shell, download-and-run, safety-prompt and instruction-override rules are `warning` in prose, `dangerous` in code blocks and scripts). It runs on every skill install and update and on every MCP server drafted from a Git repository or folder (files plus the command line). Files are typed by magic bytes: images, fonts, archives and media get path rules only, native executables (ELF, PE, Mach-O, WebAssembly) are `native-binary` whatever their name, and both are listed in one `info` `not-content-scanned` finding; every other file is read as text (UTF-32/UTF-16 by BOM, UTF-16 by NUL pattern, UTF-8 with the BOM removed, invalid bytes replaced), at most 4 MiB per file (`not-fully-scanned` warning beyond). Findings: scanner, rule, severity, file, line, message, excerpt (at most 120 characters; token formats, URL credentials, values of credential-named assignments, flags and auth schemes, and high-entropy words masked; invisible characters spelled out); at most 5 per rule and file. Verdict = worst finding (`info` leaves it `clean`). Results are cached by content hash, rules fingerprint and build version in `cache/scan` (at most 512 entries). `dangerous` blocks unless explicitly overridden; trusting a source never skips the scan; nothing leaves the machine. An install review is spent once its store commit succeeds (a later sync or clone failure is a warning). The app keeps at most 8 reviews, drops evicted ones off the async thread, and sweeps temporary clones older than an hour at startup. CLI: `skills add|update --allow-dangerous`, exit 8.
+- Servers from a Git repository or folder (#5, `agent_loadout_core::mcp_source`): drafting runs nothing (the system git clones shallow at the ref into `cache/mcp-sources/.tmp-<ulid>`, swept after an hour; repositories cannot install hooks and submodules are not fetched; the clone's `origin` is the URL without credentials) and a blocked source is never contacted. Dependency and build folders (`node_modules`, `.venv`, `venv`, `__pycache__`, `.git`, `target`, `dist`, `build`) are not read, scanned, size-counted or diffed, and are listed. Every save, update and checkout restore goes through source trust (git sources by repository key, local folders by `file:///` key; a redirect target with another key is asked about too) and then the built-in scan of the folder's files plus every saved launch line (the base and each `[os.*]` override merged over it; secret extraction, the review and the update diff cover overrides too). Drafts are pinned (package versions, `registryBaseUrl` honored; `github:<owner>/<repo>#<sha>`, `git+<url>@<sha>`; a version-less package is marked not pinned); a repository's Docker image is `loadout-local/<id>:<sha12>` run with `--pull=never`. A draft that runs from the repository's files keeps the clone as `<LOADOUT_HOME>/servers/<id>` (machine-local, never synced, `${loadout_home}/servers/<id>` in the command), placed and replaced under the store lock with the old copy aside until the commit, and marked with its commit and URL: an entry whose checkout is missing or at another commit is blocked (`checkout_out_of_date`) until `loadout server checkout <id>`. A local folder's server is bound to its machine (`meta.source.machine`; `folder_on_other_machine` elsewhere) and commit messages never name a folder outside home by its path. The synced server file holds only `[meta.source]` provenance. Declared secrets become `${secret:<alias>}` references (kept by an update); a literal the import classifier flags in a source file (passthrough values too) is replaced by a reference or left out and its value dropped, never stored, logged or sent over IPC; skip messages name the file and line, never its text.
 - Logs: redaction layer for any string that equals a resolved secret or matches the classifier.
 - Failure feedback: no automatic recording of config contents (SkillDock recorded every failure with paths and config); "Copy diagnostic report" is explicit and redacted.
 - Tool discovery (spawning servers to list tools) runs only on explicit request or for newly added servers, with resolved secrets in memory only, and a 20 s timeout.

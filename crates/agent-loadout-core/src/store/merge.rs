@@ -8,6 +8,9 @@
 //! - Other text (skill content, `.gitattributes`) merges per line through
 //!   git's file merge; binary content changed on both sides conflicts.
 //! - A file deleted on one side and changed on the other conflicts.
+//! - `sources.toml` merges per record (#24): a lapse gives way to the
+//!   user's decision on the other side (untrust wins), two lapses keep the
+//!   earlier, other records both sides changed conflict whole.
 //! - `machines/<id>.toml` and `machines/<id>.applied.toml` are single
 //!   writer: this machine's own files keep ours; another machine's come
 //!   from the side whose history touched them last. Never a conflict.
@@ -24,6 +27,7 @@ use toml_edit::{DocumentMut, Item, Table};
 
 use crate::error::{CoreError, ErrorCode};
 use crate::fs::Fs;
+use crate::sources::SOURCES_FILE;
 use crate::store::transaction::Changes;
 use crate::store::{
     CommitId, LOCK_TIMEOUT, Machine, Operation, Store, StoreLock, git_error, io_error,
@@ -111,7 +115,9 @@ pub fn merge_trees(base: &Files, ours: &Files, theirs: &Files, policy: &MergePol
             });
             continue;
         };
-        let merged = if path.ends_with(".toml") {
+        let merged = if path == SOURCES_FILE {
+            merge_sources(path, b, o, t)
+        } else if path.ends_with(".toml") {
             merge_toml(path, b, o, t)
         } else {
             merge_text(path, b, o, t)
@@ -124,6 +130,140 @@ pub fn merge_trees(base: &Files, ours: &Files, theirs: &Files, policy: &MergePol
         }
     }
     Merged { files, conflicts }
+}
+
+/// `sources.toml` (#24) merges per record, so a merge never leaves a
+/// half record: a record changed on one side takes that side whole; a
+/// lapse (only `lapsed` changed, or a new record that carries one: the
+/// automatic kind) gives way to the user's decision on the other side
+/// (untrust, block, trust again), and two lapses of one record keep the
+/// earlier. Any other record both sides changed is a conflict of that
+/// record. The rest of the file merges per field.
+fn merge_sources(
+    path: &str,
+    b: Option<&Vec<u8>>,
+    o: &[u8],
+    t: &[u8],
+) -> Result<Vec<u8>, Vec<Conflict>> {
+    let parse = |bytes: &[u8]| std::str::from_utf8(bytes).ok()?.parse::<toml::Table>().ok();
+    let base = match b {
+        Some(bytes) => parse(bytes),
+        None => Some(toml::Table::new()),
+    };
+    let (Some(mut base), Some(ours), Some(mut theirs)) = (base, parse(o), parse(t)) else {
+        return Err(whole_file(path, b, o, t));
+    };
+    let records = |table: &toml::Table| match table.get("sources") {
+        None => Some(toml::Table::new()),
+        Some(toml::Value::Table(records)) => Some(records.clone()),
+        Some(_) => None,
+    };
+    let (Some(base_records), Some(our_records), Some(their_records)) =
+        (records(&base), records(&ours), records(&theirs))
+    else {
+        return merge_toml(path, b, o, t);
+    };
+    let mut keys: Vec<&String> = base_records
+        .keys()
+        .chain(our_records.keys())
+        .chain(their_records.keys())
+        .collect();
+    keys.sort();
+    keys.dedup();
+    // The field merge below then takes the chosen side of each record
+    // whole: the base gets ours (so theirs is the only change), and theirs
+    // gets ours too where ours wins.
+    let mut new_base = base_records.clone();
+    let mut new_theirs = their_records.clone();
+    let mut conflicts = Vec::new();
+    for key in keys {
+        let (bv, ov, tv) = (
+            base_records.get(key),
+            our_records.get(key),
+            their_records.get(key),
+        );
+        if ov == tv || tv == bv || ov == bv {
+            continue;
+        }
+        let Some(side) = settle_record(bv, ov, tv) else {
+            conflicts.push(Conflict {
+                file: path.to_owned(),
+                field: Some(dotted(&["sources".to_owned(), key.clone()])),
+                base: bv.map(ToString::to_string),
+                ours: ov.map(ToString::to_string),
+                theirs: tv.map(ToString::to_string),
+            });
+            continue;
+        };
+        let put = |table: &mut toml::Table| match ov {
+            Some(value) => table.insert(key.clone(), value.clone()),
+            None => table.remove(key),
+        };
+        put(&mut new_base);
+        if side == Side::Ours {
+            put(&mut new_theirs);
+        }
+    }
+    if !conflicts.is_empty() {
+        return Err(conflicts);
+    }
+    let text = |table: &mut toml::Table, records: toml::Table| {
+        if records.is_empty() {
+            table.remove("sources");
+        } else {
+            table.insert("sources".to_owned(), toml::Value::Table(records));
+        }
+        toml::to_string(table).ok().map(String::into_bytes)
+    };
+    let (Some(base), Some(theirs)) = (text(&mut base, new_base), text(&mut theirs, new_theirs))
+    else {
+        return Err(whole_file(path, b, o, t));
+    };
+    merge_toml(path, Some(&base), o, &theirs)
+}
+
+/// Which side of a `sources.toml` record both sides changed wins, if a
+/// rule decides (see [`merge_sources`]).
+fn settle_record(
+    b: Option<&toml::Value>,
+    o: Option<&toml::Value>,
+    t: Option<&toml::Value>,
+) -> Option<Side> {
+    fn lapse(side: Option<&toml::Value>) -> Option<&toml::Value> {
+        side.and_then(|record| record.get("lapsed"))
+    }
+    let decision = |side: Option<&toml::Value>| {
+        side.map(|record| {
+            let mut record = record.clone();
+            if let toml::Value::Table(table) = &mut record {
+                table.remove("lapsed");
+            }
+            record
+        })
+    };
+    // Only the automatic lapse changed: the decision is the base's, or a
+    // new record that carries a lapse (a repository trusted through its
+    // owner or host gets its own lapsed record).
+    let lapse_only = |side: Option<&toml::Value>| {
+        lapse(side).is_some() && (b.is_none() || decision(side) == decision(b))
+    };
+    match (lapse_only(o), lapse_only(t)) {
+        (true, true) if decision(o) == decision(t) => {
+            let at = |side| {
+                lapse(side)
+                    .and_then(|lapsed| lapsed.get("at"))
+                    .map(ToString::to_string)
+            };
+            Some(if at(t) < at(o) {
+                Side::Theirs
+            } else {
+                Side::Ours
+            })
+        }
+        (true, false) => Some(Side::Theirs),
+        (false, true) => Some(Side::Ours),
+        _ => None,
+    }
 }
 
 /// The machine id of a `machines/<id>.toml` or `machines/<id>.applied.toml`.

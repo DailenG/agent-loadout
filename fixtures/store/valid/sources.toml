@@ -1,0 +1,32 @@
+schema = 1
+
+# Trust decisions about install sources (SPEC 17, #24).
+[sources."github.com/acme/skills"]
+decision = "trust"
+scope = "repo"
+decided_at = 2026-11-23T10:00:00Z
+via = "app"
+machine = "laptop"
+url = "https://github.com/acme/skills"
+
+[sources."github.com/acme-tools/*"]
+decision = "trust"
+scope = "owner"
+decided_at = 2026-11-23T10:05:00Z
+via = "cli-prompt"
+
+[sources."github.com/acme-tools/mirror"]
+decision = "trust"
+scope = "repo"
+decided_at = 2026-11-23T10:06:00Z
+via = "cli-flag"
+
+[sources."github.com/acme-tools/mirror".lapsed]
+reason = "history_rewritten"
+at = 2026-11-24T08:00:00Z
+
+[sources."git.example.corp/*"]
+decision = "block"
+scope = "host"
+decided_at = 2026-11-23T11:00:00Z
+via = "cli-command"

@@ -20,6 +20,7 @@ pub mod secrets;
 pub mod server;
 pub mod show;
 pub mod skills;
+pub mod source;
 pub mod status;
 pub mod tag;
 
@@ -54,6 +55,10 @@ const EXIT_LOCKED: u8 = 6;
 /// Exit code for project targets blocked until the manifest is trusted
 /// (`trust_required`, SPEC 14 and 17).
 pub const EXIT_TRUST_REQUIRED: u8 = 7;
+/// Exit code for an install or update the built-in scan blocked
+/// (`scan_blocked`: a `dangerous` verdict without `--allow-dangerous`,
+/// SPEC 14 and 17).
+pub const EXIT_SCAN_BLOCKED: u8 = 8;
 
 static REAL_FS: RealFs = RealFs;
 /// The CLI has no Windows registry probe yet (M4 note); detection uses
@@ -136,13 +141,14 @@ pub fn client_name() -> String {
 
 /// Process exit code for a failed command: 4 for a needed confirmation,
 /// 5 for a missing secret, 6 for `locked`, 7 for an untrusted project
-/// manifest, else 1.
+/// manifest, 8 for content the built-in scan blocked, else 1.
 pub fn exit_code(err: &CoreError) -> u8 {
     match err.code() {
         ErrorCode::Locked => EXIT_LOCKED,
         ErrorCode::ConfirmationRequired => EXIT_UNRESOLVED,
         ErrorCode::MissingSecret => EXIT_MISSING_SECRETS,
         ErrorCode::TrustRequired => EXIT_TRUST_REQUIRED,
+        ErrorCode::ScanBlocked => EXIT_SCAN_BLOCKED,
         _ => 1,
     }
 }

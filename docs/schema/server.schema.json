@@ -148,8 +148,12 @@
           "type": "string"
         },
         "origin": {
-          "description": "`manual`, `imported:<client>`, `migrated:skilldock` or `catalog:<source>`.",
+          "description": "`manual`, `imported:<client>`, `migrated:skilldock`, `catalog:<source>`,\n`source:git` or `source:local`.",
           "type": "string"
+        },
+        "source": {
+          "description": "Where a server drafted from a Git repository or folder came from\n(#5): provenance only; the clone it may run from is machine-local.",
+          "$ref": "#/$defs/ServerSource"
         }
       }
     },
@@ -188,6 +192,70 @@
           "type": "string"
         }
       }
+    },
+    "ServerSource": {
+      "description": "`[meta.source]`: the repository or folder a server was drafted from,\nso an update check can read it again (#5).",
+      "type": "object",
+      "properties": {
+        "checkout": {
+          "description": "The server runs from the machine-local clone\n`<LOADOUT_HOME>/servers/<id>`.",
+          "type": "boolean"
+        },
+        "commit": {
+          "description": "The resolved commit (git).",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "converter": {
+          "description": "`registry`, `bundle`, `client:<id>`, `npm`, `python` or `docker`.",
+          "type": "string"
+        },
+        "entry": {
+          "description": "Which definition of the file (`packages[0]`, an entry name).",
+          "type": "string"
+        },
+        "file": {
+          "description": "The file the definition came from, relative to the folder.",
+          "type": "string"
+        },
+        "folder": {
+          "description": "The folder, `${home}` for the home folder (local).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`git` or `local`.",
+          "$ref": "#/$defs/ServerSourceKind"
+        },
+        "machine": {
+          "description": "The machine a local folder belongs to (its machine id): the server\nruns only there (local sources).",
+          "type": "string"
+        },
+        "path": {
+          "description": "Folder inside the repository, `/`-separated.",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Branch or tag followed.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Git URL, userinfo removed (git).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "file",
+        "converter"
+      ]
+    },
+    "ServerSourceKind": {
+      "description": "What a source server came from.",
+      "type": "string",
+      "enum": [
+        "git",
+        "local"
+      ]
     },
     "ToolFilter": {
       "type": "object",

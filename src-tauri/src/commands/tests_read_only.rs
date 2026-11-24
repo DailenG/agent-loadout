@@ -48,6 +48,39 @@ fn tools_cards_mark_a_read_only_user_file() {
     assert_eq!(json["readOnly"], serde_json::json!({ "kind": "attribute" }));
 }
 
+/// A permission change alone keeps the file's content, so the cached probe
+/// stays until Refresh rechecks (#23); then the new state shows.
+#[test]
+fn refresh_rechecks_a_permission_change_without_a_content_change() {
+    let fx = Fx::new();
+    let file = fx.claude();
+    std::fs::write(&file, "{}\n").unwrap();
+    let claude = |list: &[tools::ToolInfo]| {
+        list.iter()
+            .find(|tool| tool.id == "claude-code")
+            .unwrap()
+            .user_files[0]
+            .read_only
+    };
+    assert_eq!(claude(&tools::list(&fx.core).unwrap()), None);
+
+    set_readonly(&file, true);
+    if writes_anyway(&file) {
+        set_readonly(&file, false);
+        return;
+    }
+    let cached = tools::list(&fx.core).unwrap();
+    apply::recheck(&fx.core);
+    let rechecked = tools::list(&fx.core).unwrap();
+    set_readonly(&file, false);
+    assert_eq!(claude(&cached), None, "same content: the cached probe");
+    assert_eq!(claude(&rechecked), ATTRIBUTE);
+
+    // And back: writable again after the next recheck.
+    apply::recheck(&fx.core);
+    assert_eq!(claude(&tools::list(&fx.core).unwrap()), None);
+}
+
 #[test]
 fn a_project_whose_files_are_all_read_only_is_read_only() {
     let fx = Fx::new();

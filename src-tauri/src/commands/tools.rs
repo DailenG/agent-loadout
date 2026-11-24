@@ -75,6 +75,12 @@ pub struct ToolInfo {
     /// Project files, relative to the project folder (`<P>/...`) or absolute
     /// for a user file keyed by project.
     pub project_files: Vec<String>,
+    /// The client has a private project target next to the shared project
+    /// file (`project_local` in the adapter table: Claude Code's
+    /// `~/.claude.json` per project, Devin's `.devin/mcp_config.local.json`),
+    /// so a private manifest entry goes there instead of over the shared
+    /// entry (#22).
+    pub private_project_target: bool,
     pub transports: Transports,
     /// The client expands environment references (`${env:NAME}`) itself.
     pub env_refs: bool,
@@ -166,6 +172,7 @@ fn tool(
                 .chain(mcp.project_local)
                 .filter_map(|location| project_file(location, core))
                 .collect(),
+            private_project_target: !mcp.project_local.is_empty(),
             transports: Transports {
                 stdio: mcp.caps.transports.stdio,
                 http: mcp.caps.transports.http,

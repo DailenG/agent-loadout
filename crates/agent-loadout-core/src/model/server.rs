@@ -182,12 +182,128 @@ pub struct ToolFilter {
 pub struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    /// `manual`, `imported:<client>`, `migrated:skilldock` or `catalog:<source>`.
+    /// `manual`, `imported:<client>`, `migrated:skilldock`, `catalog:<source>`,
+    /// `source:git` or `source:local`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// Where a server drafted from a Git repository or folder came from
+    /// (#5): provenance only; the clone it may run from is machine-local.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ServerSource>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub extra: toml::Table,
+}
+
+/// What a source server came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerSourceKind {
+    Git,
+    Local,
+}
+
+impl ServerSourceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ServerSourceKind::Git => "git",
+            ServerSourceKind::Local => "local",
+        }
+    }
+}
+
+/// `[meta.source]`: the repository or folder a server was drafted from,
+/// so an update check can read it again (#5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ServerSource {
+    /// `git` or `local`.
+    pub kind: ServerSourceKind,
+    /// Git URL, userinfo removed (git).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The folder, `${home}` for the home folder (local).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// Folder inside the repository, `/`-separated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Branch or tag followed.
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
+    /// The resolved commit (git).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("pattern" = "^[0-9a-f]{40}$"))]
+    pub commit: Option<String>,
+    /// The file the definition came from, relative to the folder.
+    pub file: String,
+    /// `registry`, `bundle`, `client:<id>`, `npm`, `python` or `docker`.
+    pub converter: String,
+    /// Which definition of the file (`packages[0]`, an entry name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+    /// The server runs from the machine-local clone
+    /// `<LOADOUT_HOME>/servers/<id>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<bool>,
+    /// The machine a local folder belongs to (its machine id): the server
+    /// runs only there (local sources).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub extra: toml::Table,
+}
+
+impl ServerSource {
+    pub fn uses_checkout(&self) -> bool {
+        self.checkout == Some(true)
+    }
+
+    fn validate_into(&self, path: &str, d: &mut Diagnostics) {
+        match self.kind {
+            ServerSourceKind::Git if self.url.as_deref().is_none_or(str::is_empty) => d.error(
+                ErrorCode::MissingField,
+                join(path, "url"),
+                "a git source needs its url",
+            ),
+            ServerSourceKind::Local if self.folder.as_deref().is_none_or(str::is_empty) => d.error(
+                ErrorCode::MissingField,
+                join(path, "folder"),
+                "a local source needs its folder",
+            ),
+            _ => {}
+        }
+        if let Some(commit) = &self.commit
+            && !crate::model::ids::is_commit_id(commit)
+        {
+            d.error(
+                ErrorCode::InvalidValue,
+                join(path, "commit"),
+                format!("{commit:?} is not a commit id (40 hex characters)"),
+            );
+        }
+        if self.machine.is_some() && self.kind != ServerSourceKind::Local {
+            d.error(
+                ErrorCode::InvalidValue,
+                join(path, "machine"),
+                "only a local folder source is bound to a machine",
+            );
+        }
+        if self.uses_checkout() && self.kind != ServerSourceKind::Git {
+            d.error(
+                ErrorCode::InvalidValue,
+                join(path, "checkout"),
+                "only a git source runs from a checkout",
+            );
+        }
+        if self.file.is_empty() || self.converter.is_empty() {
+            d.error(
+                ErrorCode::MissingField,
+                path.to_owned(),
+                "a source needs its file and converter",
+            );
+        }
+    }
 }
 
 impl Server {
@@ -252,17 +368,21 @@ impl ServerBody {
             let path = join(&join(prefix, "client"), client_id);
             check_passthrough(client_id, table, &path, d);
         }
+        let meta_path = join(prefix, "meta");
         if let Some(origin) = self.meta.as_ref().and_then(|meta| meta.origin.as_ref())
             && !is_valid_origin(origin)
         {
             d.error(
                 ErrorCode::InvalidValue,
-                join(&join(prefix, "meta"), "origin"),
+                join(&meta_path, "origin"),
                 format!(
                     "invalid origin {origin:?}; expected manual, imported:<client>, \
-                     migrated:skilldock or catalog:<source>"
+                     migrated:skilldock, catalog:<source>, source:git or source:local"
                 ),
             );
+        }
+        if let Some(source) = self.meta.as_ref().and_then(|meta| meta.source.as_ref()) {
+            source.validate_into(&join(&meta_path, "source"), d);
         }
     }
 }
@@ -481,6 +601,7 @@ fn is_valid_origin(origin: &str) -> bool {
         Some(("imported", client)) => !client.is_empty(),
         Some(("migrated", source)) => source == "skilldock",
         Some(("catalog", source)) => !source.is_empty(),
+        Some(("source", kind)) => matches!(kind, "git" | "local"),
         Some(_) => false,
     }
 }

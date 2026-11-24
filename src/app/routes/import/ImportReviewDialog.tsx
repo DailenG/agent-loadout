@@ -214,7 +214,7 @@ export function ImportReviewDialog({ plan, names, onClose, onImported, onOpenPen
         projectId,
         projectName: project?.name ?? projectId,
         key: `${id}\u0000${projectId}`,
-        placement: manifestPlacement(pick.variant, projectId, project),
+        placement: manifestPlacement(pick.variant, projectId, project, names.privateTarget),
       };
     });
   });

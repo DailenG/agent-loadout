@@ -509,7 +509,19 @@ fn history_filters_by_entity_scope_and_limit() {
         }),
         [by_hand, project]
     );
-    assert_eq!(ids(LogFilter::default()).len(), 5);
+    let all = ids(LogFilter::default());
+    assert_eq!(all.len(), 5);
+    // A page after a cursor: the commits older than it, up to the limit.
+    let after = |cursor: &str, limit: Option<usize>| {
+        ids(LogFilter {
+            limit,
+            before: Some(agent_loadout_core::store::CommitId::from_text(cursor).unwrap()),
+            ..LogFilter::default()
+        })
+    };
+    assert_eq!(after(&all[1], Some(2)), all[2..4]);
+    assert_eq!(after(&all[1], None), all[2..]);
+    assert!(after(&all[4], None).is_empty());
 }
 
 #[test]

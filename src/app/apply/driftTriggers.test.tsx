@@ -1,7 +1,8 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { App, createQueryClient } from "@/app/App";
 import { ApplyDrawer } from "@/app/apply/ApplyDrawer";
+import { FOCUS_RECHECK_MS } from "@/app/apply/driftTriggers";
 import { McpPage } from "@/app/routes/mcp/McpPage";
 import { EffectiveMatrixView } from "@/app/routes/projects/EffectiveMatrix";
 import { ProjectsPage } from "@/app/routes/projects/ProjectsPage";
@@ -91,5 +92,58 @@ describe("Refresh buttons", () => {
     await user.click(within(toolbar).getByRole("button", { name: t("mcp.toolbar.refresh") }));
 
     await waitFor(() => expect(callsOf(transport, "listServers")).toBe(before + 1));
+    // The backend forgets its cached plan and write probes first (#23).
+    const order = transport.calls.slice(transport.calls.indexOf("recheckTargets"));
+    expect(order[0]).toBe("recheckTargets");
+    expect(order).toContain("listServers");
+  });
+});
+
+describe("permission recheck (#23)", () => {
+  it("does not recheck on the watcher or an early focus, and does on a focus after FOCUS_RECHECK_MS", async () => {
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(start);
+    try {
+      const { transport } = renderApp();
+      const before = await settled(transport, "pendingPlan");
+      act(() => transport.changeTargets());
+      await waitFor(() => expect(callsOf(transport, "pendingPlan")).toBe(before + 1));
+      act(() => transport.focus());
+      await waitFor(() => expect(callsOf(transport, "pendingPlan")).toBe(before + 2));
+      expect(callsOf(transport, "recheckTargets")).toBe(0);
+
+      now.mockReturnValue(start + FOCUS_RECHECK_MS);
+      act(() => transport.focus());
+      await waitFor(() => expect(callsOf(transport, "recheckTargets")).toBe(1));
+      await waitFor(() => expect(callsOf(transport, "pendingPlan")).toBe(before + 3));
+
+      // The next focus soon after does not recheck again.
+      act(() => transport.focus());
+      await waitFor(() => expect(callsOf(transport, "pendingPlan")).toBe(before + 4));
+      expect(callsOf(transport, "recheckTargets")).toBe(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("counts a manual Refresh as the last recheck, so a focus soon after does not recheck again", async () => {
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(start);
+    try {
+      const { transport } = renderApp();
+      const before = await settled(transport, "pendingPlan");
+      now.mockReturnValue(start + FOCUS_RECHECK_MS - 1000);
+      const refreshButton = await screen.findByRole("button", { name: t("skills.refresh") });
+      act(() => refreshButton.click());
+      await waitFor(() => expect(callsOf(transport, "recheckTargets")).toBe(1));
+      await waitFor(() => expect(callsOf(transport, "pendingPlan")).toBe(before + 1));
+
+      now.mockReturnValue(start + FOCUS_RECHECK_MS + 1000);
+      act(() => transport.focus());
+      await waitFor(() => expect(callsOf(transport, "pendingPlan")).toBe(before + 2));
+      expect(callsOf(transport, "recheckTargets")).toBe(1);
+    } finally {
+      now.mockRestore();
+    }
   });
 });

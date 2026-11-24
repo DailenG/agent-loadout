@@ -146,8 +146,9 @@ still import a definition from it into the store. To let Loadout manage
 it, make the file (or the project's `.loadout` folder) writable for your
 account, or ask whoever manages that folder; otherwise there is nothing
 to fix. The app keeps its answer until the file watcher sees a change in
-that folder; after a permissions-only change, restart the app (tracked
-in [#23](https://github.com/DailenG/agent-loadout/issues/23)). Details:
+that folder; after a permissions-only change, click **Refresh** (any
+page's Refresh button), or switch back to the app after five minutes or
+more, and it checks the permissions again. Details:
 [user guide, Read-only files and folders](user-guide.md#read-only-files-and-folders).
 
 ### A server did not appear in the client

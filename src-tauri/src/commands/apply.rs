@@ -621,6 +621,27 @@ pub fn discard(core: &Core, entities: Option<&[String]>) -> CmdResult<DiscardRes
     })
 }
 
+/// Refresh (SPEC 8.5, #23): forgets the cached plan and the cached write
+/// probes, so the next view plans again and asks the OS afresh whether
+/// each file and folder can be written. A permission change alone keeps
+/// a file's content, and the watcher does not report a folder's, so the
+/// plan cache cannot see it; probes still running stay running (see
+/// `ProbeCache::clear`). The Refresh buttons call it before they refetch,
+/// and so does window focus once the last recheck is a few minutes old.
+pub fn recheck(core: &Core) {
+    core.plan_cache.invalidate();
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn recheck_targets(state: tauri::State<'_, AppState>) -> CmdResult<()> {
+    blocking(&state, |core| {
+        recheck(core);
+        Ok(())
+    })
+    .await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn pending_plan(state: tauri::State<'_, AppState>) -> CmdResult<PendingPlan> {

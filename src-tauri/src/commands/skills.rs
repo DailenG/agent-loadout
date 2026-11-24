@@ -11,9 +11,9 @@
 //! never a path; paths go out under their placeholder roots.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, PoisonError};
 
 use agent_loadout_core::adapters::adapter;
-use agent_loadout_core::adapters::detect::detect;
 use agent_loadout_core::apply::{ScopeFilter, TargetPlan, placeholder_path};
 use agent_loadout_core::layering::{Project, resolved, same_path};
 use agent_loadout_core::model::applied::Scope as TargetScope;
@@ -24,11 +24,16 @@ use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, EntryClass};
 use agent_loadout_core::skills::hash_cache::FolderHashCache;
-use agent_loadout_core::skills::install::{self, ChangeKind, InstallRequest, Source, UpdateStatus};
-use agent_loadout_core::skills::link::{self, CLIENT_SKILLS, LinkMethod, LinkStatus, SkillLedger};
+use agent_loadout_core::skills::install::{
+    self, ChangeKind, Decisions, InstallRequest, Prepared, Source, UpdateStatus,
+};
+use agent_loadout_core::skills::link::{
+    self, CLIENT_SKILLS, DetectedClients, LinkMethod, LinkStatus, ProjectSkills, SkillLedger,
+};
 use agent_loadout_core::skills::{
     self, Installed, LinkKind, Naming, SkillFiles, SkillsEnv, StoreSkill, SyncReport, store,
 };
+use agent_loadout_core::sources::SourceRef;
 use agent_loadout_core::store::{CommitId, Store};
 use agent_loadout_core::{CoreError, Env, ErrorCode};
 use serde::{Deserialize, Serialize};
@@ -36,9 +41,11 @@ use specta::Type;
 
 use super::projects::{self, ProjectTrust};
 use super::remotes::mask_url;
+use super::scan::ScanResult;
+use super::sources::{self, SourceTrustInfo, TrustGrantArg};
 use super::{
-    AppState, CmdResult, Core, FileScope, IpcError, NO_REGISTRY, ReadOnly, blocking, count,
-    read_only_of, scrubbed,
+    AppState, CmdResult, Core, FileScope, IpcError, NO_REGISTRY, ReadOnly, SharedReview, blocking,
+    count, read_only_of, scrubbed,
 };
 
 static RUNNER: SystemRunner = SystemRunner {
@@ -382,6 +389,46 @@ pub struct SkillInstalled {
     pub renamed_from: Option<String>,
     pub links: Option<SkillSync>,
     pub warnings: Vec<IpcError>,
+    /// The built-in scan of what was installed.
+    pub scan: ScanResult,
+}
+
+/// Where reviewed content comes from. A local source shows no path (it
+/// stays in the backend under the pick token).
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillReviewSource {
+    pub kind: SkillOrigin,
+    /// Git URL, userinfo masked.
+    pub url: Option<String>,
+    /// The skill folder inside the repository.
+    pub path: Option<String>,
+    pub git_ref: Option<String>,
+    /// The commit that would be installed.
+    pub commit: Option<String>,
+}
+
+/// Fetched and scanned content before install (SPEC 12.4, 17): what the
+/// install review shows. Nothing is in the store yet.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInstallReview {
+    /// Names this content in `install_reviewed_skill` and
+    /// `discard_skill_review`.
+    pub token: String,
+    pub name: String,
+    pub files: Vec<SkillFileEntry>,
+    pub source: SkillReviewSource,
+    pub scan: ScanResult,
+    /// The trust dialog's view of a git source (#24); `null` for a local
+    /// folder or archive. An untrusted source needs the dialog's answer in
+    /// `install_reviewed_skill`.
+    pub trust: Option<SourceTrustInfo>,
+    /// The trust dialog's view of the repository the host redirected the
+    /// URL to, when it moved to another repository; `null` otherwise. It
+    /// needs its own answer (`movedTrust` in `install_reviewed_skill`)
+    /// unless it is trusted: `trust`'s answer never carries over.
+    pub moved_trust: Option<SourceTrustInfo>,
 }
 
 /// What the local install picks in the OS dialog.
@@ -410,6 +457,8 @@ pub enum SkillUpdateStatus {
     Available,
     NotTracked,
     SourceUnreachable,
+    /// A block covers the source; it was not contacted (see the error).
+    SourceBlocked,
     /// The check itself failed for this skill (see the error); other
     /// skills are still checked.
     Failed,
@@ -422,6 +471,7 @@ impl From<UpdateStatus> for SkillUpdateStatus {
             UpdateStatus::Available => Self::Available,
             UpdateStatus::NotTracked => Self::NotTracked,
             UpdateStatus::Unreachable => Self::SourceUnreachable,
+            UpdateStatus::Blocked => Self::SourceBlocked,
         }
     }
 }
@@ -448,10 +498,13 @@ impl From<ChangeKind> for SkillFileChangeKind {
 pub struct SkillFileChange {
     pub path: String,
     pub kind: SkillFileChangeKind,
+    /// An added or modified file that looks executable (#24): highlight it.
+    pub script: bool,
 }
 
 /// An update check (SPEC 12.4).
 #[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillUpdateCheck {
     pub id: String,
     pub status: SkillUpdateStatus,
@@ -459,6 +512,17 @@ pub struct SkillUpdateCheck {
     pub latest: Option<String>,
     pub changes: Vec<SkillFileChange>,
     pub error: Option<IpcError>,
+    /// The built-in scan of the new content, when an update is available.
+    pub scan: Option<ScanResult>,
+    /// The trust check of a git skill's source (#24), with what changed
+    /// about it (force-push, moved); `null` for other skills. An untrusted
+    /// source needs the dialog's answer in `update_skill`.
+    pub trust: Option<SourceTrustInfo>,
+    /// The trust check of the repository the source moved to, when the
+    /// host redirected it to another repository; `null` otherwise. It
+    /// needs its own answer (`movedTrust` in `update_skill`) unless it is
+    /// trusted; the update then moves the skill's URL there.
+    pub moved_trust: Option<SourceTrustInfo>,
 }
 
 /// One file of an update preview: the store copy against the source as
@@ -481,6 +545,8 @@ pub struct SkillUpdated {
     pub commit: Option<String>,
     pub changes: Vec<SkillFileChange>,
     pub links: SkillSync,
+    /// The built-in scan of the new content.
+    pub scan: ScanResult,
 }
 
 /// A file of a store skill.
@@ -566,6 +632,33 @@ fn installed_of(env: &Env, installed: &Installed) -> SkillInstalled {
             .iter()
             .map(|err| scrubbed(env, err, None))
             .collect(),
+        scan: ScanResult::from(&installed.scan),
+    }
+}
+
+fn review_of(env: &Env, prepared: &Prepared) -> SkillInstallReview {
+    let source = prepared.source();
+    SkillInstallReview {
+        token: String::new(),
+        name: prepared.name().to_owned(),
+        files: prepared
+            .files()
+            .iter()
+            .map(|(path, bytes)| SkillFileEntry {
+                path: path.clone(),
+                bytes: count(bytes.len()),
+            })
+            .collect(),
+        source: SkillReviewSource {
+            kind: source.kind.into(),
+            url: source.url.as_deref().map(|url| source_url(env, url)),
+            path: source.path.clone(),
+            git_ref: source.git_ref.clone(),
+            commit: source.commit.clone(),
+        },
+        scan: ScanResult::from(prepared.scan()),
+        trust: None,
+        moved_trust: None,
     }
 }
 
@@ -584,17 +677,22 @@ fn field_text(value: &serde_json::Value) -> String {
 /// The project scope of the page: the known project and its `[skills]`.
 struct ProjectScope {
     project: Project,
+    wanted: ProjectSkills,
     info: SkillProject,
 }
 
-fn project_scope(core: &Core, store: Option<&Store<'_>>, id: &str) -> CmdResult<ProjectScope> {
+fn project_scope(
+    core: &Core,
+    store: Option<&Store<'_>>,
+    detected: &DetectedClients<'_>,
+    id: &str,
+) -> CmdResult<ProjectScope> {
     let known = projects::find(core, store, id)?;
     let root = known.root.clone();
     let project = projects::loaded(&known)
         .map_err(|err| scrubbed(&core.env, &err, Some(&root)))?
         .clone();
     let wanted = link::project_skills(&project);
-    let sx = sx(core);
     let cached = core
         .plan()
         .map_err(|err| scrubbed(&core.env, &err, Some(&root)))?;
@@ -609,19 +707,24 @@ fn project_scope(core: &Core, store: Option<&Store<'_>>, id: &str) -> CmdResult<
         path: placeholder_path(&core.env, &root, None),
         trust: projects::trust_of(&known),
         hash: project.hash(),
-        clients: link::selected_clients(&sx, &wanted.clients)
+        clients: detected
+            .selected(&wanted.clients)
             .into_iter()
             .map(str::to_owned)
             .collect(),
         share: wanted.share,
         read_only: access.read_only,
     };
-    Ok(ProjectScope { project, info })
+    Ok(ProjectScope {
+        project,
+        wanted,
+        info,
+    })
 }
 
 fn skill_info(
     core: &Core,
-    sx: &SkillsEnv<'_>,
+    detected: &DetectedClients<'_>,
     skill: &StoreSkill,
     ledger: &SkillLedger,
     project: Option<&ProjectScope>,
@@ -632,14 +735,13 @@ fn skill_info(
     let selection = enable.and_then(|enable| enable.clients.as_ref());
     let (project_enabled, project_shared) = match project {
         Some(scope) => {
-            let wanted = link::project_skills(&scope.project);
             let shared = scope.project.local.is_some()
                 && scope
                     .project
                     .shared
                     .as_ref()
                     .is_some_and(|file| link::manifest_enables(&file.manifest, &skill.id));
-            (wanted.enable.contains(&skill.id), shared)
+            (scope.wanted.enable.contains(&skill.id), shared)
         }
         None => (false, false),
     };
@@ -674,7 +776,8 @@ fn skill_info(
         all_detected: matches!(selection, Some(ClientSelection::AllDetected)),
         clients: selection
             .map(|selection| {
-                link::selected_clients(sx, selection)
+                detected
+                    .selected(selection)
                     .into_iter()
                     .map(str::to_owned)
                     .collect()
@@ -709,10 +812,11 @@ fn skill_info(
 pub fn list(core: &Core, scope: &SkillScope) -> CmdResult<SkillList> {
     let sx = sx(core);
     let env = &core.env;
+    let detected = DetectedClients::new(&sx);
     let store = core.open_store()?;
     let project = match scope {
         SkillScope::User => None,
-        SkillScope::Project { id } => Some(project_scope(core, store.as_ref(), id)?),
+        SkillScope::Project { id } => Some(project_scope(core, store.as_ref(), &detected, id)?),
     };
     let skills = match &store {
         Some(store) => store::list(store)?,
@@ -735,8 +839,7 @@ pub fn list(core: &Core, scope: &SkillScope) -> CmdResult<SkillList> {
         .map(|(entry, dir)| SkillClient {
             id: entry.client.to_owned(),
             name: client_name(entry.client),
-            detected: adapter(entry.client)
-                .is_some_and(|spec| detect(spec, env, sx.fs, sx.registry).detected()),
+            detected: detected.is_detected(entry.client),
             read_only: ReadOnly::of(
                 dir.as_ref()
                     .and_then(|dir| access.get(dir).copied().flatten()),
@@ -775,13 +878,10 @@ pub fn list(core: &Core, scope: &SkillScope) -> CmdResult<SkillList> {
     Ok(SkillList {
         skills: skills
             .iter()
-            .map(|skill| skill_info(core, &sx, skill, &ledger, project.as_ref()))
+            .map(|skill| skill_info(core, &detected, skill, &ledger, project.as_ref()))
             .collect(),
         clients,
-        size_warning: store
-            .as_ref()
-            .and_then(store::total_size_warning)
-            .map(|err| scrubbed(env, &err, None)),
+        size_warning: store::size_warning(&skills).map(|err| scrubbed(env, &err, None)),
         project: project.map(|scope| scope.info),
         agents_cli,
     })
@@ -920,10 +1020,14 @@ pub fn install_local(
     id: Option<String>,
     rename_if_taken: bool,
 ) -> CmdResult<SkillInstalled> {
-    let path = validate_source(core, path).map_err(|err| scrubbed(&core.env, &err, None))?;
-    let mut request = InstallRequest::new(Source::Local(path));
+    let mut request = local_request(core, path)?;
     request.naming = naming(id, rename_if_taken);
     install_with(core, &request)
+}
+
+fn local_request(core: &Core, path: &Path) -> CmdResult<InstallRequest> {
+    let path = validate_source(core, path).map_err(|err| scrubbed(&core.env, &err, None))?;
+    Ok(InstallRequest::new(Source::Local(path)))
 }
 
 fn trimmed(value: Option<String>) -> Option<String> {
@@ -943,7 +1047,20 @@ pub fn install_git(
     git_ref: Option<String>,
     id: Option<String>,
     rename_if_taken: bool,
+    trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillInstalled> {
+    let mut request = git_request(core, url, path, git_ref)?;
+    request.naming = naming(id, rename_if_taken);
+    (request.decisions.trust, request.decisions.via) = sources::grant_of(trust);
+    install_with(core, &request)
+}
+
+fn git_request(
+    core: &Core,
+    url: &str,
+    path: Option<String>,
+    git_ref: Option<String>,
+) -> CmdResult<InstallRequest> {
     let url = url.trim();
     let source = Source::parse(url, core.fs.as_ref());
     let is_url = matches!(source, Source::Git { .. }) && !Path::new(url).is_absolute();
@@ -956,8 +1073,81 @@ pub fn install_git(
     let mut request = InstallRequest::new(source);
     request.path = trimmed(path);
     request.git_ref = trimmed(git_ref);
-    request.naming = naming(id, rename_if_taken);
-    install_with(core, &request)
+    Ok(request)
+}
+
+/// Fetches and scans a git source for the install review, without
+/// changing the store. Same URL rules as [`install_git`]. A blocked
+/// source is refused (`source_blocked`) before it is contacted.
+pub fn review_git(
+    core: &Core,
+    url: &str,
+    path: Option<String>,
+    git_ref: Option<String>,
+) -> CmdResult<(Prepared, SkillInstallReview)> {
+    let request = git_request(core, url, path, git_ref)?;
+    if let Source::Git { url, .. } = &request.source {
+        let source = SourceRef::from_git_url(url).map_err(|err| scrubbed(&core.env, &err, None))?;
+        sources::refuse_blocked(core, &source)?;
+    }
+    review_with(core, &request)
+}
+
+/// Reads and scans the picked folder or archive for the install review.
+pub fn review_local(core: &Core, path: &Path) -> CmdResult<(Prepared, SkillInstallReview)> {
+    let request = local_request(core, path)?;
+    review_with(core, &request)
+}
+
+fn review_with(core: &Core, request: &InstallRequest) -> CmdResult<(Prepared, SkillInstallReview)> {
+    let prepared =
+        install::prepare(&sx(core), request).map_err(|err| scrubbed(&core.env, &err, None))?;
+    let mut review = review_of(&core.env, &prepared);
+    review.trust = prepared
+        .trust_source()
+        .map(|source| sources::check_source(core, source, prepared.source_change()))
+        .transpose()?;
+    review.moved_trust = prepared
+        .moved_to()
+        .map(|target| sources::check_source(core, target, None))
+        .transpose()?;
+    Ok((prepared, review))
+}
+
+/// Installs reviewed content: exactly what the review showed. A git
+/// source must be trusted or `trust` carries the dialog's answer
+/// (`source_trust_required`, `source_blocked` otherwise), and so must the
+/// repository it moved to (`moved_trust`, the answer for the review's
+/// `moved_trust`); then a `dangerous` verdict needs `allow_dangerous`
+/// ("Install anyway"); `scan_blocked` otherwise. On an error `prepared`
+/// stays usable.
+pub fn install_reviewed(
+    core: &Core,
+    prepared: &mut Prepared,
+    id: Option<String>,
+    rename_if_taken: bool,
+    allow_dangerous: bool,
+    trust: Option<TrustGrantArg>,
+    moved_trust: Option<TrustGrantArg>,
+) -> CmdResult<SkillInstalled> {
+    let env = &core.env;
+    let store = core.open_store_for_change()?;
+    let (trust, via) = sources::grant_of(trust);
+    let decisions = Decisions {
+        allow_dangerous,
+        trust,
+        moved_trust: sources::grant_of(moved_trust).0,
+        via,
+    };
+    let installed = install::install_prepared(
+        &store,
+        &sx(core),
+        prepared,
+        &naming(id, rename_if_taken),
+        &decisions,
+    )
+    .map_err(|err| scrubbed(env, &err, None))?;
+    Ok(installed_of(env, &installed))
 }
 
 fn require_store(core: &Core) -> CmdResult<Store<'_>> {
@@ -1042,6 +1232,7 @@ fn changes_of(changes: &[install::FileChange]) -> Vec<SkillFileChange> {
         .map(|change| SkillFileChange {
             path: change.path.clone(),
             kind: change.kind.into(),
+            script: change.script,
         })
         .collect()
 }
@@ -1070,6 +1261,15 @@ pub fn check_updates(core: &Core, ids: &[String]) -> CmdResult<Vec<SkillUpdateCh
                 latest: checked.latest,
                 changes: changes_of(&checked.changes),
                 error: checked.error.as_ref().map(|err| scrubbed(env, err, None)),
+                scan: checked.scan.as_ref().map(ScanResult::from),
+                trust: checked
+                    .trust
+                    .as_ref()
+                    .map(|check| sources::trust_info(env, check, checked.source_change.as_ref())),
+                moved_trust: checked
+                    .moved_trust
+                    .as_ref()
+                    .map(|check| sources::trust_info(env, check, None)),
             },
             Err(err) => SkillUpdateCheck {
                 id: id.clone(),
@@ -1078,6 +1278,9 @@ pub fn check_updates(core: &Core, ids: &[String]) -> CmdResult<Vec<SkillUpdateCh
                 latest: None,
                 changes: Vec::new(),
                 error: Some(scrubbed(env, &err, None)),
+                scan: None,
+                trust: None,
+                moved_trust: None,
             },
         })
         .collect())
@@ -1127,11 +1330,30 @@ pub fn update_diff(core: &Core, id: &str, file: &str) -> CmdResult<SkillFileDiff
 
 /// Updates a git skill to `latest`, the source commit its update preview
 /// showed (one commit; copies follow). The cache clone is not fetched
-/// again; `entry_changed` when it holds another commit by now.
-pub fn update(core: &Core, id: &str, latest: &str) -> CmdResult<SkillUpdated> {
+/// again; `entry_changed` when it holds another commit by now. An
+/// untrusted source needs `trust`, the dialog's answer
+/// (`source_trust_required`, `source_blocked`), and a repository it moved
+/// to needs `moved_trust` (the answer for the check's `moved_trust`); the
+/// skill's URL then follows the move. A `dangerous` scan verdict needs
+/// `allow_dangerous` ("Update anyway"); `scan_blocked` otherwise.
+pub fn update(
+    core: &Core,
+    id: &str,
+    latest: &str,
+    allow_dangerous: bool,
+    trust: Option<TrustGrantArg>,
+    moved_trust: Option<TrustGrantArg>,
+) -> CmdResult<SkillUpdated> {
     let env = &core.env;
     let store = require_store(core)?;
-    let updated = install::update_reviewed(&store, &sx(core), id, latest)
+    let (trust, via) = sources::grant_of(trust);
+    let decisions = Decisions {
+        allow_dangerous,
+        trust,
+        moved_trust: sources::grant_of(moved_trust).0,
+        via,
+    };
+    let updated = install::update_reviewed(&store, &sx(core), id, latest, &decisions)
         .map_err(|err| scrubbed(env, &err, None))?;
     Ok(SkillUpdated {
         id: updated.id,
@@ -1140,6 +1362,7 @@ pub fn update(core: &Core, id: &str, latest: &str) -> CmdResult<SkillUpdated> {
         commit: commit_text(updated.commit.as_ref()),
         changes: changes_of(&updated.changes),
         links: sync_of(env, &updated.report),
+        scan: ScanResult::from(&updated.scan),
     })
 }
 
@@ -1340,11 +1563,133 @@ pub async fn install_git_skill(
     git_ref: Option<String>,
     id: Option<String>,
     rename_if_taken: bool,
+    trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillInstalled> {
     blocking(&state, move |core| {
-        install_git(core, &url, path, git_ref, id, rename_if_taken)
+        install_git(core, &url, path, git_ref, id, rename_if_taken, trust)
     })
     .await
+}
+
+/// Fetches and scans a git source for the install review; nothing goes
+/// into the store. The review stays in the app under its token.
+#[tauri::command]
+#[specta::specta]
+pub async fn review_git_skill(
+    state: tauri::State<'_, AppState>,
+    url: String,
+    path: Option<String>,
+    git_ref: Option<String>,
+) -> CmdResult<SkillInstallReview> {
+    let (prepared, mut review) =
+        blocking(&state, move |core| review_git(core, &url, path, git_ref)).await?;
+    let (token, evicted) = state.remember_review(prepared);
+    drop_off_thread(evicted);
+    review.token = token;
+    Ok(review)
+}
+
+/// Reads and scans the folder or archive picked under `token` (from
+/// `pick_skill_source`) for the install review.
+#[tauri::command]
+#[specta::specta]
+pub async fn review_local_skill(
+    state: tauri::State<'_, AppState>,
+    token: String,
+) -> CmdResult<SkillInstallReview> {
+    let path = state.picked_folder(&token)?;
+    let (prepared, mut review) = blocking(&state, move |core| review_local(core, &path)).await?;
+    let (token, evicted) = state.remember_review(prepared);
+    drop_off_thread(evicted);
+    review.token = token;
+    Ok(review)
+}
+
+/// Installs the reviewed content. The review stays in the store until
+/// the install succeeds: on any error (`scan_blocked`, a trust error,
+/// `already_exists`, a worker failure) the dialog can ask and try again
+/// under the same token. Once the store commit is made the review is
+/// spent (a sync failure after it is a warning of the result).
+#[tauri::command]
+#[specta::specta]
+pub async fn install_reviewed_skill(
+    state: tauri::State<'_, AppState>,
+    token: String,
+    id: Option<String>,
+    rename_if_taken: bool,
+    allow_dangerous: bool,
+    trust: Option<TrustGrantArg>,
+    moved_trust: Option<TrustGrantArg>,
+) -> CmdResult<SkillInstalled> {
+    let answers = (trust, moved_trust);
+    install_review(
+        &state,
+        &token,
+        id,
+        rename_if_taken,
+        allow_dangerous,
+        answers,
+    )
+    .await
+}
+
+/// [`install_reviewed_skill`] on any [`AppState`]; `answers` are the
+/// trust dialog's for the source and for the repository it moved to.
+pub(crate) async fn install_review(
+    state: &AppState,
+    token: &str,
+    id: Option<String>,
+    rename_if_taken: bool,
+    allow_dangerous: bool,
+    answers: (Option<TrustGrantArg>, Option<TrustGrantArg>),
+) -> CmdResult<SkillInstalled> {
+    let review = state.review(token)?;
+    let shared = Arc::clone(&review);
+    let result = blocking(state, move |core| {
+        let mut prepared = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        let (trust, moved_trust) = answers;
+        install_reviewed(
+            core,
+            &mut prepared,
+            id,
+            rename_if_taken,
+            allow_dangerous,
+            trust,
+            moved_trust,
+        )
+    })
+    .await;
+    let mut done = vec![review];
+    if result.is_ok() {
+        done.extend(state.forget_review(token));
+    }
+    drop_off_thread(done);
+    result
+}
+
+/// Drops reviews on a worker thread: the last owner of a git review
+/// removes its temporary clone, which must not block the async runtime.
+fn drop_off_thread(reviews: Vec<SharedReview>) {
+    if !reviews.is_empty() {
+        tauri::async_runtime::spawn_blocking(move || drop(reviews));
+    }
+}
+
+/// Removes temporary clones left by reviews of an earlier run (the app
+/// ends without dropping its state): run once at startup.
+pub(crate) fn sweep_review_clones(core: &Core) {
+    install::sweep_temp_clones(&sx(core), std::time::Duration::from_secs(60 * 60));
+}
+
+/// Drops a review and its temporary clone (the dialog closed).
+#[tauri::command]
+#[specta::specta]
+pub async fn discard_skill_review(
+    state: tauri::State<'_, AppState>,
+    token: String,
+) -> CmdResult<()> {
+    drop_off_thread(state.forget_review(&token).into_iter().collect());
+    Ok(())
 }
 
 #[tauri::command]
@@ -1418,8 +1763,14 @@ pub async fn update_skill(
     state: tauri::State<'_, AppState>,
     id: String,
     latest: String,
+    allow_dangerous: bool,
+    trust: Option<TrustGrantArg>,
+    moved_trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillUpdated> {
-    blocking(&state, move |core| update(core, &id, &latest)).await
+    blocking(&state, move |core| {
+        update(core, &id, &latest, allow_dangerous, trust, moved_trust)
+    })
+    .await
 }
 
 #[tauri::command]

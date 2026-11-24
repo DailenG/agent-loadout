@@ -45,6 +45,8 @@ enum Command {
     Server(cmd::server::ServerArgs),
     /// Skills: install, enable for clients and projects, update, scan.
     Skills(cmd::skills::SkillsArgs),
+    /// Trusted and blocked install sources: list, trust, block, untrust.
+    Source(cmd::source::SourceArgs),
     /// Project manifests: create, register, trust, share, list, forget.
     Project(cmd::project::ProjectArgs),
     /// List store commits.
@@ -137,6 +139,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Server(args) => cmd::server::run(&context()?, args),
         Command::Project(args) => cmd::project::run(&context()?, args),
         Command::Skills(args) => cmd::skills::run(&context()?, args),
+        Command::Source(args) => cmd::source::run(&context()?, args),
         Command::History(args) => done(cmd::history::run(&context()?, args)),
         Command::Status(args) => cmd::status::run(&context()?, args),
         Command::Diff(args) => cmd::diff::run(&context()?, args),

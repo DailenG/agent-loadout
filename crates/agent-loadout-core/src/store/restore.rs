@@ -118,7 +118,7 @@ pub fn prepare(
                 ErrorCode::InvalidValue,
                 format!(
                     "unknown entity {entity:?}; expected server/<id>, skill/<id>, project/<id>, \
-                     machine/<id>, secrets, clients or settings"
+                     machine/<id>, secrets, clients, settings or sources"
                 ),
             ));
         }

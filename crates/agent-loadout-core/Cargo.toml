@@ -19,6 +19,7 @@ hmac.workspace = true
 json5.workspace = true
 jsonc-parser.workspace = true
 keyring.workspace = true
+regex.workspace = true
 saphyr-parser.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -27,6 +28,8 @@ sha2.workspace = true
 similar.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
+# Source keys of git URLs (#24).
+url.workspace = true
 zip.workspace = true
 # Only to select zip's deflate backend (miniz_oxide).
 flate2.workspace = true

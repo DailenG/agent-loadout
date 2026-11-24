@@ -51,6 +51,10 @@ pub struct LogFilter {
     pub scope: Option<Scope>,
     /// At most this many commits, newest first.
     pub limit: Option<usize>,
+    /// Only commits after this one in the walk (older than it): the cursor
+    /// of a paged list, the last commit of the previous page. A commit the
+    /// walk never reaches gives no commits.
+    pub before: Option<CommitId>,
 }
 
 /// Store-relative files and directories holding an entity
@@ -64,7 +68,7 @@ pub fn entity_paths(entity: &str) -> Vec<String> {
             format!("machines/{id}.toml"),
             format!("machines/{id}.applied.toml"),
         ],
-        None if matches!(entity, "secrets" | "clients" | "settings") => {
+        None if matches!(entity, "secrets" | "clients" | "settings" | "sources") => {
             vec![format!("{entity}.toml")]
         }
         _ => Vec::new(),
@@ -88,14 +92,18 @@ impl Store<'_> {
             .unwrap_or_default();
 
         let mut entries = Vec::new();
+        let mut past_cursor = filter.before.is_none();
         for oid in walk {
             if filter.limit.is_some_and(|limit| entries.len() >= limit) {
                 break;
             }
-            let commit = self
-                .repo
-                .find_commit(oid.map_err(git_error)?)
-                .map_err(git_error)?;
+            let oid = oid.map_err(git_error)?;
+            if !past_cursor {
+                // Skipped commits are not read, only compared by id.
+                past_cursor = filter.before.as_ref() == Some(&CommitId::from_oid(oid));
+                continue;
+            }
+            let commit = self.repo.find_commit(oid).map_err(git_error)?;
             let message = String::from_utf8_lossy(commit.message_bytes());
             let trailers = Trailers::parse(&message);
             if filter
