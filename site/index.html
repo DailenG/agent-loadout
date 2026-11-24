@@ -194,6 +194,20 @@ $ loadout rollback last</code></pre>
       <p class="aside"><b>Not managed by Loadout</b> lists each client's other entries on the MCP page and in Tools, with <b>Import…</b> on each, and a one-line sidebar notice (“7 not managed”) says when new ones appear. An import that moved secrets out of a file offers to remove the backups that still hold the old values. Details: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#importing-in-the-app">user guide, Importing in the app</a>.</p>
     </section>
 
+    <section class="sec sources" id="sources" aria-labelledby="sources-title">
+      <header class="sec-head">
+        <p class="readout">Install from anywhere, safely</p>
+        <h2 id="sources-title">Ask first. Scan always. Pin everything.</h2>
+        <p class="sec-lede">Skills and MCP servers can come from any Git repository or folder. Code from someone else runs with your permissions, so Loadout asks before it trusts a new source, scans what it fetched before anything is saved, and pins what it installs to the exact commit or version it checked.</p>
+      </header>
+      <ul class="mods" role="list">
+        <li class="mod"><h3>MCP servers from Git or a folder</h3><p>Point Install at a repository or folder. Loadout reads its MCP Registry <code>server.json</code>, MCPB manifest or committed client configs, or treats the repository itself as the server, and proposes drafts you review, edit and enable per client. Commands are pinned to the resolved commit or package version, and secrets become references. <code>loadout server add --from &lt;url|path&gt;</code></p></li>
+        <li class="mod"><h3>Do you trust this source?</h3><p>The first install from a repository, owner or host asks once: this time only, always, or cancel. Updates still show the diff; a force-push, a moved repository or an unencrypted connection asks again. Settings &gt; Sources lists every decision, and a block beats any trust. <code>loadout source ls</code></p></li>
+        <li class="mod"><h3>Built-in offline scan</h3><p>Every skill and server draft is scanned on your machine before it is saved: download-and-run commands, credential theft, hidden text and prompt overrides, native binaries, unpinned commands. Dangerous findings block until you choose <b>Install anyway</b>; trusting a source never skips the scan.</p></li>
+      </ul>
+      <p class="aside">Trust is never implicit: <code>--yes</code> never grants it, and a run without a terminal needs an explicit <code>--trust-source</code>. Details: <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/user-guide.md#source-trust">user guide, Source trust</a> and <a href="https://github.com/DailenG/agent-loadout/blob/main/docs/security.md">docs/security.md</a>.</p>
+    </section>
+
     <section class="sec dialects" id="dialects" aria-labelledby="dialects-title">
       <header class="sec-head">
         <p class="readout">One entry, many dialects</p>
