@@ -45,6 +45,9 @@ specta = { workspace = true, optional = true }
 windows-permissions.workspace = true
 # Skill links (SPEC 12.2): directory junctions without admin rights.
 junction.workspace = true
+# The external scanner's process tree (#27): a kill-on-close Job Object,
+# killed on timeout or cancel.
+win32job.workspace = true
 
 # Lock state of Secret Service entries (SPEC 11.3 `locked`, gate V1 FB-6).
 [target.'cfg(target_os = "linux")'.dependencies]

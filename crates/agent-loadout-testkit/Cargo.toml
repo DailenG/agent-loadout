@@ -13,6 +13,8 @@ homepage.workspace = true
 agent-loadout-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The scanner stub's asset hash (agent_scan_stub).
+sha2.workspace = true
 tempfile.workspace = true
 
 [lints]

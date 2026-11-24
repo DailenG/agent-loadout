@@ -7,3 +7,6 @@ src-tauri/linux/** text eol=lf
 # The bundled Loadout skill (#8): its content hash decides whether a store
 # copy was edited, so every checkout embeds the same bytes.
 crates/agent-loadout-core/agent-skill/** text eol=lf
+# The signed checksums of the pinned Snyk Agent Scan release (#27): gpg and
+# the compiled-hash test read their exact bytes.
+fixtures/agent-scan/v0.7.1/** -text

@@ -43,8 +43,27 @@ pub struct LocalSettings {
     /// open Install > Browse, or `loadout catalog online on`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub online_catalogs: Option<bool>,
+    /// The optional external scanner (#27). Absent means off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snyk_agent_scan: Option<SnykAgentScanSettings>,
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// `[snyk_agent_scan]`: Snyk Agent Scan on this machine (#27).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnykAgentScanSettings {
+    /// Run it on skill installs and updates. Absent means off: nothing is
+    /// sent to Snyk until the user turns it on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// The token as a secret reference (a `secrets.toml` alias or a
+    /// provider reference), never a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// Seconds per run (default 60).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }
 
 impl Default for LocalSettings {
@@ -55,6 +74,7 @@ impl Default for LocalSettings {
             check_for_updates: None,
             agent_skill_notice: None,
             online_catalogs: None,
+            snyk_agent_scan: None,
             extra: toml::Table::new(),
         }
     }

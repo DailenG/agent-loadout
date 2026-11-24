@@ -414,6 +414,51 @@ describe("BrowsePanel", () => {
     expect(within(anthropic).queryByRole("alert")).toBeNull();
   });
 
+  it("says plainly that Git is missing, in neutral styling, with the troubleshooting link and Try again", async () => {
+    const missing = {
+      code: "tool_not_found" as const,
+      message: "Git isn't installed or isn't on PATH; install Git to use Git skill sources, MCP servers from Git, and Git catalogs.",
+    };
+    const { user, transport } = renderBrowse(
+      { online: true, decided: true },
+      {
+        searchCatalog: async (catalog) =>
+          ok(catalog === "anthropic-skills" ? page(catalog, { status: "error", error: missing }) : page(catalog, { status: "query_too_short" })),
+      },
+    );
+    const anthropic = await screen.findByRole("region", { name: "Anthropic skills" });
+    const status = await within(anthropic).findByText(
+      "Git isn't installed, so Git catalogs can't be searched. Install Git to use them.",
+    );
+    expect(status).toHaveClass("catalog-status--neutral");
+    expect(status).not.toHaveClass("catalog-status--danger");
+    expect(within(anthropic).queryByRole("alert")).toBeNull();
+    // No repeated wording: neither the generic text nor the backend detail.
+    expect(anthropic).not.toHaveTextContent(/required program|not on PATH/);
+    expect(within(anthropic).getByRole("button", { name: "Search Anthropic skills again" })).toBeInTheDocument();
+    // The accessible name starts with the visible text (WCAG 2.5.3).
+    await user.click(
+      within(anthropic).getByRole("button", { name: "How to fix this: open the troubleshooting entry for a missing Git" }),
+    );
+    await waitFor(() => expect(invoked(transport, "openHelp")).toEqual([["git_missing"]]));
+  });
+
+  it("doesn't call a Git that failed to start missing, and never shows the backend's diagnostic text", async () => {
+    const failed = { code: "tool_not_found" as const, message: "cannot run git: Access is denied. (os error 5)" };
+    renderBrowse(
+      { online: true, decided: true },
+      {
+        searchCatalog: async (catalog) =>
+          ok(catalog === "anthropic-skills" ? page(catalog, { status: "error", error: failed }) : page(catalog, { status: "query_too_short" })),
+      },
+    );
+    const anthropic = await screen.findByRole("region", { name: "Anthropic skills" });
+    expect(await within(anthropic).findByText(/A required program is not installed or not on PATH\./)).toBeInTheDocument();
+    expect(anthropic).not.toHaveTextContent(/Git isn't installed/);
+    expect(anthropic).not.toHaveTextContent(/cannot run git|os error/);
+    expect(within(anthropic).queryByRole("button", { name: /How to fix this/ })).toBeNull();
+  });
+
   it("searches a stale catalog again with Try again", async () => {
     const { user, transport } = renderBrowse({
       online: true,

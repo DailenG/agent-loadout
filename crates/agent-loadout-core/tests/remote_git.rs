@@ -265,6 +265,34 @@ fn push_and_pull_through_a_local_bare_repository() {
     assert!(calls.iter().any(|c| args(c)[0] == "fetch"));
 }
 
+/// #29: without git on PATH the error is one sentence that names Git and
+/// what needs it; the generic "required program" text is the app's, never
+/// repeated in the detail.
+#[test]
+fn missing_git_is_one_clear_sentence() {
+    let th = TempHome::new();
+    let env = th.env_builder(host_os()).var("PATH", th.bin()).build();
+    let fs = th.fs();
+    let runner = SystemRunner::default();
+    let Err(err) = GitCli::from_env(&env, &fs, &runner, None) else {
+        panic!("no git in an empty PATH folder");
+    };
+    assert_eq!(err.code(), ErrorCode::ToolNotFound);
+    assert_eq!(
+        err.message(),
+        "Git isn't installed or isn't on PATH; install Git to use Git remotes."
+    );
+    let sources = git::git_not_found("Git skill sources, MCP servers from Git, and Git catalogs");
+    assert_eq!(
+        sources.message(),
+        "Git isn't installed or isn't on PATH; install Git to use Git skill sources, MCP servers from Git, and Git catalogs."
+    );
+    for message in [err.message(), sources.message()] {
+        assert_eq!(message.matches("PATH").count(), 1, "{message}");
+        assert!(!message.contains("required program"), "{message}");
+    }
+}
+
 #[test]
 fn an_empty_or_missing_remote() {
     let Some(world) = World::new("an_empty_or_missing_remote") else {

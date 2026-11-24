@@ -1520,7 +1520,7 @@ const messages = {
   "trust.summary.moved": "Moved to",
   "trust.summary.runsFrom": "Runs from",
   "scan.gate.updateBlocked":
-    "The built-in scan found dangerous content in the new version. Nothing was updated; review the findings, and update anyway only if you trust it.",
+    "A scan found dangerous content in the new version. Nothing was updated; review the findings, and update anyway only if you trust it.",
   "scan.gate.saveBlocked":
     "The built-in scan found dangerous content in {servers} as edited. Nothing was saved; check the edited command, and save anyway only if you trust it.",
   "scan.gate.saveBlockedDetail": "What the scan reported: {detail}",
@@ -1777,6 +1777,9 @@ const messages = {
   "catalog.status.timedOut": "Timed out: {catalog} took too long to answer.",
   "catalog.status.error": "Couldn't search {catalog}: {error}",
   "catalog.status.errorDetail": "{reason} ({detail})",
+  "catalog.status.gitMissing": "Git isn't installed, so Git catalogs can't be searched. Install Git to use them.",
+  "catalog.gitMissingHelp": "How to fix this",
+  "catalog.gitMissingHelpAria": "How to fix this: open the troubleshooting entry for a missing Git",
   "catalog.retry": "Try again",
   "catalog.retryAria": "Search {catalog} again",
   "catalog.resultsAria": "Results from {catalog}",
@@ -1881,6 +1884,156 @@ const messages = {
   "settings.catalogs.adding": "Adding…",
   "settings.catalogs.added": "Added {url}.",
   /* end M45 */
+  /* M49: Settings > Security (Snyk Agent Scan), the external scan in reviews and on library skills */
+  "settings.security.title": "Security",
+  "settings.security.loading": "Loading…",
+  "settings.security.cancel": "Cancel",
+  "settings.security.snyk.title": "Snyk Agent Scan (optional)",
+  "settings.security.snyk.what":
+    "A second opinion on skills. When it's on, Loadout runs Snyk Agent Scan as soon as an install or update review opens, before you choose Install or Update (for a folder or archive from this computer, only when you choose Scan with Snyk), and on a library skill when you ask. It shows the findings beside the built-in scan's. It scans skills only, never MCP servers.",
+  "settings.security.snyk.cloud":
+    "Snyk Agent Scan doesn't scan on your computer: it sends the skill to Snyk's analysis service in the cloud (api.snyk.io), and Snyk's terms and privacy policy apply to what it receives.",
+  "settings.security.snyk.terms": "Snyk Agent Scan terms",
+  "settings.security.snyk.privacy": "Snyk privacy policy",
+  "settings.security.snyk.sentIntro": "What is sent to Snyk for each scan:",
+  "settings.security.snyk.sent.files": "every file of the skill (Snyk redacts secrets it detects in them)",
+  "settings.security.snyk.sent.name": "the skill's name (from SKILL.md)",
+  "settings.security.snyk.sent.path": "the full path of the folder it scans (a temporary copy in Loadout's data folder)",
+  "settings.security.snyk.sent.user": "your user name on this computer",
+  "settings.security.snyk.sent.host": "this machine's host name, which the scanner adds itself where its platform reports one",
+  "settings.security.snyk.sent.version": "the scanner's version",
+  "settings.security.snyk.notSent":
+    "Loadout adds no host name, machine serial number, other environment variables or Loadout data, and never starts or contacts MCP servers for a scan.",
+  "settings.security.snyk.token":
+    "It needs a Snyk API token (SNYK_TOKEN). The free tier has a daily limit; once it's reached, skills show \"Not scanned\" and installs aren't blocked.",
+  "settings.security.snyk.never": "It's off until you turn it on here. Loadout never sends anything to Snyk while it's off.",
+  "settings.security.snyk.megabytes": "{size} MB",
+  "settings.security.snyk.status.label": "Status",
+  "settings.security.snyk.status.unsupported": "Not available",
+  "settings.security.snyk.status.unsupportedDetail": "Snyk publishes no Snyk Agent Scan build for this operating system and processor.",
+  "settings.security.snyk.status.notInstalled": "Not installed",
+  "settings.security.snyk.status.notInstalledDetail": "Install the scanner and set a token to turn it on.",
+  "settings.security.snyk.status.noToken": "Needs a token",
+  "settings.security.snyk.status.noTokenDetail": "The scanner is installed. Set a token to turn it on.",
+  "settings.security.snyk.status.off": "Off",
+  "settings.security.snyk.status.offDetail": "Installed and ready. Nothing is sent to Snyk until you turn it on.",
+  "settings.security.snyk.status.on": "On",
+  "settings.security.snyk.status.onDetail":
+    "Skills are sent to Snyk Agent Scan as soon as an install or update review opens (a folder or archive from this computer only when you ask). A dangerous verdict needs Install anyway.",
+  "settings.security.snyk.scanner.label": "Scanner",
+  "settings.security.snyk.notInstalled":
+    "Install downloads Snyk Agent Scan {version} ({size}) from Snyk's GitHub releases into Loadout's data folder on this computer and checks it against the SHA-256 built into Loadout. It isn't added to PATH.",
+  "settings.security.snyk.verified": "Snyk Agent Scan {version}, installed and verified: its SHA-256 matches the build pinned in Loadout.",
+  "settings.security.snyk.starting": "Starting the download…",
+  "settings.security.snyk.downloading": "Downloading: {received} of {total}",
+  "settings.security.snyk.progressAria": "Download progress",
+  "settings.security.snyk.progressText": "{received} of {total}",
+  "settings.security.snyk.liveInstalling": "Downloading Snyk Agent Scan.",
+  "settings.security.snyk.install": "Install",
+  "settings.security.snyk.cancelInstall": "Cancel",
+  "settings.security.snyk.remove": "Remove",
+  "settings.security.snyk.installed": "Snyk Agent Scan {version} is installed and verified. Turn it on when you're ready.",
+  "settings.security.snyk.installedOn": "Snyk Agent Scan {version} is installed and verified, and it's on again.",
+  "settings.security.snyk.installCanceled": "Install canceled; nothing was installed.",
+  "settings.security.snyk.removed": "Removed Snyk Agent Scan from this computer.",
+  "settings.security.snyk.confirmRemove.title": "Remove Snyk Agent Scan?",
+  "settings.security.snyk.confirmRemove.description":
+    "This deletes the downloaded scanner from this computer and turns Snyk Agent Scan off. The token reference is kept; nothing is sent to Snyk until you install it and turn it on again.",
+  "settings.security.snyk.token.label": "Snyk token",
+  "settings.security.snyk.token.none": "Not set.",
+  "settings.security.snyk.token.hint":
+    "Loadout stores only where the token is (a secret from the Secrets page, an environment variable, 1Password or the OS keyring), never the token. It's given only to the scanner while it runs.",
+  "settings.security.snyk.token.set": "Set token…",
+  "settings.security.snyk.token.change": "Change…",
+  "settings.security.snyk.token.check": "Check",
+  "settings.security.snyk.token.clear": "Clear",
+  "settings.security.snyk.token.checkOk": "Loadout can read the token. Snyk isn't contacted by this check.",
+  "settings.security.snyk.token.checkFailed": "Loadout can't use the token: {reason}.",
+  "settings.security.snyk.token.kind.alias": "Secret from the Secrets page",
+  "settings.security.snyk.token.kind.env": "Environment variable",
+  "settings.security.snyk.token.kind.keyring": "OS keyring entry",
+  "settings.security.snyk.token.kind.onePassword": "1Password reference",
+  "settings.security.snyk.token.dialogTitle": "Snyk token",
+  "settings.security.snyk.token.dialogHint":
+    "Say where Loadout finds the token. Only this reference is saved, on this computer. To keep the token in the OS keyring, add it as a secret on the Secrets page and pick that secret here.",
+  "settings.security.snyk.token.kindLegend": "Where the token is",
+  "settings.security.snyk.token.input.alias": "Secret",
+  "settings.security.snyk.token.pickAlias": "Pick a secret",
+  "settings.security.snyk.token.input.env": "Variable name",
+  "settings.security.snyk.token.input.keyring": "Keyring reference (keyring://service/account)",
+  "settings.security.snyk.token.input.onePassword": "1Password reference (op://vault/item/field)",
+  "settings.security.snyk.token.noAliases": "There are no secrets yet. Add one named SNYK_TOKEN on the Secrets page, or use another option.",
+  "settings.security.snyk.token.opEnvHidden":
+    "Secrets that point to a 1Password Environment aren't listed: Loadout never reads those values, so it can't hand one to the scanner.",
+  "settings.security.snyk.token.invalid.alias": "Pick a secret.",
+  "settings.security.snyk.token.invalid.env": "Enter the variable's name (letters, digits and _), not the token.",
+  "settings.security.snyk.token.invalid.keyring": "Enter keyring://service/account, not the token.",
+  "settings.security.snyk.token.invalid.onePassword":
+    "Enter op://vault/item/field, not the token. A 1Password Environment (op-env://) can't hold the scanner token.",
+  "settings.security.snyk.token.save": "Save",
+  "settings.security.snyk.enable.label": "Use Snyk Agent Scan",
+  "settings.security.snyk.enable.description":
+    "Scan skills with Snyk in install and update reviews. Turning it on sends each reviewed skill from a source to Snyk as the review opens.",
+  "settings.security.snyk.enable.needs": "Install the scanner and set a token first.",
+  "external.title": "External scan",
+  "external.scanner": "Snyk Agent Scan {version}",
+  "external.sentNote": "Snyk Agent Scan sends this content to Snyk's analysis service. Turn it off in Settings > Security.",
+  "external.running": "Scanning with Snyk Agent Scan (up to {seconds} seconds)…",
+  "external.checking": "Checking whether Snyk Agent Scan is on…",
+  "external.unknown": "Snyk Agent Scan status unknown, not scanned.",
+  "external.manualNote":
+    "This content came from this computer, so it isn't sent to Snyk on its own. Scan with Snyk sends the skill's files to Snyk's analysis service.",
+  "external.live.running": "Scanning with Snyk Agent Scan…",
+  "external.live.result": "Snyk Agent Scan: {verdict}, {count}.",
+  "external.live.confirm": "{action} needs your confirmation.",
+  "external.live.available": "{action} is available.",
+  "external.cancel": "Cancel scan",
+  "external.runAgain": "Scan again",
+  "external.none": "Snyk Agent Scan found nothing to point out. No scan can prove content is safe; review what you install.",
+  "external.badge.notScanned": "Not scanned",
+  "external.badge.notUnderstood": "Not understood",
+  "external.notScanned": "Not scanned ({reason}).",
+  "external.notScannedNote": "A skill that wasn't scanned isn't blocked; the built-in scan's findings still apply.",
+  "external.notUnderstood": "Scanner output not understood (version {version}).",
+  "external.notUnderstoodNote": "Loadout couldn't read the result, so it doesn't count as clean. It doesn't block installing.",
+  "external.reason.notInstalled": "Snyk Agent Scan isn't installed",
+  "external.reason.unsupportedPlatform": "no build for this platform",
+  "external.reason.noToken": "no Snyk token set",
+  "external.reason.tokenUnavailable": "the token couldn't be read",
+  "external.reason.tokenRejected": "Snyk didn't accept the token",
+  "external.reason.limitReached": "Snyk limit reached",
+  "external.reason.tooLarge": "too large for Snyk",
+  "external.reason.unreachable": "Snyk couldn't be reached",
+  "external.reason.timeout": "timed out",
+  "external.reason.canceled": "canceled",
+  "external.reason.wouldStartServer": "would start the server",
+  "external.reason.failed": "the scanner failed",
+  "external.risk.promptInjection": "Prompt injection in the instructions",
+  "external.risk.suspiciousDownload": "Suspicious download",
+  "external.risk.maliciousCode": "Malicious code",
+  "external.risk.credentials": "Insecure credential handling",
+  "external.risk.secret": "Secret in the content",
+  "external.risk.money": "Direct access to money",
+  "external.risk.thirdPartyContent": "Exposure to third-party content",
+  "external.risk.unverifiableDependencies": "Unverifiable dependencies",
+  "external.risk.systemServices": "Changes system services",
+  "external.risk.missingSkillMd": "No SKILL.md",
+  "external.excerpt.malicious": "Malicious URL",
+  "external.excerpt.unverifiable": "Unverifiable URL",
+  "external.skill.action": "Scan with Snyk",
+  "external.skill.actionAria": "Scan with Snyk: {name}",
+  "external.skill.title": "Snyk Agent Scan: {name}",
+  "external.skill.note": "The skill's store copy is sent to Snyk's analysis service. This scan is a report; nothing changes.",
+  "external.skill.close": "Close",
+  "scan.gate.externalDescription":
+    "Snyk Agent Scan rated this content dangerous. Nothing is installed unless you choose Install anyway, and you should only do that if you trust this content and its author.",
+  "scan.gate.externalUpdateDescription":
+    "Snyk Agent Scan rated the new version dangerous. Nothing changes unless you choose Update anyway, and you should only do that if you trust this content and its author.",
+  "scan.gate.bothDescription":
+    "Loadout's built-in scan and Snyk Agent Scan both rated this content dangerous. Nothing is installed unless you choose Install anyway, and you should only do that if you trust this content and its author.",
+  "scan.gate.bothUpdateDescription":
+    "Loadout's built-in scan and Snyk Agent Scan both rated the new version dangerous. Nothing changes unless you choose Update anyway, and you should only do that if you trust this content and its author.",
+  /* end M49 */
 } as const;
 
 export type MessageKey = keyof typeof messages;
@@ -1977,16 +2130,39 @@ const errorMessages: Record<ErrorCode, string> = {
   update_failed: "The update could not be checked or installed. Loadout keeps working as it is.",
   read_only_target: "This file or folder is read only for your account; Loadout left it as it is.",
   scan_blocked:
-    "Loadout's built-in scan found dangerous content. Nothing was installed or updated; review the findings, and install anyway only if you trust it.",
+    "A scan (Loadout's built-in scan or Snyk Agent Scan) found dangerous content. Nothing was installed or updated; review the findings, and install anyway only if you trust it.",
   checkout_out_of_date:
     "This server's local copy of its repository is out of date: restore it from the server's details on the MCP page.",
   folder_on_other_machine: "This server was added from a folder on another machine; it does not run here.",
   catalogs_off: "Online catalogs are off, so nothing was contacted. Turn them on in Settings > Catalogs.",
   catalog_unreachable: "A catalog could not be reached or answered with an error.",
+  scanner_unavailable: "Snyk Agent Scan is off. Turn it on in Settings > Security.",
+  scanner_download_failed: "Snyk Agent Scan could not be downloaded. Nothing was installed; try again later.",
+  scanner_verification_failed:
+    "The downloaded scanner didn't match the build pinned in Loadout, so it was deleted. Nothing was installed.",
+  canceled: "Canceled; nothing was changed.",
+  external_scan_required:
+    "Snyk Agent Scan is on but hasn't scanned this content yet. Nothing was installed or updated; wait for the scan in the review (or choose Scan again), then try again.",
 };
 
 export function errorMessage(code: ErrorCode): string {
   return errorMessages[code];
+}
+
+/** The core's one sentence for a missing Git (`remote::git::git_not_found`). */
+const GIT_NOT_FOUND = "Git isn't installed or isn't on PATH;";
+
+/** True for the core's Git-missing error, not for a Git that exists but failed to start. */
+export function isGitNotFound(error: { code: ErrorCode; message: string }): boolean {
+  return error.code === "tool_not_found" && error.message.startsWith(GIT_NOT_FOUND);
+}
+
+/** An IPC error as one sentence. The Git-missing message already names
+ * Git, so it is shown instead of the generic text, never after it; any
+ * other error (including another missing program, whose message is
+ * diagnostic English) keeps its generic sentence. */
+export function failureSentence(error: { code: ErrorCode; message: string }): string {
+  return isGitNotFound(error) ? error.message : errorMessage(error.code);
 }
 
 export const platformLabels: Record<Platform, string> = {

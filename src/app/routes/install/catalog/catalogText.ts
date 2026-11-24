@@ -4,7 +4,7 @@
 
 import { onlineManager } from "@tanstack/react-query";
 import { storeQueryKeys } from "@/app/apply/changeNotice";
-import { errorMessage, t, type MessageKey } from "@/i18n/en";
+import { errorMessage, failureSentence, isGitNotFound, t, type MessageKey } from "@/i18n/en";
 import type {
   CatalogEntry,
   CatalogEntryDetail,
@@ -84,9 +84,22 @@ export function pinningText(entry: CatalogEntry): string {
   return followed ? t("catalog.pin.branch", { ref: followed }) : t("catalog.pin.none");
 }
 
-/** The ipc error's sentence, with the backend's detail after it. */
+/**
+ * The ipc error's sentence, with the backend's detail after it. A missing program's detail is diagnostic
+ * text ("cannot run git: ..."), so it gets its sentence only: the Git-missing one or the generic one.
+ */
 export function ipcErrorText(error: IpcError): string {
+  if (error.code === "tool_not_found") {
+    return failureSentence(error);
+  }
   return error.message ? t("catalog.status.errorDetail", { reason: errorMessage(error.code), detail: error.message }) : errorMessage(error.code);
+}
+
+/** Git missing for a Git catalog (#29): a neutral notice with a troubleshooting link, not a red error. */
+function gitMissingLine(error: IpcError | null): StatusLine | null {
+  return error && isGitNotFound(error)
+    ? { tone: "neutral", text: t("catalog.status.gitMissing"), help: "git_missing" }
+    : null;
 }
 
 function isTimeout(error: IpcError | null): boolean {
@@ -98,7 +111,8 @@ function isOffline(): boolean {
   return !onlineManager.isOnline();
 }
 
-export type StatusLine = { tone: "neutral" | "positive" | "warning" | "danger"; text: string };
+/** `help` names a troubleshooting entry the section links to. */
+export type StatusLine = { tone: "neutral" | "positive" | "warning" | "danger"; text: string; help?: "git_missing" };
 
 /** One catalog's search status, as its section says it. */
 export function statusLine(title: string, results: CatalogResults): StatusLine {
@@ -134,7 +148,11 @@ export function statusLine(title: string, results: CatalogResults): StatusLine {
       return { tone: "neutral", text: t("catalog.status.tooShort") };
     case "link":
       return { tone: "neutral", text: t("catalog.status.link") };
-    case "error":
+    case "error": {
+      const gitMissing = isOffline() ? null : gitMissingLine(results.error);
+      if (gitMissing) {
+        return gitMissing;
+      }
       return {
         tone: "danger",
         text: isOffline()
@@ -146,6 +164,7 @@ export function statusLine(title: string, results: CatalogResults): StatusLine {
                 error: results.error ? ipcErrorText(results.error) : t("app.error.unknown"),
               }),
       };
+    }
   }
 }
 
@@ -155,6 +174,10 @@ export function failureLine(title: string, failure: unknown): StatusLine {
     return { tone: "danger", text: t("catalog.status.offline", { catalog: title }) };
   }
   const error = failure instanceof IpcFailure ? { code: failure.code, message: failure.message } : null;
+  const gitMissing = gitMissingLine(error);
+  if (gitMissing) {
+    return gitMissing;
+  }
   if (isTimeout(error)) {
     return { tone: "danger", text: t("catalog.status.timedOut", { catalog: title }) };
   }

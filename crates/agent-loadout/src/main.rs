@@ -3,6 +3,7 @@
 
 mod cmd;
 mod exec;
+mod interrupt;
 mod keyring;
 
 use std::ffi::OsString;
@@ -52,6 +53,9 @@ enum Command {
     Source(cmd::source::SourceArgs),
     /// Catalogs of MCP servers and skills: list, add, search, show.
     Catalog(cmd::catalog::CatalogArgs),
+    /// Scanners: the built-in scanner and the optional Snyk Agent Scan
+    /// (install, turn on or off, token reference, run).
+    Scanner(cmd::scanner::ScannerArgs),
     /// Project manifests: create, register, trust, share, list, forget.
     Project(cmd::project::ProjectArgs),
     /// List store commits.
@@ -147,6 +151,7 @@ fn run(cli: &Cli) -> Result<u8, CoreError> {
         Command::Agent(args) => cmd::agent::run(&context()?, args),
         Command::Source(args) => cmd::source::run(&context()?, args),
         Command::Catalog(args) => cmd::catalog::run(&context()?, args),
+        Command::Scanner(args) => cmd::scanner::run(&context()?, args),
         Command::History(args) => done(cmd::history::run(&context()?, args)),
         Command::Status(args) => cmd::status::run(&context()?, args),
         Command::Diff(args) => cmd::diff::run(&context()?, args),

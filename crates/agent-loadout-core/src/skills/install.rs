@@ -19,8 +19,10 @@ use crate::model::clients::ClientSelection;
 use crate::model::ids::{self, IdKind};
 use crate::model::settings::NewItemEnable;
 use crate::model::skill_meta::{SkillEnable, SkillMeta, SkillSource, SkillSourceKind};
-use crate::remote::git::{Invocation, RunOutput, locate};
+use crate::remote::git::{Invocation, RunOutput, git_not_found, locate};
+use crate::scan::external::{self, ExternalReport};
 use crate::scan::{self, ScanReport, Scanner};
+use crate::skills::content_hash;
 use crate::skills::link::{SyncReport, sync};
 use crate::skills::store::{self, content_dir, missing_skill_file, not_found};
 use crate::skills::{
@@ -150,6 +152,12 @@ pub struct Decisions {
     pub moved_trust: Option<TrustGrant>,
     /// Where those answers were given; recorded with "always trust".
     pub via: TrustVia,
+    /// The external scanner's report (#27) on the content an update
+    /// writes, from the update review: a `dangerous` verdict needs
+    /// [`Decisions::allow_dangerous`] like a built-in one. It must be of
+    /// exactly the content written (`entry_changed` otherwise). Installs
+    /// carry theirs on the [`Prepared`] ([`Prepared::set_external`]).
+    pub external: Option<ExternalReport>,
 }
 
 /// An install.
@@ -202,6 +210,8 @@ pub struct Installed {
     pub warnings: Vec<CoreError>,
     /// The built-in scan of the installed content (SPEC 17).
     pub scan: ScanReport,
+    /// The external scanner's report the install was gated on (#27).
+    pub external: Option<ExternalReport>,
 }
 
 /// The content to commit and where it came from.
@@ -228,6 +238,8 @@ pub struct Prepared {
     fetched: Fetched,
     name: String,
     scan: ScanReport,
+    /// The external scanner's report on the same files (#27).
+    external: Option<ExternalReport>,
     /// Installed: another [`install_prepared`] is refused.
     spent: bool,
     /// The source the user asked for, which the trust gate admits (git
@@ -259,6 +271,17 @@ impl Prepared {
     /// The built-in scan of [`Prepared::files`].
     pub fn scan(&self) -> &ScanReport {
         &self.scan
+    }
+
+    /// Attaches the external scanner's report on [`Prepared::files`] (#27):
+    /// [`install_prepared`] then gates on it too.
+    pub fn set_external(&mut self, report: Option<ExternalReport>) {
+        self.external = report;
+    }
+
+    /// The attached external report.
+    pub fn external(&self) -> Option<&ExternalReport> {
+        self.external.as_ref()
     }
 
     /// The source the trust gate admits (#24): a git source's repository
@@ -329,6 +352,7 @@ pub fn prepare(sx: &SkillsEnv<'_>, request: &InstallRequest) -> Result<Prepared,
         fetched,
         name,
         scan,
+        external: None,
         spent: false,
         trust_source: requested,
         moved_to,
@@ -365,8 +389,12 @@ pub fn install_prepared(
         decisions,
     )?;
     scan::gate(&prepared.scan, decisions.allow_dangerous)?;
+    if let Some(report) = &prepared.external {
+        external::gate(report, decisions.allow_dangerous)?;
+    }
     let mut installed =
         commit_install(store, sx, naming, &prepared.fetched, prepared.scan.clone())?;
+    installed.external = prepared.external.clone();
     // Committed: the review is spent even if what follows fails, so a
     // retry never installs a second copy.
     prepared.spent = true;
@@ -551,6 +579,7 @@ fn commit_install(
         report,
         warnings,
         scan,
+        external: None,
     })
 }
 
@@ -806,12 +835,8 @@ fn sources_dir(sx: &SkillsEnv<'_>) -> PathBuf {
 /// Git on `PATH`. Program lookup reads the real file system, as the
 /// programs live outside any confined view (a test's temp root).
 pub(crate) fn git_path(sx: &SkillsEnv<'_>) -> Result<PathBuf, CoreError> {
-    locate(sx.env, &crate::fs::RealFs).ok_or_else(|| {
-        CoreError::new(
-            ErrorCode::ToolNotFound,
-            "git is not installed or not on PATH; git skill sources need it",
-        )
-    })
+    locate(sx.env, &crate::fs::RealFs)
+        .ok_or_else(|| git_not_found("Git skill sources, MCP servers from Git, and Git catalogs"))
 }
 
 /// Git's repository-local variables, dropped so an inherited `GIT_DIR`
@@ -1708,6 +1733,8 @@ pub struct Updated {
     pub report: SyncReport,
     /// The built-in scan of the new content (SPEC 17).
     pub scan: ScanReport,
+    /// The external scanner's report the update was gated on (#27).
+    pub external: Option<ExternalReport>,
 }
 
 /// Updates a git skill: the source's latest content replaces the store
@@ -1807,6 +1834,18 @@ fn commit_update(
     }
     let scan = Scanner::new(sx.fs, sx.home).scan_files(&files);
     scan::gate(&scan, decisions.allow_dangerous)?;
+    if let Some(report) = &decisions.external {
+        if report.content_hash.as_deref() != Some(content_hash(&files).as_str()) {
+            return Err(CoreError::new(
+                ErrorCode::EntryChanged,
+                format!(
+                    "the source of skill {id:?} changed since the external scan; check for \
+                     updates again"
+                ),
+            ));
+        }
+        external::gate(report, decisions.allow_dangerous)?;
+    }
     let stored = store::read_content(store, id)?;
     let changes = changes(&stored, &files);
     let short = &commit[..commit.len().min(7)];
@@ -1842,5 +1881,6 @@ fn commit_update(
         commit: committed.commit,
         report,
         scan,
+        external: decisions.external.clone(),
     })
 }

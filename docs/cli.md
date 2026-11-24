@@ -50,6 +50,15 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout catalog search`](#loadout-catalog-search)
   - [`loadout catalog show`](#loadout-catalog-show)
   - [`loadout catalog refresh`](#loadout-catalog-refresh)
+- [`loadout scanner`](#loadout-scanner)
+  - [`loadout scanner ls`](#loadout-scanner-ls)
+  - [`loadout scanner status`](#loadout-scanner-status)
+  - [`loadout scanner install`](#loadout-scanner-install)
+  - [`loadout scanner remove`](#loadout-scanner-remove)
+  - [`loadout scanner enable`](#loadout-scanner-enable)
+  - [`loadout scanner disable`](#loadout-scanner-disable)
+  - [`loadout scanner token`](#loadout-scanner-token)
+  - [`loadout scanner run`](#loadout-scanner-run)
 - [`loadout project`](#loadout-project)
   - [`loadout project init`](#loadout-project-init)
   - [`loadout project add`](#loadout-project-add)
@@ -114,6 +123,7 @@ Commands:
   agent          The read-only Loadout skill for coding agents: install, remove, status, skill-path
   source         Trusted and blocked install sources: list, trust, block, untrust
   catalog        Catalogs of MCP servers and skills: list, add, search, show
+  scanner        Scanners: the built-in scanner and the optional Snyk Agent Scan (install, turn on or off, token reference, run)
   project        Project manifests: create, register, trust, share, list, forget
   history        List store commits
   status         Show the state of every owned and desired entry
@@ -473,6 +483,12 @@ Options:
       --allow-dangerous
           Install even when the built-in scan finds dangerous content (review the findings first)
 
+      --external
+          Also run Snyk Agent Scan on it this time (sends the skill to Snyk), even when it is turned off
+
+      --no-external
+          Do not run Snyk Agent Scan this time, even when it is turned on
+
       --trust-source[=<ONCE|REPO|OWNER|HOST>]
           Trust the git source without the prompt: once (this install only), or always for the repo, its owner or its host (`--trust-source=repo`; the value needs the `=`). Only for a source you trust: skills can run commands and read your files. --yes never answers the trust prompt
 
@@ -577,6 +593,12 @@ Options:
 
       --yes
           Answer yes to confirmations (rolling back an older apply run)
+
+      --external
+          Also run Snyk Agent Scan on each available update this time (sends the new content to Snyk), even when it is turned off
+
+      --no-external
+          Do not run Snyk Agent Scan this time, even when it is turned on
 
       --trust-source[=<ONCE|REPO|OWNER|HOST>]
           Trust the git sources without the prompt: once (this update only), or always for the repo, its owner or its host (`--trust-source=repo`; the value needs the `=`, so `--trust-source repo` updates the skill `repo` once)
@@ -1027,6 +1049,150 @@ Usage: loadout catalog refresh [OPTIONS] [ID]
 
 Arguments:
   [ID]  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner`
+
+```text
+Scanners: the built-in scanner and the optional Snyk Agent Scan (install, turn on or off, token reference, run)
+
+Usage: loadout scanner [OPTIONS] <COMMAND>
+
+Commands:
+  ls       List the scanners: the built-in scanner (always on) and Snyk Agent Scan (optional)
+  status   Show Snyk Agent Scan on this machine: version, installed, on or off, the token reference, and what it sends to Snyk
+  install  Download the pinned Snyk Agent Scan build into the data directory and verify its SHA-256. Installing does not turn it on
+  remove   Delete the installed scanner and turn it off (the token reference is kept)
+  enable   Run Snyk Agent Scan on skill installs and updates. It sends each skill to Snyk's analysis API: see `loadout scanner status`
+  disable  Stop running Snyk Agent Scan; nothing is sent to Snyk
+  token    Show, set or clear the token reference: a secret alias (see `loadout secrets`) or env:NAME, keyring://SERVICE/ACCOUNT or op://VAULT/ITEM/FIELD. Never the token itself
+  run      Scan a library skill (its store content) with Snyk Agent Scan now; reports only. Sends the skill to Snyk
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner ls`
+
+```text
+List the scanners: the built-in scanner (always on) and Snyk Agent Scan (optional)
+
+Usage: loadout scanner ls [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner status`
+
+```text
+Show Snyk Agent Scan on this machine: version, installed, on or off, the token reference, and what it sends to Snyk
+
+Usage: loadout scanner status [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner install`
+
+```text
+Download the pinned Snyk Agent Scan build into the data directory and verify its SHA-256. Installing does not turn it on
+
+Usage: loadout scanner install [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner remove`
+
+```text
+Delete the installed scanner and turn it off (the token reference is kept)
+
+Usage: loadout scanner remove [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner enable`
+
+```text
+Run Snyk Agent Scan on skill installs and updates. It sends each skill to Snyk's analysis API: see `loadout scanner status`
+
+Usage: loadout scanner enable [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner disable`
+
+```text
+Stop running Snyk Agent Scan; nothing is sent to Snyk
+
+Usage: loadout scanner disable [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner token`
+
+```text
+Show, set or clear the token reference: a secret alias (see `loadout secrets`) or env:NAME, keyring://SERVICE/ACCOUNT or op://VAULT/ITEM/FIELD. Never the token itself
+
+Usage: loadout scanner token [OPTIONS] [REFERENCE]
+
+Arguments:
+  [REFERENCE]  The reference to use
+
+Options:
+      --clear        Clear the reference
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner run`
+
+```text
+Scan a library skill (its store content) with Snyk Agent Scan now; reports only. Sends the skill to Snyk
+
+Usage: loadout scanner run [OPTIONS] <ID>
+
+Arguments:
+  <ID>  Skill id
 
 Options:
       --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default

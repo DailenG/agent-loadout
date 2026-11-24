@@ -8,6 +8,77 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Added
+
+- Snyk Agent Scan from the command line (#27): `loadout scanner
+  ls|status|install|remove|enable|disable|token|run` and `--external` /
+  `--no-external` on `skills add` and `skills update`. `install` downloads
+  the pinned v0.7.1 build from GitHub and checks it against SHA-256 values
+  compiled into Loadout (a tampered download is deleted); `token` takes a
+  secret alias or `env:`/`keyring://`/`op://` reference, never the token,
+  which reaches the scanner only in its environment. Each run is bounded
+  (60 s, the whole process tree killed on timeout or cancel), never passes
+  `--dangerously-run-mcp-servers`, and is reported as `Snyk Agent Scan:
+  <verdict>` (or `not scanned (<reason>)`) beside the built-in scan; a
+  dangerous verdict needs `--allow-dangerous` (exit 8). New error codes
+  `scanner_unavailable`, `scanner_download_failed`,
+  `scanner_verification_failed`, `canceled` and `external_scan_required`
+  (the app refuses an install from a source, or an update, while the
+  scanner is on and its scan has not run). Hardening from the review: the
+  installed scanner is hashed before each command runs it (a changed file
+  counts as not installed and is downloaded again); a pasted token is
+  refused and never echoed (an alias must be a defined secret); the
+  scanner unpacks into its run folder, not your temp folder; leftover run
+  folders and partial downloads are cleaned up; Ctrl+C stops a running
+  scan; turning the scanner off (or removing it, which now also turns it
+  off) cancels scans in progress; an untrusted or blocked git source is
+  never sent to Snyk; a crash with no output is "failed" (or "token
+  rejected"), not "no token".
+
+- Settings > Security > **Snyk Agent Scan (optional)** (#27): an optional
+  second scanner for skills, off by default. The section says in plain
+  words what it does and when (as soon as an install or update review
+  opens), that skills are sent to Snyk's cloud (`api.snyk.io`, with links
+  to Snyk's terms and privacy policy) and exactly what is sent (the
+  skill's files with detected secrets redacted, its name, the scanned
+  folder's path, your user name, the machine's host name where the
+  scanner's platform reports one, the scanner version), that it needs a
+  Snyk token and that the free tier has a daily limit. **Install**
+  downloads the pinned version with a progress bar and **Cancel** (kept
+  when you leave Settings; no second install meanwhile) and shows the
+  verified version; **Remove** asks first (Cancel is the default) and
+  turns it off. The token is a secret reference (a Secrets page alias, an
+  environment variable, 1Password or the OS keyring), never a value;
+  aliases to a 1Password Environment aren't offered, and the dialog says
+  why Save is off. **Use Snyk Agent Scan** stays off until it's installed
+  and a token is set.
+- When it's on, the skill install and update reviews show an **External
+  scan** section beside the built-in findings: Snyk's verdict and findings
+  (severity from Snyk's score, risk, `file:line`, malicious or
+  unverifiable URLs), a running state with **Cancel scan**, and "Not
+  scanned (<reason>)" or "Scanner output not understood" when it couldn't
+  scan, with **Scan again**. Content from a source is scanned as the
+  review opens; a folder or archive from this computer only through **Scan
+  with Snyk**. Install / Update waits while the scanner's status loads or
+  the scan runs. A dangerous external verdict needs **Install anyway** /
+  **Update anyway** like the built-in scan, and the box names which
+  scanner(s) found it; not-scanned results never block. The run and its
+  result are announced to screen readers. A library skill's details offer
+  **Scan with Snyk** (a report only).
+
+### Fixed
+
+- Without Git installed, Install > Browse no longer shows each Git catalog
+  as a red error with the same words twice (#29). It says, in neutral
+  styling, "Git isn't installed, so Git catalogs can't be searched.
+  Install Git to use them.", with **How to fix this** (opens the new
+  troubleshooting entry) and **Try again**. The missing-Git message is now
+  one sentence everywhere: skills from Git, MCP servers from Git and Git
+  remotes say "Git isn't installed or isn't on PATH; install Git to use
+  ..." instead of the generic "A required program is not installed or not
+  on PATH." text. A Git that exists but fails to start, and other missing
+  programs, keep the generic sentence (never the diagnostic detail).
+
 ## [0.6.0] - 2026-11-24
 
 ### Added

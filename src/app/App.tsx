@@ -37,6 +37,7 @@ import { UnmanagedNotice, UnmanagedNoticeSetting } from "@/app/routes/import/Unm
 import { MigrateSection } from "@/app/routes/migrate/MigrateSection";
 import { AgentSection, useAgentSkillStartup } from "@/app/routes/settings/agent/AgentSection";
 import { SecretsSection } from "@/app/routes/settings/secrets/SecretsSection";
+import { SecuritySection } from "@/app/routes/settings/security/SecuritySection";
 import { SourcesSection } from "@/app/routes/settings/sources/SourcesSection";
 import { CatalogsSection } from "@/app/routes/settings/catalogs/CatalogsSection";
 import { SkillsPage } from "@/app/routes/skills/SkillsPage";
@@ -673,6 +674,7 @@ function SettingsPage(props: {
       <MigrateSection onOpenImport={props.onOpenImport} />
       <SecretsSection onOpenPending={props.onOpenPending} />
       <SourcesSection />
+      <SecuritySection />
       <CatalogsSection />
       <AgentSection />
       <UpdatesSection />

@@ -110,6 +110,7 @@ fn state() -> AppState {
         core: Err(CoreError::new(ErrorCode::NotFound, "no core in this test")),
         picked: Mutex::new(HashMap::new()),
         reviews: Mutex::new(Reviews::default()),
+        scanner: Default::default(),
     }
 }
 

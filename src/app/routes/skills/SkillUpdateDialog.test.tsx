@@ -91,6 +91,8 @@ describe("SkillUpdateDialog", () => {
       },
     });
     expect(screen.getByText("Its history was rewritten (a force-push) since the last fetch.")).toBeInTheDocument();
+    // Update waits until Loadout knows whether Snyk Agent Scan is on (M49 review F6).
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Update" }));
     const trust = await screen.findByRole("alertdialog", { name: "Trust this source?" });
     await user.click(within(trust).getByRole("radio", { name: "Always trust github.com/acme/skills" }));

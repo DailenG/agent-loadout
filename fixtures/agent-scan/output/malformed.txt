@@ -1,0 +1,1 @@
+{"scan_path_responses":[{"client":"<skill>","path":"~/skill","skill_risks":[{"name":"release-helper","risk_indexes":{"malicious_code":{"sco

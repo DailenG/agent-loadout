@@ -610,6 +610,42 @@ fn tool_homepages_come_from_the_fixed_table() {
     }
 }
 
+/// Browse links the missing-Git troubleshooting entry (#29); `open_help`
+/// opens only table URLs, and the anchor matches the docs heading.
+#[test]
+fn help_pages_come_from_the_fixed_table() {
+    let url = tools::help_page("git_missing").unwrap();
+    let anchor = url.rsplit_once('#').unwrap().1;
+    let docs = include_str!("../../../docs/troubleshooting.md");
+    let heading = docs
+        .lines()
+        .find(|line| line.starts_with("### Git isn't installed"))
+        .expect("the troubleshooting entry");
+    let slug: String = heading
+        .trim_start_matches('#')
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-')
+        .map(|c| if c == ' ' { '-' } else { c })
+        .collect();
+    assert_eq!(anchor, slug);
+    assert_eq!(
+        tools::help_page("snyk_terms").unwrap(),
+        "https://github.com/snyk/agent-scan/blob/v0.7.1/TERMS.md"
+    );
+    assert_eq!(
+        tools::help_page("snyk_privacy").unwrap(),
+        "https://snyk.io/policies/privacy/"
+    );
+    for refused in ["nope", "https://example.com", ""] {
+        assert_eq!(
+            tools::help_page(refused).unwrap_err().code(),
+            agent_loadout_core::ErrorCode::InvalidValue
+        );
+    }
+}
+
 /// The pills, the Preview tab and a pill toggle use the core's rule: a
 /// client forced on in `clients.toml` counts although it is not detected,
 /// and a client whose transports do not fit never counts.

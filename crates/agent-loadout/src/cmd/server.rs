@@ -538,6 +538,7 @@ fn decisions(answer: Answer, moved: Option<Answer>, allow_dangerous: bool) -> De
         trust,
         moved_trust: moved.and_then(|moved| moved.grant().0),
         via,
+        external: None,
     }
 }
 

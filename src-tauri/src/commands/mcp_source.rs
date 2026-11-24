@@ -700,6 +700,7 @@ fn decisions(
         trust,
         moved_trust: sources::grant_of(moved_trust).0,
         via,
+        external: None,
     }
 }
 

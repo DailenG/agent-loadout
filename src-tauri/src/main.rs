@@ -8,6 +8,7 @@
 mod commands;
 
 use agent_loadout_core::brand;
+use commands::scanner::ScannerInstallProgress;
 use commands::watch::{DriftWatch, TargetsChanged};
 use tauri::Manager;
 use tauri_specta::{Builder, ErrorHandlingMode, Event, collect_commands, collect_events};
@@ -49,6 +50,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::tools::list_tools,
             commands::tools::reveal_tool_folder,
             commands::tools::open_tool_homepage,
+            commands::tools::open_help,
             commands::projects::list_projects,
             commands::projects::pick_project_folder,
             commands::projects::add_project,
@@ -116,6 +118,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::catalogs::review_catalog_mcp,
             commands::catalogs::review_catalog_skill,
             commands::catalogs::open_catalog_link,
+            commands::scanner::scanner_status,
+            commands::scanner::install_scanner,
+            commands::scanner::remove_scanner,
+            commands::scanner::set_scanner_enabled,
+            commands::scanner::set_scanner_token,
+            commands::scanner::check_scanner_token,
+            commands::scanner::external_scan_review,
+            commands::scanner::external_scan_update,
+            commands::scanner::external_scan_skill,
+            commands::scanner::cancel_external_scan,
             commands::skills::list_skills,
             commands::skills::list_skill_tool_dirs,
             commands::skills::pick_skill_source,
@@ -165,7 +177,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::import::new_unmanaged,
             commands::import::acknowledge_unmanaged,
         ])
-        .events(collect_events![TargetsChanged])
+        .events(collect_events![TargetsChanged, ScannerInstallProgress])
         .error_handling(ErrorHandlingMode::Result)
         // One TypeScript type per Rust type: the IPC types serialize and
         // deserialize alike, so the `_Serialize`/`_Deserialize` split adds

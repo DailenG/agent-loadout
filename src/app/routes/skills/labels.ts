@@ -1,7 +1,7 @@
 // Catalog keys of the Skills page enums, and the text of a change's link
 // notes (SPEC 12.2 statuses).
 
-import { errorMessage, t, type MessageKey } from "@/i18n/en";
+import { failureSentence, t, type MessageKey } from "@/i18n/en";
 import type {
   SkillEntryClass,
   SkillFileChangeKind,
@@ -59,7 +59,7 @@ export const CHANGE_KIND_KEYS = {
 } as const satisfies Record<SkillFileChangeKind, MessageKey>;
 
 export function failureText(error: unknown) {
-  return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
+  return error instanceof IpcFailure ? failureSentence(error) : t("app.error.unknown");
 }
 
 const ATTENTION: SkillLinkStatus[] = ["foreign", "collision", "changed", "blocked"];

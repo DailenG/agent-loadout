@@ -1,15 +1,18 @@
-// The install review (M40, M42): what a git repository or a picked folder
+// The install review (M40, M42, M49): what a git repository or a picked folder
 // would install, before anything reaches the store. It shows the source
-// and its trust state, the files and the built-in scan's findings. Install
-// asks the trust question when the source needs it (M39), and a dangerous
-// verdict is installed only through "Install anyway" (M40).
+// and its trust state, the files, the built-in scan's findings and, when
+// the user turned it on, Snyk Agent Scan's. Install asks the trust question
+// when the source needs it (M39), and a dangerous verdict of either scan is
+// installed only through "Install anyway" (M40, M47).
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ExternalScanSection, gateDescription, isExternalDangerous, useReviewScan } from "@/app/components/ExternalScan";
 import { DangerousGate, isDangerous, ScanFindings } from "@/app/components/ScanFindings";
 import { TrustSummary } from "@/app/components/TrustDialog";
 import { SettingsDialog } from "@/app/routes/settings/SettingsDialog";
 import { errorMessage, t } from "@/i18n/en";
 import type { SkillInstallReview } from "@/ipc/bindings";
+import { useTransport } from "@/ipc/transport";
 import { formatSize } from "../skills/labels";
 
 export type SkillReviewDialogProps = {
@@ -23,8 +26,20 @@ export type SkillReviewDialogProps = {
 };
 
 export function SkillReviewDialog({ review, origin = null, isInstalling, onInstall, onClose }: SkillReviewDialogProps) {
+  const { commands } = useTransport();
+  // Content fetched from a source is scanned as soon as the review opens; a folder or archive from this
+  // computer only on request (review F2).
+  const external = useReviewScan((runId) => commands.externalScanReview(review.token, runId), review.source.kind !== "local");
+  const shown = external.shown;
   const [acknowledged, setAcknowledged] = useState(false);
-  const dangerous = isDangerous(review.scan);
+  // The acknowledgement covers the scans shown: a new external result asks again.
+  useEffect(() => setAcknowledged(false), [shown]);
+  const builtinDangerous = isDangerous(review.scan);
+  const externalDangerous = isExternalDangerous(shown);
+  const dangerous = builtinDangerous || externalDangerous;
+  const actionNote = dangerous
+    ? t("external.live.confirm", { action: t("install.review.installAnyway") })
+    : t("external.live.available", { action: t("install.review.install") });
   const blocked = review.trust?.state.kind === "blocked" || review.movedTrust?.state.kind === "blocked";
   const source = review.source;
   const commit = source.commit?.slice(0, 7) ?? null;
@@ -52,7 +67,7 @@ export function SkillReviewDialog({ review, origin = null, isInstalling, onInsta
             <button
               className="secondary-button secondary-button--compact danger-button"
               type="button"
-              disabled={!acknowledged || isInstalling || blocked}
+              disabled={!acknowledged || isInstalling || blocked || external.busy}
               onClick={() => onInstall(true)}
             >
               {isInstalling ? t("install.review.installing") : t("install.review.installAnyway")}
@@ -61,7 +76,7 @@ export function SkillReviewDialog({ review, origin = null, isInstalling, onInsta
             <button
               className="primary-button primary-button--compact"
               type="button"
-              disabled={isInstalling || blocked}
+              disabled={isInstalling || blocked || external.busy}
               onClick={() => onInstall(false)}
             >
               {isInstalling ? t("install.review.installing") : t("install.review.install")}
@@ -96,7 +111,14 @@ export function SkillReviewDialog({ review, origin = null, isInstalling, onInsta
         {review.movedTrust ? <TrustSummary info={review.movedTrust} label={t("trust.summary.moved")} /> : null}
         {blocked ? <p className="dialog-error" role="alert">{errorMessage("source_blocked")}</p> : null}
         <ScanFindings scan={review.scan} />
-        {dangerous ? <DangerousGate acknowledged={acknowledged} onChange={setAcknowledged} /> : null}
+        {external.phase !== "off" ? <ExternalScanSection review={external} actionNote={actionNote} /> : null}
+        {dangerous ? (
+          <DangerousGate
+            acknowledged={acknowledged}
+            onChange={setAcknowledged}
+            description={gateDescription(builtinDangerous, externalDangerous, "install")}
+          />
+        ) : null}
         <section className="source-review__files" aria-label={t("install.review.files")}>
           <h4>{t("install.review.filesCount", { count: review.files.length })}</h4>
           <ul>

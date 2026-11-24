@@ -16,7 +16,7 @@ import { Modal } from "@/app/components/Modal";
 import { DangerousGate, isDangerous, ScanFindings } from "@/app/components/ScanFindings";
 import { TrustSummary, useTrustPrompt } from "@/app/components/TrustDialog";
 import { useNotifications } from "@/app/components/notifications";
-import { errorMessage, platformLabels, t, type MessageKey } from "@/i18n/en";
+import { errorMessage, failureSentence, platformLabels, t, type MessageKey } from "@/i18n/en";
 import type {
   ClientChoice,
   ClientInfo,
@@ -42,7 +42,7 @@ const KIND_LABELS: Record<McpDraftKind, MessageKey> = {
 };
 
 function failureText(error: unknown): string {
-  return error instanceof IpcFailure ? errorMessage(error.code) : t("app.error.unknown");
+  return error instanceof IpcFailure ? failureSentence(error) : t("app.error.unknown");
 }
 
 /** Empty text is "not given". */

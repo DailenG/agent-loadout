@@ -271,6 +271,11 @@ function CatalogSection({ catalog, query, online, onOpen }: SectionProps) {
     mutationFn: async () => unwrap(await commands.refreshCatalog(catalog.id)),
     onSettled: () => queryClient.resetQueries({ queryKey: [...catalogQueryKeys.search, catalog.id] }),
   });
+  const { notify } = useNotifications();
+  const openHelp = useMutation({
+    mutationFn: async (topic: string) => unwrap(await commands.openHelp(topic)),
+    onError: (error) => notify({ tone: "error", message: failureText(error) }),
+  });
 
   const pages = search.data?.pages ?? [];
   const first = pages[0];
@@ -297,6 +302,16 @@ function CatalogSection({ catalog, query, online, onOpen }: SectionProps) {
         <p className={`catalog-status catalog-status--${line.tone}`} role="status">
           {line.text}
         </p>
+        {line.help === "git_missing" ? (
+          <button
+            className="secondary-button secondary-button--compact"
+            type="button"
+            aria-label={t("catalog.gitMissingHelpAria")}
+            onClick={() => openHelp.mutate("git_missing")}
+          >
+            {t("catalog.gitMissingHelp")}
+          </button>
+        ) : null}
         {canRetry ? (
           <button
             className="secondary-button secondary-button--compact"

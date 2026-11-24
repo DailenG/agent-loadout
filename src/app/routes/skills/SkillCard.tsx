@@ -18,6 +18,7 @@ import { DeleteIcon, PowerToggleIcon, RefreshIcon } from "../mcp/icons";
 import { useSkillActions } from "./actions";
 import { OpenFolderIcon, SkillMonogram, ViewFileIcon } from "./icons";
 import { formatSize, LINK_METHOD_KEYS, ORIGIN_KEYS, monogram } from "./labels";
+import { SkillExternalScanButton, SkillExternalScanDialog } from "./SkillExternalScan";
 import { SkillFileDialog, SkillUpdateDialog } from "./SkillFileDialog";
 import { ProjectSkillPanel, ToolSyncPanel } from "./ToolSyncPanel";
 
@@ -67,7 +68,7 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showEnabledTools, setShowEnabledTools] = useState(false);
-  const [dialog, setDialog] = useState<"files" | "update" | null>(null);
+  const [dialog, setDialog] = useState<"files" | "update" | "external" | null>(null);
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
   const [tagPosition, setTagPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -380,6 +381,7 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
             ))}
           </ul>
         ) : null}
+        <SkillExternalScanButton skill={skill} onOpen={() => setDialog("external")} />
       </section>
       {project ? (
         <ProjectSkillPanel skill={skill} project={project} clients={clients} />
@@ -676,6 +678,7 @@ export const SkillCard = memo(function SkillCard(props: SkillCardProps) {
           onClose={() => setDialog(null)}
         />
       ) : null}
+      {dialog === "external" ? <SkillExternalScanDialog skill={skill} onClose={() => setDialog(null)} /> : null}
     </>
   );
 });

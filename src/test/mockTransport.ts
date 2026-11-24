@@ -35,9 +35,13 @@ import type {
   McpUpdateCheck,
   TrustGrantArg,
   McpCheckoutReview,
+  ExternalScanResult,
+  ScannerInstallProgress,
+  ScanVerdict,
 } from "@/ipc/bindings";
 import type { CommandResult, Commands, Transport } from "@/ipc/transport";
 import { catalogCommands, defaultCatalogState, type CatalogMockState } from "@/test/catalogData";
+import { defaultScannerState, scannerCommands, type ScannerMockState } from "@/test/scannerData";
 
 export type MockTransportOptions = {
   appInfo?: AppInfo;
@@ -49,6 +53,8 @@ export type MockTransportOptions = {
   commands?: Partial<Commands>;
   /** Seeds the catalog mock (M45): online setting, catalogs, how each answers. */
   catalogs?: Partial<CatalogMockState>;
+  /** Seeds the external scanner mock (M47, M49): installed, switch, token reference, scan answers. */
+  scanner?: Partial<ScannerMockState>;
 };
 
 export type MockInvocation = {
@@ -213,6 +219,7 @@ export const MOCK_SKILL_INSTALLED: SkillInstalled = {
   links: null,
   warnings: [],
   scan: MOCK_SCAN_CLEAN,
+  external: null,
 };
 
 /** What `review_git_skill` / `review_local_skill` answer by default. */
@@ -337,8 +344,16 @@ export function mockAdoptResult(scan: UnmanagedSkills, choices: SkillAdoptChoice
   };
 }
 
+/** A scan the gates read: the built-in scan, or an external one that ran (`scanned`). */
+type GateScan = { verdict: ScanVerdict } | null;
+
 /** What a review or an update check asks of the install, save or update that follows it. */
-type MockGate = { trust: SourceTrustInfo | null; movedTrust: SourceTrustInfo | null; scans: (ScanResult | null)[] };
+type MockGate = { trust: SourceTrustInfo | null; movedTrust: SourceTrustInfo | null; scans: GateScan[] };
+
+/** An external scan as the gate sees it: only a scan that ran can block (M47). */
+function externalGateScan(result: ExternalScanResult): GateScan {
+  return result.status === "scanned" ? result : null;
+}
 
 /** The commands whose answers the mock remembers for the gates. */
 const RECORDED: Record<string, true> = {
@@ -351,6 +366,9 @@ const RECORDED: Record<string, true> = {
   checkSkillUpdates: true,
   checkMcpSourceUpdate: true,
   reviewMcpCheckout: true,
+  externalScanReview: true,
+  externalScanUpdate: true,
+  setScannerEnabled: true,
 };
 
 /**
@@ -392,6 +410,7 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
   const resizeListeners = new Set<() => void>();
   const focusListeners = new Set<() => void>();
   const targetListeners = new Set<() => void>();
+  const scannerListeners = new Set<(progress: ScannerInstallProgress) => void>();
   const subscribe = (listeners: Set<() => void>) => async (handler: () => void) => {
     listeners.add(handler);
     return () => {
@@ -407,9 +426,11 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
   const mcpChecks = new Map<string, MockGate>();
   const mcpCheckouts = new Map<string, MockGate>();
   const catalogState: CatalogMockState = { ...defaultCatalogState(), ...options.catalogs };
+  const scannerState: ScannerMockState = { ...defaultScannerState(), ...options.scanner };
 
   const defaults: Commands = {
     ...catalogCommands(catalogState, { mcp: MOCK_MCP_REVIEW, skill: MOCK_SKILL_REVIEW }),
+    ...scannerCommands(scannerState, (progress) => scannerListeners.forEach((listener) => listener(progress))),
     appInfo: async () => options.appInfo ?? MOCK_APP_INFO,
     dataHome: async () => options.dataHome ?? ok(MOCK_DATA_HOME),
     listServers: async () => ok(MOCK_SERVER_LIST),
@@ -442,6 +463,7 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     listTools: async () => ok(MOCK_TOOLS),
     revealToolFolder: async () => ok(null),
     openToolHomepage: async () => ok(null),
+    openHelp: async () => ok(null),
     scanImport: async () => ok({ candidates: [], warnings: [] }),
     applyImport: async () =>
       ok({
@@ -593,7 +615,16 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     skillUpdateDiff: async (_id, file) => ok({ path: file, before: "", after: "", binary: false }),
     updateSkill: async (id, _latest, allowDangerous, trust, movedTrust) =>
       gateRefusal(skillChecks.get(id), trust, movedTrust, allowDangerous) ??
-      ok({ id, from: null, to: "0000000", commit: MOCK_CHANGE.commit, changes: [], links: MOCK_SKILL_CHANGE.links, scan: MOCK_SCAN_CLEAN }),
+      ok({
+        id,
+        from: null,
+        to: "0000000",
+        commit: MOCK_CHANGE.commit,
+        changes: [],
+        links: MOCK_SKILL_CHANGE.links,
+        scan: MOCK_SCAN_CLEAN,
+        external: null,
+      }),
     listSkillFiles: async () => ok([]),
     readSkillFile: async (_id, file) => ok({ path: file, text: "", bytes: 0 }),
     revealSkillFolder: async () => ok(null),
@@ -624,20 +655,42 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
         calls.push(name as keyof Commands);
         invocations.push({ command: name as keyof Commands, args });
         const answer = (handler as (...rest: unknown[]) => unknown)(...args);
-        return name in RECORDED ? Promise.resolve(answer).then((result) => record(name, result)) : answer;
+        return name in RECORDED ? Promise.resolve(answer).then((result) => record(name, args, result)) : answer;
       },
     ]),
   ) as Commands;
 
-  /** Remembers what a review or check asked for; answers with the result unchanged. */
-  function record(name: string, result: unknown): unknown {
+  /**
+   * Remembers what a review or check asked for; answers with the result unchanged. An external scan
+   * joins the gate of the review (`token`) or update (`id`) it ran on, replacing an earlier run. As in the
+   * backend (M47, review F1), an update scan forgets the earlier report before it runs (so a failed run
+   * leaves none), and turning the scanner off forgets every external report.
+   */
+  function record(name: string, args: unknown[], result: unknown): unknown {
     const answered = result as CommandResult<unknown>;
+    if (name === "externalScanUpdate" || (name === "setScannerEnabled" && args[0] === false)) {
+      const forget = name === "setScannerEnabled" ? [...skillChecks.keys(), ...skillReviews.keys()] : [args[0] as string];
+      for (const key of forget) {
+        for (const gates of [skillChecks, skillReviews]) {
+          const gate = gates.get(key);
+          if (gate && (gates === skillChecks || name === "setScannerEnabled")) {
+            gates.set(key, { ...gate, scans: [gate.scans[0]] });
+          }
+        }
+      }
+    }
     if (answered.status !== "ok") {
       return result;
     }
     if (name === "reviewGitSkill" || name === "reviewLocalSkill" || name === "reviewCatalogSkill") {
       const review = answered.data as SkillInstallReview;
       skillReviews.set(review.token, { trust: review.trust, movedTrust: review.movedTrust, scans: [review.scan] });
+    } else if (name === "externalScanReview" || name === "externalScanUpdate") {
+      const gates = name === "externalScanReview" ? skillReviews : skillChecks;
+      const gate = gates.get(args[0] as string);
+      if (gate) {
+        gates.set(args[0] as string, { ...gate, scans: [gate.scans[0], externalGateScan(answered.data as ExternalScanResult)] });
+      }
     } else if (name === "reviewMcpGitSource" || name === "reviewMcpLocalSource" || name === "reviewCatalogMcp") {
       const review = answered.data as McpSourceReview;
       mcpReviews.set(review.token, review);
@@ -686,6 +739,12 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     },
     events: {
       onTargetsChanged: subscribe(targetListeners),
+      onScannerInstallProgress: async (handler) => {
+        scannerListeners.add(handler);
+        return () => {
+          scannerListeners.delete(handler);
+        };
+      },
     },
   };
 }

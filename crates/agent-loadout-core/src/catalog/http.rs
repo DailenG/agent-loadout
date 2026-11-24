@@ -79,7 +79,7 @@ fn var(env: &Env, names: &[&'static str]) -> Option<(&'static str, String)> {
 /// The proxy the first set of `names` gives, with the `NO_PROXY` hosts;
 /// `Err` (the reason) for a SOCKS proxy (ureq is built without SOCKS) or
 /// a value that does not parse.
-fn proxy(env: &Env, names: &[&'static str]) -> Result<Option<ureq::Proxy>, String> {
+pub(crate) fn proxy(env: &Env, names: &[&'static str]) -> Result<Option<ureq::Proxy>, String> {
     let Some((name, url)) = var(env, names) else {
         return Ok(None);
     };

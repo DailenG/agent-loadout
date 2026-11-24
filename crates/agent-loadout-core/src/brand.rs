@@ -24,6 +24,10 @@ pub const HOME_ENV_VAR: &str = "LOADOUT_HOME";
 /// instead of the OS keyring; release builds refuse keyring calls while it
 /// is set.
 pub const TEST_KEYRING_ENV_VAR: &str = "LOADOUT_TEST_KEYRING";
+/// Debug builds of the CLI run the external scanner from this absolute
+/// path (its size and SHA-256 become the pin) instead of the pinned
+/// Snyk Agent Scan build; release builds ignore it.
+pub const TEST_AGENT_SCAN_ENV_VAR: &str = "LOADOUT_TEST_AGENT_SCAN";
 /// Variable names `loadout exec` stage 1 hands to stage 2 under `op run`.
 pub const EXEC_ENV_VAR: &str = "LOADOUT_EXEC_ENV";
 /// Prefix of every message `loadout exec` writes (stderr only).

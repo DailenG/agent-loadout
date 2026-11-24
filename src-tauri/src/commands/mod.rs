@@ -22,6 +22,7 @@ pub mod projects;
 pub mod remotes;
 pub mod resolve;
 pub mod scan;
+pub mod scanner;
 pub mod secrets;
 pub mod servers;
 pub mod skills;
@@ -46,6 +47,8 @@ mod tests_project_servers;
 mod tests_read_only;
 #[cfg(test)]
 mod tests_scan;
+#[cfg(test)]
+mod tests_scanner;
 #[cfg(test)]
 mod tests_skills;
 #[cfg(test)]
@@ -174,6 +177,9 @@ pub struct AppState {
     /// decision (SPEC 17), by token; a git source's temporary clone goes
     /// with each.
     reviews: Mutex<Reviews>,
+    /// External scans in flight and update reviews' external reports
+    /// (#27).
+    pub(crate) scanner: scanner::ScannerState,
 }
 
 /// One install review, shared with the install running on a worker
@@ -208,6 +214,7 @@ impl AppState {
             core,
             picked: Mutex::new(HashMap::new()),
             reviews: Mutex::new(Reviews::default()),
+            scanner: scanner::ScannerState::default(),
         }
     }
 

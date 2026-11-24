@@ -7,25 +7,25 @@ import { useId } from "react";
 import { t, type MessageKey } from "@/i18n/en";
 import type { ScanFinding, ScanResult, ScanSeverity, ScanVerdict } from "@/ipc/bindings";
 
-const SEVERITY_LABELS: Record<ScanSeverity, MessageKey> = {
+export const SEVERITY_LABELS: Record<ScanSeverity, MessageKey> = {
   dangerous: "scan.severity.dangerous",
   warning: "scan.severity.warning",
   info: "scan.severity.info",
 };
 
-const SEVERITY_TONES: Record<ScanSeverity, string> = {
+export const SEVERITY_TONES: Record<ScanSeverity, string> = {
   dangerous: "tone-danger",
   warning: "tone-warning",
   info: "tone-neutral",
 };
 
-const VERDICT_LABELS: Record<ScanVerdict, MessageKey> = {
+export const VERDICT_LABELS: Record<ScanVerdict, MessageKey> = {
   clean: "scan.verdict.clean",
   warning: "scan.verdict.warning",
   dangerous: "scan.verdict.dangerous",
 };
 
-const VERDICT_TONES: Record<ScanVerdict, string> = {
+export const VERDICT_TONES: Record<ScanVerdict, string> = {
   clean: "tone-positive",
   warning: "tone-warning",
   dangerous: "tone-danger",

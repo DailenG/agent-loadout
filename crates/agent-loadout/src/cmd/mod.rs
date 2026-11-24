@@ -18,6 +18,7 @@ pub mod project;
 pub mod remote;
 pub mod restore;
 pub mod rollback;
+pub mod scanner;
 pub mod secrets;
 pub mod server;
 pub mod show;

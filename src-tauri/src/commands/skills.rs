@@ -20,6 +20,7 @@ use agent_loadout_core::model::applied::Scope as TargetScope;
 use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
 use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
+use agent_loadout_core::scan::external::ExternalReport;
 use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, EntryClass};
@@ -42,6 +43,7 @@ use specta::Type;
 use super::projects::{self, ProjectTrust};
 use super::remotes::mask_url;
 use super::scan::ScanResult;
+use super::scanner::ExternalScanResult;
 use super::sources::{self, SourceTrustInfo, TrustGrantArg};
 use super::{
     AppState, CmdResult, Core, FileScope, IpcError, NO_REGISTRY, ReadOnly, SharedReview, blocking,
@@ -393,6 +395,8 @@ pub struct SkillInstalled {
     pub warnings: Vec<IpcError>,
     /// The built-in scan of what was installed.
     pub scan: ScanResult,
+    /// The external scan (Snyk Agent Scan) the install was gated on.
+    pub external: Option<ExternalScanResult>,
 }
 
 /// Where reviewed content comes from. A local source shows no path (it
@@ -549,6 +553,8 @@ pub struct SkillUpdated {
     pub links: SkillSync,
     /// The built-in scan of the new content.
     pub scan: ScanResult,
+    /// The external scan (Snyk Agent Scan) the update was gated on.
+    pub external: Option<ExternalScanResult>,
 }
 
 /// A file of a store skill.
@@ -635,6 +641,10 @@ fn installed_of(env: &Env, installed: &Installed) -> SkillInstalled {
             .map(|err| scrubbed(env, err, None))
             .collect(),
         scan: ScanResult::from(&installed.scan),
+        external: installed
+            .external
+            .as_ref()
+            .map(|report| ExternalScanResult::of(env, report)),
     }
 }
 
@@ -1061,6 +1071,8 @@ pub fn install_git(
     rename_if_taken: bool,
     trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillInstalled> {
+    // No review, so no external scan: refused while the scanner is on.
+    super::scanner::require_report(core, false)?;
     let mut request = git_request(core, url, path, git_ref)?;
     request.naming = naming(id, rename_if_taken);
     (request.decisions.trust, request.decisions.via) = sources::grant_of(trust);
@@ -1160,6 +1172,13 @@ pub fn install_reviewed(
     moved_trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillInstalled> {
     let env = &core.env;
+    // With the scanner on, a git or catalog review must carry its external
+    // report (a local folder is scanned only on request, M49).
+    let remote = matches!(
+        prepared.source().kind,
+        SkillSourceKind::Git | SkillSourceKind::Catalog
+    );
+    super::scanner::require_report(core, !remote || prepared.external().is_some())?;
     let store = core.open_store_for_change()?;
     let (trust, via) = sources::grant_of(trust);
     let decisions = Decisions {
@@ -1167,6 +1186,7 @@ pub fn install_reviewed(
         trust,
         moved_trust: sources::grant_of(moved_trust).0,
         via,
+        external: None,
     };
     let installed = install::install_prepared(
         &store,
@@ -1364,7 +1384,11 @@ pub fn update_diff(core: &Core, id: &str, file: &str) -> CmdResult<SkillFileDiff
 /// (`source_trust_required`, `source_blocked`), and a repository it moved
 /// to needs `moved_trust` (the answer for the check's `moved_trust`); the
 /// skill's URL then follows the move. A `dangerous` scan verdict needs
-/// `allow_dangerous` ("Update anyway"); `scan_blocked` otherwise.
+/// `allow_dangerous` ("Update anyway"); `scan_blocked` otherwise, also for
+/// a dangerous `external` report (the update review's
+/// `external_scan_update`), which must be of the content written
+/// (`entry_changed` otherwise).
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     core: &Core,
     id: &str,
@@ -1372,8 +1396,10 @@ pub fn update(
     allow_dangerous: bool,
     trust: Option<TrustGrantArg>,
     moved_trust: Option<TrustGrantArg>,
+    external: Option<ExternalReport>,
 ) -> CmdResult<SkillUpdated> {
     let env = &core.env;
+    super::scanner::require_report(core, external.is_some())?;
     let store = require_store(core)?;
     let (trust, via) = sources::grant_of(trust);
     let decisions = Decisions {
@@ -1381,6 +1407,7 @@ pub fn update(
         trust,
         moved_trust: sources::grant_of(moved_trust).0,
         via,
+        external,
     };
     let updated = install::update_reviewed(&store, &sx(core), id, latest, &decisions)
         .map_err(|err| scrubbed(env, &err, None))?;
@@ -1392,6 +1419,10 @@ pub fn update(
         changes: changes_of(&updated.changes),
         links: sync_of(env, &updated.report),
         scan: ScanResult::from(&updated.scan),
+        external: updated
+            .external
+            .as_ref()
+            .map(|report| ExternalScanResult::of(env, report)),
     })
 }
 
@@ -1808,10 +1839,29 @@ pub async fn update_skill(
     trust: Option<TrustGrantArg>,
     moved_trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillUpdated> {
-    blocking(&state, move |core| {
-        update(core, &id, &latest, allow_dangerous, trust, moved_trust)
+    // The external scan of this update's review, if one ran; kept for a
+    // retry ("Update anyway") when the update fails.
+    let external = state.scanner.take_update(&id);
+    let kept = external.clone();
+    let key = id.clone();
+    let result = blocking(&state, move |core| {
+        update(
+            core,
+            &id,
+            &latest,
+            allow_dangerous,
+            trust,
+            moved_trust,
+            external,
+        )
     })
-    .await
+    .await;
+    if result.is_err()
+        && let Some(report) = kept
+    {
+        state.scanner.restore_update(&key, report);
+    }
+    result
 }
 
 #[tauri::command]

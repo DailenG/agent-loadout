@@ -17,13 +17,16 @@ async function selectTransport(): Promise<Transport> {
   if (import.meta.env.MODE === "mock") {
     const { createMockTransport } = await import("@/test/mockTransport");
     const appInfo = { version: "0.0.0-mock", platform: "windows" } as const;
-    const dataset = new URLSearchParams(window.location.search).get("dataset");
+    const params = new URLSearchParams(window.location.search);
+    const dataset = params.get("dataset");
     if (dataset === "perf") {
       const { buildPerfDataset } = await import("@/test/perfData");
       return createMockTransport({ appInfo, ...buildPerfDataset() });
     }
     const { buildDemoDataset } = await import("@/test/demoData");
-    return createMockTransport({ appInfo, ...buildDemoDataset() });
+    const { demoScannerState } = await import("@/test/scannerData");
+    // `?scanner=` picks the external scanner's demo state (M49).
+    return createMockTransport({ appInfo, ...buildDemoDataset(), scanner: demoScannerState(params.get("scanner")) });
   }
   return tauriTransport;
 }

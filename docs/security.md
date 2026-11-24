@@ -188,7 +188,8 @@ folder's server never runs on another machine.
 ## Catalogs (network use)
 
 Catalogs are the only part of Loadout that makes HTTP requests of its own
-(besides the optional updater and the git your remotes and sources use).
+(besides the optional updater, the optional Snyk Agent Scan download below
+and the git your remotes and sources use).
 
 - **Off until you turn it on.** "Online catalogs" (`online_catalogs` in
   `state/local-settings.toml`, per machine) is off by default. While it is
@@ -240,6 +241,93 @@ Catalogs are the only part of Loadout that makes HTTP requests of its own
 - **Cache:** results are saved in `LOADOUT_HOME/cache/catalogs` (this
   machine only, keyed on the catalog's address) for 24 hours; stale
   results are labeled with their age, and a failed refresh keeps them.
+
+## Snyk Agent Scan (optional, sends skills to Snyk)
+
+Snyk Agent Scan is an optional second opinion on skills, beside the
+built-in scan. It is **off by default** and nothing is sent anywhere until
+you turn it on (Settings > Security, or `loadout scanner enable`) or ask
+for one run (`--external` on `skills add` or `skills update`).
+
+**What is sent to Snyk.** Each run sends one skill to Snyk's analysis API
+(`api.snyk.io`), as Snyk Agent Scan 0.7.1 does:
+
+- every file of the skill, with its path inside the skill (Snyk redacts
+  secrets it detects; text files that are not UTF-8 are described, not
+  sent);
+- the skill's name (from its `SKILL.md`);
+- the path of the folder scanned (a temporary copy below
+  `LOADOUT_HOME/cache/scan-external/`, made relative to your home folder,
+  so it names your data folder);
+- your user name;
+- this machine's host name, which the scanner adds itself where its
+  platform reports one;
+- the scanner's version;
+- your Snyk token (as the `Authorization` header).
+
+Loadout adds no host name, `MACHINE_SERIAL` or other identifier of its
+own. Snyk's handling of that data is governed by its terms and privacy
+policy. In
+0.7.0 it scans skills only, never MCP servers: Snyk's scanner sends a
+server's configuration (command, arguments, URL) even when it declines to
+start it.
+
+**How it runs.**
+
+- **Pinned and verified.** Install downloads one pinned release (v0.7.1)
+  from GitHub over https (redirects only to GitHub's release storage
+  hosts, 64 MiB cap) into `LOADOUT_HOME/tools/snyk-agent-scan/0.7.1/`
+  (never on `PATH`; it syncs only if your data directory itself is in a
+  sync folder) and checks its size and SHA-256 against the values
+  compiled into Loadout before it is installed; a mismatch deletes the
+  download. Each command that runs the scanner hashes the installed file
+  again first: a file changed since its install (corrupted, replaced by a
+  sync peer) is not run, counts as not installed, and `loadout scanner
+  install` (or Install in Settings) downloads it again. The file could
+  still change between that check and the run, which takes your own user
+  account (which could change Loadout itself too). The pinned values come
+  from the release's `sha256sums.txt.asc`, whose signature (Snyk's key
+  `EF4F F9D1 8D82 D562 9B82 491D 2A20 F86E 4EF1 31B1`) is checked with gpg
+  when the pin is bumped (`scripts/verify-agent-scan-pins.*`); Loadout has
+  no OpenPGP code of its own. `loadout scanner remove` (or Remove in
+  Settings) deletes it and turns the scanner off; a partial download left
+  by a killed install is deleted by the next install.
+- **The token is a reference.** You give a secret alias defined in your
+  secrets (`loadout secrets`) or a provider reference (`env:`,
+  `keyring://`, `op://`), never the token. A pasted token is refused, and
+  the error never repeats what you typed (so a token that happens to look
+  like an alias is not stored either). The token is read for each run and
+  passed only in the scanner's environment as `SNYK_TOKEN`: never on its
+  command line, in a file, a log, an error or the app's IPC (and masked in
+  the scanner's own error output Loadout keeps).
+- **One bounded run.** The scanner runs as `agent-scan scan --json
+  --storage-file <temp> <skill copy>` on a copy of exactly the content
+  that would be installed or updated, below
+  `LOADOUT_HOME/cache/scan-external/`, with stdin closed (any consent
+  prompt is declined), a scrubbed environment (profile, system, locale,
+  proxy and CA variables only; its temp folder is the run's own, so
+  nothing it unpacks lands in yours), and a 60 second timeout; a timeout
+  or cancel kills its whole process tree and deletes the run folder (a
+  folder a killed process left behind is deleted by a later run). On
+  Windows the scanner runs only inside a kill-on-close job object; if one
+  cannot be created, it is stopped at once and the run is "not scanned
+  (failed)". Ctrl+C (or SIGTERM) during `loadout` stops the scanner the
+  same way. Turning the scanner off in Settings cancels runs in progress,
+  and a run the switch was turned off for attaches no report. Loadout
+  never passes `--dangerously-run-mcp-servers`, `--ci`, `--verbose`,
+  `--scan-all-users` or a run without a path. The command line checks a
+  git source's trust before the scan: a blocked or not yet trusted
+  source is never sent to Snyk.
+- **Results.** Findings are shown beside the built-in ones, labeled
+  "Snyk Agent Scan". A `dangerous` verdict needs the same explicit
+  **Install anyway** / `--allow-dangerous` as a built-in one. A run that
+  could not happen (no token, Snyk rejected the token, Snyk's daily limit,
+  too large, offline, timeout, the scanner failed) says "not scanned
+  (<reason>)" and never blocks; output Loadout does not understand
+  (including output over 16 MiB) says so and is never shown as clean.
+  While the scanner is on, the app refuses to install from a git or
+  catalog review, or to update, without the external scan's report
+  (`external_scan_required`).
 
 ## The Loadout skill for agents
 

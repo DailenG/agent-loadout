@@ -5,7 +5,7 @@
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createContext, useContext } from "react";
-import { commands, events, type ErrorCode, type IpcError } from "@/ipc/bindings";
+import { commands, events, type ErrorCode, type IpcError, type ScannerInstallProgress } from "@/ipc/bindings";
 
 /** The generated command accessors; a mock must match them exactly. */
 export type Commands = typeof commands;
@@ -29,6 +29,8 @@ export type TransportEvents = {
    * skill folder change (SPEC 8.5); resolves to the unsubscribe.
    */
   onTargetsChanged(handler: () => void): Promise<() => void>;
+  /** Calls `handler` with each download step of `install_scanner` (M47); resolves to the unsubscribe. */
+  onScannerInstallProgress(handler: (progress: ScannerInstallProgress) => void): Promise<() => void>;
 };
 
 export type Transport = {
@@ -54,6 +56,7 @@ export const tauriTransport: Transport = {
   },
   events: {
     onTargetsChanged: (handler) => events.targetsChanged.listen(() => handler()),
+    onScannerInstallProgress: (handler) => events.scannerInstallProgress.listen((event) => handler(event.payload)),
   },
 };
 

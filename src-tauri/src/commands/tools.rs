@@ -312,3 +312,46 @@ pub async fn open_tool_homepage(
     })
     .await
 }
+
+/// Troubleshooting entries the app links to, by topic. A fixed table:
+/// `open_help` opens only these URLs.
+const HELP_PAGES: &[(&str, &str)] = &[
+    (
+        "git_missing",
+        "https://github.com/DailenG/agent-loadout/blob/main/docs/troubleshooting.md#git-isnt-installed-so-git-catalogs-cant-be-searched",
+    ),
+    // Snyk Agent Scan (#27): the terms of the pinned release and Snyk's
+    // privacy policy, linked from Settings > Security.
+    (
+        "snyk_terms",
+        "https://github.com/snyk/agent-scan/blob/v0.7.1/TERMS.md",
+    ),
+    ("snyk_privacy", "https://snyk.io/policies/privacy/"),
+];
+
+/// The URL `open_help` opens for `topic`; an error for any other topic, so
+/// no other URL can be opened.
+pub fn help_page(topic: &str) -> Result<&'static str, CoreError> {
+    HELP_PAGES
+        .iter()
+        .find(|(id, _)| *id == topic)
+        .map(|(_, url)| *url)
+        .ok_or_else(|| {
+            CoreError::new(
+                ErrorCode::InvalidValue,
+                format!("no help page for {topic:?}"),
+            )
+        })
+}
+
+/// Opens a troubleshooting entry in the browser (Install > Browse links
+/// the missing-Git entry, #29). The URL comes from a fixed table.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_help(state: tauri::State<'_, AppState>, topic: String) -> CmdResult<()> {
+    blocking(&state, move |_core| {
+        let url = help_page(&topic)?;
+        os_open(OsStr::new(url)).map_err(IpcError::from)
+    })
+    .await
+}

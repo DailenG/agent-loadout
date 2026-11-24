@@ -264,7 +264,12 @@ describe("SkillsPage", () => {
     const alpha = screen.getByRole("article", { name: "alpha" });
     await user.click(await within(alpha).findByRole("button", { name: "Preview the update of alpha" }));
     await user.click(within(await screen.findByRole("dialog", { name: "Update alpha" })).getByRole("button", { name: "Update" }));
-    expect(await screen.findByText(/Nothing was updated; review the findings, and update anyway only if you trust it\./)).toBeInTheDocument();
+    // Neutral: the built-in scan or Snyk Agent Scan may have refused it (M49 review F1).
+    expect(
+      await screen.findByText(
+        "A scan found dangerous content in the new version. Nothing was updated; review the findings, and update anyway only if you trust it.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/install anyway/i)).toBeNull();
   });
 
@@ -284,7 +289,16 @@ describe("SkillsPage", () => {
       checkSkillUpdates: async () => ok([check("alpha", "aaaaaaa"), check("repo-notes", "bbbbbbb")]),
       updateSkill: async (id, latest) =>
         id === "alpha"
-          ? ok({ id, from: null, to: latest, commit: MOCK_SKILL_CHANGE.commit, changes: [], links: MOCK_SKILL_CHANGE.links, scan: MOCK_SCAN_CLEAN })
+          ? ok({
+              id,
+              from: null,
+              to: latest,
+              commit: MOCK_SKILL_CHANGE.commit,
+              changes: [],
+              links: MOCK_SKILL_CHANGE.links,
+              scan: MOCK_SCAN_CLEAN,
+              external: null,
+            })
           : mockIpcError({ code: "entry_changed", message: "changed" }),
     });
     await screen.findByRole("article", { name: "alpha" });

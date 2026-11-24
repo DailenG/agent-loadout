@@ -20,6 +20,9 @@ categories = ["command-line-utilities", "development-tools", "config"]
 agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.6.0" }
 agent-loadout-testkit = { path = "crates/agent-loadout-testkit" }
 clap = { version = "4", features = ["derive"] }
+# Ctrl+C / SIGTERM during an external scan (#27): cancels the scanner's
+# process tree instead of leaving it running (safe API; MIT/Apache).
+ctrlc = { version = "3", features = ["termination"] }
 dirs = "6"
 getrandom = "0.4"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }

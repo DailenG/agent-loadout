@@ -400,6 +400,20 @@ JSON. Each catalog is searched on its own, so the others still answer.
 
 **Try again** (app) or `loadout catalog refresh [ID]` fetches again.
 
+### Git isn't installed, so Git catalogs can't be searched
+
+Git taps (such as `anthropics/skills`) are fetched with your system git.
+Without it, Install > Browse shows "Git isn't installed, so Git catalogs
+can't be searched. Install Git to use them." for each tap; registries
+still answer. Skills from Git, MCP servers from Git and Git remotes need
+git too, and say "Git isn't installed or isn't on PATH; install Git to use
+...".
+
+Install Git (<https://git-scm.com/downloads>; on Windows, `winget install
+Git.Git`), make sure `git --version` works in a new terminal, then restart
+Loadout so it sees the new `PATH` and choose **Try again**. Loadout looks
+for git only on `PATH`, never in a project folder.
+
 ### Results say "Stale" or "saved 1 day ago"
 
 Results are kept for 24 hours. When a catalog can't be refreshed, Loadout

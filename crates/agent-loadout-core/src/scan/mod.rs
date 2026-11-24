@@ -15,6 +15,7 @@
 
 mod cache;
 mod engine;
+pub mod external;
 pub mod rules;
 #[cfg(test)]
 mod tests;

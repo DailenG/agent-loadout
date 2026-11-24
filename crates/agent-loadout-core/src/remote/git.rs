@@ -116,6 +116,16 @@ pub fn locate(env: &Env, fs: &dyn Fs) -> Option<PathBuf> {
     locate_program(env, fs, "git")
 }
 
+/// `tool_not_found` for a missing git, as one sentence naming what needs
+/// it (#29): the app shows this message on its own, never after the
+/// generic "a required program is missing" text.
+pub fn git_not_found(needed_for: &str) -> CoreError {
+    CoreError::new(
+        ErrorCode::ToolNotFound,
+        format!("Git isn't installed or isn't on PATH; install Git to use {needed_for}."),
+    )
+}
+
 /// An executable on `PATH` (`.exe` added on Windows).
 pub(crate) fn locate_program(env: &Env, fs: &dyn Fs, name: &str) -> Option<PathBuf> {
     let (separator, file) = match env.os() {
@@ -322,12 +332,7 @@ impl<'a> GitCli<'a> {
         runner: &'a dyn Runner,
         helper: Option<PathBuf>,
     ) -> Result<Self, CoreError> {
-        let git = locate(env, fs).ok_or_else(|| {
-            CoreError::new(
-                ErrorCode::ToolNotFound,
-                "git is not installed or not on PATH; git remotes need it",
-            )
-        })?;
+        let git = locate(env, fs).ok_or_else(|| git_not_found("Git remotes"))?;
         Ok(Self {
             git,
             runner,

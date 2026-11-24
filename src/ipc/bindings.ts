@@ -65,6 +65,11 @@ export const commands = {
 	 *  table, never from the caller.
 	 */
 	openToolHomepage: (client: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("open_tool_homepage", { client }, options)),
+	/**
+	 *  Opens a troubleshooting entry in the browser (Install > Browse links
+	 *  the missing-Git entry, #29). The URL comes from a fixed table.
+	 */
+	openHelp: (topic: string, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("open_help", { topic }, options)),
 	listProjects: (options?: InvokeOptions) => typedError<ProjectRow[], IpcError>(__TAURI_INVOKE("list_projects", undefined, options)),
 	/**
 	 *  Opens the OS folder picker; `None` when the user cancels. The folder is
@@ -170,6 +175,54 @@ export const commands = {
 	 *  caller; only https addresses open; nothing is fetched.
 	 */
 	openCatalogLink: (catalog: string, entry: string | null, link: CatalogLink, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("open_catalog_link", { catalog, entry, link }, options)),
+	scannerStatus: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("scanner_status", undefined, options)),
+	/**
+	 *  Downloads and verifies the pinned build, emitting
+	 *  `ScannerInstallProgress`; `cancel_external_scan` stops it (`canceled`,
+	 *  nothing installed). Installing does not turn the scanner on. A second
+	 *  install while one runs is `locked`.
+	 */
+	installScanner: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("install_scanner", undefined, options)),
+	/**
+	 *  Deletes the scanner and turns it off, like [`set_scanner_enabled`]
+	 *  with `false`.
+	 */
+	removeScanner: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("remove_scanner", undefined, options)),
+	/**
+	 *  Turns the scanner on or off; off cancels every external scan (not an
+	 *  install) and drops the external reports of open reviews.
+	 */
+	setScannerEnabled: (enabled: boolean, options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("set_scanner_enabled", { enabled }, options)),
+	/**
+	 *  Sets (`invalid_ref` when it does not parse, or names an alias the
+	 *  secrets catalog does not define; the input is never echoed) or clears
+	 *  the token reference: a secret alias or a provider reference, never a
+	 *  value.
+	 */
+	setScannerToken: (reference: string | null, options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("set_scanner_token", { reference }, options)),
+	checkScannerToken: (options?: InvokeOptions) => typedError<ScannerTokenCheck, IpcError>(__TAURI_INVOKE("check_scanner_token", undefined, options)),
+	/**
+	 *  Runs the scanner on an install review's content and attaches the
+	 *  report: `install_reviewed_skill` then needs `allowDangerous` for a
+	 *  dangerous external verdict. `run_id` names the run for
+	 *  `cancel_external_scan`.
+	 */
+	externalScanReview: (token: string, runId: string, options?: InvokeOptions) => typedError<ExternalScanResult, IpcError>(__TAURI_INVOKE("external_scan_review", { token, runId }, options)),
+	/**
+	 *  Runs the scanner on the content `check_skill_updates` fetched for `id`
+	 *  and remembers the report for `update_skill(id, latest, ..)`. A report
+	 *  remembered for `id` before is dropped first, so a failed run never
+	 *  leaves an older one. `latest` is the checked commit; when the source
+	 *  moved on since, `update_skill` answers `entry_changed`.
+	 */
+	externalScanUpdate: (id: string, latest: string, runId: string, options?: InvokeOptions) => typedError<ExternalScanResult, IpcError>(__TAURI_INVOKE("external_scan_update", { id, latest, runId }, options)),
+	/**  Runs the scanner on a library skill's store content; report only. */
+	externalScanSkill: (id: string, runId: string, options?: InvokeOptions) => typedError<ExternalScanResult, IpcError>(__TAURI_INVOKE("external_scan_skill", { id, runId }, options)),
+	/**
+	 *  Cancels the external scan `run_id`; `null` cancels every running scan
+	 *  and the scanner install.
+	 */
+	cancelExternalScan: (runId: string | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("cancel_external_scan", { runId }, options)),
 	listSkills: (scope: SkillScope, options?: InvokeOptions) => typedError<SkillList, IpcError>(__TAURI_INVOKE("list_skills", { scope }, options)),
 	listSkillToolDirs: (scope: SkillScope, options?: InvokeOptions) => typedError<ToolSkillDir[], IpcError>(__TAURI_INVOKE("list_skill_tool_dirs", { scope }, options)),
 	/**
@@ -259,6 +312,7 @@ export const commands = {
 
 /** Events */
 export const events = {
+	scannerInstallProgress: makeEvent<ScannerInstallProgress, ScannerInstallProgress>("scanner-install-progress"),
 	targetsChanged: makeEvent<TargetsChanged, TargetsChanged>("targets-changed"),
 };
 
@@ -1210,7 +1264,75 @@ export type ErrorCode =
  *  A catalog could not be reached or answered with an error (timeout,
  *  HTTP status, rate limit, a body too large or not JSON).
  */
-"catalog_unreachable";
+"catalog_unreachable" | 
+/**
+ *  The optional external scanner (Snyk Agent Scan, #27) is turned off
+ *  on this machine, so an explicit run was refused; nothing ran.
+ */
+"scanner_unavailable" | 
+/**
+ *  The external scanner could not be downloaded (network, HTTP status,
+ *  a redirect to a host Loadout does not download from, too large).
+ */
+"scanner_download_failed" | 
+/**
+ *  The external scanner's download is not the pinned build (size or
+ *  SHA-256); it was deleted and nothing was installed.
+ */
+"scanner_verification_failed" | 
+/**
+ *  The user canceled the operation (a scanner install); nothing was
+ *  changed.
+ */
+"canceled" | 
+/**
+ *  The external scanner is on, installed and has a token, but the
+ *  install or update carries no external report (its scan has not
+ *  run): run the scan, then try again. Nothing was changed.
+ */
+"external_scan_required";
+
+/**  Why the content was not scanned; never blocks. */
+export type ExternalNotScanned = "not_installed" | "unsupported_platform" | "no_token" | "token_unavailable" | "token_rejected" | "limit_reached" | "too_large" | "unreachable" | "timeout" | "canceled" | "would_start_server" | "failed";
+
+/**  One external scan, shown beside the built-in scan. */
+export type ExternalScanResult = {
+	/**  `snyk-agent-scan`. */
+	scanner: string,
+	version: string,
+	status: ExternalScanStatus,
+	reason: ExternalNotScanned | null,
+	/**  Meaningful only when `status` is `scanned`. */
+	verdict: ScanVerdict,
+	findings: ScanFinding[],
+	/**  English, one line, no paths or values. */
+	detail: string | null,
+};
+
+/**  Whether the run happened and was understood. */
+export type ExternalScanStatus = "scanned" | "not_scanned" | "not_understood";
+
+/**  Snyk Agent Scan on this machine. */
+export type ExternalScannerStatus = {
+	/**  `snyk-agent-scan`. */
+	scanner: string,
+	/**  The pinned version. */
+	version: string,
+	/**  A pinned build exists for this OS and architecture. */
+	supported: boolean,
+	installed: boolean,
+	enabled: boolean,
+	/**  The reference text, never a value. */
+	tokenRef: string | null,
+	tokenKind: ScannerTokenKind | null,
+	/**  Download size of this platform's build. */
+	sizeBytes: number | null,
+	/**
+	 *  Seconds one run may take (`[snyk_agent_scan] timeout_secs`, default
+	 *  60).
+	 */
+	timeoutSecs: number,
+};
 
 /**
  *  `env.GITHUB_TOOLSETS: "repos" -> "repos,issues"`; refs stay refs,
@@ -2603,6 +2725,21 @@ export type ScanSeverity = "info" | "warning" | "dangerous";
  */
 export type ScanVerdict = "clean" | "warning" | "dangerous";
 
+/**  Download progress of `install_scanner`, in bytes. */
+export type ScannerInstallProgress = {
+	received: number,
+	total: number,
+};
+
+/**  Whether the token reference resolves (Snyk is not contacted). */
+export type ScannerTokenCheck = {
+	ok: boolean,
+	reason: ExternalNotScanned | null,
+};
+
+/**  How the token reference resolves. */
+export type ScannerTokenKind = "alias" | "env" | "keyring" | "one_password";
+
 export type SecretDestinationKind = "keyring" | "onepassword" | "env";
 
 /**  Where a fix writes the reference. */
@@ -2877,6 +3014,8 @@ export type SkillInstalled = {
 	warnings: IpcError[],
 	/**  The built-in scan of what was installed. */
 	scan: ScanResult,
+	/**  The external scan (Snyk Agent Scan) the install was gated on. */
+	external: ExternalScanResult | null,
 };
 
 /**  An entry Loadout owns in a client skill folder. */
@@ -3045,6 +3184,8 @@ export type SkillUpdated = {
 	links: SkillSync,
 	/**  The built-in scan of the new content. */
 	scan: ScanResult,
+	/**  The external scan (Snyk Agent Scan) the update was gated on. */
+	external: ExternalScanResult | null,
 };
 
 export type SourceAskReason = "first_time" | "not_trusted" | "lapsed";

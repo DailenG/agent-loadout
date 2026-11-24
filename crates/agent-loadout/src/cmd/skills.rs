@@ -14,6 +14,7 @@ use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
 use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
 use agent_loadout_core::scan::ScanReport;
+use agent_loadout_core::scan::external::{Choice, ExternalReport, Runner};
 use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, ClientDir};
@@ -28,6 +29,7 @@ use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+use super::scanner;
 use super::source::{Answer, Answers, TrustSourceArg};
 use super::{
     Context, EXIT_SCAN_BLOCKED, EXIT_UNRESOLVED, JSON_SCHEMA, error_json, path_json, print_json,
@@ -74,6 +76,13 @@ enum SkillsCommand {
         /// (review the findings first).
         #[arg(long)]
         allow_dangerous: bool,
+        /// Also run Snyk Agent Scan on it this time (sends the skill to
+        /// Snyk), even when it is turned off.
+        #[arg(long, conflicts_with = "no_external")]
+        external: bool,
+        /// Do not run Snyk Agent Scan this time, even when it is turned on.
+        #[arg(long)]
+        no_external: bool,
         /// Trust the git source without the prompt: once (this install
         /// only), or always for the repo, its owner or its host
         /// (`--trust-source=repo`; the value needs the `=`). Only for a
@@ -119,6 +128,13 @@ enum SkillsCommand {
         /// content (review the findings first, with --check).
         #[arg(long, conflicts_with_all = ["check", "agents"])]
         allow_dangerous: bool,
+        /// Also run Snyk Agent Scan on each available update this time
+        /// (sends the new content to Snyk), even when it is turned off.
+        #[arg(long, conflicts_with_all = ["no_external", "agents"])]
+        external: bool,
+        /// Do not run Snyk Agent Scan this time, even when it is turned on.
+        #[arg(long, conflicts_with = "agents")]
+        no_external: bool,
         /// Trust the git sources without the prompt: once (this update
         /// only), or always for the repo, its owner or its host
         /// (`--trust-source=repo`; the value needs the `=`, so
@@ -266,16 +282,21 @@ pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
             git_ref,
             id,
             allow_dangerous,
+            external,
+            no_external,
             trust_source,
         } => add(
             ctx,
             &sx,
-            source,
-            path,
-            git_ref,
-            id,
-            *allow_dangerous,
-            *trust_source,
+            AddArgs {
+                source,
+                path,
+                git_ref,
+                id,
+                allow_dangerous: *allow_dangerous,
+                external: scanner::choice(*external, *no_external),
+                trust_source: *trust_source,
+            },
         ),
         SkillsCommand::Rm { id, agents: true } => agents(ctx, &sx, CliAction::Remove, id),
         SkillsCommand::Rm { id, agents: false } => {
@@ -299,6 +320,8 @@ pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
             id,
             check,
             allow_dangerous,
+            external,
+            no_external,
             trust_source,
             ..
         } => update(
@@ -307,6 +330,7 @@ pub fn run(ctx: &Context, args: &SkillsArgs) -> Result<u8, CoreError> {
             id.as_deref(),
             *check,
             *allow_dangerous,
+            scanner::choice(*external, *no_external),
             *trust_source,
         ),
         SkillsCommand::Scan { project } => scan(ctx, &sx, project.as_deref()),
@@ -393,17 +417,27 @@ fn naming(ctx: &Context, id: &Option<String>) -> Naming {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn add(
-    ctx: &Context,
-    sx: &skills::SkillsEnv<'_>,
-    source: &str,
-    path: &Option<String>,
-    git_ref: &Option<String>,
-    id: &Option<String>,
+/// `skills add`'s arguments.
+struct AddArgs<'a> {
+    source: &'a str,
+    path: &'a Option<String>,
+    git_ref: &'a Option<String>,
+    id: &'a Option<String>,
     allow_dangerous: bool,
+    external: Choice,
     trust_source: Option<TrustSourceArg>,
-) -> Result<u8, CoreError> {
+}
+
+fn add(ctx: &Context, sx: &skills::SkillsEnv<'_>, args: AddArgs<'_>) -> Result<u8, CoreError> {
+    let AddArgs {
+        source,
+        path,
+        git_ref,
+        id,
+        allow_dangerous,
+        external,
+        trust_source,
+    } = args;
     let text = source;
     let mut request = if text.trim_start().starts_with(catalog::REF_PREFIX) {
         let store = ctx.open_store()?;
@@ -468,8 +502,8 @@ fn add(
     request.decisions = Decisions {
         allow_dangerous,
         trust,
-        moved_trust: None,
         via,
+        ..Decisions::default()
     };
     let mut prepared = install::prepare(sx, &request)?;
     // The host redirected a moved repository: the gate asks about where
@@ -485,6 +519,17 @@ fn add(
         }
         request.decisions.moved_trust = answer.grant().0;
     }
+    // A moved repository's trust is settled first: a blocked or declined
+    // source is never sent to Snyk.
+    if let Some(target) = prepared.moved_to() {
+        sources::would_admit(&store, target, request.decisions.moved_trust)?;
+    }
+    // The optional external scanner: one run on exactly the content that
+    // would be installed, after the built-in scan.
+    if let Some(runner) = scanner::wanted(ctx, Some(&store), external)? {
+        let report = scanner::report_for(ctx, &runner, prepared.files(), prepared.name());
+        prepared.set_external(Some(report));
+    }
     match install::install_prepared(
         &store,
         sx,
@@ -494,7 +539,7 @@ fn add(
     ) {
         Ok(installed) => installed_out(ctx, &installed),
         Err(err) if err.code() == ErrorCode::ScanBlocked => {
-            blocked_out(ctx, &err, prepared.scan());
+            blocked_out(ctx, &err, prepared.scan(), prepared.external());
             Ok(EXIT_SCAN_BLOCKED)
         }
         Err(err) => Err(err),
@@ -631,16 +676,28 @@ pub(super) fn print_scan(report: &ScanReport, indent: &str) {
     }
 }
 
-/// An install the scan blocked: its findings, then the error.
-fn blocked_out(ctx: &Context, err: &CoreError, report: &ScanReport) {
+/// An install a scan blocked: the findings, then the error.
+fn blocked_out(
+    ctx: &Context,
+    err: &CoreError,
+    report: &ScanReport,
+    external: Option<&ExternalReport>,
+) {
     if ctx.json {
-        print_json(&json!({
+        let mut doc = json!({
             "schema": JSON_SCHEMA,
             "error": error_json(err),
             "scan": scan_json(report),
-        }));
+        });
+        if let Some(external) = external {
+            doc["external"] = scanner::external_json(external);
+        }
+        print_json(&doc);
     } else {
         print_scan(report, "");
+        if let Some(external) = external {
+            scanner::print_external(external, "");
+        }
         eprintln!("error[{}]: {err}", err.code());
         eprintln!(
             "Nothing was installed. Review the findings; to install anyway, run again with --allow-dangerous."
@@ -654,7 +711,7 @@ fn installed_out(ctx: &Context, installed: &skills::Installed) -> Result<u8, Cor
     }
     let code = installed.report.as_ref().map_or(0, exit_for);
     if ctx.json {
-        print_json(&json!({
+        let mut doc = json!({
             "schema": JSON_SCHEMA,
             "skill": {
                 "id": installed.id,
@@ -666,7 +723,11 @@ fn installed_out(ctx: &Context, installed: &skills::Installed) -> Result<u8, Cor
             "links": installed.report.as_ref().map(report_json),
             "warnings": installed.warnings.iter().map(error_json).collect::<Vec<_>>(),
             "scan": scan_json(&installed.scan),
-        }));
+        });
+        if let Some(external) = &installed.external {
+            doc["external"] = scanner::external_json(external);
+        }
+        print_json(&doc);
     } else {
         let renamed = installed
             .renamed_from
@@ -675,6 +736,9 @@ fn installed_out(ctx: &Context, installed: &skills::Installed) -> Result<u8, Cor
             .unwrap_or_default();
         println!("Added skill {}{renamed}.", installed.id);
         print_scan(&installed.scan, "");
+        if let Some(external) = &installed.external {
+            scanner::print_external(external, "");
+        }
         if let Some(report) = &installed.report {
             print_links(report);
         }
@@ -943,12 +1007,62 @@ fn list(ctx: &Context, sx: &skills::SkillsEnv<'_>) -> Result<u8, CoreError> {
     Ok(0)
 }
 
+/// The trust checks of an available update: its source's and the one of
+/// the repository it moved to.
+fn trust_checks(checked: &UpdateCheck) -> impl Iterator<Item = &TrustCheck> {
+    checked.trust.iter().chain(checked.moved_trust.iter())
+}
+
+/// Every source of the update is trusted already (nothing to ask).
+fn admitted_without_asking(checked: &UpdateCheck) -> bool {
+    trust_checks(checked).all(|check| matches!(check.state, TrustState::Trusted { .. }))
+}
+
+/// A source of the update is blocked (the update's gate refuses it).
+fn source_blocked(checked: &UpdateCheck) -> bool {
+    trust_checks(checked).any(|check| matches!(check.state, TrustState::Blocked { .. }))
+}
+
+/// The external report of an available update's content (the cache
+/// clone as the check left it), when this run uses the scanner; the run
+/// is prepared (token resolved) once, on the first update that needs it.
+fn external_for_update(
+    ctx: &Context,
+    store: &Store<'_>,
+    sx: &skills::SkillsEnv<'_>,
+    id: &str,
+    choice: Choice,
+    runner: &mut Option<Option<Result<Runner, ExternalReport>>>,
+) -> Result<Option<ExternalReport>, CoreError> {
+    if runner.is_none() {
+        *runner = Some(scanner::wanted(ctx, Some(store), choice)?);
+    }
+    let Some(Some(runner)) = runner.as_ref() else {
+        return Ok(None);
+    };
+    let Some(files) = install::cached_latest(store, sx, id)? else {
+        return Ok(None);
+    };
+    Ok(Some(scanner::report_for(ctx, runner, &files, id)))
+}
+
+/// One skill's result: its JSON, and the scans the human output prints.
+type UpdateResult = (Value, Option<ScanReport>, Option<ExternalReport>);
+
+fn with_external(mut result: Value, external: Option<&ExternalReport>) -> Value {
+    if let Some(external) = external {
+        result["external"] = scanner::external_json(external);
+    }
+    result
+}
+
 fn update(
     ctx: &Context,
     sx: &skills::SkillsEnv<'_>,
     id: Option<&str>,
     check: bool,
     allow_dangerous: bool,
+    external: Choice,
     trust_source: Option<TrustSourceArg>,
 ) -> Result<u8, CoreError> {
     let store: Store<'_> = require_store(ctx, "there is no skill to update")?;
@@ -957,35 +1071,55 @@ fn update(
         None => store::ids(&store)?,
     };
     let mut answers = Answers::default();
-    // Each result with the scan the human output prints.
-    let mut results: Vec<(Value, Option<ScanReport>)> = Vec::new();
+    let mut runner = None;
+    let mut results: Vec<UpdateResult> = Vec::new();
     let mut failed = false;
     let mut blocked = false;
     let mut attention = false;
     for id in &ids {
         let checked = install::check_update(&store, sx, id)?;
+        // `--check`: one external run per available update of a trusted
+        // source, on the content the check fetched (an untrusted or
+        // blocked source is never sent to Snyk before the user trusts
+        // it). An update runs it after the trust answer, below.
+        let external_report = if check
+            && checked.status == UpdateStatus::Available
+            && admitted_without_asking(&checked)
+        {
+            external_for_update(ctx, &store, sx, id, external, &mut runner)?
+        } else {
+            None
+        };
         if check {
             failed |= checked.status == UpdateStatus::Unreachable;
             results.push((
-                json!({
-                    "id": checked.id,
-                    "status": checked.status.as_str(),
-                    "current": checked.current,
-                    "latest": checked.latest,
-                    "changes": checked.changes.iter().map(change_json).collect::<Vec<_>>(),
-                    "error": checked.error.as_ref().map(error_json),
-                    "scan": checked.scan.as_ref().map(scan_json),
-                    "trust": checked.trust.as_ref().map(trust_json),
-                    "source_change": checked.source_change.as_ref().map(source_change_json),
-                    "moved_trust": checked.moved_trust.as_ref().map(trust_json),
-                }),
+                with_external(
+                    json!({
+                        "id": checked.id,
+                        "status": checked.status.as_str(),
+                        "current": checked.current,
+                        "latest": checked.latest,
+                        "changes": checked.changes.iter().map(change_json).collect::<Vec<_>>(),
+                        "error": checked.error.as_ref().map(error_json),
+                        "scan": checked.scan.as_ref().map(scan_json),
+                        "trust": checked.trust.as_ref().map(trust_json),
+                        "source_change": checked.source_change.as_ref().map(source_change_json),
+                        "moved_trust": checked.moved_trust.as_ref().map(trust_json),
+                    }),
+                    external_report.as_ref(),
+                ),
                 checked.scan,
+                external_report,
             ));
             continue;
         }
         match checked.status {
             UpdateStatus::NotTracked | UpdateStatus::UpToDate => {
-                results.push((json!({ "id": id, "status": checked.status.as_str() }), None));
+                results.push((
+                    json!({ "id": id, "status": checked.status.as_str() }),
+                    None,
+                    None,
+                ));
             }
             UpdateStatus::Unreachable | UpdateStatus::Blocked => {
                 failed = true;
@@ -996,15 +1130,25 @@ fn update(
                         "error": checked.error.as_ref().map(error_json),
                     }),
                     None,
+                    None,
                 ));
             }
             // The content the check fetched and scanned is the content
-            // written: no second fetch between the scan and the update.
+            // written: no second fetch between the scans and the update.
+            // The external run comes after the trust answer.
             UpdateStatus::Available => {
-                match update_answer(ctx, &store, &mut answers, &checked, trust_source).and_then(
-                    |answered| {
+                let mut external_report = external_report;
+                let outcome = update_answer(ctx, &store, &mut answers, &checked, trust_source)
+                    .and_then(|answered| {
+                        // A blocked source is refused by the update's
+                        // gate: never sent to Snyk first.
+                        if !source_blocked(&checked) {
+                            external_report =
+                                external_for_update(ctx, &store, sx, id, external, &mut runner)?;
+                        }
                         let decisions = Decisions {
                             allow_dangerous,
+                            external: external_report.clone(),
                             ..answered
                         };
                         install::update_reviewed(
@@ -1014,41 +1158,50 @@ fn update(
                             checked.latest.as_deref().unwrap_or_default(),
                             &decisions,
                         )
-                    },
-                ) {
+                    });
+                match outcome {
                     Ok(updated) => {
                         attention |= updated.report.needs_attention();
                         results.push((
-                        json!({
-                            "id": id,
-                            "status": "updated",
-                            "from": updated.from,
-                            "to": updated.to,
-                            "commit": updated.commit.as_ref().map(CommitId::as_str),
-                            "changes": updated.changes.iter().map(change_json).collect::<Vec<_>>(),
-                            "links": report_json(&updated.report),
-                            "scan": scan_json(&updated.scan),
-                        }),
-                        Some(updated.scan),
-                    ));
+                            with_external(
+                                json!({
+                                    "id": id,
+                                    "status": "updated",
+                                    "from": updated.from,
+                                    "to": updated.to,
+                                    "commit": updated.commit.as_ref().map(CommitId::as_str),
+                                    "changes": updated.changes.iter().map(change_json).collect::<Vec<_>>(),
+                                    "links": report_json(&updated.report),
+                                    "scan": scan_json(&updated.scan),
+                                }),
+                                updated.external.as_ref(),
+                            ),
+                            Some(updated.scan),
+                            updated.external,
+                        ));
                     }
                     Err(err) if err.code() == ErrorCode::ScanBlocked => {
                         blocked = true;
                         results.push((
-                            json!({
-                                "id": id,
-                                "status": "blocked",
-                                "latest": checked.latest,
-                                "error": error_json(&err),
-                                "scan": checked.scan.as_ref().map(scan_json),
-                            }),
+                            with_external(
+                                json!({
+                                    "id": id,
+                                    "status": "blocked",
+                                    "latest": checked.latest,
+                                    "error": error_json(&err),
+                                    "scan": checked.scan.as_ref().map(scan_json),
+                                }),
+                                external_report.as_ref(),
+                            ),
                             checked.scan,
+                            external_report,
                         ));
                     }
                     Err(err) => {
                         failed = true;
                         results.push((
                             json!({ "id": id, "status": "failed", "error": error_json(&err) }),
+                            None,
                             None,
                         ));
                     }
@@ -1057,10 +1210,10 @@ fn update(
         }
     }
     if ctx.json {
-        let skills: Vec<&Value> = results.iter().map(|(result, _)| result).collect();
+        let skills: Vec<&Value> = results.iter().map(|(result, _, _)| result).collect();
         print_json(&json!({ "schema": JSON_SCHEMA, "skills": skills }));
     } else {
-        for (result, scan) in &results {
+        for (result, scan, external) in &results {
             let status = result["status"].as_str().unwrap_or_default();
             let id = result["id"].as_str().unwrap_or_default();
             match result["error"]["message"].as_str() {
@@ -1079,6 +1232,9 @@ fn update(
             }
             if let Some(scan) = scan {
                 print_scan(scan, "  ");
+            }
+            if let Some(external) = external {
+                scanner::print_external(external, "  ");
             }
         }
         if blocked {

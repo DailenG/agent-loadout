@@ -1075,6 +1075,129 @@ The verdict is the worst finding: `clean`, `warning` or `dangerous`.
   always run, and the result says "custom rules in use". A file that does
   not load is reported with every scan.
 
+### Snyk Agent Scan (optional)
+
+Loadout can ask a second scanner for its opinion on a skill:
+[Snyk Agent Scan](https://github.com/snyk/agent-scan). It is **off by
+default** and only scans skills (never MCP servers). Unlike the built-in
+scan, it doesn't run on your computer alone: **it sends the skill to
+Snyk's analysis service in the cloud (`api.snyk.io`).** For each scan Snyk
+receives:
+
+- every file of the skill (Snyk redacts secrets it detects in them);
+- the skill's name (from `SKILL.md`);
+- the full path of the folder it scans (a temporary copy in Loadout's
+  data folder);
+- your user name on this computer;
+- this machine's host name, which the scanner adds itself where its
+  platform reports one;
+- the scanner's version.
+
+Loadout adds no host name, machine serial number, other environment
+variables or Loadout data, and never starts or contacts MCP servers for a
+scan. Snyk's terms and privacy policy apply to what it receives; the
+section links both. It needs a Snyk API token (`SNYK_TOKEN`); the free
+tier has a daily limit.
+
+**Turning it on in the app** (Settings > Security > **Snyk Agent Scan
+(optional)**):
+
+1. **Install** downloads the scanner version pinned in Loadout from
+   Snyk's GitHub releases into `tools/snyk-agent-scan/` in the data folder
+   (this computer only, not added to PATH; it syncs only if the data
+   folder itself is in a sync folder), with a progress bar and **Cancel**.
+   It is checked against the SHA-256 built into Loadout before it counts as
+   installed; a mismatch deletes it. Each scan checks it again first: a
+   file that changed since (corrupted, or replaced by a sync peer) isn't
+   run, the scanner shows as not installed, and **Install** downloads it
+   again. The row then says which version is installed and verified. The
+   download keeps going (with its progress and **Cancel**) if you leave
+   Settings, and a
+   second install can't start meanwhile. **Remove** deletes it after a
+   confirmation (Cancel is the default) and turns Snyk Agent Scan off;
+   the token reference is kept.
+2. **Set token...** says where the token is: a secret from the Secrets
+   page (an alias such as `SNYK_TOKEN`), an environment variable, a
+   1Password reference (`op://vault/item/field`) or an OS keyring entry
+   (`keyring://service/account`). Only this reference is saved, on this
+   computer; Loadout never asks for, shows or stores the token itself and
+   hands it only to the scanner while it runs. To keep the token in the
+   keyring, add it as a secret on the Secrets page and pick that secret.
+   **Check** tells you whether Loadout can read it (Snyk isn't contacted).
+   Secrets that point to a 1Password Environment (`op-env://`) aren't
+   offered: Loadout never reads those values, so it can't hand one to the
+   scanner. While what you typed isn't a reference, the dialog says why
+   Save is off. A secret alias must be one of your secrets; a pasted token
+   is refused, and the error never repeats it.
+3. **Use Snyk Agent Scan** turns it on. It stays unavailable until the
+   scanner is installed and a token is set.
+
+**What happens when it's on.**
+
+- Install and update reviews of content from a source (a Git repository,
+  a catalog, an update) run it once **as soon as the review opens, before
+  you choose Install or Update**. A folder or archive from this computer
+  is not sent on its own: its review shows **Scan with Snyk**, so you can
+  look at the files first. The result is listed under **External scan**,
+  beside the built-in findings: the verdict, and per finding the severity
+  (Snyk's score: high and critical, or malicious code, are `dangerous`,
+  medium is `warning`, low is `info`), the risk, `file:line`, Snyk's
+  explanation and any malicious or unverifiable URL. **Install** /
+  **Update** waits for it (up to the configured timeout, 60 seconds by
+  default) and while Loadout checks whether it's on; **Cancel scan**
+  stops it. If Loadout can't read the scanner's status, the review says
+  "Snyk Agent Scan status unknown, not scanned" and doesn't block.
+- A **dangerous** external verdict needs the same **Install anyway** /
+  **Update anyway** and "I read the findings" tick as the built-in scan;
+  the box says which scanner (or both) rated it dangerous. The tick covers
+  the result on screen: a new result asks again. Turning the scanner off
+  (or removing it) cancels scans in progress and forgets earlier Snyk
+  results, so they can't block a later update. While it's on, Loadout
+  won't install from a source or update without the Snyk result (a
+  canceled or not-scanned result counts); the review then runs the scan
+  first.
+- When it couldn't scan, the review says **Not scanned** and why (Snyk
+  limit reached, timed out, canceled, Snyk couldn't be reached, too large
+  for Snyk, no token, the token couldn't be read or was rejected), with
+  **Scan again**. Output Loadout can't read says "Scanner output not
+  understood (version ...)". Neither ever blocks an install, and neither
+  counts as clean: the built-in scan's findings still apply.
+- A skill's details in the library offer **Scan with Snyk** (while it's on
+  and installed), a report on the stored copy that changes nothing.
+- The scan's start and its result are announced to screen readers, with
+  what the Install or Update button now needs.
+- While it's off, nothing is ever sent to Snyk.
+
+### Snyk Agent Scan from the command line
+
+Snyk Agent Scan is off until you turn it on, and when it runs it **sends
+the skill to Snyk** (see above and [Security](security.md)).
+
+```sh
+loadout scanner install                 # download the pinned build, SHA-256 checked
+loadout secrets set SNYK_TOKEN --keyring < token.txt   # the token, in your OS keyring
+loadout scanner token SNYK_TOKEN        # a reference: an alias, env:NAME, keyring://... or op://...
+loadout scanner enable                  # prints what is sent, then turns it on
+loadout scanner status                  # version, installed, on or off, token reference
+```
+
+From then on `loadout skills add` and `loadout skills update` run it once
+per skill, after the built-in scan, and print `Snyk Agent Scan: <verdict>
+(N findings)` with its findings (`--json`: an `external` object). A
+`dangerous` Snyk verdict blocks like a built-in one (exit 8) until you
+pass `--allow-dangerous`. When it could not run it says `not scanned
+(<reason>)` (no token, Snyk rejected the token, Snyk limit reached, too
+large, offline, timed out, the scanner failed) and never blocks. A git
+source is sent only once you trust it: an untrusted or blocked source is
+refused before the scan, and `skills update --check` skips the scan for a
+source you haven't trusted yet. `--external` runs it once even when it is
+off; `--no-external` skips it once. Ctrl+C while it runs stops the
+scanner and deletes its copy of the skill. `loadout scanner run <SKILL>`
+scans a skill already in your library, `loadout scanner disable` turns it
+off and `loadout scanner remove` deletes the download and turns it off.
+`loadout scanner token` takes a reference only: a secret alias you
+defined with `loadout secrets`, or `env:`, `keyring://` or `op://`.
+
 ### Source trust
 
 Only install from sources you trust. Skills and MCP servers can run

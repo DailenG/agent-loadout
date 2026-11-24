@@ -261,6 +261,22 @@ pub enum ErrorCode {
     /// A catalog could not be reached or answered with an error (timeout,
     /// HTTP status, rate limit, a body too large or not JSON).
     CatalogUnreachable,
+    /// The optional external scanner (Snyk Agent Scan, #27) is turned off
+    /// on this machine, so an explicit run was refused; nothing ran.
+    ScannerUnavailable,
+    /// The external scanner could not be downloaded (network, HTTP status,
+    /// a redirect to a host Loadout does not download from, too large).
+    ScannerDownloadFailed,
+    /// The external scanner's download is not the pinned build (size or
+    /// SHA-256); it was deleted and nothing was installed.
+    ScannerVerificationFailed,
+    /// The user canceled the operation (a scanner install); nothing was
+    /// changed.
+    Canceled,
+    /// The external scanner is on, installed and has a token, but the
+    /// install or update carries no external report (its scan has not
+    /// run): run the scan, then try again. Nothing was changed.
+    ExternalScanRequired,
 }
 
 impl ErrorCode {
@@ -344,6 +360,11 @@ impl ErrorCode {
             ErrorCode::FolderOnOtherMachine => "folder_on_other_machine",
             ErrorCode::CatalogsOff => "catalogs_off",
             ErrorCode::CatalogUnreachable => "catalog_unreachable",
+            ErrorCode::ScannerUnavailable => "scanner_unavailable",
+            ErrorCode::ScannerDownloadFailed => "scanner_download_failed",
+            ErrorCode::ScannerVerificationFailed => "scanner_verification_failed",
+            ErrorCode::Canceled => "canceled",
+            ErrorCode::ExternalScanRequired => "external_scan_required",
         }
     }
 }

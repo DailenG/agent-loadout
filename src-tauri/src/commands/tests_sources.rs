@@ -178,7 +178,7 @@ fn installs_and_updates_take_the_dialogs_answer() {
     sources::revoke(&fx.core, &listed[0].id).unwrap();
     assert!(sources::list(&fx.core).unwrap().is_empty());
     let latest = checks[0].latest.clone().unwrap();
-    let err = skills::update(&fx.core, "alpha", &latest, false, None, None).unwrap_err();
+    let err = skills::update(&fx.core, "alpha", &latest, false, None, None, None).unwrap_err();
     assert_eq!(err.code, ErrorCode::SourceTrustRequired);
     skills::update(
         &fx.core,
@@ -186,6 +186,7 @@ fn installs_and_updates_take_the_dialogs_answer() {
         &latest,
         false,
         Some(TrustGrantArg::Once),
+        None,
         None,
     )
     .unwrap();
