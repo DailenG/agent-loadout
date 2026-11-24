@@ -220,8 +220,10 @@ fn launch_lines_cross_ipc_under_placeholders_and_save_the_real_paths() {
     let (mut resolved, review) = mcp_source::review_git(&fx.core, &url, None, None).unwrap();
     let draft = &review.drafts[0];
     // `npx -y git+file:///<home>/clock.git#<sha>`: the home folder is `~`
-    // in the launch line and in the Form (#18).
-    assert!(draft.launch.contains("git+file:///~"), "{}", draft.launch);
+    // in the launch line and in the Form (#18). The slash before the home
+    // folder belongs to the home path on Unix and to the URL on Windows.
+    assert!(draft.launch.contains("git+file://"), "{}", draft.launch);
+    assert!(draft.launch.contains("~/clock.git#"), "{}", draft.launch);
     assert_eq!(draft.launch_lines.len(), 1);
     fx.assert_no_root(&serde_json::to_string(&review).unwrap());
     let picks = vec![McpDraftPick {

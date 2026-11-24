@@ -394,7 +394,9 @@ fn a_bundle_checkout_updates_with_a_file_diff_and_force_push_lapses_trust() {
     .unwrap();
     let checkout = fx.home.path.join(CHECKOUTS_DIR).join("files");
     assert_eq!(
-        fx.read(&checkout.join("server").join("index.js")),
+        // A runner's core.autocrlf may check files out with CRLF.
+        fx.read(&checkout.join("server").join("index.js"))
+            .replace("\r\n", "\n"),
         "console.log(\"files v1\");\n"
     );
 
@@ -431,7 +433,8 @@ fn a_bundle_checkout_updates_with_a_file_diff_and_force_push_lapses_trust() {
     )
     .unwrap();
     assert_eq!(
-        fx.read(&checkout.join("server").join("index.js")),
+        fx.read(&checkout.join("server").join("index.js"))
+            .replace("\r\n", "\n"),
         "console.log(\"files v2\");\n"
     );
 
@@ -779,7 +782,8 @@ fn a_failed_update_commit_keeps_the_old_checkout() {
     assert_eq!(err.code(), ErrorCode::Locked);
     drop(lock);
     assert_eq!(
-        fx.read(&checkout.join("server").join("index.js")),
+        fx.read(&checkout.join("server").join("index.js"))
+            .replace("\r\n", "\n"),
         "console.log(\"files v1\");\n"
     );
     let server = store.server("files").unwrap().unwrap().into_value();
@@ -844,7 +848,8 @@ fn a_stale_checkout_blocks_its_entries_until_restored() {
     mcp_source::restore_checkout(&store, &sx, &fx.ax(), prepared, &once()).unwrap();
     let checkout = fx.home.path.join(CHECKOUTS_DIR).join("files");
     assert_eq!(
-        fx.read(&checkout.join("server").join("index.js")),
+        fx.read(&checkout.join("server").join("index.js"))
+            .replace("\r\n", "\n"),
         "console.log(\"files v2\");\n"
     );
     // Only the secret it waits for is left, not the checkout.
