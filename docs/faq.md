@@ -113,10 +113,14 @@ scanner, in its environment. A 1Password Environment (`op-env://`) can't
 be used, because Loadout never reads those values.
 
 **What happens when I reach Snyk's daily limit?**
-The free tier allows a limited number of scans a day. After that, skills
-show "Not scanned (Snyk limit reached)" and install as usual: a skill
-Snyk didn't scan is never blocked and never counts as clean, and the
-built-in scan still runs.
+Skills show "Not scanned (Snyk limit reached)" and install as usual: a
+skill Snyk didn't scan is never blocked and never counts as clean, and the
+built-in scan still runs. Snyk doesn't publish the free tier's limit, and
+its console shows no Agent Scan usage. In our own testing a new account's
+valid token (accepted by Snyk's account API) was refused with "Daily usage
+limit reached" from the first scan. Higher limits are only available by
+contacting Snyk (Snyk Evo); there is no self-serve plan or billing for
+Agent Scan.
 
 **Why doesn't Snyk Agent Scan check MCP servers?**
 In this version it scans skills only. Snyk's scanner sends an MCP

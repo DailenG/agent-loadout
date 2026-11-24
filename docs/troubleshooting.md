@@ -518,8 +518,12 @@ never counts as clean; the built-in scan still applies. **Scan again**
   set, or it doesn't resolve on this machine (an unset environment
   variable, a locked keyring, 1Password not signed in). **Check** in
   Settings > Security says which.
-- **Snyk limit reached**: the free tier's daily limit is used up. Skills
-  aren't scanned by Snyk until it resets; nothing is blocked.
+- **Snyk limit reached**: Snyk refused the scan with its free tier's
+  daily limit (HTTP 429). Snyk doesn't publish the limit, and a new
+  account can be refused from its first scan even with a valid token;
+  higher limits are only available by contacting Snyk. Skills aren't
+  scanned by Snyk until it lets scans through again; nothing is blocked.
+  A token Snyk doesn't accept shows **Snyk rejected the token** instead.
 - **too large**: Snyk refused the skill's size.
 - **Snyk could not be reached**: offline, a firewall, or a proxy problem
   (the scanner uses the same proxy variables).

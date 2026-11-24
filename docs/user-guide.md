@@ -1105,8 +1105,10 @@ receives:
 Loadout adds no host name, machine serial number, other environment
 variables or Loadout data, and never starts or contacts MCP servers for a
 scan. Snyk's terms and privacy policy apply to what it receives; the
-section links both. It needs a Snyk API token (`SNYK_TOKEN`); the free
-tier has a daily limit.
+section links both. It needs a Snyk API token (`SNYK_TOKEN`, from
+https://app.snyk.io/account; no Snyk CLI login is needed). The free tier
+has a daily limit that Snyk doesn't publish and that can be reached from
+the first scan; higher limits are only available by contacting Snyk.
 
 **Turning it on in the app** (Settings > Security > **Snyk Agent Scan
 (optional)**):
