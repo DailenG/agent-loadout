@@ -446,9 +446,23 @@ mod tree {
     impl Running {
         pub fn spawn(mut command: Command) -> Result<Self, String> {
             command.process_group(0);
-            let child = command
-                .spawn()
-                .map_err(|err| format!("the scanner could not be started: {err}"))?;
+            // ETXTBSY: a program that was just written (a copy of a
+            // scanner) can still be open for writing in a child another
+            // thread forked before it exec'd; that resolves in moments.
+            let busy = Some(rustix::io::Errno::TXTBSY.raw_os_error());
+            let mut attempt = 0;
+            let child = loop {
+                match command.spawn() {
+                    Err(err) if err.raw_os_error() == busy && attempt < 10 => {
+                        attempt += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(50 * attempt));
+                    }
+                    result => {
+                        break result
+                            .map_err(|err| format!("the scanner could not be started: {err}"))?;
+                    }
+                }
+            };
             let group = Pid::from_child(&child);
             Ok(Self { child, group })
         }
