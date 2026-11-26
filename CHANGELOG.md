@@ -33,6 +33,12 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 - The omp logo in the app is omp's own mark (the gradient π from
   omp.sh), not a placeholder.
+- Skills page in a project: paths inside the project folder read
+  ".claude/skills in the project folder" instead of the raw `<P>/`
+  placeholder (also in read-only tooltips, adopt results, Pending changes
+  and History); long descriptions end before the card's buttons instead
+  of running under them; the skill icon's corner mark no longer crowds
+  the letter.
 
 ## [0.7.0] - 2026-11-24
 

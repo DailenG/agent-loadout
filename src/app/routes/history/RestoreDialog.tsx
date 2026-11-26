@@ -10,6 +10,7 @@ import { useInvalidateStore } from "@/app/apply/changeNotice";
 import { Modal } from "@/app/components/Modal";
 import { useNotifications } from "@/app/components/notifications";
 import { failureText } from "@/app/routes/history/labels";
+import { displayPath } from "@/app/routes/projects/labels";
 import { t, type MessageKey } from "@/i18n/en";
 import type { HistoryEntry, RestorePreview, RestoreResult } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
@@ -167,7 +168,7 @@ export function RestoreDialog({ entry, pick, onClose, onRestored }: RestoreDialo
                 <ul>
                   {data.sharedManifests.map((file) => (
                     <li key={file} className="history-mono">
-                      {file}
+                      {displayPath(file)}
                     </li>
                   ))}
                 </ul>

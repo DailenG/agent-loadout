@@ -755,6 +755,24 @@ const SKILL_TOOL_DIRS: ToolSkillDir[] = [
   },
 ];
 
+/* A project's real skill folders (`<P>/...` placeholder paths) with long descriptions, as the 0.7.0 report. */
+const PROJECT_SKILL_TOOL_DIRS: ToolSkillDir[] = [
+  {
+    client: "claude-code",
+    name: "Claude Code",
+    dir: "<P>/.claude/skills",
+    exists: true,
+    entries: [
+      { name: "warp-agent-path", path: "<P>/.claude/skills/warp-agent-path", class: "unmanaged", linkTarget: null, skillId: null, description: "Find out in under a minute which link of the remote path to one device is broken: the API token, the agent, the tunnel, or the device itself, with the exact fix for each." },
+      { name: "warp-alert-triage", path: "<P>/.claude/skills/warp-alert-triage", class: "unmanaged", linkTarget: null, skillId: null, description: null },
+      { name: "warp-app-runbooks", path: "<P>/.claude/skills/warp-app-runbooks", class: "unmanaged", linkTarget: null, skillId: null, description: "Per-application install and error runbooks for the vendor products that generate the most tickets (Revit, Bluebeam, Outlook, Teams)." },
+      { name: "code-review", path: "<P>/.claude/skills/code-review", class: "managed", linkTarget: "%LOCALAPPDATA%/Loadout/store/skills/code-review", skillId: "code-review", description: "Review a diff for correctness, security and style before it lands, with a summary of every finding ordered by severity and a suggested fix." },
+    ],
+    readOnly: null,
+  },
+  { client: "codex", name: "Codex", dir: "<P>/.codex/skills", exists: false, entries: [], readOnly: null },
+];
+
 /* M34 skills adopt (#3): the unmanaged folders above as the adopt scan sees them. */
 const UNMANAGED_SKILLS: UnmanagedSkills = {
   candidates: [
@@ -1831,7 +1849,7 @@ export function buildDemoDataset(): MockTransportOptions {
       secretsOverview: async () =>
         ok({ aliases: ALIASES, undefined: ["LINEAR_API_KEY"], environment: null, opAccount: "work.1password.com", serviceAccountSet: false }),
       listSkills: async (scope) => ok(skillList(scope)),
-      listSkillToolDirs: async () => ok(SKILL_TOOL_DIRS),
+      listSkillToolDirs: async (scope) => ok(scope.kind === "project" ? PROJECT_SKILL_TOOL_DIRS : SKILL_TOOL_DIRS),
       /* M34 */
       scanUnmanagedSkills: async (_scope, client) => ok(unmanagedSkills(client)),
       adoptSkills: async (_scope, client, choices) => ok(adoptResult(client, choices)),

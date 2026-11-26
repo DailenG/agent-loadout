@@ -56,6 +56,18 @@ export function projectRelativePath(path: string, root?: string): string {
   return root ? `${root}/${rest}` : rest;
 }
 
+/**
+ * Any path from IPC as people read it: `<P>/.claude/skills` becomes
+ * `.claude/skills in the project folder`, or `<root>/.claude/skills` when
+ * the folder is given. Other paths (`~/...`, absolute) are unchanged.
+ */
+export function displayPath(path: string, root?: string): string {
+  if (!path.startsWith(PROJECT_ROOT)) {
+    return path;
+  }
+  return root ? projectRelativePath(path, root) : t("path.inProject", { path: path.slice(PROJECT_ROOT.length) });
+}
+
 /** The manifest files as `ProjectRow.readOnlyFiles` names them (M38). */
 const MANIFEST_FILES: Record<ManifestLayerKind, string> = {
   shared: `${PROJECT_ROOT}.loadout/project.toml`,

@@ -3648,6 +3648,7 @@ code {
 
 .skill-card__title-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   min-width: 0;
 }
@@ -4339,9 +4340,10 @@ code {
 
 .skill-card__summary-description,
 .mcp-server-card__subtitle {
-  width: min(700px, 68vw);
+  /* Never wider than its column, so it ends before the card's actions. */
+  width: 100%;
   min-width: 0;
-  max-width: none;
+  max-width: 700px;
   overflow: hidden;
   margin: 0;
   color: color-mix(in srgb, var(--muted) 94%, #111827 6%);
@@ -18907,10 +18909,21 @@ button.settings-form-item:disabled {
    the surface color, so it sits on the tile's corner without cutting its
    edge; in dark its fill is opaque for the same reason. */
 .link-badge__type-mark {
+  /* Out on the corner, clear of the centered letter. */
+  top: -6px;
+  left: -6px;
+  width: 14px;
+  height: 14px;
   border-color: transparent;
+  border-radius: 5px;
   box-shadow:
     0 0 0 2px var(--surface),
     0 2px 6px rgba(15, 23, 42, 0.1);
+}
+
+:root[data-theme="dark"] .link-badge--monogram {
+  background: var(--surface-strong);
+  box-shadow: 0 0 0 1px var(--line) inset;
 }
 
 :root[data-theme="dark"] .link-badge__type-mark--skill,

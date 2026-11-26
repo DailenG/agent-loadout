@@ -162,6 +162,7 @@ const messages = {
   "skills.source.details.linkTarget": "Links to",
   "skills.source.details.managementStatus": "Management status",
   "skills.source.details.storeSkill": "Store skill",
+  "path.inProject": "{path} in the project folder",
   "skills.source.folder": "Skill folder: {path}",
   "skills.source.folderMissing": "{tool} has no skill folder here yet: {path}",
   "skills.source.success.imported": "Imported {name} to the store.",

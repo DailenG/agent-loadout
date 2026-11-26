@@ -12,6 +12,7 @@
 import { useId } from "react";
 import { t, type MessageKey } from "@/i18n/en";
 import type { ReadOnly, ReadOnlyKind } from "@/ipc/bindings";
+import { displayPath } from "@/app/routes/projects/labels";
 
 const KIND_KEYS = {
   acl: "readOnly.kind.acl",
@@ -28,7 +29,7 @@ export function readOnlyReason(kind: ReadOnlyKind): string {
 /** The whole explanation: the path (when given), the reason, and that Loadout leaves it as it is. */
 export function readOnlyTooltip(readOnly: ReadOnly, path?: string | null): string {
   const reason = readOnlyReason(readOnly.kind);
-  return path ? t("readOnly.tooltipPath", { path, reason }) : t("readOnly.tooltip", { reason });
+  return path ? t("readOnly.tooltipPath", { path: displayPath(path), reason }) : t("readOnly.tooltip", { reason });
 }
 
 export function LockIcon() {

@@ -141,7 +141,7 @@ describe("ApplyDrawer", () => {
 
     expect(within(user).getByText(USER_FILE.file)).toBeInTheDocument();
     expect(within(user).getByText(CODEX_FILE.file)).toBeInTheDocument();
-    expect(within(project).getAllByText(PROJECT_FILE.file)).toHaveLength(2);
+    expect(within(project).getAllByText(".mcp.json in the project folder")).toHaveLength(2);
     expect(within(project).getByText("~/code/demo")).toBeInTheDocument();
     expect(within(project).getByText("~/code/other")).toBeInTheDocument();
     expect(
@@ -181,10 +181,10 @@ describe("ApplyDrawer", () => {
 
     await user.click(await screen.findByRole("checkbox", { name: t("apply.file.select", { file: USER_FILE.file }) }));
     const demo = screen.getByRole("checkbox", {
-      name: t("apply.file.selectInProject", { file: PROJECT_FILE.file, project: "~/code/demo" }),
+      name: t("apply.file.selectInProject", { file: ".mcp.json in the project folder", project: "~/code/demo" }),
     });
     const other = screen.getByRole("checkbox", {
-      name: t("apply.file.selectInProject", { file: PROJECT_FILE.file, project: "~/code/other" }),
+      name: t("apply.file.selectInProject", { file: ".mcp.json in the project folder", project: "~/code/other" }),
     });
     await user.click(demo);
     expect(demo).toBeChecked();

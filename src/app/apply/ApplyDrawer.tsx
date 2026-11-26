@@ -15,6 +15,7 @@ import { Modal } from "@/app/components/Modal";
 import { ReadOnlyBadge, ReadOnlyNote, readOnlyReason } from "@/app/components/ReadOnlyBadge";
 import { useNotifications } from "@/app/components/notifications";
 import { ResolverDialog } from "@/app/resolver/ResolverDialog";
+import { displayPath } from "@/app/routes/projects/labels";
 import { errorMessage, t, type MessageKey } from "@/i18n/en";
 import type {
   AppliedRun,
@@ -104,8 +105,8 @@ function PlannedFileItem({ file, selected, onSelect, clientName, onResolve }: Fi
           onChange={(event) => onSelect(event.target.checked)}
           aria-label={
             file.project
-              ? t("apply.file.selectInProject", { file: file.file, project: file.project })
-              : t("apply.file.select", { file: file.file })
+              ? t("apply.file.selectInProject", { file: displayPath(file.file), project: file.project })
+              : t("apply.file.select", { file: displayPath(file.file) })
           }
         />
         <button
@@ -115,9 +116,9 @@ function PlannedFileItem({ file, selected, onSelect, clientName, onResolve }: Fi
           aria-controls={detailId}
           onClick={() => setExpanded((current) => !current)}
         >
-          <span className="apply-file__path" title={file.project ? `${file.project}: ${file.file}` : file.file}>
+          <span className="apply-file__path" title={file.project ? `${file.project}: ${displayPath(file.file)}` : displayPath(file.file)}>
             {file.project ? <span className="apply-file__project">{file.project}</span> : null}
-            <span>{file.file}</span>
+            <span>{displayPath(file.file)}</span>
           </span>
           <span className="apply-file__counts" aria-label={t("apply.counts.aria", { ...counts })}>
             <span className="apply-count apply-count--create">+{counts.create}</span>
@@ -142,7 +143,7 @@ function PlannedFileItem({ file, selected, onSelect, clientName, onResolve }: Fi
       {expanded ? (
         <div className="apply-file__detail" id={detailId}>
           {diffLines.length > 0 ? (
-            <pre className="apply-diff" aria-label={t("apply.file.diff", { file: file.file })}>
+            <pre className="apply-diff" aria-label={t("apply.file.diff", { file: displayPath(file.file) })}>
               {diffLines.map((line, index) => (
                 <span key={index} className={diffLineClass(line)}>
                   {line}

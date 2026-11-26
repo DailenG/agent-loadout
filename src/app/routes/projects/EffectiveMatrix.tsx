@@ -12,7 +12,7 @@ import { STATE_KEYS } from "@/app/apply/labels";
 import { RefreshButton } from "@/app/apply/RefreshButton";
 import { HeaderToolbar } from "@/app/components/HeaderSlots";
 import { ReadOnlyBadge, readOnlyTooltip } from "@/app/components/ReadOnlyBadge";
-import { LAYER_KEYS, LAYER_LETTERS, failureText } from "@/app/routes/projects/labels";
+import { LAYER_KEYS, LAYER_LETTERS, displayPath, failureText } from "@/app/routes/projects/labels";
 import { errorMessage, t } from "@/i18n/en";
 import type { MatrixCell, MatrixClient } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
@@ -78,7 +78,7 @@ function Provenance({ selected, clientName, onClose }: {
         <dt>{t("matrix.detail.winner")}</dt>
         <dd>
           <span className="matrix-detail__layer">{t(LAYER_KEYS[cell.winner.layer])}</span>{" "}
-          <code>{cell.winner.file}</code>{" "}
+          <code>{displayPath(cell.winner.file)}</code>{" "}
           <ReadOnlyBadge readOnly={cell.winner.readOnly} path={cell.winner.file} />
         </dd>
         <dt>{t("matrix.detail.source")}</dt>

@@ -13,6 +13,7 @@ import {
   OUTCOME_TONES,
   failureText,
 } from "@/app/routes/history/labels";
+import { displayPath } from "@/app/routes/projects/labels";
 import { t } from "@/i18n/en";
 import type { AppliedDetail, EntityDiff } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
@@ -64,7 +65,7 @@ function AppliedTargets({ applied }: { applied: AppliedDetail }) {
             {applied.targets.map((target, index) => (
               <tr key={`${target.client}-${target.file}-${index}`}>
                 <td>{clientNames.get(target.client) ?? target.client}</td>
-                <td className="history-mono">{target.file}</td>
+                <td className="history-mono">{displayPath(target.file)}</td>
                 <td>
                   <span className="apply-file__counts" aria-label={t("apply.counts.aria", { ...target.counts })}>
                     <span className="apply-count apply-count--create">+{target.counts.create}</span>
@@ -108,7 +109,7 @@ function SemanticDiff({ changes }: { changes: EntityDiff[] }) {
           </div>
           {diffs.map((diff) => (
             <div key={diff.file} className="history-detail__file">
-              <span className="history-mono history-detail__path">{diff.file}</span>
+              <span className="history-mono history-detail__path">{displayPath(diff.file)}</span>
               {diff.fields.length > 0 ? (
                 <ul className="history-detail__fields">
                   {diff.fields.map((field) => (

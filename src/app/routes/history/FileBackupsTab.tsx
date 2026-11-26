@@ -12,6 +12,7 @@ import {
   failureText,
   formatTime,
 } from "@/app/routes/history/labels";
+import { displayPath } from "@/app/routes/projects/labels";
 import { errorMessage, t } from "@/i18n/en";
 import type { BackupRunEntry, FileRestoreEntry } from "@/ipc/bindings";
 import { unwrap, useTransport } from "@/ipc/transport";
@@ -97,8 +98,8 @@ export function FileBackupsTab() {
                 const outcome = outcomes[run.run]?.[file];
                 return (
                   <li key={file} className="history-backup-file">
-                    <span className="history-mono history-backup-file__path" title={file}>
-                      {file}
+                    <span className="history-mono history-backup-file__path" title={displayPath(file)}>
+                      {displayPath(file)}
                     </span>
                     {outcome ? (
                       <span className={`status-badge ${FILE_RESTORE_TONES[outcome.outcome]}`}>

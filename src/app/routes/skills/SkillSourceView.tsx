@@ -16,6 +16,7 @@ import { AdoptDialog } from "../import/skills/AdoptDialog";
 import { DeleteIcon } from "../mcp/icons";
 import { useSkillActions } from "./actions";
 import { FolderIcon, ImportIcon, SkillMonogram } from "./icons";
+import { displayPath } from "../projects/labels";
 import { ENTRY_CLASS_KEYS, ENTRY_CLASS_TONES, monogram } from "./labels";
 
 type EntryRowProps = {
@@ -201,12 +202,12 @@ function EntryRow({ dir, entry, scope, expanded, onExpandedChange, onShowManaged
             </div>
             <div>
               <dt>{t("skills.source.details.localPath")}</dt>
-              <dd className="detail-grid__single-line" data-tooltip={entry.path}>{entry.path}</dd>
+              <dd className="detail-grid__single-line" data-tooltip={displayPath(entry.path)}>{displayPath(entry.path)}</dd>
             </div>
             {entry.linkTarget ? (
               <div>
                 <dt>{t("skills.source.details.linkTarget")}</dt>
-                <dd className="detail-grid__single-line" data-tooltip={entry.linkTarget}>{entry.linkTarget}</dd>
+                <dd className="detail-grid__single-line" data-tooltip={displayPath(entry.linkTarget)}>{displayPath(entry.linkTarget)}</dd>
               </div>
             ) : null}
             {entry.skillId ? (
@@ -244,10 +245,10 @@ export function ToolSkillList({ dir, scope, query, onShowManaged, confirmRename 
   return (
     <>
       <div className="skills-source-folder-row">
-        <p className="skills-source-folder" title={dir.dir}>
+        <p className="skills-source-folder" title={displayPath(dir.dir)}>
           {dir.exists
-            ? t("skills.source.folder", { path: dir.dir })
-            : t("skills.source.folderMissing", { tool: dir.name, path: dir.dir })}
+            ? t("skills.source.folder", { path: displayPath(dir.dir) })
+            : t("skills.source.folderMissing", { tool: dir.name, path: displayPath(dir.dir) })}
         </p>
         <ReadOnlyBadge readOnly={dir.readOnly} path={dir.dir} />
         {hasRealFolders ? (
@@ -263,7 +264,7 @@ export function ToolSkillList({ dir, scope, query, onShowManaged, confirmRename 
       </div>
       {dir.readOnly ? (
         <ReadOnlyNote>
-          {t("readOnly.skills.folder", { client: dir.name, path: dir.dir, reason: readOnlyReason(dir.readOnly.kind) })}
+          {t("readOnly.skills.folder", { client: dir.name, path: displayPath(dir.dir), reason: readOnlyReason(dir.readOnly.kind) })}
         </ReadOnlyNote>
       ) : null}
       <div className="card-list">

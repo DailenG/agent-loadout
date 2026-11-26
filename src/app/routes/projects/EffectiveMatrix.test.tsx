@@ -93,7 +93,7 @@ describe("EffectiveMatrixView", () => {
     const detail = screen.getByRole("complementary", {
       name: t("matrix.detail.title", { server: "github", client: "Claude Code" }),
     });
-    expect(within(detail).getAllByText("<P>/.mcp.json").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText(".mcp.json in the project folder").length).toBeGreaterThan(0);
     expect(within(detail).getByText("store:github+project")).toBeInTheDocument();
     const shadowed = within(detail).getByRole("list", { name: t("matrix.detail.shadowed") });
     expect(shadowed).toHaveTextContent(t("matrix.layer.user"));

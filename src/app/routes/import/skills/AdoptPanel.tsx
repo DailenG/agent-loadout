@@ -12,6 +12,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { storeQueryKeys, useInvalidateImports, useInvalidateStore } from "@/app/apply/changeNotice";
 import { useNotifications } from "@/app/components/notifications";
 import { useAddFolderFlow } from "@/app/routes/projects/AddFolderFlow";
+import { displayPath } from "@/app/routes/projects/labels";
 import { LINK_STATUS_KEYS, failureText, formatSize } from "@/app/routes/skills/labels";
 import { useProjectList } from "@/app/scope/ActiveScope";
 import { t, type MessageKey } from "@/i18n/en";
@@ -90,8 +91,8 @@ function FolderList({ variant, names }: { variant: UnmanagedSkillVariant; names:
       {variant.folders.map((folder) => (
         <li key={`${folder.client}:${folder.path}`}>
           <span className="adopt-folders__client">{names(folder.client)}</span>
-          <span className="adopt-path" title={folder.path}>
-            {folder.path}
+          <span className="adopt-path" title={displayPath(folder.path)}>
+            {displayPath(folder.path)}
           </span>
         </li>
       ))}
@@ -226,8 +227,8 @@ function ProblemList({ problems, names }: { problems: UnmanagedSkillProblem[]; n
         <li key={`${problem.client}:${problem.path}`} className="adopt-result-row">
           <strong>{problem.name}</strong>
           <span className="adopt-folders__client">{names(problem.client)}</span>
-          <span className="adopt-path" title={problem.path}>
-            {problem.path}
+          <span className="adopt-path" title={displayPath(problem.path)}>
+            {displayPath(problem.path)}
           </span>
           <span className="adopt-reason">{reasonText(problem.error)}</span>
         </li>
@@ -268,8 +269,8 @@ function AdoptResultView({ result, names, onAgain }: AdoptResultViewProps) {
               <li key={`${folder.client}:${folder.path}`} className="adopt-result-row">
                 <strong>{folder.skillId ?? folder.name}</strong>
                 <span className="adopt-folders__client">{names(folder.client)}</span>
-                <span className="adopt-path" title={folder.path}>
-                  {folder.path}
+                <span className="adopt-path" title={displayPath(folder.path)}>
+                  {displayPath(folder.path)}
                 </span>
                 {folder.skillId && folder.skillId !== folder.name ? (
                   <span className="adopt-reason">
@@ -298,8 +299,8 @@ function AdoptResultView({ result, names, onAgain }: AdoptResultViewProps) {
               <li key={`${folder.client}:${folder.path}`} className="adopt-result-row">
                 <strong>{folder.name}</strong>
                 <span className="adopt-folders__client">{names(folder.client)}</span>
-                <span className="adopt-path" title={folder.path}>
-                  {folder.path}
+                <span className="adopt-path" title={displayPath(folder.path)}>
+                  {displayPath(folder.path)}
                 </span>
                 <span className="adopt-reason">{keptReason(folder)}</span>
               </li>

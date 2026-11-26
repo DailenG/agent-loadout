@@ -416,6 +416,28 @@ describe("SkillsPage", () => {
     expect(screen.getByRole("tab", { name: /Store/ })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("shows a project skill folder's paths without the backend's <P> placeholder", async () => {
+    const projectDir: ToolSkillDir = {
+      ...CLAUDE_DIR,
+      dir: "<P>/.claude/skills",
+      entries: [
+        { name: "hand-made", path: "<P>/.claude/skills/hand-made", class: "unmanaged", linkTarget: null, skillId: null, description: "Made by hand." },
+      ],
+      readOnly: { kind: "acl" },
+    };
+    const { user } = renderPage({ listSkillToolDirs: async () => ok([projectDir]) });
+    await user.click(await screen.findByRole("tab", { name: /Claude Code/ }));
+    expect(screen.getByText("Skill folder: .claude/skills in the project folder")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: /hand-made/, expanded: false })[0]!);
+    expect(await screen.findByText(".claude/skills/hand-made in the project folder")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("<P>");
+    for (const element of document.querySelectorAll("[title], [data-tooltip], [aria-description]")) {
+      for (const name of ["title", "data-tooltip", "aria-description"]) {
+        expect(element.getAttribute(name) ?? "").not.toContain("<P>");
+      }
+    }
+  });
+
   it("follows the sidebar to a project: lists project-enabled skills and turns one on with the shown hash", async () => {
     const scopes: SkillScope[] = [];
     const { user, transport } = renderPage({

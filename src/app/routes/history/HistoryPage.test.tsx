@@ -378,7 +378,7 @@ describe("HistoryPage", () => {
     const dialog = await screen.findByRole("dialog", {
       name: t("history.restore.titleVersion", { id: SERVER_EDIT.shortId }),
     });
-    expect(await within(dialog).findByText("<P>/.loadout/project.toml")).toBeInTheDocument();
+    expect(await within(dialog).findByText(".loadout/project.toml in the project folder")).toBeInTheDocument();
     const restore = within(dialog).getByRole("button", { name: t("history.restore.action") });
     expect(restore).toBeDisabled();
     await user.click(within(dialog).getByRole("checkbox", { name: t("history.restore.sharedConfirm") }));
