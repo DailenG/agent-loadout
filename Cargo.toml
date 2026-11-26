@@ -84,6 +84,11 @@ windows-permissions = "0.2"
 # Job Objects for `loadout exec` on Windows (SPEC 11.5): a safe wrapper, so
 # the workspace keeps `unsafe_code = "forbid"`.
 win32job = "2"
+# The external scanners' process tree on Windows (#30): the child starts
+# suspended, joins a kill-on-close Job Object, then resumes, so nothing it
+# starts escapes the job; the job is terminated and waited for. A safe
+# wrapper, as above.
+process-wrap = { version = "11", default-features = false, features = ["std", "job-object", "kill-on-drop", "creation-flags"] }
 # Archive folder remotes and `restore --from <zip>` (SPEC 9.6). Deflate
 # only, through flate2's pure Rust miniz_oxide backend (MIT/Apache); the
 # other zip codecs are left out.

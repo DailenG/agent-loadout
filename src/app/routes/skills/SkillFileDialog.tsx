@@ -173,7 +173,7 @@ type SkillUpdateDialogProps = {
 /**
  * The update preview (SPEC 12.4): each changed file's diff (executable-looking
  * files marked), the source's trust state, the built-in scan of the new
- * content (M42) and, when it's on, Snyk Agent Scan's (M49), then Update. An
+ * content (M42) and, when it's on, SkillSpector's (M51), then Update. An
  * untrusted or lapsed source asks first; a dangerous verdict of either scan
  * updates only through "Update anyway".
  */
@@ -183,18 +183,20 @@ export function SkillUpdateDialog({ skill, check, isUpdating, onUpdate, onClose 
   const { resolveTrust, dialog: trustDialog } = useTrustPrompt();
   const [selected, setSelected] = useState<SkillFileChange | null>(check.changes[0] ?? null);
   const latest = check.latest ?? "";
-  // The backend remembers this run for `update_skill(id, latest, ...)`: the gate is the scan shown. Updates come
-  // from a source, so the scan starts as soon as the review opens.
-  const external = useReviewScan((runId) => commands.externalScanUpdate(skill.id, latest, runId), true);
+  // The backend remembers this run for `update_skill(id, latest, ...)`: the gate is the scan shown. The scan
+  // starts as soon as the review opens.
+  const external = useReviewScan((runId) => commands.externalScanUpdate(skill.id, latest, runId));
   const shown = external.shown;
   const [acknowledged, setAcknowledged] = useState(false);
   useEffect(() => setAcknowledged(false), [shown]);
   const builtinDangerous = isDangerous(check.scan);
   const externalDangerous = isExternalDangerous(shown);
   const dangerous = builtinDangerous || externalDangerous;
-  const actionNote = dangerous
-    ? t("external.live.confirm", { action: t("skill.update.anyway") })
-    : t("external.live.available", { action: t("skill.update.confirm") });
+  const actionNote = external.needsScan
+    ? t("external.live.needsScan", { action: t(dangerous ? "skill.update.anyway" : "skill.update.confirm") })
+    : dangerous
+      ? t("external.live.confirm", { action: t("skill.update.anyway") })
+      : t("external.live.available", { action: t("skill.update.confirm") });
   const blocked = check.trust?.state.kind === "blocked" || check.movedTrust?.state.kind === "blocked";
   const diff = useQuery({
     queryKey: ["skill_update_diff", skill.id, check.latest, selected?.path],
@@ -241,7 +243,7 @@ export function SkillUpdateDialog({ skill, check, isUpdating, onUpdate, onClose 
               <button
                 className="secondary-button danger-button"
                 type="button"
-                disabled={isUpdating || blocked || !acknowledged || external.busy}
+                disabled={isUpdating || blocked || !acknowledged || external.busy || external.needsScan}
                 onClick={() => void update(true)}
               >
                 {isUpdating ? t("skills.updating") : t("skill.update.anyway")}
@@ -250,7 +252,7 @@ export function SkillUpdateDialog({ skill, check, isUpdating, onUpdate, onClose 
               <button
                 className="primary-button"
                 type="button"
-                disabled={isUpdating || blocked || external.busy}
+                disabled={isUpdating || blocked || external.busy || external.needsScan}
                 onClick={() => void update(false)}
               >
                 {isUpdating ? t("skills.updating") : t("skill.update.confirm")}

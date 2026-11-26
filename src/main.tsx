@@ -25,7 +25,7 @@ async function selectTransport(): Promise<Transport> {
     }
     const { buildDemoDataset } = await import("@/test/demoData");
     const { demoScannerState } = await import("@/test/scannerData");
-    // `?scanner=` picks the external scanner's demo state (M49).
+    // `?scanner=` picks SkillSpector's demo state (M51; `demoScannerState` lists them).
     return createMockTransport({ appInfo, ...buildDemoDataset(), scanner: demoScannerState(params.get("scanner")) });
   }
   return tauriTransport;

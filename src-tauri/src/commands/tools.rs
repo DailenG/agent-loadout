@@ -327,6 +327,16 @@ const HELP_PAGES: &[(&str, &str)] = &[
         "https://github.com/snyk/agent-scan/blob/v0.7.1/TERMS.md",
     ),
     ("snyk_privacy", "https://snyk.io/policies/privacy/"),
+    // SkillSpector (#30): the project at the tested tag, and uv's
+    // installation page (Prepare needs uv), linked from Settings > Security.
+    (
+        "skillspector",
+        "https://github.com/NVIDIA/SkillSpector/tree/v2.13.7",
+    ),
+    (
+        "uv_install",
+        "https://docs.astral.sh/uv/getting-started/installation/",
+    ),
 ];
 
 /// The URL `open_help` opens for `topic`; an error for any other topic, so

@@ -1,11 +1,11 @@
 //! Ctrl+C (SIGINT), SIGTERM and SIGHUP while the external scanner runs or
-//! downloads (#27). The scanner is in its own process group on Unix, so
-//! the terminal's Ctrl+C never reaches it, and on Windows the run folder
-//! would stay behind. While a [`Busy`] guard is held, the signal sets the
-//! cancel flag instead: the run kills the scanner's process tree and
-//! removes its folder (a download deletes its partial file), then the
-//! guard ends the command with exit code 130. Outside a guard the signal
-//! ends the command at once, as without a handler.
+//! is prepared (SkillSpector scans and `scanner prepare`, #30). The
+//! scanner is in its own process group on Unix, so the terminal's Ctrl+C
+//! never reaches it, and on Windows the run folder would stay behind.
+//! While a [`Busy`] guard is held, the signal sets the cancel flag
+//! instead: the run kills the scanner's process tree and removes its run
+//! folder, then the guard ends the command with exit code 130. Outside a
+//! guard the signal ends the command at once, as without a handler.
 
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,7 +17,7 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 static BUSY: AtomicBool = AtomicBool::new(false);
 static HANDLER: Once = Once::new();
 
-/// A cancelable stretch of the command (a scanner run or download).
+/// A cancelable stretch of the command (a scanner run or Prepare).
 pub struct Busy(());
 
 impl Busy {
@@ -38,7 +38,7 @@ impl Busy {
         Self(())
     }
 
-    /// The flag the run or download polls.
+    /// The flag the run or Prepare polls.
     pub fn flag(&self) -> &'static AtomicBool {
         &CANCEL
     }

@@ -14,7 +14,8 @@ use agent_loadout_core::model::clients::ClientSelection;
 use agent_loadout_core::model::skill_meta::{DistributionMethod, SkillSourceKind};
 use agent_loadout_core::remote::git::{IDLE_TIMEOUT, SystemRunner};
 use agent_loadout_core::scan::ScanReport;
-use agent_loadout_core::scan::external::{Choice, ExternalReport, Runner};
+use agent_loadout_core::scan::external::skillspector::Runner;
+use agent_loadout_core::scan::external::{Choice, ExternalReport};
 use agent_loadout_core::skills::adopt;
 use agent_loadout_core::skills::agents_cli::{self, CliAction};
 use agent_loadout_core::skills::classify::{self, ClientDir};
@@ -54,8 +55,8 @@ enum SkillsCommand {
     /// Install a skill from a git URL, a local folder, or a .zip/.skill
     /// archive. With --yes, a taken id becomes <id>-2. A git source you
     /// have not trusted asks first (a terminal prompt, or --trust-source).
-    /// The built-in scan runs first; a dangerous verdict installs nothing
-    /// (exit 8) unless --allow-dangerous.
+    /// The built-in scan runs first (and SkillSpector when it is on); a
+    /// dangerous verdict installs nothing (exit 8) unless --allow-dangerous.
     Add {
         /// Git URL (a GitHub /tree/<ref>/<path> URL selects a folder), a
         /// local folder or archive, a catalog entry
@@ -76,12 +77,12 @@ enum SkillsCommand {
         /// (review the findings first).
         #[arg(long)]
         allow_dangerous: bool,
-        /// Also run Snyk Agent Scan on it this time (sends the skill to
-        /// Snyk), even when it is turned off.
-        #[arg(long, conflicts_with = "no_external", hide = true)]
+        /// Also run SkillSpector on it this time (locally), even when it is
+        /// turned off.
+        #[arg(long, conflicts_with = "no_external")]
         external: bool,
-        /// Do not run Snyk Agent Scan this time, even when it is turned on.
-        #[arg(long, hide = true)]
+        /// Do not run SkillSpector this time, even when it is turned on.
+        #[arg(long)]
         no_external: bool,
         /// Trust the git source without the prompt: once (this install
         /// only), or always for the repo, its owner or its host
@@ -128,12 +129,12 @@ enum SkillsCommand {
         /// content (review the findings first, with --check).
         #[arg(long, conflicts_with_all = ["check", "agents"])]
         allow_dangerous: bool,
-        /// Also run Snyk Agent Scan on each available update this time
-        /// (sends the new content to Snyk), even when it is turned off.
-        #[arg(long, conflicts_with_all = ["no_external", "agents"], hide = true)]
+        /// Also run SkillSpector on each available update this time
+        /// (locally), even when it is turned off.
+        #[arg(long, conflicts_with_all = ["no_external", "agents"])]
         external: bool,
-        /// Do not run Snyk Agent Scan this time, even when it is turned on.
-        #[arg(long, conflicts_with = "agents", hide = true)]
+        /// Do not run SkillSpector this time, even when it is turned on.
+        #[arg(long, conflicts_with = "agents")]
         no_external: bool,
         /// Trust the git sources without the prompt: once (this update
         /// only), or always for the repo, its owner or its host
@@ -520,13 +521,14 @@ fn add(ctx: &Context, sx: &skills::SkillsEnv<'_>, args: AddArgs<'_>) -> Result<u
         request.decisions.moved_trust = answer.grant().0;
     }
     // A moved repository's trust is settled first: a blocked or declined
-    // source is never sent to Snyk.
+    // source is never scanned.
     if let Some(target) = prepared.moved_to() {
         sources::would_admit(&store, target, request.decisions.moved_trust)?;
     }
     // The optional external scanner: one run on exactly the content that
-    // would be installed, after the built-in scan.
-    if let Some(runner) = scanner::wanted(ctx, Some(&store), external)? {
+    // would be installed (local folders and archives too), after the
+    // built-in scan.
+    if let Some(runner) = scanner::wanted(ctx, external)? {
         let report = scanner::report_for(ctx, &runner, prepared.files(), prepared.name());
         prepared.set_external(Some(report));
     }
@@ -1025,7 +1027,8 @@ fn source_blocked(checked: &UpdateCheck) -> bool {
 
 /// The external report of an available update's content (the cache
 /// clone as the check left it), when this run uses the scanner; the run
-/// is prepared (token resolved) once, on the first update that needs it.
+/// is prepared (SkillSpector found) once, on the first update that needs
+/// it.
 fn external_for_update(
     ctx: &Context,
     store: &Store<'_>,
@@ -1035,7 +1038,7 @@ fn external_for_update(
     runner: &mut Option<Option<Result<Runner, ExternalReport>>>,
 ) -> Result<Option<ExternalReport>, CoreError> {
     if runner.is_none() {
-        *runner = Some(scanner::wanted(ctx, Some(store), choice)?);
+        *runner = Some(scanner::wanted(ctx, choice)?);
     }
     let Some(Some(runner)) = runner.as_ref() else {
         return Ok(None);
@@ -1080,8 +1083,8 @@ fn update(
         let checked = install::check_update(&store, sx, id)?;
         // `--check`: one external run per available update of a trusted
         // source, on the content the check fetched (an untrusted or
-        // blocked source is never sent to Snyk before the user trusts
-        // it). An update runs it after the trust answer, below.
+        // blocked source is never scanned before the user trusts it). An
+        // update runs it after the trust answer, below.
         let external_report = if check
             && checked.status == UpdateStatus::Available
             && admitted_without_asking(&checked)
@@ -1141,7 +1144,7 @@ fn update(
                 let outcome = update_answer(ctx, &store, &mut answers, &checked, trust_source)
                     .and_then(|answered| {
                         // A blocked source is refused by the update's
-                        // gate: never sent to Snyk first.
+                        // gate: never scanned first.
                         if !source_blocked(&checked) {
                             external_report =
                                 external_for_update(ctx, &store, sx, id, external, &mut runner)?;

@@ -286,7 +286,8 @@ impl AppState {
 
 /// `text` with the folders that hold the user name replaced by their
 /// placeholder roots: the project folder (`<P>`, when given), then the home
-/// folder (`~`), each as written and with forward slashes. Core messages
+/// folder (`~`), each as written, with forward slashes and with doubled
+/// backslashes (as JSON or Rust debug output escapes them). Core messages
 /// may name absolute paths; the app sends them through this.
 pub(crate) fn scrub(env: &Env, text: &str, project: Option<&Path>) -> String {
     let mut out = text.to_owned();
@@ -300,7 +301,8 @@ pub(crate) fn scrub(env: &Env, text: &str, project: Option<&Path>) -> String {
             continue;
         }
         let forward = native.replace('\\', "/");
-        for form in [native.as_str(), forward.as_str()] {
+        let doubled = native.replace('\\', "\\\\");
+        for form in [doubled.as_str(), native.as_str(), forward.as_str()] {
             out = out.replace(form, placeholder);
         }
     }

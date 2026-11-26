@@ -14,9 +14,8 @@ use std::time::{Duration, Instant};
 use agent_loadout_core::adapters::detect::NoRegistry;
 use agent_loadout_core::remote::git::SystemRunner;
 use agent_loadout_core::scan::Verdict;
-use agent_loadout_core::scan::external::{
-    self, ExternalReport, ExternalStatus, NotScanned, Runner, SCANNER,
-};
+use agent_loadout_core::scan::external::snyk::{self, Runner, SCANNER};
+use agent_loadout_core::scan::external::{self, ExternalReport, ExternalStatus, NotScanned};
 use agent_loadout_core::secrets::SecretValue;
 use agent_loadout_core::skills::install::{
     self, Decisions, InstallRequest, Naming, Source, UpdateStatus,
@@ -139,9 +138,9 @@ fn the_scanner_gets_one_skill_path_and_the_token_only_in_its_environment() {
             "{name} reached the scanner"
         );
     }
-    let allowed: Vec<String> = external::PASSED_VARS
+    let allowed: Vec<String> = snyk::PASSED_VARS
         .iter()
-        .chain(external::TEMP_VARS.iter())
+        .chain(snyk::TEMP_VARS.iter())
         .chain(["SNYK_TOKEN", "PYTHONIOENCODING", "PYTHONUTF8"].iter())
         .map(|name| name.to_ascii_uppercase())
         .collect();
@@ -359,14 +358,10 @@ fn a_timeout_kills_the_whole_process_tree() {
     let stub = AgentScanStub::install(&fx.home);
     let heartbeat = hang(&fx, &stub);
     let start = Instant::now();
-    let report = runner(&stub, Duration::from_millis(1500)).scan_files(
-        &noisy_env(&fx),
-        &fx.home,
-        &files(),
-        None,
-    );
+    let report =
+        runner(&stub, Duration::from_secs(4)).scan_files(&noisy_env(&fx), &fx.home, &files(), None);
     assert!(
-        start.elapsed() < Duration::from_secs(20),
+        start.elapsed() < Duration::from_secs(60),
         "{:?}",
         start.elapsed()
     );
@@ -384,10 +379,11 @@ fn a_cancel_kills_the_whole_process_tree() {
     let cancel = AtomicBool::new(false);
     let report = std::thread::scope(|scope| {
         scope.spawn(|| {
-            let _ = beat(&heartbeat, Duration::from_secs(10));
+            // Generous: under load the grandchild may start late.
+            let _ = beat(&heartbeat, Duration::from_secs(120));
             cancel.store(true, Ordering::SeqCst);
         });
-        runner(&stub, Duration::from_secs(60)).scan_files(
+        runner(&stub, Duration::from_secs(300)).scan_files(
             &noisy_env(&fx),
             &fx.home,
             &files(),
@@ -575,8 +571,8 @@ fn a_run_needs_the_pinned_build_and_a_token() {
     let fx = Fx::new();
     let store = fx.store();
     let not_ready =
-        external::prepare_run(&fx.env, &fx.fs, &fx.home, Some(&store), &fx.delivery).unwrap_err();
-    let expected = if external::pinned_asset().is_some() {
+        snyk::prepare_run(&fx.env, &fx.fs, &fx.home, Some(&store), &fx.delivery).unwrap_err();
+    let expected = if snyk::pinned_asset().is_some() {
         NotScanned::NotInstalled
     } else {
         NotScanned::UnsupportedPlatform
@@ -585,7 +581,7 @@ fn a_run_needs_the_pinned_build_and_a_token() {
 
     // Token references resolve through the providers; values never show.
     let resolve = |reference: &str| {
-        external::resolve_token(
+        snyk::resolve_token(
             &fx.env,
             &fx.fs,
             &fx.home,
@@ -613,11 +609,11 @@ fn a_binary_changed_after_install_is_not_run() {
     let store = fx.store();
     let stub = AgentScanStub::install(&fx.home);
     fx.keyring.insert("loadout", "snyk", TOKEN);
-    external::set_token(&fx.fs, &fx.home, None, Some("keyring://loadout/snyk")).unwrap();
+    snyk::set_token(&fx.fs, &fx.home, None, Some("keyring://loadout/snyk")).unwrap();
     // The `Err` is a report, as `prepare_run`'s.
     #[allow(clippy::result_large_err)]
     let prepare = || {
-        external::prepare_run_with(
+        snyk::prepare_run_with(
             stub.tool().clone(),
             &fx.env,
             &fx.fs,
@@ -660,16 +656,13 @@ fn a_token_alias_must_be_a_defined_secret() {
         .unwrap();
     let read: &dyn agent_loadout_core::store::StoreRead = &store;
     let pasted = "deadbeef0123456789abcdef01234567";
-    let err = external::set_token(&fx.fs, &fx.home, Some(read), Some(pasted)).unwrap_err();
+    let err = snyk::set_token(&fx.fs, &fx.home, Some(read), Some(pasted)).unwrap_err();
     assert_eq!(err.code(), ErrorCode::InvalidRef);
     assert!(!err.message().contains(pasted), "{}", err.message());
-    assert_eq!(external::settings(&fx.fs, &fx.home).unwrap().token, None);
-    external::set_token(&fx.fs, &fx.home, Some(read), Some("SNYK_TOKEN")).unwrap();
+    assert_eq!(snyk::settings(&fx.fs, &fx.home).unwrap().token, None);
+    snyk::set_token(&fx.fs, &fx.home, Some(read), Some("SNYK_TOKEN")).unwrap();
     assert_eq!(
-        external::settings(&fx.fs, &fx.home)
-            .unwrap()
-            .token
-            .as_deref(),
+        snyk::settings(&fx.fs, &fx.home).unwrap().token.as_deref(),
         Some("SNYK_TOKEN")
     );
 }

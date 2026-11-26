@@ -1,0 +1,86 @@
+{
+  "skill": {
+    "name": "deps-skill",
+    "source": "hand-made fixture from the documented SkillSpector 2.13.7 JSON schema (not captured output)",
+    "scanned_at": "2026-11-25T10:00:00Z"
+  },
+  "risk_assessment": {
+    "score": 5,
+    "severity": "LOW",
+    "recommendation": "SAFE",
+    "max_issue_severity": "LOW"
+  },
+  "components": [
+    {
+      "path": "SKILL.md",
+      "type": "markdown",
+      "lines": 12,
+      "executable": false,
+      "size_bytes": 310
+    },
+    {
+      "path": "scripts/sync.py",
+      "type": "python",
+      "lines": 87,
+      "executable": true,
+      "size_bytes": 2650
+    }
+  ],
+  "structured_summaries": [],
+  "issues": [
+    {
+      "id": "SC4",
+      "finding_id": "sc4-requirements.txt-1",
+      "category": "supply_chain",
+      "pattern": "Vulnerable Dependency",
+      "severity": "LOW",
+      "confidence": 1.0,
+      "location": {
+        "file": "requirements.txt",
+        "start_line": 1,
+        "end_line": 1
+      },
+      "finding": "requests==2.31.0",
+      "explanation": "OSV.dev unreachable, using static fallback vulnerability list. Results may be incomplete.",
+      "remediation": "Review this code before installing the skill.",
+      "code_snippet": "requests==2.31.0",
+      "intent": "",
+      "tags": [],
+      "evidence": {},
+      "match_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "occurrences": [],
+      "surface": "config"
+    }
+  ],
+  "suppressed_count": 0,
+  "suppressed": [],
+  "metadata": {
+    "has_executable_scripts": true,
+    "skillspector_version": "2.13.7",
+    "llm_requested": false,
+    "llm_available": false,
+    "meta_analysis_applied": false,
+    "inference_usage": [],
+    "llm_provenance": null,
+    "filtering_mode": "heuristic"
+  },
+  "execution_successful": true,
+  "analysis_completeness": {
+    "status": "complete",
+    "is_complete": true,
+    "coverage_percent": 100.0,
+    "total_components": 2,
+    "scanned_components": 2,
+    "execution_successful": true,
+    "fully_inspected_files": 2,
+    "partially_inspected_files": 0,
+    "entirely_uninspected_files": 0,
+    "ledger_exceptions": [],
+    "scope_exclusions": [],
+    "analyzer_statuses": [],
+    "references": [],
+    "limitations": [],
+    "findings_before_filtering": 0,
+    "findings_after_filtering": 0
+  }
+}

@@ -4,7 +4,9 @@
 //! the keyring is [`MemKeyring`], `op` is the `op-stub` binary
 //! ([`op_stub::OpStub`]), `gh` is `gh-stub` ([`gh_stub::GhStub`]), Snyk
 //! Agent Scan is `agent-scan-stub` ([`agent_scan_stub::AgentScanStub`]),
-//! and a system git runs with [`git_env`]'s isolated configuration.
+//! SkillSpector, uvx and uv are `skillspector-stub`
+//! ([`skillspector_stub::SkillSpectorStub`]), and a system git runs with
+//! [`git_env`]'s isolated configuration.
 
 pub mod agent_scan_stub;
 pub mod gh_stub;
@@ -12,6 +14,7 @@ pub mod git_env;
 mod keyring_mem;
 pub mod op_stub;
 mod rooted_fs;
+pub mod skillspector_stub;
 mod temp_home;
 
 pub use keyring_mem::{MemKeyring, MemKeyringMode};

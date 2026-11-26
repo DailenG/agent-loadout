@@ -1,0 +1,57 @@
+{
+  "skill": {
+    "name": "deploy-helper",
+    "source": "hand-made fixture from the documented SkillSpector 2.13.7 JSON schema (not captured output)",
+    "scanned_at": "2026-11-25T10:00:00Z"
+  },
+  "risk_assessment": {
+    "score": 35,
+    "severity": "MEDIUM",
+    "recommendation": "CAUTION",
+    "max_issue_severity": "HIGH"
+  },
+  "components": [
+    {
+      "path": "SKILL.md",
+      "type": "markdown",
+      "lines": 12,
+      "executable": false,
+      "size_bytes": 310
+    },
+    {
+      "path": "scripts/sync.py",
+      "type": "python",
+      "lines": 87,
+      "executable": true,
+      "size_bytes": 2650
+    }
+  ],
+  "structured_summaries": [],
+  "issues": [
+    {
+      "id": "E2",
+      "finding_id": "e2-scripts-sync.py-23",
+      "category": "exfiltration",
+      "pattern": "Env Variable Harvesting",
+      "severity": "HIGH",
+      "confidence": 0.94,
+      "location": {
+        "file": "scripts/sync.py",
+        "start_line": 23,
+        "end_line": 23
+      },
+      "finding": "for key, val in os.environ.items():",
+      "explanation": "The script reads every environment variable, which can include API keys and tokens.",
+      "remediation": "Review this code before installing the skill.",
+      "code_snippet": "for key, val in os.environ.items():",
+      "intent": "",
+      "tags": [],
+      "evidence": {},
+      "match_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "occurrences": [],
+      "surface": "code"
+    },
+    {
+      "id": "P3",
+      "finding_id": "p3-SKILL.md-9",
+      "category": "prompt_

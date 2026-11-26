@@ -638,6 +638,14 @@ fn help_pages_come_from_the_fixed_table() {
         tools::help_page("snyk_privacy").unwrap(),
         "https://snyk.io/policies/privacy/"
     );
+    assert_eq!(
+        tools::help_page("skillspector").unwrap(),
+        "https://github.com/NVIDIA/SkillSpector/tree/v2.13.7"
+    );
+    assert_eq!(
+        tools::help_page("uv_install").unwrap(),
+        "https://docs.astral.sh/uv/getting-started/installation/"
+    );
     for refused in ["nope", "https://example.com", ""] {
         assert_eq!(
             tools::help_page(refused).unwrap_err().code(),

@@ -57,6 +57,7 @@ dependencies = [
  "jsonc-parser",
  "junction",
  "keyring",
+ "process-wrap",
  "regex",
  "rustix",
  "saphyr-parser",
@@ -71,7 +72,6 @@ dependencies = [
  "toml_edit 0.25.20+spec-1.1.0",
  "ureq",
  "url",
- "win32job",
  "windows-permissions",
  "zip",
 ]
@@ -3375,6 +3375,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-wrap"
+version = "11.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3655b18489c90df24f2c401ac65f908b17210e59cf676127f79890f67f3e30e"
+dependencies = [
+ "indexmap 2.14.2",
+ "nix",
+ "windows",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5563,16 +5574,6 @@ dependencies = [
  "thiserror 2.0.21",
  "windows",
  "windows-core",
-]
-
-[[package]]
-name = "win32job"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b25acac91041257d64f5625690b626133e0ca9e4e17814552b5803b1a82f7c"
-dependencies = [
- "thiserror 1.0.69",
- "windows",
 ]
 
 [[package]]

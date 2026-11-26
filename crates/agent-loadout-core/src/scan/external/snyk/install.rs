@@ -22,6 +22,7 @@ use crate::catalog::http::proxy;
 use crate::env::Env;
 use crate::error::{CoreError, ErrorCode};
 use crate::paths::LoadoutHome;
+pub(super) use crate::scan::external::process::hex;
 
 /// `<LOADOUT_HOME>/<TOOLS_DIR>/snyk-agent-scan/<version>/`.
 pub const TOOLS_DIR: &str = "tools";
@@ -293,7 +294,7 @@ impl Tool {
 
 /// `<LOADOUT_HOME>/tools/snyk-agent-scan`.
 pub(super) fn tool_root(home: &LoadoutHome) -> PathBuf {
-    home.path.join(TOOLS_DIR).join(SCANNER)
+    home.path.join(TOOLS_DIR).join(SCANNER.as_str())
 }
 
 fn io(what: &str, path: &Path, err: &std::io::Error) -> CoreError {
@@ -310,10 +311,6 @@ fn make_executable(path: &Path) -> Result<(), CoreError> {
 #[cfg(not(unix))]
 fn make_executable(_path: &Path) -> Result<(), CoreError> {
     Ok(())
-}
-
-pub(super) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Counts and hashes what is written.

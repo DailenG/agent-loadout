@@ -177,30 +177,17 @@ export const commands = {
 	openCatalogLink: (catalog: string, entry: string | null, link: CatalogLink, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("open_catalog_link", { catalog, entry, link }, options)),
 	scannerStatus: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("scanner_status", undefined, options)),
 	/**
-	 *  Downloads and verifies the pinned build, emitting
-	 *  `ScannerInstallProgress`; `cancel_external_scan` stops it (`canceled`,
-	 *  nothing installed). Installing does not turn the scanner on. A second
-	 *  install while one runs is `locked`.
+	 *  Downloads the pinned SkillSpector once (uv on `PATH`), emitting
+	 *  `ScannerPrepareProgress`; `cancel_external_scan(null)` stops it
+	 *  (`canceled`). Does not turn the scanner on. A second Prepare while one
+	 *  runs is `locked`.
 	 */
-	installScanner: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("install_scanner", undefined, options)),
+	prepareScanner: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("prepare_scanner", undefined, options)),
 	/**
-	 *  Deletes the scanner and turns it off, like [`set_scanner_enabled`]
-	 *  with `false`.
-	 */
-	removeScanner: (options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("remove_scanner", undefined, options)),
-	/**
-	 *  Turns the scanner on or off; off cancels every external scan (not an
-	 *  install) and drops the external reports of open reviews.
+	 *  Turns the scanner on or off; off cancels every external scan (not a
+	 *  Prepare) and drops the external reports of open reviews.
 	 */
 	setScannerEnabled: (enabled: boolean, options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("set_scanner_enabled", { enabled }, options)),
-	/**
-	 *  Sets (`invalid_ref` when it does not parse, or names an alias the
-	 *  secrets catalog does not define; the input is never echoed) or clears
-	 *  the token reference: a secret alias or a provider reference, never a
-	 *  value.
-	 */
-	setScannerToken: (reference: string | null, options?: InvokeOptions) => typedError<ExternalScannerStatus, IpcError>(__TAURI_INVOKE("set_scanner_token", { reference }, options)),
-	checkScannerToken: (options?: InvokeOptions) => typedError<ScannerTokenCheck, IpcError>(__TAURI_INVOKE("check_scanner_token", undefined, options)),
 	/**
 	 *  Runs the scanner on an install review's content and attaches the
 	 *  report: `install_reviewed_skill` then needs `allowDangerous` for a
@@ -220,7 +207,7 @@ export const commands = {
 	externalScanSkill: (id: string, runId: string, options?: InvokeOptions) => typedError<ExternalScanResult, IpcError>(__TAURI_INVOKE("external_scan_skill", { id, runId }, options)),
 	/**
 	 *  Cancels the external scan `run_id`; `null` cancels every running scan
-	 *  and the scanner install.
+	 *  and a running Prepare.
 	 */
 	cancelExternalScan: (runId: string | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("cancel_external_scan", { runId }, options)),
 	listSkills: (scope: SkillScope, options?: InvokeOptions) => typedError<SkillList, IpcError>(__TAURI_INVOKE("list_skills", { scope }, options)),
@@ -312,7 +299,7 @@ export const commands = {
 
 /** Events */
 export const events = {
-	scannerInstallProgress: makeEvent<ScannerInstallProgress, ScannerInstallProgress>("scanner-install-progress"),
+	scannerPrepareProgress: makeEvent<ScannerPrepareProgress, ScannerPrepareProgress>("scanner-prepare-progress"),
 	targetsChanged: makeEvent<TargetsChanged, TargetsChanged>("targets-changed"),
 };
 
@@ -1293,17 +1280,19 @@ export type ErrorCode =
 "external_scan_required";
 
 /**  Why the content was not scanned; never blocks. */
-export type ExternalNotScanned = "not_installed" | "unsupported_platform" | "no_token" | "token_unavailable" | "token_rejected" | "limit_reached" | "too_large" | "unreachable" | "timeout" | "canceled" | "would_start_server" | "failed";
+export type ExternalNotScanned = "not_available" | "not_prepared" | "not_installed" | "unsupported_platform" | "no_token" | "token_unavailable" | "token_rejected" | "limit_reached" | "too_large" | "unreachable" | "timeout" | "canceled" | "would_start_server" | "failed";
 
 /**  One external scan, shown beside the built-in scan. */
 export type ExternalScanResult = {
-	/**  `snyk-agent-scan`. */
-	scanner: string,
+	scanner: ExternalScanner,
+	/**  The version that ran. */
 	version: string,
 	status: ExternalScanStatus,
 	reason: ExternalNotScanned | null,
 	/**  Meaningful only when `status` is `scanned`. */
 	verdict: ScanVerdict,
+	/**  The scanner did not fully scan the content: never "clean" then. */
+	incomplete: boolean,
 	findings: ScanFinding[],
 	/**  English, one line, no paths or values. */
 	detail: string | null,
@@ -1312,26 +1301,34 @@ export type ExternalScanResult = {
 /**  Whether the run happened and was understood. */
 export type ExternalScanStatus = "scanned" | "not_scanned" | "not_understood";
 
-/**  Snyk Agent Scan on this machine. */
+/**  Which external scanner made a report. */
+export type ExternalScanner = "skillspector" | "snyk-agent-scan";
+
+/**  SkillSpector on this machine. */
 export type ExternalScannerStatus = {
-	/**  `snyk-agent-scan`. */
-	scanner: string,
-	/**  The pinned version. */
-	version: string,
-	/**  A pinned build exists for this OS and architecture. */
-	supported: boolean,
-	installed: boolean,
+	scanner: ExternalScanner,
+	/**  The version this Loadout is tested with. */
+	testedVersion: string,
+	/**  The uvx form's interpreter. */
+	python: string,
+	availability: ScannerAvailability,
+	/**  Ready: the form that runs; needs_prepare: `uvx`; not_available: none. */
+	runtime: ScannerRuntime | null,
+	/**  Ready only: the version that will run. */
+	version: string | null,
+	/**  `version == testedVersion` (true unless ready with another version). */
+	versionTested: boolean,
 	enabled: boolean,
-	/**  The reference text, never a value. */
-	tokenRef: string | null,
-	tokenKind: ScannerTokenKind | null,
-	/**  Download size of this platform's build. */
-	sizeBytes: number | null,
 	/**
-	 *  Seconds one run may take (`[snyk_agent_scan] timeout_secs`, default
-	 *  60).
+	 *  Seconds one scan may take (`[skillspector] timeout_secs`, default
+	 *  120).
 	 */
 	timeoutSecs: number,
+	/**
+	 *  A 0.7.0 Snyk Agent Scan install remains (`loadout scanner remove`
+	 *  deletes it).
+	 */
+	snykInstalled: boolean,
 };
 
 /**
@@ -2725,20 +2722,19 @@ export type ScanSeverity = "info" | "warning" | "dangerous";
  */
 export type ScanVerdict = "clean" | "warning" | "dangerous";
 
-/**  Download progress of `install_scanner`, in bytes. */
-export type ScannerInstallProgress = {
-	received: number,
-	total: number,
+/**  Whether SkillSpector can run on this machine. */
+export type ScannerAvailability = "ready" | "needs_prepare" | "not_available";
+
+/**
+ *  One line of uv's output while `prepare_scanner` runs (control
+ *  characters removed, the home folder scrubbed).
+ */
+export type ScannerPrepareProgress = {
+	line: string,
 };
 
-/**  Whether the token reference resolves (Snyk is not contacted). */
-export type ScannerTokenCheck = {
-	ok: boolean,
-	reason: ExternalNotScanned | null,
-};
-
-/**  How the token reference resolves. */
-export type ScannerTokenKind = "alias" | "env" | "keyring" | "one_password";
+/**  How SkillSpector runs. */
+export type ScannerRuntime = "uvx" | "path";
 
 export type SecretDestinationKind = "keyring" | "onepassword" | "env";
 

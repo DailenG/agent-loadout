@@ -53,9 +53,8 @@ enum Command {
     Source(cmd::source::SourceArgs),
     /// Catalogs of MCP servers and skills: list, add, search, show.
     Catalog(cmd::catalog::CatalogArgs),
-    /// Scanners: the built-in scanner and the optional Snyk Agent Scan
-    /// (disabled and hidden since 0.7.1; `scanner remove` cleans up).
-    #[command(hide = true)]
+    /// Scanners: the built-in scanner and the optional SkillSpector (runs
+    /// locally; off by default).
     Scanner(cmd::scanner::ScannerArgs),
     /// Project manifests: create, register, trust, share, list, forget.
     Project(cmd::project::ProjectArgs),

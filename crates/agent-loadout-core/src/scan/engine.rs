@@ -505,7 +505,7 @@ fn secret_ranges(text: &str) -> Vec<Range<usize>> {
 /// secrets masked ([`secret_ranges`]), invisible characters spelled out
 /// as `\u{XXXX}`, Unicode tag characters decoded as `[hidden: ...]`, at
 /// most [`EXCERPT_CHARS`] characters.
-fn excerpt(matched: &str) -> String {
+pub(crate) fn excerpt(matched: &str) -> String {
     let mut text = cut(matched, EXCERPT_SOURCE_BYTES).to_owned();
     for range in secret_ranges(&text).into_iter().rev() {
         text.replace_range(range, "****");

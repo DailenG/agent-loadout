@@ -36,7 +36,7 @@ import type {
   TrustGrantArg,
   McpCheckoutReview,
   ExternalScanResult,
-  ScannerInstallProgress,
+  ScannerPrepareProgress,
   ScanVerdict,
 } from "@/ipc/bindings";
 import type { CommandResult, Commands, Transport } from "@/ipc/transport";
@@ -53,7 +53,7 @@ export type MockTransportOptions = {
   commands?: Partial<Commands>;
   /** Seeds the catalog mock (M45): online setting, catalogs, how each answers. */
   catalogs?: Partial<CatalogMockState>;
-  /** Seeds the external scanner mock (M47, M49): installed, switch, token reference, scan answers. */
+  /** Seeds the external scanner mock (M50, M51): availability, switch, scan answers, Prepare. */
   scanner?: Partial<ScannerMockState>;
 };
 
@@ -410,7 +410,7 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
   const resizeListeners = new Set<() => void>();
   const focusListeners = new Set<() => void>();
   const targetListeners = new Set<() => void>();
-  const scannerListeners = new Set<(progress: ScannerInstallProgress) => void>();
+  const scannerListeners = new Set<(progress: ScannerPrepareProgress) => void>();
   const subscribe = (listeners: Set<() => void>) => async (handler: () => void) => {
     listeners.add(handler);
     return () => {
@@ -739,7 +739,7 @@ export function createMockTransport(options: MockTransportOptions = {}): MockTra
     },
     events: {
       onTargetsChanged: subscribe(targetListeners),
-      onScannerInstallProgress: async (handler) => {
+      onScannerPrepareProgress: async (handler) => {
         scannerListeners.add(handler);
         return () => {
           scannerListeners.delete(handler);

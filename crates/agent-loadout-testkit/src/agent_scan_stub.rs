@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicBool;
 
 use agent_loadout_core::CoreError;
 use agent_loadout_core::paths::LoadoutHome;
-use agent_loadout_core::scan::external::{Asset, Download, Tool, VERSION, copy};
+use agent_loadout_core::scan::external::snyk::{Asset, Download, Tool, VERSION, copy};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

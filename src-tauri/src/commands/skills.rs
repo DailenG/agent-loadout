@@ -1042,6 +1042,8 @@ pub fn install_local(
     id: Option<String>,
     rename_if_taken: bool,
 ) -> CmdResult<SkillInstalled> {
+    // No review, so no external scan: refused while the scanner is on.
+    super::scanner::require_report(core, false)?;
     let mut request = local_request(core, path)?;
     request.naming = naming(id, rename_if_taken);
     install_with(core, &request)
@@ -1172,13 +1174,9 @@ pub fn install_reviewed(
     moved_trust: Option<TrustGrantArg>,
 ) -> CmdResult<SkillInstalled> {
     let env = &core.env;
-    // With the scanner on, a git or catalog review must carry its external
-    // report (a local folder is scanned only on request, M49).
-    let remote = matches!(
-        prepared.source().kind,
-        SkillSourceKind::Git | SkillSourceKind::Catalog
-    );
-    super::scanner::require_report(core, !remote || prepared.external().is_some())?;
+    // With SkillSpector on and ready, every review (local folders and
+    // archives too: nothing is uploaded) must carry its external report.
+    super::scanner::require_report(core, prepared.external().is_some())?;
     let store = core.open_store_for_change()?;
     let (trust, via) = sources::grant_of(trust);
     let decisions = Decisions {

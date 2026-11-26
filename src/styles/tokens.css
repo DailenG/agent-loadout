@@ -20575,7 +20575,7 @@ button.settings-form-item:disabled {
 }
 /* end M45 */
 
-/* M49: Settings > Security (Snyk Agent Scan) and the external scan in reviews. */
+/* M49, M51: Settings > Security (SkillSpector) and the external scan in reviews. */
 .external-scan {
   padding-top: 10px;
   border-top: 1px solid var(--line);
@@ -20609,16 +20609,6 @@ button.settings-form-item:disabled {
   font-size: 0.8rem;
 }
 
-.external-scan__url {
-  display: grid;
-  gap: 2px;
-}
-
-.external-scan__url > span {
-  color: var(--muted);
-  font-size: 0.72rem;
-}
-
 .scanner-disclosure__text {
   display: grid;
   gap: 6px;
@@ -20648,23 +20638,10 @@ button.settings-form-item:disabled {
   accent-color: var(--accent);
 }
 
-.scanner-token {
-  display: grid;
-  gap: 10px;
-}
-
-.scanner-token__kinds {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  color: var(--heading);
-  font-size: 0.8rem;
-}
-
-.scanner-token__kinds legend {
-  margin-bottom: 4px;
+.scanner-prepare__line {
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
 }
 
 .scanner-disclosure__links {
@@ -20672,4 +20649,4 @@ button.settings-form-item:disabled {
   flex-wrap: wrap;
   gap: 8px;
 }
-/* end M49 */
+/* end M49, M51 */

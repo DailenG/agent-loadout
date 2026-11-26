@@ -1,0 +1,132 @@
+{
+  "skill": {
+    "name": "noisy-skill",
+    "source": "hand-made fixture from the documented SkillSpector 2.13.7 JSON schema (not captured output)",
+    "scanned_at": "2026-11-25T10:00:00Z"
+  },
+  "risk_assessment": {
+    "score": 78,
+    "severity": "HIGH",
+    "recommendation": "DO_NOT_INSTALL",
+    "max_issue_severity": "HIGH"
+  },
+  "components": [
+    {
+      "path": "SKILL.md",
+      "type": "markdown",
+      "lines": 12,
+      "executable": false,
+      "size_bytes": 310
+    },
+    {
+      "path": "scripts/sync.py",
+      "type": "python",
+      "lines": 87,
+      "executable": true,
+      "size_bytes": 2650
+    }
+  ],
+  "structured_summaries": [],
+  "issues": [
+    {
+      "id": "E2",
+      "finding_id": "e2-scripts-sync.py-23",
+      "category": "exfiltration",
+      "pattern": "Env Variable Harvesting",
+      "severity": "HIGH",
+      "confidence": 0.94,
+      "location": {
+        "file": "scripts/sync.py",
+        "start_line": 23,
+        "end_line": 23
+      },
+      "finding": "for key, val in os.environ.items():",
+      "explanation": "The script reads every environment variable, which can include API keys and tokens.",
+      "remediation": "Review this code before installing the skill.",
+      "code_snippet": "for key, val in os.environ.items():",
+      "intent": "",
+      "tags": [],
+      "evidence": {},
+      "match_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "occurrences": [],
+      "surface": "code"
+    },
+    {
+      "id": "E4",
+      "finding_id": "e4-scripts-sync.py-30",
+      "category": "execution",
+      "pattern": "Shell Execution",
+      "severity": "HIGH",
+      "confidence": 0.9,
+      "location": {
+        "file": "scripts/sync.py",
+        "start_line": 30,
+        "end_line": 30
+      },
+      "finding": "subprocess.run(cmd, shell=True)",
+      "explanation": "The script runs a shell command built from its input.",
+      "remediation": "Review this code before installing the skill.",
+      "code_snippet": "subprocess.run(cmd, shell=True)",
+      "intent": "",
+      "tags": [],
+      "evidence": {},
+      "match_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "occurrences": [],
+      "surface": "code"
+    },
+    {
+      "id": "E2",
+      "finding_id": "e2-scripts-sync.py-55",
+      "category": "exfiltration",
+      "pattern": "Env Variable Harvesting",
+      "severity": "HIGH",
+      "confidence": 0.9,
+      "location": {
+        "file": "scripts/sync.py",
+        "start_line": 55,
+        "end_line": 55
+      },
+      "finding": "os.environ.copy()",
+      "explanation": "The script copies the whole environment.",
+      "remediation": "Review this code before installing the skill.",
+      "code_snippet": "os.environ.copy()",
+      "intent": "",
+      "tags": [],
+      "evidence": {},
+      "match_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "occurrences": [],
+      "surface": "code"
+    }
+  ],
+  "suppressed_count": 0,
+  "suppressed": [],
+  "metadata": {
+    "has_executable_scripts": true,
+    "skillspector_version": "2.13.7",
+    "llm_requested": false,
+    "llm_available": false,
+    "meta_analysis_applied": false,
+    "inference_usage": [],
+    "llm_provenance": null,
+    "filtering_mode": "heuristic"
+  },
+  "execution_successful": true,
+  "analysis_completeness": {
+    "status": "complete",
+    "is_complete": true,
+    "coverage_percent": 100.0,
+    "total_components": 2,
+    "scanned_components": 2,
+    "execution_successful": true,
+    "fully_inspected_files": 2,
+    "partially_inspected_files": 0,
+    "entirely_uninspected_files": 0,
+    "ledger_exceptions": [],
+    "scope_exclusions": [],
+    "analyzer_statuses": [],
+    "references": [],
+    "limitations": [],
+    "findings_before_filtering": 0,
+    "findings_after_filtering": 0
+  }
+}

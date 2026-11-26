@@ -264,7 +264,7 @@ describe("SkillsPage", () => {
     const alpha = screen.getByRole("article", { name: "alpha" });
     await user.click(await within(alpha).findByRole("button", { name: "Preview the update of alpha" }));
     await user.click(within(await screen.findByRole("dialog", { name: "Update alpha" })).getByRole("button", { name: "Update" }));
-    // Neutral: the built-in scan or Snyk Agent Scan may have refused it (M49 review F1).
+    // Neutral: the built-in scan or SkillSpector may have refused it (M49 review F1).
     expect(
       await screen.findByText(
         "A scan found dangerous content in the new version. Nothing was updated; review the findings, and update anyway only if you trust it.",

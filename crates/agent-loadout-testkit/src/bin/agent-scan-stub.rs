@@ -86,8 +86,13 @@ fn heartbeat(file: Option<&Path>) -> ! {
     let mut beat = 0u64;
     loop {
         beat += 1;
+        // Written beside it and renamed over it: a kill mid-write never
+        // leaves the file empty.
         if let Some(file) = file {
-            let _ = std::fs::write(file, beat.to_string());
+            let next = file.with_extension("next");
+            if std::fs::write(&next, beat.to_string()).is_ok() {
+                let _ = std::fs::rename(&next, file);
+            }
         }
         std::thread::sleep(Duration::from_millis(50));
     }

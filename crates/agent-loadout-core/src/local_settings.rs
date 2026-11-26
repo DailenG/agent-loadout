@@ -43,9 +43,14 @@ pub struct LocalSettings {
     /// open Install > Browse, or `loadout catalog online on`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub online_catalogs: Option<bool>,
-    /// The optional external scanner (#27). Absent means off.
+    /// Snyk Agent Scan (#27, 0.7.0; disabled since 0.7.1). Absent means
+    /// off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snyk_agent_scan: Option<SnykAgentScanSettings>,
+    /// SkillSpector, the optional external scanner (#30). Absent means
+    /// off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skillspector: Option<SkillSpectorSettings>,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -66,6 +71,18 @@ pub struct SnykAgentScanSettings {
     pub timeout_secs: Option<u64>,
 }
 
+/// `[skillspector]`: SkillSpector on this machine (#30).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillSpectorSettings {
+    /// Run it on skill installs and updates. Absent means off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Seconds per scan (default 120, at most 3540: see
+    /// `skillspector::MAX_TIMEOUT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
 impl Default for LocalSettings {
     fn default() -> Self {
         Self {
@@ -75,6 +92,7 @@ impl Default for LocalSettings {
             agent_skill_notice: None,
             online_catalogs: None,
             snyk_agent_scan: None,
+            skillspector: None,
             extra: toml::Table::new(),
         }
     }

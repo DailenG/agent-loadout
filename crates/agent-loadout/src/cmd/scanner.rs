@@ -1,22 +1,22 @@
-//! `loadout scanner ls|status|install|remove|enable|disable|token|run`
-//! (#27): the optional external scanner, Snyk Agent Scan. `loadout skills
-//! scan` already names the classification of client skill folders, so the
-//! scanners get their own noun; there is one optional scanner, so the
-//! subcommands take no scanner name.
+//! `loadout scanner ls|status|prepare|enable|disable|run|remove` (#30):
+//! the optional external scanner, NVIDIA SkillSpector, run locally from
+//! the user's own uv or `skillspector`. `loadout skills scan` already
+//! names the classification of client skill folders, so the scanners get
+//! their own noun; there is one optional scanner, so the subcommands take
+//! no scanner name. `remove` cleans up a 0.7.0 Snyk Agent Scan install;
+//! `install` and `token` (Snyk's) are hidden and refused.
 //!
 //! Also the helpers `skills add` and `skills update` use for
 //! `--external` / `--no-external`: one bounded run per skill, its report
 //! printed beside the built-in scan's.
 
-use std::io::IsTerminal;
-
 use agent_loadout_core::scan::Verdict;
-use agent_loadout_core::scan::external::{
-    self, Choice, DISCLOSURE, ExternalReport, ExternalStatus, NotScanned, Runner, Tool,
-    UreqDownload,
+use agent_loadout_core::scan::external::skillspector::{
+    self, Availability, DISCLOSURE, PYTHON, Runner, Runtime, RuntimeKind, SETUP, VERSION,
 };
-use agent_loadout_core::skills::{SkillFiles, store as skill_store};
-use agent_loadout_core::store::{Store, StoreRead};
+use agent_loadout_core::scan::external::snyk;
+use agent_loadout_core::scan::external::{Choice, ExternalReport, ExternalStatus};
+use agent_loadout_core::skills::{SkillFiles, content_hash, store as skill_store};
 use agent_loadout_core::{CoreError, ErrorCode};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
@@ -32,79 +32,64 @@ pub struct ScannerArgs {
 
 #[derive(Debug, Subcommand)]
 enum ScannerCommand {
-    /// List the scanners: the built-in scanner (always on) and Snyk Agent
-    /// Scan (optional).
+    /// List the scanners: the built-in scanner (always on) and SkillSpector
+    /// (optional, local).
     Ls,
-    /// Show Snyk Agent Scan on this machine: version, installed, on or off,
-    /// the token reference, and what it sends to Snyk.
+    /// Show SkillSpector on this machine: how it runs (uvx or on PATH),
+    /// its version, on or off, the timeout, and what leaves the machine.
     Status,
-    /// Download the pinned Snyk Agent Scan build into the data directory
-    /// and verify its SHA-256. Installing does not turn it on.
-    Install,
-    /// Delete the installed scanner and turn it off (the token reference
-    /// is kept).
-    Remove,
-    /// Run Snyk Agent Scan on skill installs and updates. It sends each
-    /// skill to Snyk's analysis API: see `loadout scanner status`.
+    /// Download the pinned SkillSpector into uv's cache once (runs `uvx
+    /// --python 3.13 --from skillspector==2.13.7 skillspector --version`).
+    /// Needs uv on PATH; scans never download anything.
+    Prepare,
+    /// Run SkillSpector on skill installs and updates on this machine
+    /// (locally; see `loadout scanner status`).
     Enable,
-    /// Stop running Snyk Agent Scan; nothing is sent to Snyk.
+    /// Stop running SkillSpector on skill installs and updates.
     Disable,
-    /// Show, set or clear the token reference: a secret alias (see
-    /// `loadout secrets`) or env:NAME, keyring://SERVICE/ACCOUNT or
-    /// op://VAULT/ITEM/FIELD. Never the token itself.
-    Token {
-        /// The reference to use.
-        #[arg(conflicts_with = "clear")]
-        reference: Option<String>,
-        /// Clear the reference.
-        #[arg(long)]
-        clear: bool,
-    },
-    /// Scan a library skill (its store content) with Snyk Agent Scan now;
-    /// reports only. Sends the skill to Snyk.
+    /// Scan a library skill (its store content) with SkillSpector now;
+    /// reports only. Exits 0 when it was scanned, 1 otherwise.
     Run {
         /// Skill id.
-        id: String,
+        skill: String,
+    },
+    /// Delete a Snyk Agent Scan install left by Loadout 0.7.0 and its
+    /// settings.
+    Remove,
+    /// Snyk Agent Scan (disabled): refused.
+    #[command(hide = true)]
+    Install,
+    /// Snyk Agent Scan (disabled): refused.
+    #[command(hide = true)]
+    Token {
+        #[arg(conflicts_with = "clear")]
+        reference: Option<String>,
+        #[arg(long)]
+        clear: bool,
     },
 }
 
 pub fn run(ctx: &Context, args: &ScannerArgs) -> Result<u8, CoreError> {
-    // Disabled in this build: only cleaning up a 0.7.0 install and
-    // saying so work; nothing is downloaded or run.
-    if !external::AVAILABLE
-        && !matches!(
-            args.command,
-            ScannerCommand::Remove | ScannerCommand::Status
-        )
-    {
-        return Err(external::unavailable());
-    }
     match &args.command {
         ScannerCommand::Ls => list(ctx),
         ScannerCommand::Status => status(ctx),
-        ScannerCommand::Install => install(ctx),
-        ScannerCommand::Remove => {
-            let removed = external::remove(ctx.fs(), &ctx.home, &tool(ctx)?)?;
-            if ctx.json {
-                print_json(&json!({ "schema": JSON_SCHEMA, "removed": removed }));
-            } else if removed {
-                println!("Removed Snyk Agent Scan and turned it off.");
-            } else {
-                println!("Snyk Agent Scan is not installed.");
-            }
-            Ok(0)
-        }
+        ScannerCommand::Prepare => prepare(ctx),
         ScannerCommand::Enable => switch(ctx, true),
         ScannerCommand::Disable => switch(ctx, false),
-        ScannerCommand::Token { reference, clear } => token(ctx, reference.as_deref(), *clear),
-        ScannerCommand::Run { id } => run_on_library(ctx, id),
+        ScannerCommand::Run { skill } => run_on_library(ctx, skill),
+        ScannerCommand::Remove => remove(ctx),
+        ScannerCommand::Install | ScannerCommand::Token { .. } => Err(CoreError::new(
+            ErrorCode::ScannerUnavailable,
+            "Snyk Agent Scan is disabled; the optional scanner is SkillSpector, which needs \
+             neither an install by Loadout nor a token: see `loadout scanner status`",
+        )),
     }
 }
 
-/// The pinned scanner; `not_supported_on_os` without a build for this
-/// platform. Debug builds run the file `LOADOUT_TEST_AGENT_SCAN` names
-/// (its own size and SHA-256 as the pin) for the CLI tests.
-fn tool(ctx: &Context) -> Result<Tool, CoreError> {
+/// The 0.7.0 Snyk Agent Scan install `remove` deletes. Debug builds use the
+/// file `LOADOUT_TEST_AGENT_SCAN` names (its own size and SHA-256 as the
+/// pin) for the CLI tests.
+fn snyk_tool(ctx: &Context) -> Result<snyk::Tool, CoreError> {
     #[cfg(debug_assertions)]
     if let Some(path) = ctx
         .env
@@ -122,72 +107,102 @@ fn tool(ctx: &Context) -> Result<Tool, CoreError> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let asset = external::Asset::of(&name, &bytes);
-        return Ok(Tool::new(&ctx.home, external::VERSION, asset));
+        let asset = snyk::Asset::of(&name, &bytes);
+        return Ok(snyk::Tool::new(&ctx.home, snyk::VERSION, asset));
     }
-    Tool::pinned(&ctx.home)
+    snyk::Tool::pinned(&ctx.home)
 }
 
-fn status_json(status: &external::Status) -> Value {
+fn remove(ctx: &Context) -> Result<u8, CoreError> {
+    let removed = snyk::remove(ctx.fs(), &ctx.home, &snyk_tool(ctx)?)?;
+    if ctx.json {
+        print_json(&json!({ "schema": JSON_SCHEMA, "removed": removed }));
+    } else if removed {
+        println!("Removed Snyk Agent Scan (from Loadout 0.7.0) and its settings.");
+    } else {
+        println!("Snyk Agent Scan is not installed.");
+    }
+    Ok(0)
+}
+
+fn scanner_status(ctx: &Context) -> Result<skillspector::Status, CoreError> {
+    skillspector::status(&ctx.env, ctx.fs(), &ctx.home)
+}
+
+/// `scanner status --json` (also `prepare`, `enable` and `disable`).
+fn status_json(status: &skillspector::Status) -> Value {
+    let availability = &status.availability;
+    let runtime = availability.runtime();
+    let (kind, program) = match availability {
+        Availability::Ready(runtime) => (Some(runtime.kind), Some(path_json(&runtime.program))),
+        Availability::NeedsPrepare { uv } => (Some(RuntimeKind::Uvx), Some(path_json(uv))),
+        Availability::NotAvailable => (None, None),
+    };
     json!({
-        "name": external::SCANNER,
-        "version": status.version,
-        "supported": status.supported,
-        "asset": status.asset.as_ref().map(|asset| json!({
-            "name": asset.name,
-            "sha256": asset.sha256,
-            "size": asset.size,
-        })),
-        "installed": status.installed,
+        "schema": JSON_SCHEMA,
+        "name": skillspector::SCANNER.as_str(),
+        "tested_version": VERSION,
+        "python": PYTHON,
+        "availability": availability.as_str(),
+        "runtime": kind.map(RuntimeKind::as_str),
+        "program": program,
+        "version": runtime.map(|runtime| runtime.version.as_str()),
+        "version_tested": runtime.is_none_or(Runtime::tested),
+        "note": runtime.and_then(Runtime::note),
         "enabled": status.enabled,
-        "token": status.token,
-        "binary": status.binary.as_deref().map(path_json),
         "timeout_secs": status.timeout.as_secs(),
+        "sends": DISCLOSURE,
+        "setup": matches!(availability, Availability::NotAvailable).then_some(SETUP),
+        "snyk_installed": status.snyk_installed,
     })
 }
 
-fn yes_no(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+fn on_off(value: bool) -> &'static str {
+    if value { "on " } else { "off" }
+}
+
+/// How SkillSpector runs here, in a few words.
+fn availability_text(availability: &Availability) -> String {
+    match availability {
+        Availability::Ready(runtime) => match runtime.kind {
+            RuntimeKind::Uvx => format!("SkillSpector {} (ready, uvx)", runtime.version),
+            RuntimeKind::Path => format!("SkillSpector {} (ready, on PATH)", runtime.version),
+        },
+        Availability::NeedsPrepare { .. } => {
+            format!("SkillSpector {VERSION} (needs `loadout scanner prepare`)")
+        }
+        Availability::NotAvailable => {
+            format!("SkillSpector {VERSION} (not found; see `loadout scanner status`)")
+        }
+    }
 }
 
 fn list(ctx: &Context) -> Result<u8, CoreError> {
     let status = scanner_status(ctx)?;
+    let runtime = status.availability.runtime();
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
             "scanners": [
-                { "name": "builtin", "enabled": true, "installed": true, "local": true },
+                { "name": "builtin", "enabled": true, "availability": "ready", "local": true },
                 {
-                    "name": external::SCANNER,
+                    "name": skillspector::SCANNER.as_str(),
                     "enabled": status.enabled,
-                    "installed": status.installed,
-                    "supported": status.supported,
-                    "token": status.token.is_some(),
-                    "local": false,
-                    "version": status.version,
+                    "availability": status.availability.as_str(),
+                    "runtime": runtime.map(|runtime| runtime.kind.as_str()),
+                    "version": runtime.map(|runtime| runtime.version.as_str()),
+                    "local": true,
                 },
             ],
         }));
         return Ok(0);
     }
+    println!("builtin        on   Loadout's own rules; runs locally, nothing leaves this machine");
     println!(
-        "builtin           on   Loadout's own rules; runs locally, nothing leaves this machine"
-    );
-    let state = if status.enabled { "on " } else { "off" };
-    let installed = match (status.supported, status.installed) {
-        (false, _) => "no build for this platform",
-        (true, true) => "installed",
-        (true, false) => "not installed",
-    };
-    let token = if status.token.is_some() {
-        "token set"
-    } else {
-        "no token"
-    };
-    println!(
-        "{}   {state}  Snyk Agent Scan {} ({installed}, {token}); sends skills to Snyk",
-        external::SCANNER,
-        status.version
+        "{:<14} {}  {}; runs locally",
+        skillspector::SCANNER.as_str(),
+        on_off(status.enabled),
+        availability_text(&status.availability)
     );
     Ok(0)
 }
@@ -195,103 +210,114 @@ fn list(ctx: &Context) -> Result<u8, CoreError> {
 fn status(ctx: &Context) -> Result<u8, CoreError> {
     let status = scanner_status(ctx)?;
     if ctx.json {
-        let mut doc = status_json(&status);
-        doc["schema"] = json!(JSON_SCHEMA);
-        doc["available"] = json!(external::AVAILABLE);
-        if external::AVAILABLE {
-            doc["sends"] = json!(DISCLOSURE);
-        }
-        print_json(&doc);
+        print_json(&status_json(&status));
         return Ok(0);
     }
-    if !external::AVAILABLE {
-        println!("Snyk Agent Scan is disabled in this build; it never runs.");
-        println!("  Installed: {}", yes_no(status.installed));
-        if status.installed {
-            println!("Run `loadout scanner remove` to delete it.");
+    println!("SkillSpector (optional, runs locally; tested version {VERSION})");
+    match &status.availability {
+        Availability::Ready(runtime) => {
+            match runtime.kind {
+                RuntimeKind::Uvx => println!("  Runtime:   uvx ({})", runtime.command_line()),
+                RuntimeKind::Path => {
+                    println!("  Runtime:   on PATH ({})", runtime.program.display());
+                }
+            }
+            println!("  Version:   {}", runtime.version);
+            if let Some(note) = runtime.note() {
+                println!("  Note:      {note}");
+            }
         }
-        return Ok(0);
+        Availability::NeedsPrepare { uv } => {
+            println!(
+                "  Runtime:   uvx ({}); SkillSpector {VERSION} is not downloaded yet",
+                uv.display()
+            );
+        }
+        Availability::NotAvailable => {
+            println!("  Runtime:   not found (neither uv nor skillspector is on PATH)")
+        }
     }
-    println!("Snyk Agent Scan {} (optional)", status.version);
-    match &status.asset {
-        Some(asset) => println!("  Build:     {} ({} bytes)", asset.name, asset.size),
-        None => println!("  Build:     none for this platform"),
-    }
-    println!("  Installed: {}", yes_no(status.installed));
-    if let Some(binary) = &status.binary {
-        println!("  Binary:    {}", binary.display());
-    }
-    println!("  Turned on: {}", yes_no(status.enabled));
-    println!(
-        "  Token:     {}",
-        status.token.as_deref().unwrap_or("not set")
-    );
+    println!("  Turned on: {}", if status.enabled { "yes" } else { "no" });
     println!("  Timeout:   {} s", status.timeout.as_secs());
     println!();
     println!("{DISCLOSURE}");
+    print_next_step(&status.availability);
+    if status.snyk_installed {
+        println!();
+        println!(
+            "A Snyk Agent Scan install from Loadout 0.7.0 remains (it never runs): `loadout \
+             scanner remove` deletes it."
+        );
+    }
     Ok(0)
 }
 
-/// [`external::status`] of [`tool`].
-fn scanner_status(ctx: &Context) -> Result<external::Status, CoreError> {
-    external::status_of(ctx.fs(), &ctx.home, tool(ctx).ok())
+/// What to do when SkillSpector is not ready: prepare it, or set it up.
+fn print_next_step(availability: &Availability) {
+    match availability {
+        Availability::Ready(_) => {}
+        Availability::NeedsPrepare { .. } => {
+            println!();
+            println!("SkillSpector is not downloaded yet: run `loadout scanner prepare` (once).");
+        }
+        Availability::NotAvailable => {
+            println!();
+            println!("{SETUP}");
+        }
+    }
 }
 
-fn install(ctx: &Context) -> Result<u8, CoreError> {
-    let tool = tool(ctx)?;
-    // Hashed: a binary changed since its install is downloaded again.
-    let already = tool.installed() && tool.verify().is_ok();
-    if !already {
-        let busy = Busy::start();
-        let download = UreqDownload::new(&ctx.env);
-        let show = !ctx.json && std::io::stderr().is_terminal();
-        let mut last = u64::MAX;
-        if !ctx.json {
-            eprintln!(
-                "Downloading {} ({:.1} MB) from GitHub...",
-                tool.asset().name,
-                tool.asset().size as f64 / 1_000_000.0
-            );
-        }
-        tool.install(
-            &download,
-            &mut |received, total| {
-                if !show || total == 0 {
-                    return;
+fn prepare(ctx: &Context) -> Result<u8, CoreError> {
+    if skillspector::find_uv(&ctx.env).is_none() {
+        // Nothing to download: a SkillSpector on PATH runs as it is.
+        if let Availability::Ready(runtime) = skillspector::detect(&ctx.env, &ctx.home) {
+            let status = scanner_status(ctx)?;
+            if ctx.json {
+                let mut doc = status_json(&status);
+                doc["prepared"] = json!(false);
+                print_json(&doc);
+            } else {
+                println!(
+                    "uv is not on PATH, and SkillSpector {} on PATH ({}) is ready: there is \
+                     nothing to prepare.",
+                    runtime.version,
+                    runtime.program.display()
+                );
+                if let Some(note) = runtime.note() {
+                    println!("note: {note}");
                 }
-                let percent = received * 100 / total;
-                if percent != last {
-                    last = percent;
-                    eprint!("\r  {percent:>3}%");
-                }
-            },
-            Some(busy.flag()),
-        )
-        .inspect_err(|_| {
-            if show {
-                eprintln!();
             }
-        })?;
-        if show {
-            eprintln!();
+            return Ok(0);
         }
-        drop(busy);
+        return Err(CoreError::new(
+            ErrorCode::ScannerUnavailable,
+            format!(
+                "neither uv nor skillspector is on PATH, so there is nothing to prepare. {SETUP}"
+            ),
+        ));
     }
+    eprintln!(
+        "Preparing SkillSpector {VERSION}: uv downloads it and its dependencies (a few hundred \
+         MB) from PyPI, and a Python {PYTHON} build when uv has none. This happens once; scans \
+         never download anything."
+    );
+    // Ctrl+C kills uv's whole process tree and removes the run folder.
+    let busy = Busy::start();
+    let prepared = skillspector::prepare(
+        &ctx.env,
+        &ctx.home,
+        &mut |line| eprintln!("  {line}"),
+        Some(busy.flag()),
+    );
+    drop(busy);
+    let runtime = prepared?;
     let status = scanner_status(ctx)?;
     if ctx.json {
         let mut doc = status_json(&status);
-        doc["schema"] = json!(JSON_SCHEMA);
-        doc["already_installed"] = json!(already);
+        doc["prepared"] = json!(true);
         print_json(&doc);
     } else {
-        if already {
-            println!("Snyk Agent Scan {} is already installed.", status.version);
-        } else {
-            println!(
-                "Installed Snyk Agent Scan {} (SHA-256 verified).",
-                status.version
-            );
-        }
+        println!("SkillSpector {} is ready (uvx).", runtime.version);
         if !status.enabled {
             println!("It is off: turn it on with `loadout scanner enable`.");
         }
@@ -300,73 +326,38 @@ fn install(ctx: &Context) -> Result<u8, CoreError> {
 }
 
 fn switch(ctx: &Context, on: bool) -> Result<u8, CoreError> {
-    external::set_enabled(ctx.fs(), &ctx.home, on)?;
+    skillspector::set_enabled(ctx.fs(), &ctx.home, on)?;
     let status = scanner_status(ctx)?;
     if ctx.json {
-        let mut doc = status_json(&status);
-        doc["schema"] = json!(JSON_SCHEMA);
-        print_json(&doc);
+        print_json(&status_json(&status));
         return Ok(0);
     }
     if on {
-        println!("Snyk Agent Scan is on for skill installs and updates on this machine.");
+        println!("SkillSpector is on for skill installs and updates on this machine.");
         println!("{DISCLOSURE}");
-        if !status.installed {
-            println!("It is not installed yet: run `loadout scanner install`.");
+        if let Some(note) = status.availability.runtime().and_then(Runtime::note) {
+            println!("note: {note}");
         }
-        if status.token.is_none() {
-            println!("No token is set yet: run `loadout scanner token <REF>`.");
-        }
+        print_next_step(&status.availability);
     } else {
-        println!("Snyk Agent Scan is off; nothing is sent to Snyk.");
-    }
-    Ok(0)
-}
-
-fn token(ctx: &Context, reference: Option<&str>, clear: bool) -> Result<u8, CoreError> {
-    if clear {
-        external::set_token(ctx.fs(), &ctx.home, None, None)?;
-    } else if let Some(reference) = reference {
-        // An alias is checked against the secrets catalog.
-        let store = ctx.open_store()?;
-        let read = store.as_ref().map(|store| store as &dyn StoreRead);
-        external::set_token(ctx.fs(), &ctx.home, read, Some(reference))?;
-    }
-    let settings = external::settings(ctx.fs(), &ctx.home)?;
-    if ctx.json {
-        print_json(&json!({
-            "schema": JSON_SCHEMA,
-            "token": settings.token,
-            "kind": settings
-                .token
-                .as_deref()
-                .and_then(|text| external::TokenRef::parse(text).ok())
-                .map(|parsed| parsed.kind()),
-        }));
-    } else {
-        match &settings.token {
-            Some(reference) => println!("Token reference: {reference}"),
-            None => println!(
-                "No token reference. Store the token as a secret (for example `loadout secrets \
-                 set SNYK_TOKEN --keyring`, value on stdin), then `loadout scanner token \
-                 SNYK_TOKEN`."
-            ),
-        }
+        println!("SkillSpector is off; installs and updates use the built-in scan only.");
     }
     Ok(0)
 }
 
 fn run_on_library(ctx: &Context, id: &str) -> Result<u8, CoreError> {
-    let settings = external::settings(ctx.fs(), &ctx.home)?;
+    let settings = skillspector::settings(ctx.fs(), &ctx.home)?;
     if !settings.enabled {
-        return Err(off_error());
+        return Err(CoreError::new(
+            ErrorCode::ScannerUnavailable,
+            "SkillSpector is off on this machine; turn it on with `loadout scanner enable`, or \
+             pass --external to an install or update",
+        ));
     }
     let store = require_store(ctx, "there is no skill to scan")?;
     let files = skill_store::read_content(&store, id)?;
-    let report = match prepare(ctx, Some(&store)) {
-        Ok(runner) => scan(ctx, &runner, &files, id),
-        Err(report) => report,
-    };
+    let runner = skillspector::prepare_run(&ctx.env, ctx.fs(), &ctx.home);
+    let report = report_for(ctx, &runner, &files, id);
     if ctx.json {
         print_json(&json!({
             "schema": JSON_SCHEMA,
@@ -382,20 +373,8 @@ fn run_on_library(ctx: &Context, id: &str) -> Result<u8, CoreError> {
     })
 }
 
-fn off_error() -> CoreError {
-    CoreError::new(
-        ErrorCode::ScannerUnavailable,
-        "Snyk Agent Scan is off on this machine; turn it on with `loadout scanner enable` (it \
-         sends the skill to Snyk), or pass --external to an install or update",
-    )
-}
-
-/// `--external` / `--no-external` as a [`Choice`]. With the scanner
-/// disabled in this build `--external` is ignored, with a note.
+/// `--external` / `--no-external` as a [`Choice`].
 pub(super) fn choice(on: bool, off: bool) -> Choice {
-    if on && !external::AVAILABLE {
-        eprintln!("note: --external is ignored: Snyk Agent Scan is disabled in this build");
-    }
     match (on, off) {
         (true, _) => Choice::On,
         (_, true) => Choice::Off,
@@ -403,45 +382,30 @@ pub(super) fn choice(on: bool, off: bool) -> Choice {
     }
 }
 
-/// A runner when this command should run the scanner (`choice`, else the
+/// A runner when this command should run SkillSpector (`choice`, else the
 /// switch): `None` when not; `Some(Err(report))` when it should but cannot
-/// (not installed, no token): every skill gets that report.
+/// (not found, not prepared): every skill gets that report.
 pub(super) fn wanted(
     ctx: &Context,
-    store: Option<&Store<'_>>,
     choice: Choice,
 ) -> Result<Option<Result<Runner, ExternalReport>>, CoreError> {
-    let settings = external::settings(ctx.fs(), &ctx.home)?;
-    if !external::wanted(&settings, choice) {
+    let settings = skillspector::settings(ctx.fs(), &ctx.home)?;
+    if !skillspector::wanted(&settings, choice) {
         return Ok(None);
     }
-    Ok(Some(prepare(ctx, store)))
+    Ok(Some(skillspector::prepare_run(
+        &ctx.env,
+        ctx.fs(),
+        &ctx.home,
+    )))
 }
 
-// The `Err` is the not-scanned report, built once per command.
-#[allow(clippy::result_large_err)]
-fn prepare(ctx: &Context, store: Option<&Store<'_>>) -> Result<Runner, ExternalReport> {
-    let Ok(tool) = tool(ctx) else {
-        return Err(ExternalReport::not_scanned(
-            external::VERSION,
-            NotScanned::UnsupportedPlatform,
-            None,
-        ));
-    };
-    external::prepare_run_with(tool, &ctx.env, ctx.fs(), &ctx.home, store, &ctx.delivery)
-}
-
-/// One run on `files`, announced on stderr (it sends the skill to Snyk).
-/// Ctrl+C stops the scanner's whole process tree, removes the run folder
-/// and ends the command (exit 130).
-pub(super) fn scan(
-    ctx: &Context,
-    runner: &Runner,
-    files: &SkillFiles,
-    name: &str,
-) -> ExternalReport {
+/// One run on `files`, announced on stderr. Ctrl+C (or SIGTERM, SIGHUP)
+/// kills the scanner's whole process tree, removes the run folder and ends
+/// the command (exit 130).
+fn scan(ctx: &Context, runner: &Runner, files: &SkillFiles, name: &str) -> ExternalReport {
     if !ctx.json {
-        eprintln!("Running Snyk Agent Scan on {name} (sends the skill to Snyk)...");
+        eprintln!("Running SkillSpector on {name}...");
     }
     let busy = Busy::start();
     let report = runner.scan_files(&ctx.env, &ctx.home, files, Some(busy.flag()));
@@ -460,7 +424,7 @@ pub(super) fn report_for(
         Ok(runner) => scan(ctx, runner, files, name),
         Err(report) => {
             let mut report = report.clone();
-            report.content_hash = Some(agent_loadout_core::skills::content_hash(files));
+            report.content_hash = Some(content_hash(files));
             report
         }
     }
@@ -476,6 +440,7 @@ pub(super) fn external_json(report: &ExternalReport) -> Value {
         // A report that wasn't scanned or wasn't understood has no verdict:
         // `null`, never "clean" (scripts and agents read this field).
         "verdict": (report.status == ExternalStatus::Scanned).then(|| report.verdict.as_str()),
+        "incomplete": report.incomplete,
         "detail": report.detail,
         "findings": report.findings.iter().map(|finding| json!({
             "scanner": finding.scanner,
@@ -489,9 +454,9 @@ pub(super) fn external_json(report: &ExternalReport) -> Value {
     })
 }
 
-/// `Snyk Agent Scan: <summary>`, then one line per finding.
+/// `SkillSpector: <summary>`, then one line per finding.
 pub(super) fn print_external(report: &ExternalReport, indent: &str) {
-    println!("{indent}Snyk Agent Scan: {}", report.summary());
+    println!("{indent}{}: {}", report.scanner.name(), report.summary());
     if let Some(detail) = &report.detail
         && report.status != ExternalStatus::Scanned
     {
@@ -513,7 +478,7 @@ pub(super) fn print_external(report: &ExternalReport, indent: &str) {
             println!("{indent}    > {excerpt}");
         }
     }
-    if report.verdict == Verdict::Dangerous {
+    if report.status == ExternalStatus::Scanned && report.verdict == Verdict::Dangerous {
         println!(
             "{indent}  (a dangerous verdict needs --allow-dangerous, as for the built-in scan)"
         );

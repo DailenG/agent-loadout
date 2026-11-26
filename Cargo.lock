@@ -57,6 +57,7 @@ dependencies = [
  "jsonc-parser",
  "junction",
  "keyring",
+ "process-wrap",
  "proptest",
  "regex",
  "rustix",
@@ -72,7 +73,6 @@ dependencies = [
  "toml_edit",
  "ureq",
  "url",
- "win32job",
  "windows-permissions",
  "zip",
 ]
@@ -1473,6 +1473,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process-wrap"
+version = "11.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3655b18489c90df24f2c401ac65f908b17210e59cf676127f79890f67f3e30e"
+dependencies = [
+ "indexmap",
+ "nix",
+ "windows",
 ]
 
 [[package]]

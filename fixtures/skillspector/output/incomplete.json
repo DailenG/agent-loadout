@@ -1,0 +1,93 @@
+{
+  "skill": {
+    "name": "binary-helper",
+    "source": "hand-made fixture from the documented SkillSpector 2.13.7 JSON schema (not captured output)",
+    "scanned_at": "2026-11-25T10:00:00Z"
+  },
+  "risk_assessment": {
+    "score": 21,
+    "severity": "MEDIUM",
+    "recommendation": "CAUTION",
+    "max_issue_severity": "LOW"
+  },
+  "components": [
+    {
+      "path": "SKILL.md",
+      "type": "markdown",
+      "lines": 12,
+      "executable": false,
+      "size_bytes": 310
+    },
+    {
+      "path": "scripts/sync.py",
+      "type": "python",
+      "lines": 87,
+      "executable": true,
+      "size_bytes": 2650
+    }
+  ],
+  "structured_summaries": [],
+  "issues": [
+    {
+      "id": "AE6",
+      "finding_id": "ae6-SKILL.md-14",
+      "category": "coverage",
+      "pattern": "Opaque Referenced Asset",
+      "severity": "LOW",
+      "confidence": 0.6,
+      "location": {
+        "file": "SKILL.md",
+        "start_line": 14,
+        "end_line": 14
+      },
+      "finding": "assets/tool.bin",
+      "explanation": "The instructions reference a binary file that could not be inspected.",
+      "remediation": "Review this code before installing the skill.",
+      "code_snippet": "assets/tool.bin",
+      "intent": "",
+      "tags": [],
+      "evidence": {},
+      "match_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "occurrences": [],
+      "surface": "instructions"
+    }
+  ],
+  "suppressed_count": 0,
+  "suppressed": [],
+  "metadata": {
+    "has_executable_scripts": true,
+    "skillspector_version": "2.13.7",
+    "llm_requested": false,
+    "llm_available": false,
+    "meta_analysis_applied": false,
+    "inference_usage": [],
+    "llm_provenance": null,
+    "filtering_mode": "heuristic"
+  },
+  "execution_successful": true,
+  "analysis_completeness": {
+    "status": "partial",
+    "is_complete": false,
+    "coverage_percent": 87.5,
+    "total_components": 8,
+    "scanned_components": 7,
+    "execution_successful": true,
+    "fully_inspected_files": 2,
+    "partially_inspected_files": 1,
+    "entirely_uninspected_files": 0,
+    "ledger_exceptions": [
+      {
+        "reason": "opaque_binary",
+        "message": "Referenced binary could not be inspected",
+        "path": "assets/tool.bin",
+        "fatal": false
+      }
+    ],
+    "scope_exclusions": [],
+    "analyzer_statuses": [],
+    "references": [],
+    "limitations": [],
+    "findings_before_filtering": 0,
+    "findings_after_filtering": 0
+  }
+}

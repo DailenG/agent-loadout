@@ -12,7 +12,8 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::paths::HomeSource;
-use crate::scan::Severity;
+use crate::scan::external::{ExternalStatus, gate};
+use crate::scan::{Finding, Severity, Verdict};
 
 fn fixture(relative: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -137,7 +138,7 @@ fn scores_map_to_severities() {
     };
     let credential = finding("insecure_credential_handling");
     assert_eq!(credential.severity, Severity::Warning);
-    assert_eq!(credential.scanner, SCANNER);
+    assert_eq!(credential.scanner, SCANNER.as_str());
     assert_eq!(credential.file.as_deref(), Some("scripts/deploy.sh"));
     assert_eq!(credential.line, Some(7));
     assert_eq!(

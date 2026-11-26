@@ -1,21 +1,18 @@
-//! The optional external scanner, Snyk Agent Scan (#27), for Settings >
-//! Security and the install and update reviews: status, install (with
-//! progress events, cancelable), remove, the switch, the token reference,
-//! and one run on an install review, an available update or a library
-//! skill. Nothing runs unless the user turned the scanner on. No token
-//! value crosses IPC (only its reference); details are scrubbed of the
-//! home folder.
+//! The optional external scanner, NVIDIA SkillSpector (#30), for
+//! Settings > Security and the install and update reviews: status,
+//! Prepare (the one-time uvx download, with progress events, cancelable),
+//! the switch, and one run on an install review, an available update or a
+//! library skill. Nothing runs unless the user turned the scanner on.
+//! Details and progress lines are scrubbed of the home folder.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use agent_loadout_core::scan::external::{
-    self, ExternalReport, ExternalStatus, NotScanned, Runner, TokenRef, Tool, UreqDownload,
-};
+use agent_loadout_core::scan::external::skillspector::{self, Availability, RuntimeKind};
+use agent_loadout_core::scan::external::{ExternalReport, ExternalStatus, NotScanned, Scanner};
 use agent_loadout_core::skills::install::{self, Prepared};
 use agent_loadout_core::skills::{SkillFiles, content_hash, store as skill_store};
-use agent_loadout_core::store::StoreRead;
 use agent_loadout_core::{CoreError, Env, ErrorCode};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -23,6 +20,24 @@ use tauri_specta::Event;
 
 use super::scan::{ScanFinding, ScanVerdict};
 use super::{AppState, CmdResult, Core, IpcError, blocking, scrub, scrubbed};
+
+/// Which external scanner made a report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+pub enum ExternalScanner {
+    #[serde(rename = "skillspector")]
+    SkillSpector,
+    #[serde(rename = "snyk-agent-scan")]
+    SnykAgentScan,
+}
+
+impl From<Scanner> for ExternalScanner {
+    fn from(scanner: Scanner) -> Self {
+        match scanner {
+            Scanner::SkillSpector => Self::SkillSpector,
+            Scanner::SnykAgentScan => Self::SnykAgentScan,
+        }
+    }
+}
 
 /// Whether the run happened and was understood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -47,6 +62,8 @@ impl From<ExternalStatus> for ExternalScanStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalNotScanned {
+    NotAvailable,
+    NotPrepared,
     NotInstalled,
     UnsupportedPlatform,
     NoToken,
@@ -64,6 +81,8 @@ pub enum ExternalNotScanned {
 impl From<NotScanned> for ExternalNotScanned {
     fn from(reason: NotScanned) -> Self {
         match reason {
+            NotScanned::NotAvailable => Self::NotAvailable,
+            NotScanned::NotPrepared => Self::NotPrepared,
             NotScanned::NotInstalled => Self::NotInstalled,
             NotScanned::UnsupportedPlatform => Self::UnsupportedPlatform,
             NotScanned::NoToken => Self::NoToken,
@@ -84,13 +103,15 @@ impl From<NotScanned> for ExternalNotScanned {
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalScanResult {
-    /// `snyk-agent-scan`.
-    pub scanner: String,
+    pub scanner: ExternalScanner,
+    /// The version that ran.
     pub version: String,
     pub status: ExternalScanStatus,
     pub reason: Option<ExternalNotScanned>,
     /// Meaningful only when `status` is `scanned`.
     pub verdict: ScanVerdict,
+    /// The scanner did not fully scan the content: never "clean" then.
+    pub incomplete: bool,
     pub findings: Vec<ScanFinding>,
     /// English, one line, no paths or values.
     pub detail: Option<String>,
@@ -99,11 +120,12 @@ pub struct ExternalScanResult {
 impl ExternalScanResult {
     pub fn of(env: &Env, report: &ExternalReport) -> Self {
         Self {
-            scanner: report.scanner.clone(),
+            scanner: report.scanner.into(),
             version: report.version.clone(),
             status: report.status.into(),
             reason: report.reason.map(ExternalNotScanned::from),
             verdict: report.verdict.into(),
+            incomplete: report.incomplete,
             findings: report.findings.iter().map(ScanFinding::from).collect(),
             detail: report
                 .detail
@@ -113,98 +135,140 @@ impl ExternalScanResult {
     }
 }
 
-/// How the token reference resolves.
+/// Whether SkillSpector can run on this machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum ScannerTokenKind {
-    Alias,
-    Env,
-    Keyring,
-    OnePassword,
+pub enum ScannerAvailability {
+    Ready,
+    NeedsPrepare,
+    NotAvailable,
 }
 
-/// Snyk Agent Scan on this machine.
+/// How SkillSpector runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ScannerRuntime {
+    Uvx,
+    Path,
+}
+
+impl From<RuntimeKind> for ScannerRuntime {
+    fn from(kind: RuntimeKind) -> Self {
+        match kind {
+            RuntimeKind::Uvx => Self::Uvx,
+            RuntimeKind::Path => Self::Path,
+        }
+    }
+}
+
+/// SkillSpector on this machine.
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalScannerStatus {
-    /// `snyk-agent-scan`.
-    pub scanner: String,
-    /// The pinned version.
-    pub version: String,
-    /// A pinned build exists for this OS and architecture.
-    pub supported: bool,
-    pub installed: bool,
+    pub scanner: ExternalScanner,
+    /// The version this Loadout is tested with.
+    pub tested_version: String,
+    /// The uvx form's interpreter.
+    pub python: String,
+    pub availability: ScannerAvailability,
+    /// Ready: the form that runs; needs_prepare: `uvx`; not_available: none.
+    pub runtime: Option<ScannerRuntime>,
+    /// Ready only: the version that will run.
+    pub version: Option<String>,
+    /// `version == testedVersion` (true unless ready with another version).
+    pub version_tested: bool,
     pub enabled: bool,
-    /// The reference text, never a value.
-    pub token_ref: Option<String>,
-    pub token_kind: Option<ScannerTokenKind>,
-    /// Download size of this platform's build.
-    pub size_bytes: Option<u32>,
-    /// Seconds one run may take (`[snyk_agent_scan] timeout_secs`, default
-    /// 60).
+    /// Seconds one scan may take (`[skillspector] timeout_secs`, default
+    /// 120).
     pub timeout_secs: u32,
+    /// A 0.7.0 Snyk Agent Scan install remains (`loadout scanner remove`
+    /// deletes it).
+    pub snyk_installed: bool,
 }
 
-/// Whether the token reference resolves (Snyk is not contacted).
-#[derive(Debug, Clone, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ScannerTokenCheck {
-    pub ok: bool,
-    pub reason: Option<ExternalNotScanned>,
+/// One line of uv's output while `prepare_scanner` runs (control
+/// characters removed, the home folder scrubbed).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ScannerPrepareProgress {
+    pub line: String,
 }
 
-/// Download progress of `install_scanner`, in bytes.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Event)]
-pub struct ScannerInstallProgress {
-    pub received: u32,
-    pub total: u32,
-}
-
-/// Runs in flight (each cancelable, by the caller's run id) and the
-/// external reports of update reviews, by skill id, until `update_skill`
-/// uses them.
+/// Runs in flight (each cancelable, by the caller's run id; Prepare has
+/// none) and the external reports of update reviews, by skill id, until
+/// `update_skill` uses them.
 #[derive(Default)]
 pub(crate) struct ScannerState {
+    /// Runs and the Prepare (id `None`); `preparing` and
+    /// `cancel_pending` change only under this lock.
     running: Mutex<Vec<(Option<String>, Arc<AtomicBool>)>>,
-    installing: AtomicBool,
+    preparing: AtomicBool,
+    /// `cancel_external_scan(null)` arrived while no Prepare was
+    /// registered (the GUI's Cancel can beat `prepare_scanner` to the
+    /// backend): the next Prepare is canceled before it starts.
+    cancel_pending: AtomicBool,
+    /// Bumped each time the scanner is turned off: a run attaches or
+    /// remembers its report only if it did not change since the run began.
+    generation: Arc<AtomicU64>,
     updates: Mutex<HashMap<String, ExternalReport>>,
 }
 
 impl ScannerState {
+    fn running(&self) -> std::sync::MutexGuard<'_, Vec<(Option<String>, Arc<AtomicBool>)>> {
+        self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// A cancel flag for one run (`run_id`: the caller's, for a per-run
     /// cancel), registered until the guard drops.
     pub(crate) fn start(&self, run_id: Option<String>) -> Running<'_> {
         let flag = Arc::new(AtomicBool::new(false));
-        self.running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push((run_id, Arc::clone(&flag)));
+        self.running().push((run_id, Arc::clone(&flag)));
         Running { state: self, flag }
     }
 
-    /// Cancels the run `run_id`, or every run and install with `None`.
+    /// Cancels the run `run_id`, or every run and Prepare with `None`
+    /// (the next Prepare too, when none is registered yet).
     pub(crate) fn cancel(&self, run_id: Option<&str>) {
-        for (id, flag) in self
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-        {
+        let running = self.running();
+        for (id, flag) in running.iter() {
             if run_id.is_none() || id.as_deref() == run_id {
                 flag.store(true, Ordering::SeqCst);
             }
         }
+        if run_id.is_none() && !self.preparing.load(Ordering::SeqCst) {
+            self.cancel_pending.store(true, Ordering::SeqCst);
+        }
     }
 
-    /// The install slot; `locked` while another install runs.
-    pub(crate) fn begin_install(&self) -> CmdResult<Installing<'_>> {
-        if self.installing.swap(true, Ordering::SeqCst) {
+    /// The Prepare slot with its cancel flag; `locked` while another
+    /// Prepare runs, `canceled` when a cancel arrived before it.
+    pub(crate) fn begin_prepare(&self) -> CmdResult<Preparing<'_>> {
+        let mut running = self.running();
+        if self.preparing.load(Ordering::SeqCst) {
             return Err(IpcError {
                 code: ErrorCode::Locked,
-                message: "Snyk Agent Scan is already being installed".to_owned(),
+                message: "SkillSpector is already being prepared".to_owned(),
             });
         }
-        Ok(Installing(self))
+        if self.cancel_pending.swap(false, Ordering::SeqCst) {
+            return Err(IpcError {
+                code: ErrorCode::Canceled,
+                message: "preparing SkillSpector was canceled".to_owned(),
+            });
+        }
+        self.preparing.store(true, Ordering::SeqCst);
+        let flag = Arc::new(AtomicBool::new(false));
+        running.push((None, Arc::clone(&flag)));
+        Ok(Preparing { state: self, flag })
+    }
+
+    /// The current switch-off generation.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    /// The generation counter, for a worker thread.
+    pub(crate) fn generation_counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.generation)
     }
 
     pub(crate) fn remember_update(&self, id: &str, report: ExternalReport) {
@@ -212,6 +276,22 @@ impl ScannerState {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.to_owned(), report);
+    }
+
+    /// Remembers `report` unless the scanner was turned off since
+    /// `generation` (checked under the lock [`Self::turned_off`] clears).
+    pub(crate) fn remember_update_since(
+        &self,
+        id: &str,
+        report: ExternalReport,
+        generation: u64,
+    ) -> bool {
+        let mut updates = self.updates.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.generation() != generation {
+            return false;
+        }
+        updates.insert(id.to_owned(), report);
+        true
     }
 
     /// The external report of `id`'s update review, taken out.
@@ -235,15 +315,12 @@ impl ScannerState {
             .clear();
     }
 
-    /// The scanner was turned off (or removed): every run is canceled (an
-    /// install goes on) and the remembered update reports are dropped.
+    /// The scanner was turned off: the generation moves on (runs still
+    /// going attach nothing), every run is canceled (a Prepare goes on)
+    /// and the remembered update reports are dropped.
     pub(crate) fn turned_off(&self) {
-        for (id, flag) in self
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-        {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        for (id, flag) in self.running().iter() {
             if id.is_some() {
                 flag.store(true, Ordering::SeqCst);
             }
@@ -260,19 +337,22 @@ pub(crate) struct Running<'a> {
 impl Drop for Running<'_> {
     fn drop(&mut self) {
         self.state
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .running()
             .retain(|(_, flag)| !Arc::ptr_eq(flag, &self.flag));
     }
 }
 
-/// Holds the install slot until dropped.
-pub(crate) struct Installing<'a>(&'a ScannerState);
+/// Holds the Prepare slot and its cancel flag until dropped.
+pub(crate) struct Preparing<'a> {
+    state: &'a ScannerState,
+    pub(crate) flag: Arc<AtomicBool>,
+}
 
-impl Drop for Installing<'_> {
+impl Drop for Preparing<'_> {
     fn drop(&mut self) {
-        self.0.installing.store(false, Ordering::SeqCst);
+        let mut running = self.state.running();
+        running.retain(|(_, flag)| !Arc::ptr_eq(flag, &self.flag));
+        self.state.preparing.store(false, Ordering::SeqCst);
     }
 }
 
@@ -285,192 +365,149 @@ fn u32_of(value: u64) -> u32 {
 }
 
 pub fn status(core: &Core) -> CmdResult<ExternalScannerStatus> {
-    let status = external::status(core.fs.as_ref(), &core.home).map_err(|err| ipc(core, &err))?;
-    let token_kind = status
-        .token
-        .as_deref()
-        .and_then(|text| TokenRef::parse(text).ok())
-        .map(|parsed| match parsed.kind() {
-            "alias" => ScannerTokenKind::Alias,
-            "env" => ScannerTokenKind::Env,
-            "keyring" => ScannerTokenKind::Keyring,
-            _ => ScannerTokenKind::OnePassword,
-        });
+    let status = skillspector::status(&core.env, core.fs.as_ref(), &core.home)
+        .map_err(|err| ipc(core, &err))?;
+    let (availability, runtime, version) = match &status.availability {
+        Availability::Ready(runtime) => (
+            ScannerAvailability::Ready,
+            Some(runtime.kind.into()),
+            Some(runtime.version.clone()),
+        ),
+        Availability::NeedsPrepare { .. } => (
+            ScannerAvailability::NeedsPrepare,
+            Some(ScannerRuntime::Uvx),
+            None,
+        ),
+        Availability::NotAvailable => (ScannerAvailability::NotAvailable, None, None),
+    };
     Ok(ExternalScannerStatus {
-        scanner: external::SCANNER.to_owned(),
-        version: status.version.to_owned(),
-        supported: status.supported,
-        installed: status.installed,
+        scanner: skillspector::SCANNER.into(),
+        tested_version: skillspector::VERSION.to_owned(),
+        python: skillspector::PYTHON.to_owned(),
+        availability,
+        runtime,
+        version_tested: version
+            .as_deref()
+            .is_none_or(|v| v == skillspector::VERSION),
+        version,
         enabled: status.enabled,
-        token_ref: status.token,
-        token_kind,
-        size_bytes: status.asset.map(|asset| u32_of(asset.size)),
         timeout_secs: u32_of(status.timeout.as_secs()),
+        snyk_installed: status.snyk_installed,
     })
 }
 
-/// Downloads and verifies the pinned build; `progress(received, total)`.
-/// `canceled` once `cancel` is set (nothing installed).
-pub fn install(
+/// Downloads the pinned SkillSpector into uv's cache; `progress` gets each
+/// line uv prints (scrubbed). `canceled` once `cancel` is set. Does not
+/// turn the scanner on.
+pub fn prepare(
     core: &Core,
-    progress: &mut dyn FnMut(u64, u64),
+    progress: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> CmdResult<ExternalScannerStatus> {
-    if !external::AVAILABLE {
-        return Err(ipc(core, &external::unavailable()));
-    }
-    let tool = Tool::pinned(&core.home).map_err(|err| ipc(core, &err))?;
-    tool.install(&UreqDownload::new(&core.env), progress, Some(cancel))
-        .map_err(|err| ipc(core, &err))?;
-    status(core)
-}
-
-/// Deletes the scanner and turns it off (the token reference is kept).
-pub fn remove(core: &Core) -> CmdResult<ExternalScannerStatus> {
-    let tool = Tool::pinned(&core.home).map_err(|err| ipc(core, &err))?;
-    external::remove(core.fs.as_ref(), &core.home, &tool).map_err(|err| ipc(core, &err))?;
+    let env = &core.env;
+    skillspector::prepare(
+        env,
+        &core.home,
+        &mut |line| progress(&scrub(env, line, None)),
+        Some(cancel),
+    )
+    .map_err(|err| ipc(core, &err))?;
     status(core)
 }
 
 pub fn set_enabled(core: &Core, enabled: bool) -> CmdResult<ExternalScannerStatus> {
-    external::set_enabled(core.fs.as_ref(), &core.home, enabled).map_err(|err| ipc(core, &err))?;
-    status(core)
-}
-
-/// Sets or clears the reference; an alias must be defined in the secrets
-/// catalog. `invalid_ref` never echoes the input (it may be a token).
-pub fn set_token(core: &Core, reference: Option<String>) -> CmdResult<ExternalScannerStatus> {
-    let store = core.open_store()?;
-    let read = store.as_ref().map(|store| store as &dyn StoreRead);
-    external::set_token(core.fs.as_ref(), &core.home, read, reference.as_deref())
+    skillspector::set_enabled(core.fs.as_ref(), &core.home, enabled)
         .map_err(|err| ipc(core, &err))?;
     status(core)
 }
 
-/// Resolves the token reference (may show the 1Password prompt); the value
-/// is dropped at once.
-pub fn check_token(core: &Core) -> CmdResult<ScannerTokenCheck> {
-    let settings =
-        external::settings(core.fs.as_ref(), &core.home).map_err(|err| ipc(core, &err))?;
-    let Some(reference) = settings.token else {
-        return Ok(ScannerTokenCheck {
-            ok: false,
-            reason: Some(ExternalNotScanned::NoToken),
-        });
-    };
-    let store = core.open_store()?;
-    let resolved = external::resolve_token(
-        &core.env,
-        core.fs.as_ref(),
-        &core.home,
-        store.as_ref(),
-        &core.delivery,
-        &reference,
-    );
-    Ok(match resolved {
-        Ok(_) => ScannerTokenCheck {
-            ok: true,
-            reason: None,
-        },
-        Err((reason, _)) => ScannerTokenCheck {
-            ok: false,
-            reason: Some(reason.into()),
-        },
-    })
-}
-
-/// `scanner_unavailable` unless the scanner is available in this build
-/// ([`external::AVAILABLE`]) and turned on.
+/// `scanner_unavailable` unless SkillSpector is turned on.
 fn require_enabled(core: &Core) -> CmdResult<()> {
-    if !external::AVAILABLE {
-        return Err(IpcError {
-            code: ErrorCode::ScannerUnavailable,
-            message: "Snyk Agent Scan is disabled in this version of Loadout".to_owned(),
-        });
-    }
     let settings =
-        external::settings(core.fs.as_ref(), &core.home).map_err(|err| ipc(core, &err))?;
+        skillspector::settings(core.fs.as_ref(), &core.home).map_err(|err| ipc(core, &err))?;
     if settings.enabled {
         Ok(())
     } else {
         Err(IpcError {
             code: ErrorCode::ScannerUnavailable,
-            message: "Snyk Agent Scan is off on this machine; turn it on in Settings > Security"
+            message: "SkillSpector is off on this machine; turn it on in Settings > Security"
                 .to_owned(),
         })
     }
 }
 
-/// A ready run, or the report saying why not.
-fn prepare(core: &Core) -> CmdResult<Result<Runner, ExternalReport>> {
-    let store = core.open_store()?;
-    Ok(external::prepare_run(
-        &core.env,
-        core.fs.as_ref(),
-        &core.home,
-        store.as_ref(),
-        &core.delivery,
-    ))
-}
-
-/// One run on `files` with `runner` (or its not-scanned report).
-pub(crate) fn scan_with(
-    core: &Core,
-    runner: &Result<Runner, ExternalReport>,
-    files: &SkillFiles,
-    cancel: &AtomicBool,
-) -> ExternalReport {
-    match runner {
+/// One run, while the scanner is on: the switch is checked before
+/// detection, again just before the scanner starts, and once more after
+/// it ends, so a run the user turned off meanwhile
+/// (`set_scanner_enabled(false)` also cancels it) leaves no report behind.
+/// On but not ready: the `not_scanned` report (`not_available` /
+/// `not_prepared`), nothing runs.
+fn scan(core: &Core, files: &SkillFiles, cancel: &AtomicBool) -> CmdResult<ExternalReport> {
+    require_enabled(core)?;
+    let runner = skillspector::prepare_run(&core.env, core.fs.as_ref(), &core.home);
+    require_enabled(core)?;
+    let report = match runner {
         Ok(runner) => runner.scan_files(&core.env, &core.home, files, Some(cancel)),
-        Err(report) => {
-            let mut report = report.clone();
+        Err(mut report) => {
             report.content_hash = Some(content_hash(files));
             report
         }
-    }
-}
-
-/// One run, while the scanner is on: the switch is checked before the
-/// token is resolved (which may wait on the 1Password prompt), again just
-/// before the scanner starts, and once more after it ends, so a run the
-/// user turned off meanwhile (`set_scanner_enabled(false)` also cancels
-/// it) leaves no report behind.
-fn scan(core: &Core, files: &SkillFiles, cancel: &AtomicBool) -> CmdResult<ExternalReport> {
-    require_enabled(core)?;
-    let runner = prepare(core)?;
-    require_enabled(core)?;
-    let report = scan_with(core, &runner, files, cancel);
+    };
     require_enabled(core)?;
     Ok(report)
 }
 
-/// `external_scan_required` when the scanner is on, installed and has a
-/// token but `has_report` is false: the install or update would skip the
-/// external scan the user turned on (the GUI runs it first; a canceled or
+/// `external_scan_required` when SkillSpector is on and ready but
+/// `has_report` is false: the install or update would skip the external
+/// scan the user turned on (the GUI runs it first; a canceled or
 /// not-scanned run still counts as a report).
 pub(crate) fn require_report(core: &Core, has_report: bool) -> CmdResult<()> {
     if has_report
-        || !external::required(core.fs.as_ref(), &core.home).map_err(|err| ipc(core, &err))?
+        || !skillspector::required(&core.env, core.fs.as_ref(), &core.home)
+            .map_err(|err| ipc(core, &err))?
     {
         return Ok(());
     }
     Err(IpcError {
         code: ErrorCode::ExternalScanRequired,
-        message: "Snyk Agent Scan is on but has not scanned this content yet; run the scan, \
+        message: "SkillSpector is on but has not scanned this content yet; run the scan, \
                   then try again"
             .to_owned(),
     })
 }
 
-/// Scans an install review's content and attaches the report to it.
+/// `scanner_unavailable`: the scanner was turned off while a run went on.
+fn turned_off_meanwhile() -> IpcError {
+    IpcError {
+        code: ErrorCode::ScannerUnavailable,
+        message: "SkillSpector was turned off during the scan; its report was dropped".to_owned(),
+    }
+}
+
+/// Scans an install review's content and attaches the report to it. An
+/// earlier report is dropped first; the new one is attached only while
+/// `generation` still reads `since` (the scanner was not turned off
+/// since the run began). The caller holds the review's lock throughout.
 pub fn scan_review(
     core: &Core,
     prepared: &mut Prepared,
     cancel: &AtomicBool,
+    generation: &AtomicU64,
+    since: u64,
 ) -> CmdResult<ExternalScanResult> {
+    prepared.set_external(None);
     let report = scan(core, prepared.files(), cancel)?;
+    if generation.load(Ordering::SeqCst) != since {
+        return Err(turned_off_meanwhile());
+    }
     let result = ExternalScanResult::of(&core.env, &report);
     prepared.set_external(Some(report));
+    // Turned off between the check and the attach: `turned_off` could not
+    // take this review's lock, so drop the report here.
+    if generation.load(Ordering::SeqCst) != since {
+        prepared.set_external(None);
+        return Err(turned_off_meanwhile());
+    }
     Ok(result)
 }
 
@@ -515,59 +552,40 @@ pub async fn scanner_status(state: tauri::State<'_, AppState>) -> CmdResult<Exte
     blocking(&state, status).await
 }
 
-/// Downloads and verifies the pinned build, emitting
-/// `ScannerInstallProgress`; `cancel_external_scan` stops it (`canceled`,
-/// nothing installed). Installing does not turn the scanner on. A second
-/// install while one runs is `locked`.
+/// Downloads the pinned SkillSpector once (uv on `PATH`), emitting
+/// `ScannerPrepareProgress`; `cancel_external_scan(null)` stops it
+/// (`canceled`). Does not turn the scanner on. A second Prepare while one
+/// runs is `locked`.
 #[tauri::command]
 #[specta::specta]
-pub async fn install_scanner(
+pub async fn prepare_scanner(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> CmdResult<ExternalScannerStatus> {
-    let installing = state.scanner.begin_install()?;
-    let running = state.scanner.start(None);
-    let flag = Arc::clone(&running.flag);
+    let preparing = state.scanner.begin_prepare()?;
+    let flag = Arc::clone(&preparing.flag);
     let result = blocking(&state, move |core| {
-        let mut last = u64::MAX;
-        install(
+        prepare(
             core,
-            &mut |received, total| {
-                // About 1% steps, plus the first and the last.
-                let step = (total / 100).max(1);
-                if received / step != last || received == total {
-                    last = received / step;
-                    let _ = ScannerInstallProgress {
-                        received: u32_of(received),
-                        total: u32_of(total),
-                    }
-                    .emit(&app);
+            &mut |line| {
+                let _ = ScannerPrepareProgress {
+                    line: line.to_owned(),
                 }
+                .emit(&app);
             },
             &flag,
         )
     })
     .await;
-    drop(running);
-    drop(installing);
+    drop(preparing);
     result
-}
-
-/// Deletes the scanner and turns it off, like [`set_scanner_enabled`]
-/// with `false`.
-#[tauri::command]
-#[specta::specta]
-pub async fn remove_scanner(state: tauri::State<'_, AppState>) -> CmdResult<ExternalScannerStatus> {
-    let status = blocking(&state, remove).await?;
-    turned_off(&state);
-    Ok(status)
 }
 
 /// The scanner is off: runs are canceled (they then attach nothing), the
 /// reports remembered for update reviews and attached to install reviews
 /// are dropped (installs and updates are then gated on the built-in scan
 /// only).
-fn turned_off(state: &AppState) {
+pub(crate) fn turned_off(state: &AppState) {
     state.scanner.turned_off();
     for (_, review) in &state.reviews().items {
         // A review being installed right now keeps its report.
@@ -577,8 +595,8 @@ fn turned_off(state: &AppState) {
     }
 }
 
-/// Turns the scanner on or off; off cancels every external scan (not an
-/// install) and drops the external reports of open reviews.
+/// Turns the scanner on or off; off cancels every external scan (not a
+/// Prepare) and drops the external reports of open reviews.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_scanner_enabled(
@@ -592,27 +610,6 @@ pub async fn set_scanner_enabled(
     Ok(status)
 }
 
-/// Sets (`invalid_ref` when it does not parse, or names an alias the
-/// secrets catalog does not define; the input is never echoed) or clears
-/// the token reference: a secret alias or a provider reference, never a
-/// value.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_scanner_token(
-    state: tauri::State<'_, AppState>,
-    reference: Option<String>,
-) -> CmdResult<ExternalScannerStatus> {
-    blocking(&state, move |core| set_token(core, reference)).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn check_scanner_token(
-    state: tauri::State<'_, AppState>,
-) -> CmdResult<ScannerTokenCheck> {
-    blocking(&state, check_token).await
-}
-
 /// Runs the scanner on an install review's content and attaches the
 /// report: `install_reviewed_skill` then needs `allowDangerous` for a
 /// dangerous external verdict. `run_id` names the run for
@@ -624,12 +621,14 @@ pub async fn external_scan_review(
     token: String,
     run_id: String,
 ) -> CmdResult<ExternalScanResult> {
+    let since = state.scanner.generation();
+    let generation = state.scanner.generation_counter();
     let review = state.review(&token)?;
     let running = state.scanner.start(Some(run_id));
     let flag = Arc::clone(&running.flag);
     let result = blocking(&state, move |core| {
         let mut prepared = review.lock().unwrap_or_else(PoisonError::into_inner);
-        scan_review(core, &mut prepared, &flag)
+        scan_review(core, &mut prepared, &flag, &generation, since)
     })
     .await;
     drop(running);
@@ -650,6 +649,7 @@ pub async fn external_scan_update(
     run_id: String,
 ) -> CmdResult<ExternalScanResult> {
     let _ = latest;
+    let since = state.scanner.generation();
     let _ = state.scanner.take_update(&id);
     let running = state.scanner.start(Some(run_id));
     let flag = Arc::clone(&running.flag);
@@ -657,7 +657,9 @@ pub async fn external_scan_update(
     let result = blocking(&state, move |core| scan_update(core, &id, &flag)).await;
     drop(running);
     let (report, result) = result?;
-    state.scanner.remember_update(&key, report);
+    if !state.scanner.remember_update_since(&key, report, since) {
+        return Err(turned_off_meanwhile());
+    }
     Ok(result)
 }
 
@@ -677,7 +679,7 @@ pub async fn external_scan_skill(
 }
 
 /// Cancels the external scan `run_id`; `null` cancels every running scan
-/// and the scanner install.
+/// and a running Prepare.
 #[tauri::command]
 #[specta::specta]
 pub async fn cancel_external_scan(

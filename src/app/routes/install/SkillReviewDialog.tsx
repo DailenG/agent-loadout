@@ -1,7 +1,7 @@
-// The install review (M40, M42, M49): what a git repository or a picked folder
-// would install, before anything reaches the store. It shows the source
-// and its trust state, the files, the built-in scan's findings and, when
-// the user turned it on, Snyk Agent Scan's. Install asks the trust question
+// The install review (M40, M42, M49, M51): what a git repository or a picked
+// folder would install, before anything reaches the store. It shows the
+// source and its trust state, the files, the built-in scan's findings and,
+// when the user turned it on, SkillSpector's. Install asks the trust question
 // when the source needs it (M39), and a dangerous verdict of either scan is
 // installed only through "Install anyway" (M40, M47).
 
@@ -27,9 +27,8 @@ export type SkillReviewDialogProps = {
 
 export function SkillReviewDialog({ review, origin = null, isInstalling, onInstall, onClose }: SkillReviewDialogProps) {
   const { commands } = useTransport();
-  // Content fetched from a source is scanned as soon as the review opens; a folder or archive from this
-  // computer only on request (review F2).
-  const external = useReviewScan((runId) => commands.externalScanReview(review.token, runId), review.source.kind !== "local");
+  // SkillSpector runs on this computer, so every review is scanned as soon as it opens, local folders too.
+  const external = useReviewScan((runId) => commands.externalScanReview(review.token, runId));
   const shown = external.shown;
   const [acknowledged, setAcknowledged] = useState(false);
   // The acknowledgement covers the scans shown: a new external result asks again.
@@ -37,9 +36,11 @@ export function SkillReviewDialog({ review, origin = null, isInstalling, onInsta
   const builtinDangerous = isDangerous(review.scan);
   const externalDangerous = isExternalDangerous(shown);
   const dangerous = builtinDangerous || externalDangerous;
-  const actionNote = dangerous
-    ? t("external.live.confirm", { action: t("install.review.installAnyway") })
-    : t("external.live.available", { action: t("install.review.install") });
+  const actionNote = external.needsScan
+    ? t("external.live.needsScan", { action: t(dangerous ? "install.review.installAnyway" : "install.review.install") })
+    : dangerous
+      ? t("external.live.confirm", { action: t("install.review.installAnyway") })
+      : t("external.live.available", { action: t("install.review.install") });
   const blocked = review.trust?.state.kind === "blocked" || review.movedTrust?.state.kind === "blocked";
   const source = review.source;
   const commit = source.commit?.slice(0, 7) ?? null;
@@ -67,7 +68,7 @@ export function SkillReviewDialog({ review, origin = null, isInstalling, onInsta
             <button
               className="secondary-button secondary-button--compact danger-button"
               type="button"
-              disabled={!acknowledged || isInstalling || blocked || external.busy}
+              disabled={!acknowledged || isInstalling || blocked || external.busy || external.needsScan}
               onClick={() => onInstall(true)}
             >
               {isInstalling ? t("install.review.installing") : t("install.review.installAnyway")}
@@ -76,7 +77,7 @@ export function SkillReviewDialog({ review, origin = null, isInstalling, onInsta
             <button
               className="primary-button primary-button--compact"
               type="button"
-              disabled={isInstalling || blocked || external.busy}
+              disabled={isInstalling || blocked || external.busy || external.needsScan}
               onClick={() => onInstall(false)}
             >
               {isInstalling ? t("install.review.installing") : t("install.review.install")}
