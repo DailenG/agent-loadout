@@ -19,9 +19,10 @@ Loadout reads and writes:
   it, the 1Password CLI `op`.
 
 It uses the network only for remotes you add, git sources of skills and
-MCP servers, online catalogs (off until you turn them on), and the
-optional update check. Everything else,
-the built-in scan included, works offline.
+MCP servers, online catalogs (off until you turn them on), the optional
+update check, and the optional SkillSpector scanner (off until you turn
+it on; see below). Everything else, the built-in scan included, works
+offline.
 
 ## Secrets
 
@@ -162,6 +163,53 @@ and they are never marked official. Credentials in a URL are used only for
 the fetch: they are not stored in `sources.toml`, a server file or a
 checkout's git config, and messages show them as `***`. A blocked source
 is never contacted. Trust never skips the scan.
+
+### Optional second scanner: SkillSpector
+
+[NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) 2.13.7 can
+scan skills as a local second opinion (off by default; Settings >
+Security or `loadout scanner enable`, per machine). Loadout never
+installs or bundles it: it runs `uvx --python 3.13 --from
+skillspector==2.13.7 skillspector` once you prepared it, or a
+`skillspector` you installed on `PATH`.
+
+What leaves the machine, exactly: SkillSpector runs on this computer and
+never uploads the skill. Nothing leaves this machine except the names and
+versions of the skill's dependencies, sent to OSV.dev (api.osv.dev) to
+look up known vulnerabilities, when the skill has a dependency manifest
+(requirements.txt, package.json, pyproject.toml or Pipfile). Preparing
+the uvx form once downloads SkillSpector 2.13.7 and its dependencies (a
+few hundred MB) from PyPI, and a Python 3.13 build when uv has none;
+scans themselves never download anything. No account, no token, no
+upload of skill content. Loadout runs it only on skills, never on MCP
+servers (SkillSpector does not read MCP client configs), and only when
+you turn it on (or pass --external).
+
+How each run is contained:
+
+- **Static only.** The command is exactly `skillspector scan --no-llm
+  --format json --fail-on-incomplete -- <copy>`; uv runs it with
+  `--offline`. Never a flag that follows references, downloads packages,
+  loads a baseline the skill ships, or calls an AI provider.
+- **A copy of what will be written.** The skill is staged in
+  `cache/scan-external/run-<random>/` and that folder is removed after
+  the run. Stdin is closed; output is read from stdout (at most 16 MiB).
+- **Scrubbed environment.** The child starts from an empty environment
+  plus what Python and uv need (system, profile, locale, proxy and CA
+  variables, uv's cache folders) and its own temp folder. AI provider
+  keys (`OPENAI_*`, `ANTHROPIC_*`, `AWS_*`, `NVIDIA_*`, `GOOGLE_*`,
+  `LANGSMITH_*`, ...) and `SKILLSPECTOR_*` never reach it;
+  `LANGSMITH_TRACING=false` and `LANGCHAIN_TRACING_V2=false` are set.
+- **Bounded.** 120 s per scan by default; on timeout or cancel the whole
+  process tree is killed (Windows Job Object, Unix process group).
+- **Never weaker than the built-in scan.** A `dangerous` result needs the
+  same explicit install anyway; a run that fails, times out or prints
+  something Loadout cannot read is "not scanned" or "not understood",
+  never clean, and a partial scan is "not fully scanned". While it is on
+  and ready, every install and update must carry its report.
+
+SkillSpector's bundled YARA rules partly derive from Neo23x0
+signature-base (Detection Rule License 1.1); Loadout ships none of them.
 
 ## MCP servers from a Git repository or folder
 

@@ -105,11 +105,34 @@ edit them by hand:
 
 In PowerShell, set the variable first: `$env:LOADOUT_UPDATE_DOCS = "1"`.
 
+### Moving SkillSpector to a new version
+
+The optional external scanner (#30) is NVIDIA SkillSpector, tested with
+one version (`VERSION` in
+`crates/agent-loadout-core/src/scan/external/skillspector/mod.rs`); the
+uvx form pins it and a `skillspector` on `PATH` of another version gets a
+"not tested" note. To move to a new release:
+
+1. Read the release notes and the JSON report (`Finding.to_dict`, the
+   report node, `analysis_completeness`), the exit codes and the CLI flags.
+   Loadout parses that output (`scan/external/skillspector/adapter.rs`);
+   output it can't read is "not understood", never clean.
+2. Check that the scan command (`SCAN_ARGS`) is still static only and that
+   nothing new reaches the network or an AI provider in `--no-llm` mode;
+   update `DISCLOSURE` (and `docs/security.md`, which quotes it) if it
+   does. Check the supported Python versions (`PYTHON`).
+3. Set `VERSION`, update `fixtures/skillspector/output/` when the schema
+   changed, and run `cargo test -p agent-loadout-core --lib
+   scan::external` and `--test skillspector_scan`.
+4. Update the version in `docs/user-guide.md`, `docs/security.md`,
+   `docs/troubleshooting.md`, the frontend strings (`src/i18n/en.ts`) and
+   `SPEC.md`, regenerate `docs/cli.md`, and add a CHANGELOG entry.
+
 ### Bumping the Snyk Agent Scan pin
 
-The integration is disabled since 0.7.1 (`scan::external::AVAILABLE =
-false`: Snyk's free tier refuses new accounts). The pin and this procedure
-stay for when it, or another scanner, is turned back on.
+The integration is disabled since 0.7.1 (`scan::external::snyk::AVAILABLE
+= false`: Snyk's free tier refuses new accounts). The pin and this
+procedure stay for when it is turned back on.
 
 The optional external scanner (#27) runs one pinned release of
 [snyk/agent-scan](https://github.com/snyk/agent-scan), verified against
@@ -117,9 +140,9 @@ SHA-256 values compiled into Loadout. Moving to a new release is a normal
 change:
 
 1. Read the release notes and the scanner's `--json` schema: Loadout parses
-   that output (`scan/external/adapter.rs`), and output it can't read is
+   that output (`scan/external/snyk/adapter.rs`), and output it can't read is
    reported as "not understood", never clean.
-2. In `crates/agent-loadout-core/src/scan/external/pin.rs`, set `VERSION`
+2. In `crates/agent-loadout-core/src/scan/external/snyk/pin.rs`, set `VERSION`
    and, for each of the five assets (Windows x64, Linux x64 and arm64,
    macOS arm64 and x64), the SHA-256 and size from the release's
    `sha256sums.txt.asc`. Never compute them from a download.

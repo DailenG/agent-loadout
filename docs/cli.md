@@ -50,6 +50,14 @@ and task-oriented examples are in the [user guide](user-guide.md#the-command-lin
   - [`loadout catalog search`](#loadout-catalog-search)
   - [`loadout catalog show`](#loadout-catalog-show)
   - [`loadout catalog refresh`](#loadout-catalog-refresh)
+- [`loadout scanner`](#loadout-scanner)
+  - [`loadout scanner ls`](#loadout-scanner-ls)
+  - [`loadout scanner status`](#loadout-scanner-status)
+  - [`loadout scanner prepare`](#loadout-scanner-prepare)
+  - [`loadout scanner enable`](#loadout-scanner-enable)
+  - [`loadout scanner disable`](#loadout-scanner-disable)
+  - [`loadout scanner run`](#loadout-scanner-run)
+  - [`loadout scanner remove`](#loadout-scanner-remove)
 - [`loadout project`](#loadout-project)
   - [`loadout project init`](#loadout-project-init)
   - [`loadout project add`](#loadout-project-add)
@@ -114,6 +122,7 @@ Commands:
   agent          The read-only Loadout skill for coding agents: install, remove, status, skill-path
   source         Trusted and blocked install sources: list, trust, block, untrust
   catalog        Catalogs of MCP servers and skills: list, add, search, show
+  scanner        Scanners: the built-in scanner and the optional SkillSpector (runs locally; off by default)
   project        Project manifests: create, register, trust, share, list, forget
   history        List store commits
   status         Show the state of every owned and desired entry
@@ -407,7 +416,7 @@ Usage: loadout skills [OPTIONS] <COMMAND>
 
 Commands:
   ls       List store skills (and the agents CLI's skills when compatibility is on)
-  add      Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2. A git source you have not trusted asks first (a terminal prompt, or --trust-source). The built-in scan runs first; a dangerous verdict installs nothing (exit 8) unless --allow-dangerous
+  add      Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2. A git source you have not trusted asks first (a terminal prompt, or --trust-source). The built-in scan runs first (and SkillSpector when it is on); a dangerous verdict installs nothing (exit 8) unless --allow-dangerous
   rm       Remove a store skill and its owned links and copies; with --agents, remove an agents CLI skill through the `skills` CLI
   enable   Enable a skill for clients (user scope), or in a project
   disable  Disable a skill for clients (user scope), or in a project
@@ -443,7 +452,7 @@ Options:
 ## `loadout skills add`
 
 ```text
-Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2. A git source you have not trusted asks first (a terminal prompt, or --trust-source). The built-in scan runs first; a dangerous verdict installs nothing (exit 8) unless --allow-dangerous
+Install a skill from a git URL, a local folder, or a .zip/.skill archive. With --yes, a taken id becomes <id>-2. A git source you have not trusted asks first (a terminal prompt, or --trust-source). The built-in scan runs first (and SkillSpector when it is on); a dangerous verdict installs nothing (exit 8) unless --allow-dangerous
 
 Usage: loadout skills add [OPTIONS] <SOURCE>
 
@@ -472,6 +481,12 @@ Options:
 
       --allow-dangerous
           Install even when the built-in scan finds dangerous content (review the findings first)
+
+      --external
+          Also run SkillSpector on it this time (locally), even when it is turned off
+
+      --no-external
+          Do not run SkillSpector this time, even when it is turned on
 
       --trust-source[=<ONCE|REPO|OWNER|HOST>]
           Trust the git source without the prompt: once (this install only), or always for the repo, its owner or its host (`--trust-source=repo`; the value needs the `=`). Only for a source you trust: skills can run commands and read your files. --yes never answers the trust prompt
@@ -577,6 +592,12 @@ Options:
 
       --yes
           Answer yes to confirmations (rolling back an older apply run)
+
+      --external
+          Also run SkillSpector on each available update this time (locally), even when it is turned off
+
+      --no-external
+          Do not run SkillSpector this time, even when it is turned on
 
       --trust-source[=<ONCE|REPO|OWNER|HOST>]
           Trust the git sources without the prompt: once (this update only), or always for the repo, its owner or its host (`--trust-source=repo`; the value needs the `=`, so `--trust-source repo` updates the skill `repo` once)
@@ -1027,6 +1048,131 @@ Usage: loadout catalog refresh [OPTIONS] [ID]
 
 Arguments:
   [ID]  
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner`
+
+```text
+Scanners: the built-in scanner and the optional SkillSpector (runs locally; off by default)
+
+Usage: loadout scanner [OPTIONS] <COMMAND>
+
+Commands:
+  ls       List the scanners: the built-in scanner (always on) and SkillSpector (optional, local)
+  status   Show SkillSpector on this machine: how it runs (uvx or on PATH), its version, on or off, the timeout, and what leaves the machine
+  prepare  Download the pinned SkillSpector into uv's cache once (runs `uvx --python 3.13 --from skillspector==2.13.7 skillspector --version`). Needs uv on PATH; scans never download anything
+  enable   Run SkillSpector on skill installs and updates on this machine (locally; see `loadout scanner status`)
+  disable  Stop running SkillSpector on skill installs and updates
+  run      Scan a library skill (its store content) with SkillSpector now; reports only. Exits 0 when it was scanned, 1 otherwise
+  remove   Delete a Snyk Agent Scan install left by Loadout 0.7.0 and its settings
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner ls`
+
+```text
+List the scanners: the built-in scanner (always on) and SkillSpector (optional, local)
+
+Usage: loadout scanner ls [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner status`
+
+```text
+Show SkillSpector on this machine: how it runs (uvx or on PATH), its version, on or off, the timeout, and what leaves the machine
+
+Usage: loadout scanner status [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner prepare`
+
+```text
+Download the pinned SkillSpector into uv's cache once (runs `uvx --python 3.13 --from skillspector==2.13.7 skillspector --version`). Needs uv on PATH; scans never download anything
+
+Usage: loadout scanner prepare [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner enable`
+
+```text
+Run SkillSpector on skill installs and updates on this machine (locally; see `loadout scanner status`)
+
+Usage: loadout scanner enable [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner disable`
+
+```text
+Stop running SkillSpector on skill installs and updates
+
+Usage: loadout scanner disable [OPTIONS]
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner run`
+
+```text
+Scan a library skill (its store content) with SkillSpector now; reports only. Exits 0 when it was scanned, 1 otherwise
+
+Usage: loadout scanner run [OPTIONS] <SKILL>
+
+Arguments:
+  <SKILL>  Skill id
+
+Options:
+      --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default
+      --json         Print machine-readable JSON to stdout
+      --yes          Answer yes to confirmations (rolling back an older apply run)
+  -h, --help         Print help
+```
+
+## `loadout scanner remove`
+
+```text
+Delete a Snyk Agent Scan install left by Loadout 0.7.0 and its settings
+
+Usage: loadout scanner remove [OPTIONS]
 
 Options:
       --home <PATH>  Data directory to use instead of LOADOUT_HOME or the per-OS default

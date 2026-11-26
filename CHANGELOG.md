@@ -8,6 +8,42 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+### Added
+
+- NVIDIA SkillSpector as the optional second scanner for skills (#30), a
+  local second opinion beside the built-in scan, off by default. Loadout
+  never installs it: it runs SkillSpector 2.13.7 through uv (`uvx
+  --python 3.13 --from skillspector==2.13.7`, downloaded once by
+  **Prepare** in Settings > Security or `loadout scanner prepare`), or a
+  `skillspector` you installed on `PATH` (another version shows "not
+  tested with this Loadout"). Scans are static only (`--no-llm`), run on a
+  copy of exactly the content to install or update, with stdin closed, AI
+  provider keys removed from the environment, LangSmith tracing off, a
+  time limit (120 s by default) and the whole process tree stopped on
+  timeout or cancel; uv runs them `--offline`. Nothing leaves the machine
+  except the names and versions of a skill's dependencies, sent to OSV.dev
+  when the skill has a dependency manifest, plus the one-time Prepare
+  download. No account, no token.
+- While SkillSpector is on, every install and update review runs it
+  (local folders and archives too) and shows an **External scan** section
+  (severity, rule id such as `E2`, `file:line`, message, masked excerpt);
+  a library skill has **Scan with SkillSpector**. A dangerous result (a
+  `CRITICAL` finding or a `DO_NOT_INSTALL` recommendation) needs the same
+  **Install anyway** / **Update anyway** or `--allow-dangerous` (exit 8)
+  as the built-in scan; a partial scan reads "not fully scanned", never
+  clean; not scanned and not understood never block.
+- `loadout scanner ls|status|prepare|enable|disable|run` and `--external`
+  / `--no-external` on `skills add` and `skills update` are visible again,
+  now for SkillSpector. `scanner status --json` reports availability,
+  runtime, version, the disclosure and setup instructions.
+
+### Changed
+
+- `loadout scanner install` and `scanner token` (Snyk Agent Scan only)
+  stay hidden and fail with `scanner_unavailable`; `scanner remove` still
+  deletes a 0.7.0 Snyk Agent Scan install, and Settings > Security and
+  `scanner status` mention one that remains.
+
 ## [0.7.1] - 2026-11-25
 
 ### Changed

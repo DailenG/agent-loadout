@@ -11,7 +11,7 @@ describes the code as it is. For the user-level ideas see
 |---|---|---|
 | `crates/agent-loadout-core` | `agent-loadout-core` (library) | All logic: schemas, store, formats, adapters, layering, apply, secrets, skills, sources, scan, catalogs, the agent skill, remotes, migration. No Tauri dependency. Also holds the bundled agent skill's files (`agent-skill/loadout/`). |
 | `crates/agent-loadout` | `agent-loadout` (binary `loadout`) | The CLI (clap). Thin over core; also `loadout exec` and the hidden `loadout git-credential`. |
-| `crates/agent-loadout-testkit` | `agent-loadout-testkit` (unpublished) | Hermetic test helpers: `TempHome`, `RootedFs`, `MemKeyring`, `op-stub`, `gh-stub`, `agent-scan-stub` (a fake Snyk Agent Scan installed through the real verified install, which logs its argv, environment, stdin and staged files, replays recorded outputs and can hang to test timeouts and cancel), isolated git config. |
+| `crates/agent-loadout-testkit` | `agent-loadout-testkit` (unpublished) | Hermetic test helpers: `TempHome`, `RootedFs`, `MemKeyring`, `op-stub`, `gh-stub`, `skillspector-stub` (copied into a temp `bin` folder as `skillspector`, `uvx` or `uv`; logs its program, argv, environment, stdin bytes and staged files, replays fixture outputs with a chosen exit code, emulates uv's `--offline` cache miss and Prepare, and can hang with a heartbeat grandchild to test timeouts and cancel), `agent-scan-stub` (a fake Snyk Agent Scan installed through the real verified install; disabled scanner), isolated git config. |
 | `src-tauri` | `agent-loadout-app` (unpublished) | The Tauri 2 desktop app. Its own Cargo workspace, so the root workspace builds without WebView tooling. Commands are thin wrappers over core. |
 | `src` | (npm, private) | React 18 + TypeScript frontend, Vite, TanStack Query, CodeMirror 6. |
 
@@ -68,7 +68,7 @@ Rules every layer follows:
 | `secrets/` | Reference grammar (`grammar.rs`), catalog (`catalog.rs`), providers (`providers/`: env, keyring, 1Password), statuses (`status.rs`), delivery selection and rendering (`delivery.rs`, `render.rs`), secret classification (`classify.rs`), secret extraction shared by import and the SkillDock migration (`extract.rs`), the leak scanner (`scanner.rs`). |
 | `skills/` | Skill store (`store.rs`; listings read only `SKILL.md` and file metadata through `summarize_folder`), installs from git, folders and archives with the review step and the gates before the commit (`install.rs`: `prepare`, `install_prepared`, `Decisions { allow_dangerous, trust, moved_trust, via }`, update checks with force-push and move detection, `sweep_temp_clones`), links, junctions and copies, with client detection probed once per operation (`link.rs`, `DetectedClients`), folder classification (`classify.rs`), adopt and bulk import of unmanaged folders (`adopt.rs`), content summaries of skill folders cached by their file listing (`hash_cache.rs`), `SKILL.md` frontmatter (`frontmatter.rs`), the agents CLI folder (`agents_cli.rs`). |
 | `scan/` | The built-in offline scanner: rules as data (`rules.toml`, parsed and checked in `rules.rs`), matching, line numbers and masked excerpts (`engine.rs`), results cached by content hash in `cache/scan` (`cache.rs`), the findings model, `Scanner` and the `scan_blocked` gate (`mod.rs`). Used by skill installs and updates and by MCP drafts from a repository. |
-| `scan/external/` | The optional second scanner, Snyk Agent Scan (#27), off by default: the compiled pin (`v0.7.1`, the SHA-256 and size of the asset for each of five platforms, taken from the release's GPG-signed `sha256sums.txt.asc`) and the download URL (`pin.rs`); the verified install into `tools/snyk-agent-scan/<version>/` (https only, redirects followed by hand to GitHub's release hosts, 64 MiB cap, size and SHA-256 checked before the rename, `installed.json` written last, `Tool::verify()` re-hashing the binary before each command uses it) (`install.rs`); one bounded run on a staged copy in `cache/scan-external/run-*` (stdin closed, a scrubbed environment with `SNYK_TOKEN` and the run's own temp folder, a timeout, the process tree killed through a Windows job object or a Unix process group on timeout or cancel) (`run.rs`); the JSON adapter that maps Snyk's scores and risks into the shared findings model and every failure into a "not scanned" reason (`adapter.rs`); settings in `state/local-settings.toml`, token references, `prepare_run` and the `gate` (`mod.rs`). Skill installs and updates gate on its report after the built-in gate (`skills/install.rs`: `Prepared::set_external`, `Decisions.external`). |
+| `scan/external/` | Optional external scanners, off by default. Shared (`mod.rs`): the `Scanner` id (`skillspector`, `snyk-agent-scan`), `ExternalReport` (status, not-scanned reason, verdict, findings, `incomplete`), `Choice` (`--external`/`--no-external`) and the `gate`; `process.rs`: one bounded run on a staged copy in `cache/scan-external/run-*` (self-removing run folder, stale-run sweep, stdin closed, stdout cap, stderr tail and per-line callback, timeout, cancel, process tree killed through a Windows job object or a Unix process group, environment allowlist); `text.rs`: JSON and path helpers. `skillspector/` (#30, the scanner since 0.8.0): settings `[skillspector]`, detection (prepared uvx form probed `--offline`, else `skillspector` on `PATH`, else needs Prepare), `prepare` (the one download), `Runner` (exact argv, scrubbed `child_env` without provider keys, tracing off), `DISCLOSURE`, `SETUP` (`mod.rs`); the JSON adapter mapping SkillSpector's issues, recommendation and completeness into the shared findings model (`adapter.rs`). `snyk/` (#27, disabled since 0.7.1, `AVAILABLE = false`): pin, verified install, run and adapter, kept for `scanner remove`. Skill installs and updates gate on the report after the built-in gate (`skills/install.rs`: `Prepared::set_external`, `Decisions.external`). |
 | `catalog/` | Online catalogs: the catalog list (built-ins plus `store/catalogs.toml`), the machine-local Online catalogs switch, search, show and refresh per catalog (in parallel, each with its own status), the handoff of an entry to the existing reviews (`mcp_handoff`, `skill_request`, skills.sh addresses), and `catalog:<source>/<id>` references (`mod.rs`); the HTTP client behind the `Http` trait, `ureq` with rustls and the platform verifier, time limits, an 8 MiB cap after decompression, https-only redirects and the proxy rules (SOCKS refused, never a direct fallback) (`http.rs`); the MCP Registry client (`/v0.1`, falling back to `/v0`), its pinning and trust keys on what runs (`registry.rs`); Git taps, shallow and sparse through the system git, skill folders and Claude Code plugin marketplaces (`tap.rs`); the 24-hour cache in `cache/catalogs` keyed on the catalog's address (`cache.rs`). Nothing here runs in the background. |
 | `agent.rs` | The Loadout skill for agents: the bundled files (`include_str!` of `agent-skill/loadout/`, LF line endings), its status in the store (`Current`, `Outdated`, `Customized`, `Newer`, by content hash and the `[bundled]` version), `install` (with `reset`), `remove`, `refresh` and `startup_refresh` (re-checked under the store lock; a customized copy is reported once per version through `agent_skill_notice` in `state/local-settings.toml`), and `materialize` into `cache/agent-skill/loadout` for `agent skill-path`. |
 | `remote/` | Remote config (`config.rs`), folder remotes (`folder.rs`), git remotes through the system git (`git.rs`), GitHub CLI helpers (`gh.rs`), token credentials (`credential.rs`), push and pull (`sync.rs`), sync-tool artifact filtering (`sync_artifacts.rs`), restore on a new machine (`restore.rs`), the remote manifest (`manifest.rs`), UNC paths (`unc.rs`). |
@@ -142,17 +142,17 @@ with the user's answer, and is spent by a successful one. Temporary clones
 interrupted run are swept once they are an hour old: at app start, and
 when a CLI server command starts.
 
-**The external scanner's pin.** The Snyk Agent Scan version and the
-SHA-256 and size of each platform's asset are constants in
-`scan/external/pin.rs`. They come from the release's cleartext-signed
-`sha256sums.txt.asc`, kept verbatim with Snyk's signing key in
-`fixtures/agent-scan/v<version>/`; a unit test checks that the compiled
-hashes equal the signed body, and `scripts/verify-agent-scan-pins.sh` /
-`.ps1` checks the signature with the system gpg against the pinned key
-fingerprint (Loadout ships no OpenPGP code). `fixtures/agent-scan/output/`
-holds `--json` documents in Snyk's schema that the testkit's
-`agent-scan-stub` replays; a debug build of the CLI can point at the stub
-with `LOADOUT_TEST_AGENT_SCAN`. Bumping the pin is described in
+**The external scanners.** SkillSpector is not pinned by hash: Loadout
+never downloads it itself. uv resolves `skillspector==2.13.7` (the
+`VERSION` constant in `scan/external/skillspector/mod.rs`) from PyPI
+during Prepare, and a `skillspector` on `PATH` is whatever the user
+installed (another version gets a "not tested" note). The adapter's input
+shapes are hand-made from the documented schema in
+`fixtures/skillspector/output/` (marked as such), replayed by the
+testkit's `skillspector-stub`. The disabled Snyk Agent Scan keeps its
+compiled pin in `scan/external/snyk/pin.rs`, checked against the signed
+`sha256sums.txt.asc` in `fixtures/agent-scan/v<version>/` by a unit test
+and `scripts/verify-agent-scan-pins.*`. Moving either is described in
 [CONTRIBUTING](../CONTRIBUTING.md).
 
 ## CLI
@@ -163,9 +163,9 @@ options `--home`, `--json` and `--yes`, builds a `Context` (resolved
 command in `src/cmd/`. `src/exec/` is `loadout exec`, which parses its own
 arguments before clap, never writes to stdout (the MCP channel) and does
 not read the store. `src/keyring.rs` is the OS keyring provider.
-`src/interrupt.rs` turns Ctrl+C, SIGTERM and SIGHUP during a Snyk Agent
-Scan run or download into its cancel flag (the process tree is killed and
-the run folder or partial download removed) and exits 130. The full
+`src/interrupt.rs` turns Ctrl+C, SIGTERM and SIGHUP during a SkillSpector
+scan or `scanner prepare` into its cancel flag (the process tree is killed
+and the run folder removed) and exits 130. The full
 command reference is [cli.md](cli.md), generated from the clap help by
 `scripts/gen-cli-docs.mjs`. Commands that change the store open it through
 `Context::open_store_for_change`, which first replaces an outdated agent
@@ -191,7 +191,8 @@ appear there only in "never" guidance.
   `catalogs.rs` (Install > Browse and Settings > Catalogs; one
   `search_catalog` call per catalog, `open_catalog_link` looks the URL up
   itself and opens only https), `scanner.rs` (Settings > Security and the
-  External scan of reviews: install with progress events, per-run cancel,
+  External scan of reviews: SkillSpector status and Prepare with progress
+  events, per-run cancel,
   the reports remembered for `install_reviewed_skill` and `update_skill`,
   `external_scan_required`), `agent.rs` (Settings > Agent integration and
   the update at app start), `import.rs` (scan and apply an import,
@@ -229,7 +230,7 @@ fallback: outside Tauri without the mock, calls fail.
 | Path | Contents |
 |---|---|
 | `src/main.tsx`, `src/app/App.tsx` | Shell: sidebar with the scope switcher and nav, header slots, window chrome, route error boundary |
-| `src/app/routes/<page>/` | One folder per page: `skills` (with the update review and `SkillExternalScan.tsx`: Scan with Snyk on a library skill), `mcp` (with `McpSourceUpdate.tsx`: Check for update, Restore copy), `projects`, `tools`, `install` (skill review, `McpSourcePanel.tsx`: MCP From Git or folder, `catalog/`: Browse with `BrowsePanel.tsx` and `EntryDetail.tsx`), `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `sources`, `security`, `catalogs`, `agent`, `updates`), `migrate` |
+| `src/app/routes/<page>/` | One folder per page: `skills` (with the update review and `SkillExternalScan.tsx`: Scan with SkillSpector on a library skill), `mcp` (with `McpSourceUpdate.tsx`: Check for update, Restore copy), `projects`, `tools`, `install` (skill review, `McpSourcePanel.tsx`: MCP From Git or folder, `catalog/`: Browse with `BrowsePanel.tsx` and `EntryDetail.tsx`), `import` (MCP import, the not-managed section and sidebar notice, `skills/` adopt, `projects/` Discover projects), `history`, `settings` (`versioning`, `secrets`, `sources`, `security`, `catalogs`, `agent`, `updates`), `migrate` |
 | `src/app/apply/` | Pending changes pill and drawer, change notices, query keys, drift triggers, Refresh |
 | `src/app/resolver/` | The drift resolver dialog |
 | `src/app/scope/` | `ActiveScope.tsx` (User or one project; not persisted) and `ScopeSwitcher.tsx` |

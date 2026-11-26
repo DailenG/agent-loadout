@@ -451,7 +451,53 @@ plugins in a tap's folder or a Git repository (`github`, `url`,
 installed either. Ask the publisher for a Git source, or install its MCP
 server or skill from its repository with **From Git or folder**.
 
-## Snyk Agent Scan (0.7.0 only)
+## SkillSpector
+
+### Not scanned: "SkillSpector was not found" / "isn't available on this computer"
+
+Neither uv nor a `skillspector` was found on `PATH` (on Windows only
+`.exe` files count). Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+and run `loadout scanner prepare` (or **Prepare** in Settings >
+Security), or `pipx install skillspector==2.13.7 --python 3.13`. The app
+and the CLI see the `PATH` they were started with: restart the app (or
+open a new terminal) after installing.
+
+### Not scanned: "SkillSpector is not downloaded yet" / "isn't prepared yet"
+
+uv is on `PATH`, but the pinned SkillSpector is not in uv's cache yet.
+Scans run uv with `--offline` and never download, so run Prepare once. If
+you cleared uv's cache (`uv cache clean`), prepare again.
+
+### Prepare fails
+
+The error shows uv's last line. Common causes: no network or a proxy
+(Loadout passes `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` and
+`SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` through to uv), or a Python that
+can't be used. SkillSpector needs Python 3.12 or 3.13; 3.14 and later
+fail while installing yara-python. The uvx form asks uv for 3.13 and
+downloads it when uv has none.
+
+### "SkillSpector X is not tested with this Loadout"
+
+The `skillspector` on `PATH` is not 2.13.7. It still runs, and its output
+is read defensively: anything Loadout cannot read is "not understood",
+never clean. To match, `pipx install --force skillspector==2.13.7 --python
+3.13`, or use uv (`loadout scanner prepare`), which pins 2.13.7.
+
+### Not scanned (timed out)
+
+A scan ran longer than its limit (120 s by default) and was stopped.
+The first scan after Prepare is slower (Python compiles its files once).
+Raise `timeout_secs` under `[skillspector]` in `state/local-settings.toml`
+in Loadout's data folder (Settings > Security shows the current limit).
+
+### A finding "OSV.dev unreachable"
+
+The skill has a dependency manifest and SkillSpector could not reach
+`api.osv.dev` (offline, firewall or proxy), so it fell back to a small
+built-in list. The result may miss known-vulnerable dependencies.
+
+### Snyk Agent Scan (0.7.0 only)
 
 Loadout 0.7.0 shipped an optional Snyk Agent Scan; it is disabled from
 0.7.1 because Snyk's free tier refuses new accounts. If you installed it,

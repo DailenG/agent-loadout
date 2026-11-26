@@ -1076,11 +1076,75 @@ The verdict is the worst finding: `clean`, `warning` or `dangerous`.
   always run, and the result says "custom rules in use". A file that does
   not load is reported with every scan.
 
-### Snyk Agent Scan (0.7.0 only)
+### SkillSpector (optional second scanner)
 
-Loadout 0.7.0 shipped an optional Snyk Agent Scan; it is disabled from
-0.7.1 because Snyk's free tier refuses new accounts. If you installed it,
-run `loadout scanner remove`.
+[NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) (Apache-2.0)
+can scan skills as a local second opinion beside the built-in scan, never
+instead of it. It is off by default and Loadout never installs it. Turn
+it on in **Settings > Security** or with `loadout scanner enable`.
+
+**Getting it.** Loadout runs SkillSpector 2.13.7 in one of two ways:
+
+- **With uv** (preferred): install [uv](https://docs.astral.sh/uv/getting-started/installation/),
+  then click **Prepare** in Settings > Security or run `loadout scanner
+  prepare`. Prepare runs `uvx --python 3.13 --from skillspector==2.13.7
+  skillspector --version` once, which downloads SkillSpector and its
+  dependencies (a few hundred MB) from PyPI, and a Python 3.13 build when
+  uv has none. It can take several minutes; the progress shows uv's
+  output, and **Cancel** stops it. Scans then run uv with `--offline`, so
+  they never download anything.
+- **Installed yourself:** a `skillspector` on your `PATH`, for example
+  `pipx install skillspector==2.13.7 --python 3.13`. Another version runs
+  too, with the note "SkillSpector X is not tested with this Loadout".
+
+SkillSpector needs Python 3.12 or 3.13; Python 3.14 and later don't work
+yet (one of its dependencies, yara-python, has no packages for them).
+`loadout scanner status` (or the Status line in Settings) says which form
+will run, its version, and what to do when neither is found.
+
+**What leaves the machine.** SkillSpector runs on this computer and never
+uploads the skill. Nothing leaves the machine except the names and
+versions of the skill's dependencies, sent to OSV.dev (`api.osv.dev`) to
+look up known vulnerabilities, when the skill has a dependency manifest
+(`requirements.txt`, `package.json`, `pyproject.toml` or `Pipfile`), plus
+the one-time Prepare download. No account, no token. Loadout runs it with
+`--no-llm`, never with an AI provider: provider keys in your environment
+(`OPENAI_*`, `ANTHROPIC_*`, `AWS_*`, ...) are removed from its
+environment and LangSmith tracing is turned off. It scans skills only;
+MCP servers get the built-in scan alone (SkillSpector doesn't read MCP
+client configs).
+
+**When it runs.** While it is on, every install and update review runs it
+(local folders and archives too) on a copy of exactly the content to be
+written, and **Scan with SkillSpector** on a library skill runs it on
+request (`loadout scanner run <SKILL>`). On the command line,
+`--external` / `--no-external` on `skills add` and `skills update` turn
+it on or off for one run. Each scan is bounded (120 s by default;
+`timeout_secs` under `[skillspector]` in `state/local-settings.toml`
+changes it) and the whole process tree is stopped on timeout or cancel.
+
+**Results.** The review's **External scan** section, and the line
+`SkillSpector: <verdict> (N findings)` on the command line, list each
+finding with its severity, SkillSpector's rule id (such as `E2` or `SC4`),
+`file:line`, message and the matched text (secrets masked).
+SkillSpector's `CRITICAL` is `dangerous`, `HIGH` and `MEDIUM` are
+`warning`, `LOW` is `info`, and its `DO_NOT_INSTALL` recommendation makes
+the verdict `dangerous` even without a `CRITICAL` finding.
+
+- **`dangerous` blocks** like the built-in scan: **Install anyway** /
+  **Update anyway** after ticking the box, or `--allow-dangerous` (exit 8
+  without it).
+- **Not fully scanned:** when SkillSpector reports partial coverage, the
+  result says "not fully scanned" (never "clean") with an `incomplete`
+  finding naming the status and coverage. It does not block by itself.
+- **Not scanned** (not available, needs Prepare, timeout, canceled,
+  failed) and **not understood** (output Loadout cannot read) never block
+  and never read as clean. An "OSV.dev unreachable" `SC4` finding means
+  the dependency lookup was offline and the result may be incomplete.
+
+If you installed Snyk Agent Scan with Loadout 0.7.0 (disabled since
+0.7.1), `loadout scanner remove` deletes it and its settings; Settings >
+Security shows a line while it remains.
 
 ### Source trust
 
