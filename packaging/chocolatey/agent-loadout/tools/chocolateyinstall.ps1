@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
-$url64 = 'https://github.com/DailenG/agent-loadout/releases/download/v0.7.1/Loadout_0.7.1_x64-setup.exe'
-$checksum64 = '9d3b19bade49bbdff1b54f3c7b617cffbdf3505f9bf5bd028f0c77319d0f6cbe'
+# Set when the package is built, from the GitHub release and its SHA256SUMS.
+$url64 = '__URL64__'
+$checksum64 = '__CHECKSUM64__'
 
 # The installer is per user: it installs into the profile of the account
 # running it. Under SYSTEM that profile belongs to nobody.

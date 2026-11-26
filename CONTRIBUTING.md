@@ -253,9 +253,9 @@ Maintainers only.
    run means a new version, not a re-tag.
 5. After publishing:
    - **Chocolatey**: `.github/workflows/chocolatey.yml` runs on the
-     published release (and daily), updates
-     `packaging/chocolatey/agent-loadout` from the release's `SHA256SUMS`,
-     pushes the package and commits the updated files.
+     published release, builds the package from
+     `packaging/chocolatey/agent-loadout` (templates) and the release's
+     `SHA256SUMS`, and pushes it. If it fails, run it by hand with the tag.
    - **winget**: submit the manifests from `winget-manifests-X.Y.Z.zip`
      (rendered by `packaging/winget/render.ps1`) to `microsoft/winget-pkgs`.
      While an earlier version's pull request is still open, replace its
