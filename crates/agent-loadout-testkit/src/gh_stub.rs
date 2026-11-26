@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::op_stub::built_binary;
+use crate::op_stub::{built_binary, copy_executable};
 
 /// Config file next to the installed stub.
 pub const CONFIG_FILE: &str = "gh-stub.json";
@@ -55,8 +55,7 @@ impl GhStub {
     /// Installs the stub in `dir` as `gh`, logged in as `stub-user`.
     pub fn install(dir: &Path) -> Self {
         let target = dir.join(format!("gh{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(binary(), &target)
-            .unwrap_or_else(|err| panic!("install gh-stub at {}: {err}", target.display()));
+        copy_executable(&binary(), &target);
         let mut stub = Self {
             dir: dir.to_owned(),
             config: GhStubConfig::default(),

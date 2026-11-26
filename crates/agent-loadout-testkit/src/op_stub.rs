@@ -183,7 +183,7 @@ impl Drop for OpStub {
 /// opened in this process would be inherited by a child that another test
 /// thread forks at the same moment, and while that child holds it, running
 /// the copy fails with ETXTBSY ("Text file busy").
-fn copy_executable(from: &Path, to: &Path) {
+pub(crate) fn copy_executable(from: &Path, to: &Path) {
     #[cfg(unix)]
     {
         let status = std::process::Command::new("cp")
@@ -197,7 +197,7 @@ fn copy_executable(from: &Path, to: &Path) {
     #[cfg(not(unix))]
     std::fs::copy(from, to)
         .map(drop)
-        .unwrap_or_else(|err| panic!("install op-stub at {}: {err}", to.display()));
+        .unwrap_or_else(|err| panic!("copy {} to {}: {err}", from.display(), to.display()));
 }
 
 /// The built `op-stub` binary. See [`built_binary`].

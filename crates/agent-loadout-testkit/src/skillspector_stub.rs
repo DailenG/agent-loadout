@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::op_stub::built_binary;
+use crate::op_stub::{built_binary, copy_executable};
 
 /// Config file beside the copies.
 pub const CONFIG_FILE: &str = "skillspector-stub.json";
@@ -158,8 +158,7 @@ impl SkillSpectorStub {
         let path = self
             .bin
             .join(format!("{program}{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(binary(), &path)
-            .unwrap_or_else(|err| panic!("copy the stub to {}: {err}", path.display()));
+        copy_executable(&binary(), &path);
         path
     }
 
