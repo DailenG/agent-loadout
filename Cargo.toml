@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
@@ -17,7 +17,7 @@ keywords = ["mcp", "ai", "claude", "codex", "config"]
 categories = ["command-line-utilities", "development-tools", "config"]
 
 [workspace.dependencies]
-agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.7.0" }
+agent-loadout-core = { path = "crates/agent-loadout-core", version = "0.7.1" }
 agent-loadout-testkit = { path = "crates/agent-loadout-testkit" }
 clap = { version = "4", features = ["derive"] }
 # Ctrl+C / SIGTERM during an external scan (#27): cancels the scanner's

@@ -8,6 +8,8 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-25
+
 ### Changed
 
 - Snyk Agent Scan (#27) is disabled and hidden. Snyk's free tier refuses
@@ -577,7 +579,8 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/DailenG/agent-loadout/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DailenG/agent-loadout/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DailenG/agent-loadout/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/DailenG/agent-loadout/compare/v0.4.0...v0.5.0

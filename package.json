@@ -1,6 +1,6 @@
 {
   "name": "agent-loadout",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Loadout desktop app frontend (never published to npm)",
   "license": "MIT",
   "repository": "https://github.com/DailenG/agent-loadout",
