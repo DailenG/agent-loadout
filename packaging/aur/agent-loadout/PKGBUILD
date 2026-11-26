@@ -7,7 +7,7 @@
 # SKIP with its SHA-256, then `makepkg --printsrcinfo > .SRCINFO`.
 
 pkgname=agent-loadout
-pkgver=0.7.1
+pkgver=0.8.0
 pkgrel=1
 pkgdesc='Manage MCP servers, skills and secret references for AI coding clients'
 arch=('x86_64')
@@ -40,7 +40,7 @@ source=(
   "$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
   'agent-loadout.desktop'
 )
-sha256sums=('0f4636c45aca6ee96aec09c0759a6632f385afcd54da7dbba943a32000c18ec7'
+sha256sums=('SKIP'
             'dd9b38cdfe479ced09da8b37aa2638c1377b661d4413f40b96f815fcb3e4c044')
 
 prepare() {

@@ -8,6 +8,8 @@ is tracked in [issues](https://github.com/DailenG/agent-loadout/issues).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-26
+
 ### Added
 
 - NVIDIA SkillSpector as the optional second scanner for skills (#30), a
@@ -615,7 +617,8 @@ Tagged but never published: both release runs failed before publishing
 anything (0.1.1 at the Linux `.deb` check). The tags are protected, so the
 first published release is 0.1.2.
 
-[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/DailenG/agent-loadout/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/DailenG/agent-loadout/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/DailenG/agent-loadout/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DailenG/agent-loadout/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DailenG/agent-loadout/compare/v0.5.0...v0.6.0

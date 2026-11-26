@@ -1,6 +1,6 @@
 pkgbase = agent-loadout-bin
 	pkgdesc = Manage MCP servers, skills and secret references for AI coding clients (prebuilt)
-	pkgver = 0.7.1
+	pkgver = 0.8.0
 	pkgrel = 1
 	url = https://github.com/DailenG/agent-loadout
 	arch = x86_64
@@ -25,7 +25,7 @@ pkgbase = agent-loadout-bin
 	conflicts = agent-loadout
 	options = !strip
 	options = !debug
-	source_x86_64 = https://github.com/DailenG/agent-loadout/releases/download/v0.7.1/agent-loadout-0.7.1-x86_64-linux.tar.gz
-	sha256sums_x86_64 = 0fd5eddbbab35b80a3e15af5e9cea97eca38af2679dcd28da968b42f11c0bf8f
+	source_x86_64 = https://github.com/DailenG/agent-loadout/releases/download/v0.8.0/agent-loadout-0.8.0-x86_64-linux.tar.gz
+	sha256sums_x86_64 = SKIP
 
 pkgname = agent-loadout-bin
