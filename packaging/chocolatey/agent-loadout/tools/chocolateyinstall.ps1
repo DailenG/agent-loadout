@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
-$url64 = 'https://github.com/DailenG/agent-loadout/releases/download/v0.7.0/Loadout_0.7.0_x64-setup.exe'
-$checksum64 = '47756a2d61b65132508602edde283ce2dc8fb17c2359cce385d369d4b59ac645'
+$url64 = 'https://github.com/DailenG/agent-loadout/releases/download/v0.7.1/Loadout_0.7.1_x64-setup.exe'
+$checksum64 = '9d3b19bade49bbdff1b54f3c7b617cffbdf3505f9bf5bd028f0c77319d0f6cbe'
 
 # The installer is per user: it installs into the profile of the account
 # running it. Under SYSTEM that profile belongs to nobody.
