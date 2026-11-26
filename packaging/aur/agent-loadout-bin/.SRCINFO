@@ -26,6 +26,6 @@ pkgbase = agent-loadout-bin
 	options = !strip
 	options = !debug
 	source_x86_64 = https://github.com/DailenG/agent-loadout/releases/download/v0.8.0/agent-loadout-0.8.0-x86_64-linux.tar.gz
-	sha256sums_x86_64 = SKIP
+	sha256sums_x86_64 = a11148fb7ac87859a2c26799405bf5174a51dca1f72b3176884f48f553354af9
 
 pkgname = agent-loadout-bin

@@ -28,7 +28,7 @@ pkgbase = agent-loadout
 	options = !lto
 	source = agent-loadout-0.8.0.tar.gz::https://github.com/DailenG/agent-loadout/archive/refs/tags/v0.8.0.tar.gz
 	source = agent-loadout.desktop
-	sha256sums = SKIP
+	sha256sums = ef4ce9063117e39ddb8428646b167fe1b0e696629672d878dee93bc6b7a51d0f
 	sha256sums = dd9b38cdfe479ced09da8b37aa2638c1377b661d4413f40b96f815fcb3e4c044
 
 pkgname = agent-loadout
